@@ -312,7 +312,7 @@ pub enum ProviderError {
 /// Connector 描述符的构造错误。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CoreError {
-    #[error("{connector} 未声明任何操作，退回服务级授权（§125）")]
+    #[error("Connector {connector} 未声明任何操作，退回服务级授权（§125）")]
     ConnectorWithoutOperations { connector: String },
 }
 ```
