@@ -1801,15 +1801,30 @@ fn failed_migration_leaves_later_migrations_unapplied() {
 }
 
 #[test]
-fn wal_mode_is_enabled() {
+fn pragmas_are_set_as_required() {
+    // Global Constraints 把三条 PRAGMA 都定为固定值，三条都要断言。
+    // synchronous=FULL 是崩溃原子性的前提，foreign_keys=ON 是外键约束的前提。
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");
     let db = Db::open(&path).unwrap();
     let tx = db.begin().unwrap();
-    let rows = tx.query("PRAGMA journal_mode", &[]).unwrap();
-    match &rows[0][0] {
-        Value::Text(s) => assert_eq!(s, "wal"),
+
+    let journal = tx.query("PRAGMA journal_mode", &[]).unwrap();
+    match &journal[0][0] {
+        Value::Text(s) => assert_eq!(s, "wal", "journal_mode 应为 WAL"),
         other => panic!("journal_mode 应为文本，实际 {other:?}"),
+    }
+
+    let sync = tx.query("PRAGMA synchronous", &[]).unwrap();
+    match &sync[0][0] {
+        Value::Int(i) => assert_eq!(*i, 2, "synchronous 应为 FULL(2)"),
+        other => panic!("synchronous 应为整数，实际 {other:?}"),
+    }
+
+    let fk = tx.query("PRAGMA foreign_keys", &[]).unwrap();
+    match &fk[0][0] {
+        Value::Int(i) => assert_eq!(*i, 1, "foreign_keys 应为 ON(1)"),
+        other => panic!("foreign_keys 应为整数，实际 {other:?}"),
     }
 }
 ```
