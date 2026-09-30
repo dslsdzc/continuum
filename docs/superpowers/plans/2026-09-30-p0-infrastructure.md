@@ -3484,6 +3484,40 @@ fn second_startup_applies_no_migration() {
     let out = run(&path);
     assert!(out.contains("迁移应用 0 项"), "实际输出:\n{out}");
 }
+
+#[test]
+fn startup_reports_skipped_records() {
+    // 空库上「跳过记录 0 条」恒为 0，区分不了「真读出 0」与「写死 0」。
+    // 先写入一条无法解码的事件（schema_version 为文本），
+    // 再启动，断言该计数确实是从库里读出来的。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+
+    {
+        let db = continuum_persist::Db::open(&path).unwrap();
+        db.migrate().unwrap();
+        let tx = db.begin().unwrap();
+        tx.execute(
+            "INSERT INTO events
+               (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+             VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+            &[
+                continuum_persist::Value::text("e1"),
+                continuum_persist::Value::text("node.started"),
+                // schema_version 为文本，解码失败 → 计入跳过
+                continuum_persist::Value::text("one"),
+                continuum_persist::Value::Int(1),
+                continuum_persist::Value::text("{}"),
+            ],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+
+    let out = run(&path);
+    assert!(out.contains("跳过记录 1 条"), "实际输出:\n{out}");
+    assert!(out.contains("迁移应用 0 项"), "实际输出:\n{out}");
+}
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -3535,12 +3569,12 @@ fn startup(path: &Path) -> Result<(), PersistError> {
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-runtime -v`
-Expected: PASS，3 passed。
+Expected: PASS，4 passed。
 
 - [ ] **Step 5: 运行全量测试**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS。计数：core 5、provider 1、events 19、persist 24、runtime 3，共 52 passed。
+Expected: 全部 PASS。计数：core 5、provider 1、events 19、persist 24、runtime 4，共 53 passed。
 
 - [ ] **Step 6: 提交**
 
