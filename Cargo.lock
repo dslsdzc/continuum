@@ -88,7 +88,9 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "continuum-core",
+ "futures-core",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
