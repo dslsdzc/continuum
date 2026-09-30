@@ -659,6 +659,19 @@ use continuum_provider::tool::ToolProvider;
 use futures_core::Stream;
 use serde_json::json;
 use std::pin::Pin;
+use std::task::{Context, Poll};
+
+/// 测试用单分片流。`futures-core` 只提供 trait 与类型别名，不提供构造函数，
+/// `stream::iter` 属于 `futures-util`。为不引入第五个外部依赖，在此手写。
+struct OnceStream(Option<Result<StreamChunk, ProviderError>>);
+
+impl Stream for OnceStream {
+    type Item = Result<StreamChunk, ProviderError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Poll::Ready(self.0.take())
+    }
+}
 
 struct FakeModel;
 
@@ -693,12 +706,11 @@ impl ModelProvider for FakeModel {
     }
 
     async fn stream(&self, _request: InvokeRequest) -> Result<ModelStream, ProviderError> {
-        let chunks = vec![Ok(StreamChunk {
-            delta: "pong".into(),
-            done: true,
-        })];
         let chunks: Pin<Box<dyn Stream<Item = Result<StreamChunk, ProviderError>> + Send>> =
-            Box::pin(futures_core::stream::iter(chunks));
+            Box::pin(OnceStream(Some(Ok(StreamChunk {
+                delta: "pong".into(),
+                done: true,
+            }))));
         Ok(ModelStream {
             call: CallId::new("call-1"),
             chunks,
