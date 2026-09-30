@@ -4,11 +4,15 @@
 
 pub mod db;
 pub mod error;
+pub mod recovery;
 pub mod value;
 
 mod tx;
 
 pub use db::{builtin_migrations, Db, Migration};
 pub use error::PersistError;
+pub use recovery::{
+    run_recovery, PhaseReport, RecoveryHook, RecoveryPhase, RecoveryRegistry, RecoveryReport,
+};
 pub use tx::{EventLogScan, Tx};
 pub use value::Value;
