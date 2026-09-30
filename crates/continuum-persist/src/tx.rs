@@ -6,7 +6,7 @@
 use crate::value::Value;
 use crate::{Db, PersistError};
 use continuum_events::audit::{record_hash, AuditKind, AuditRecord, GENESIS_HASH};
-use continuum_events::{DecodedEvent, Event};
+use continuum_events::{DecodedEvent, Event, EventCodecChain, EventType};
 use serde_json::Value as JsonValue;
 
 pub struct Tx<'a> {
@@ -282,10 +282,15 @@ fn json_at(row: &[Value], index: usize) -> JsonValue {
 impl Tx<'_> {
     /// 按 rowid 顺序解码事件日志，实现 P0 设计第 4.1 节的判定规则。
     ///
-    /// 致命：未知且未标记 ignorable 的事件类型；
-    ///       可跳过事件之后存在 intent.completed。
-    /// 可跳过：payload 无法解码的记录，计入 `skipped_records`。
-    pub fn scan_event_log(&self) -> Result<EventLogScan, PersistError> {
+    /// `chain` 由调用方装配并校验过缺口（见 `run_recovery` 第一阶段）。
+    /// 每条记录按其 `schema_version` 列在该链中取解码器：版本号不在链中
+    /// （含未来版本）为致命，与「未知事件类型默认读时必需」同向。
+    ///
+    /// 致命：版本号不在链中；未知且未标记 ignorable 的事件类型；
+    ///       可跳过记录之后存在 intent.completed（含该记录本身不可读）。
+    /// 可跳过：payload 列不可读或不是合法 JSON；版本号列不可判定；
+    ///         信封其它字段类型错。
+    pub fn scan_event_log(&self, chain: &EventCodecChain) -> Result<EventLogScan, PersistError> {
         let rows = self.query(
             "SELECT event_id, event_type, schema_version, occurred_at, intent_id, node_id,
                     ignorable, payload
@@ -299,28 +304,50 @@ impl Tx<'_> {
 
         for row in &rows {
             let event_type = text_at(row, 1)?;
-            let envelope = serde_json::json!({
-                "event_id": text_at(row, 0)?,
-                "event_type": event_type,
-                "schema_version": json_at(row, 2),
-                "occurred_at": json_at(row, 3),
-                "intent_id": json_at(row, 4),
-                "node_id": json_at(row, 5),
-                "ignorable": bool_at(row, 6),
-                "payload": serde_json::from_str::<JsonValue>(&text_at(row, 7)?)
-                    .unwrap_or(JsonValue::Null),
-            });
 
-            match continuum_events::decode_event(&envelope.to_string()) {
-                Ok(DecodedEvent::Event(_)) => decoded += 1,
-                Ok(DecodedEvent::Skippable(_)) => {
-                    skipped_records += 1;
-                    saw_skip = true;
+            // payload 列不可读、或不是合法 JSON，一律记可跳过。
+            // 不要把解析失败降级成 JSON null：payload 的类型是 Value，
+            // null 合法，那样这类损坏会被计为已解码，收口升级随之漏判。
+            let payload = match row.get(7) {
+                Some(Value::Text(s)) => serde_json::from_str::<JsonValue>(s).ok(),
+                _ => None,
+            };
+
+            let version = match row.get(2) {
+                Some(Value::Int(v)) if *v > 0 && *v <= i64::from(u32::MAX) => Some(*v as u32),
+                _ => None,
+            };
+
+            let skipped = match (payload, version) {
+                (Some(payload), Some(version)) => {
+                    let envelope = serde_json::json!({
+                        "event_id": text_at(row, 0)?,
+                        "event_type": event_type,
+                        "schema_version": json_at(row, 2),
+                        "occurred_at": json_at(row, 3),
+                        "intent_id": json_at(row, 4),
+                        "node_id": json_at(row, 5),
+                        "ignorable": bool_at(row, 6),
+                        "payload": payload,
+                    });
+                    match chain.decode(version, &envelope.to_string()) {
+                        Ok(DecodedEvent::Event(_)) => false,
+                        Ok(DecodedEvent::Skippable(_)) => true,
+                        Err(e) => return Err(PersistError::Database(e.to_string())),
+                    }
                 }
-                Err(e) => return Err(PersistError::Database(e.to_string())),
+                // payload 不可读，或版本号不可判定
+                _ => true,
+            };
+
+            if skipped {
+                skipped_records += 1;
+                saw_skip = true;
+            } else {
+                decoded += 1;
             }
 
-            if saw_skip && event_type == "intent.completed" {
+            if saw_skip && event_type == EventType::IntentCompleted.as_str() {
                 return Err(PersistError::Database(
                     "可跳过事件之后存在 intent.completed，收口依据不成立".to_owned(),
                 ));

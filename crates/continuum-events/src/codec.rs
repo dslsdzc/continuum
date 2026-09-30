@@ -48,8 +48,14 @@ impl EventCodecChain {
         self.decoders.insert(version, Box::new(decoder));
     }
 
-    /// 版本号必须从 1 开始连续。返回缺口处的最小缺失版本号。
+    /// 版本号必须从 1 开始连续，且不得为空链。
+    ///
+    /// 空链返回 `CodecChainGap { missing: 1 }`：没有任何解码器时装配必须失败，
+    /// 否则每条记录都会因「链中无对应版本」被放过。
     pub fn validate_contiguous(&self) -> Result<(), EventLogError> {
+        if self.decoders.is_empty() {
+            return Err(EventLogError::CodecChainGap { missing: 1 });
+        }
         for (i, version) in self.decoders.keys().enumerate() {
             let expected = i as u32 + 1;
             if *version != expected {
@@ -108,4 +114,15 @@ pub fn decode_event(json: &str) -> Result<DecodedEvent, EventLogError> {
             message: e.to_string(),
         })),
     }
+}
+
+/// P0 的解码器链：只有版本 1，解码器为 `decode_event`。
+///
+/// 这是运行期唯一的链装配点（由 `run_recovery` 第一阶段调用）。
+/// 将来新增 `schema_version` 时在此追加注册，
+/// 并由 `validate_contiguous` 保证版本号无缺口。
+pub fn default_chain() -> EventCodecChain {
+    let mut chain = EventCodecChain::new();
+    chain.register(1, decode_event);
+    chain
 }

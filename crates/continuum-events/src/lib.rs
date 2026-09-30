@@ -5,5 +5,7 @@ pub mod codec;
 pub mod event;
 
 pub use audit::{verify_chain, AuditError, AuditKind, AuditRecord, GENESIS_HASH};
-pub use codec::{decode_event, DecodedEvent, EventCodecChain, EventLogError, SkipReason};
+pub use codec::{
+    decode_event, default_chain, DecodedEvent, EventCodecChain, EventLogError, SkipReason,
+};
 pub use event::{Event, EventType, CURRENT_SCHEMA_VERSION};

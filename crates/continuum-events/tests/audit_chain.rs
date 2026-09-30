@@ -114,3 +114,17 @@ fn record_hash_matches_the_frozen_vector() {
         "record_hash 的输入顺序或编码被改动；既有审计记录将全部失效"
     );
 }
+
+#[test]
+fn record_hash_is_independent_of_payload_key_insertion_order() {
+    // serde_json 默认用有序 map；若启用 preserve_order 功能，
+    // 键序会变成插入序依赖，既有审计记录的哈希会全部失效。
+    // 该断言把「键序无关」这一假设锁死。
+    let a = json!({"a": 1, "b": 2});
+    let b = json!({"b": 2, "a": 1});
+    assert_eq!(
+        record_hash(GENESIS_HASH, 1, AuditKind::DeviceJoin, 1, &a),
+        record_hash(GENESIS_HASH, 1, AuditKind::DeviceJoin, 1, &b),
+        "payload 的键序不应影响哈希；此处失败说明 serde_json 启用了 preserve_order"
+    );
+}

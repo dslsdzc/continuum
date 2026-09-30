@@ -108,12 +108,14 @@ fn phase_without_hooks_reports_zero() {
         .find(|p| p.phase == RecoveryPhase::LoadDurableState)
         .unwrap();
     assert_eq!(load.hooks_run, 0);
+    assert!(load.builtin_work, "第一阶段应标记为执行了内建工作");
     let lost = report
         .phases
         .iter()
         .find(|p| p.phase == RecoveryPhase::MarkLostExecutions)
         .unwrap();
     assert_eq!(lost.hooks_run, 0);
+    assert!(!lost.builtin_work, "非第一阶段不得标记内建工作");
     let running = report
         .phases
         .iter()
@@ -231,4 +233,28 @@ fn fatal_event_log_stops_recovery_before_any_phase() {
         log.lock().unwrap().is_empty(),
         "致命判定后不得执行任何阶段"
     );
+}
+
+#[test]
+fn unknown_schema_version_is_fatal() {
+    // 链中只有版本 1；版本 99 的记录不得被当作 v1 静默接受
+    let (_d, db) = db_with_probe();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        INSERT_EVENT,
+        &[
+            Value::text("e1"),
+            Value::text("node.started"),
+            Value::Int(99),
+            Value::Int(1),
+            Value::Int(0),
+            Value::text("{}"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let err = run_recovery(&db, &RecoveryRegistry::new())
+        .expect_err("未知 schema_version 必须致命");
+    assert!(err.to_string().contains("99"), "实际: {err}");
 }

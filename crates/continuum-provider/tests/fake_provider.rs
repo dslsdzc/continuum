@@ -179,3 +179,34 @@ async fn fake_implementations_satisfy_the_frozen_interfaces() {
         .await
         .is_ok());
 }
+
+#[tokio::test]
+async fn model_stream_is_consumable() {
+    let m = FakeModel;
+    let stream = m
+        .stream(InvokeRequest {
+            model: ModelId::new("fake-1"),
+            messages: vec![],
+            max_tokens: None,
+        })
+        .await
+        .expect("流应可建立");
+
+    // 手动 poll，证明该接口能被消费而不只是能被构造
+    let mut chunks = stream.chunks;
+    let waker = std::task::Waker::noop();
+    let mut cx = std::task::Context::from_waker(waker);
+
+    match chunks.as_mut().poll_next(&mut cx) {
+        std::task::Poll::Ready(Some(Ok(chunk))) => {
+            assert_eq!(chunk.delta, "pong");
+            assert!(chunk.done, "首个分片应标记 done");
+        }
+        other => panic!("首个分片应为 Ready(Some(Ok(..)))，实际 {other:?}"),
+    }
+
+    match chunks.as_mut().poll_next(&mut cx) {
+        std::task::Poll::Ready(None) => {}
+        other => panic!("流应已结束，实际 {other:?}"),
+    }
+}

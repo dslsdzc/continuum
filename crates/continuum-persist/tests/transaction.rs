@@ -121,6 +121,38 @@ fn last_audit_hash_is_genesis_on_empty_chain() {
     tx.commit().unwrap();
 }
 
+#[test]
+fn ignorable_flag_survives_the_write_path() {
+    // 该标志曾在首轮被静默丢弃（INSERT 漏列）。直接查列，锁死写路径。
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.append_event(&Event::new(EventType::NodeStarted, "e1", 1, json!({})).with_ignorable(true))
+        .unwrap();
+    tx.append_event(&Event::new(EventType::NodeStarted, "e2", 2, json!({})))
+        .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query("SELECT event_id, ignorable FROM events ORDER BY event_id", &[])
+        .unwrap();
+    let flags: Vec<(String, i64)> = rows
+        .iter()
+        .map(|r| {
+            let id = match &r[0] {
+                Value::Text(s) => s.clone(),
+                other => panic!("event_id 应为文本，实际 {other:?}"),
+            };
+            let flag = match &r[1] {
+                Value::Int(i) => *i,
+                other => panic!("ignorable 应为整数，实际 {other:?}"),
+            };
+            (id, flag)
+        })
+        .collect();
+    assert_eq!(flags, vec![("e1".to_owned(), 1), ("e2".to_owned(), 0)]);
+}
+
 /// 直接插一行，绕过 append_event，用于构造非法记录。
 fn insert_raw_event(
     tx: &continuum_persist::Tx<'_>,
@@ -156,7 +188,7 @@ fn scan_counts_skippable_records() {
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
-    let scan = tx.scan_event_log().unwrap();
+    let scan = tx.scan_event_log(&continuum_events::default_chain()).unwrap();
     assert_eq!(scan.decoded, 1);
     assert_eq!(scan.skipped_records, 1);
 }
@@ -170,7 +202,7 @@ fn scan_is_clean_when_all_records_decode() {
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
-    let scan = tx.scan_event_log().unwrap();
+    let scan = tx.scan_event_log(&continuum_events::default_chain()).unwrap();
     assert_eq!(scan.decoded, 1);
     assert_eq!(scan.skipped_records, 0);
 }
@@ -184,7 +216,7 @@ fn unknown_event_type_is_fatal_on_scan() {
 
     let tx = db.begin().unwrap();
     let err = tx
-        .scan_event_log()
+        .scan_event_log(&continuum_events::default_chain())
         .expect_err("未知且非 ignorable 的类型必须致命");
     assert!(err.to_string().contains("future.thing"), "实际: {err}");
 }
@@ -202,7 +234,7 @@ fn skippable_record_before_intent_completed_is_fatal() {
 
     let tx = db.begin().unwrap();
     let err = tx
-        .scan_event_log()
+        .scan_event_log(&continuum_events::default_chain())
         .expect_err("收口前的记录不可读时必须致命");
     assert!(err.to_string().contains("intent.completed"), "实际: {err}");
 }
@@ -218,7 +250,62 @@ fn skippable_record_after_intent_completed_is_only_counted() {
 
     let tx = db.begin().unwrap();
     let scan = tx
-        .scan_event_log()
+        .scan_event_log(&continuum_events::default_chain())
         .expect("收口之后的坏记录不升级为致命");
     assert_eq!(scan.skipped_records, 1);
+}
+
+#[test]
+fn unreadable_payload_is_skippable() {
+    // payload 列不是合法 JSON：应为可跳过，而不是被计为已解码
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("node.started"),
+            Value::Int(1),
+            Value::Int(1),
+            Value::text("not json at all"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let scan = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect("坏 payload 不应致命");
+    assert_eq!(scan.decoded, 0, "坏 payload 不得被计为已解码");
+    assert_eq!(scan.skipped_records, 1);
+}
+
+#[test]
+fn unreadable_payload_on_intent_completed_is_fatal() {
+    // 收口行本身不可读：跳过它会使收口依据不成立，必须致命
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("intent.completed"),
+            Value::Int(1),
+            Value::Int(1),
+            Value::text("not json at all"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect_err("不可读的收口行必须致命");
+    assert!(err.to_string().contains("intent.completed"), "实际: {err}");
 }
