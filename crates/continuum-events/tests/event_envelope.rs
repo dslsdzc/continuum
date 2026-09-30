@@ -146,3 +146,13 @@ fn codec_chain_accepts_contiguous_versions() {
     })));
     chain.validate_contiguous().expect("相邻版本应通过校验");
 }
+
+#[test]
+fn codec_chain_rejects_empty_chain() {
+    // 空链必须拒绝装配：否则任何记录都会因「链中无对应版本」而放过。
+    let chain = EventCodecChain::new();
+    match chain.validate_contiguous() {
+        Err(EventLogError::CodecChainGap { missing }) => assert_eq!(missing, 1),
+        other => panic!("空链必须被拒绝，实际 {other:?}"),
+    }
+}
