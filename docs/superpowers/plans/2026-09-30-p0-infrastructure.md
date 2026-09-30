@@ -2453,8 +2453,20 @@ Expected: FAIL，编译错误 `no method named append_event`
 
 - [ ] **Step 3: 补全事务 API**
 
-`crates/continuum-persist/src/tx.rs` 全文替换为下面的内容。同时把 `crates/continuum-persist/src/lib.rs` 的
-`pub use tx::Tx;` 改为 `pub use tx::{EventLogScan, Tx};`——`EventLogScan` 在本 task 才引入。
+`crates/continuum-persist/src/tx.rs` 全文替换为下面的内容。同时做两处配套修改：
+
+1. `crates/continuum-persist/src/lib.rs` 的 `pub use tx::Tx;` 改为 `pub use tx::{EventLogScan, Tx};`——`EventLogScan` 在本 task 才引入。
+2. 修正 `crates/continuum-persist/src/db.rs` 中 `Db::begin` 的文档注释。Task 6 的原文写「第二个未提交时调用会阻塞」，对**同线程**不成立：连接由单把 `std::sync::Mutex` 保护，`Tx` 在其整个生命周期持有 guard，同线程在持有 `Tx` 期间调用 `begin` 或 `migrate` 会死锁（std Mutex 不可重入），不返回错误。改为：
+
+```rust
+    /// 开启写事务。同一时刻只有一个事务。
+    ///
+    /// 连接由单把 `Mutex` 保护，`Tx` 在其整个生命周期持有该 guard。
+    /// 跨线程在 `Tx` 未提交时调用本方法会阻塞；
+    /// 同一线程在持有 `Tx` 期间调用本方法或 `migrate` 会死锁
+    /// （`std::sync::Mutex` 不可重入），不返回错误。
+    pub fn begin(&self) -> Result<Tx<'_>, PersistError> {
+```
 
 ```rust
 //! 事务 API。
