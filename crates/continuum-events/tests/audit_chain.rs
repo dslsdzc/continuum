@@ -1,5 +1,5 @@
 use continuum_events::audit::{
-    verify_chain, AuditKind, AuditRecord, AuditError, GENESIS_HASH,
+    record_hash, verify_chain, AuditKind, AuditRecord, AuditError, GENESIS_HASH,
 };
 use serde_json::json;
 
@@ -79,4 +79,38 @@ fn broken_link_is_detected() {
 #[test]
 fn empty_chain_verifies() {
     verify_chain(&[]).expect("空链应通过校验");
+}
+
+#[test]
+fn serde_names_match_as_str_for_all_eight_kinds() {
+    // Task 7 的 audit_records() 要把库里的 §313 文本反序列化回 AuditKind，
+    // 写入用 as_str、读回用 serde rename，两者必须一致，
+    // 否则库里的记录读不回来。往返测试是对称的，发现不了这类偏差。
+    for k in AuditKind::ALL {
+        let wire = serde_json::to_string(&k).expect("可序列化");
+        assert_eq!(
+            wire,
+            format!("\"{}\"", k.as_str()),
+            "serde rename 与 as_str 不一致: {k:?}"
+        );
+    }
+}
+
+#[test]
+fn record_hash_matches_the_frozen_vector() {
+    // 黄金向量锁定 record_hash 的输入顺序与大端编码。
+    // 期望值由独立的 Python hashlib 实现按同一输入顺序算出，非本实现自产；
+    // 推导命令写在报告里，可复现。
+    let payload = json!({"effect": "push_branch", "target": "origin/main"});
+    let got = record_hash(
+        GENESIS_HASH,
+        1,
+        AuditKind::ExternalEffects,
+        1_700_000_000_000,
+        &payload,
+    );
+    assert_eq!(
+        got, "ec9b6a9a3fc381a83dd6daca1a2d9fee76d0cf3ea4bbfd26c46688eba8b39f87",
+        "record_hash 的输入顺序或编码被改动；既有审计记录将全部失效"
+    );
 }
