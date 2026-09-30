@@ -83,31 +83,41 @@ resume eligible tasks          P1 注册
 
 §319 只列出五个阶段的名称，未定义各阶段的判定规则。`load durable state` 由本子项目实现，其内容与判定规则在此定义。规则形态取自 DSH 的可恢复解码器（见 `2026-09-30-DSH-对照分析.md` 第 4.3 节）。
 
-第一阶段执行三项：
+第一阶段执行四项，全部由 `run_recovery` 自身完成，不受钩子注册表控制：
 
 ```
-1  打开数据库并按 version 升序应用未记录的迁移
-2  解码事件日志，按第 5.2 节处理未知事件类型
-3  重算审计链，按第 6 节校验哈希
+1  按 version 升序应用未记录的迁移
+2  装配解码器链并校验版本号无缺口                 第 5.1 节
+3  按每条记录的 schema_version 解码事件日志       第 5.2 节
+4  重算审计链，按第 6 节校验哈希
 ```
+
+迁移放在此处的理由：`run_recovery` 可被直接调用，不能依赖调用方已经迁移过。`migrate` 幂等，与调用方的重复调用不冲突。
 
 判定规则：
 
 ```
-可跳过     单条事件的 payload 无法反序列化
-           跳过该事件并计入 RecoveryReport.skipped_records
+可跳过     单条事件的 payload 列不可读或不是合法 JSON
+           单条事件的 schema_version 列不可判定为正整数
+           信封其它字段类型错
+           以上均计入 RecoveryReport.skipped_records
 
-致命       未知事件类型且 ignorable = false        §5.2
-           可跳过事件之后存在 intent.completed     见下
-           审计链任一哈希不匹配                     §6
-           迁移失败                                第 4 节
+致命       记录的 schema_version 不在链中（含未来版本）  第 5.1 节
+           未知事件类型且 ignorable = false               第 5.2 节
+           可跳过记录之后存在 intent.completed            见下
+           审计链任一哈希不匹配                           第 6 节
+           迁移失败                                       第 4 节
 ```
+
+payload 解析失败必须归入可跳过，不得降级为一个合法值后计为已解码：那样会同时使本条规则永不触发，并使下面的收口升级漏判。
 
 「可跳过事件之后存在 `intent.completed`」升级为致命的原因：`intent.completed` 表示该 Intent 已按 §266 收口。其前驱事件不可读时，收口依据不成立，继续启动会得到无法解释的已完成状态。
 
 致命判定触发时启动中止，不进入后续四个阶段。
 
-`RecoveryReport` 增加 `skipped_records: usize` 字段，记录第 2 项与第 3 项判定中被跳过的事件数。该字段是「跳过发生了」的唯一可观测证据，不得省略。
+`RecoveryReport` 增加 `skipped_records: usize` 字段，记录第 3 项判定中被跳过的事件数。该字段是「跳过发生了」的唯一可观测证据，不得省略。
+
+`PhaseReport` 增加 `builtin_work: bool` 字段，标记该阶段是否执行了本子项目的内建工作（仅第一阶段为 true）。它与 `hooks_run` 分开：内建工作不受注册表控制，第一阶段的 `hooks_run` 可以为 0 而 `builtin_work` 为 true。
 
 约束：
 
@@ -167,7 +177,15 @@ intent.completed
                  新增可选字段不递增
 ```
 
-Failure condition：解码器链存在缺口时装配失败，不得以「最近的可用版本」替代。
+装配点在 `run_recovery` 的第一阶段：装配、校验缺口、再交给事件日志扫描。扫描按每条记录的 `schema_version` 在链中取解码器。
+
+Failure condition：
+
+```
+解码器链存在缺口        装配失败，不得以「最近的可用版本」替代
+解码器链为空            装配失败
+记录的版本不在链中      致命，不得回退到最低版本
+```
 
 ## 5.2 未知事件类型
 
