@@ -3620,3 +3620,472 @@ B4         防篡改只覆盖单条改写，不覆盖整链重写
 ```
 
 这三项扩大了 P0 的设计范围，是规范层未要求的机制。若判定它们超出 v0.1 的必要性，可以在实现前删除，删除点在 Task 4 的 `codec.rs`、Task 7 的 `scan_event_log`、以及 Task 8 第一阶段的内建工作。
+
+---
+
+### Task 11: 终审修复
+
+**背景：** 全分支终审（最强模型）发现三处 Important 与三项护栏缺口。它们**不是逐任务的实现偏差**——每个 task 各自都符合其 brief——而是计划与设计层面的问题：规则写明了、运行期不成立，或机制建好但没接上。逐任务评审在结构上看不到这类问题。
+
+**本 task 的代码取代前一任务中相应位置的代码。** 不改动 Task 1–10 的其余实现。
+
+**Files:**
+- Modify: `crates/continuum-events/src/codec.rs`
+- Modify: `crates/continuum-events/src/lib.rs`
+- Modify: `crates/continuum-persist/src/tx.rs`
+- Modify: `crates/continuum-persist/src/recovery.rs`
+- Modify: `crates/continuum-provider/tests/fake_provider.rs`
+- Modify: `crates/continuum-events/tests/audit_chain.rs`
+- Modify: `crates/continuum-persist/tests/transaction.rs`
+- Modify: `crates/continuum-persist/tests/recovery.rs`
+
+**Interfaces:**
+- `continuum_events::default_chain() -> EventCodecChain`
+- `EventCodecChain::validate_contiguous` 在空链时返回 `Err`
+- `Tx::scan_event_log(&self, chain: &EventCodecChain) -> Result<EventLogScan, PersistError>`（签名带链）
+- `PhaseReport` 增加 `builtin_work: bool`
+- `run_recovery` 的第一阶段执行迁移、建链、解码、校验审计链
+
+- [ ] **Step 1: 修 `codec.rs` 的空链假通过，并给出唯一装配点**
+
+终审 I2：`EventCodecChain` 与 `validate_contiguous` 在全仓只有单测引用，运行路径根本不经过它，`decode_event` 也不读 `schema_version`——于是 §5.1 的三条规则在运行期一条都不成立，`schema_version: 99` 会被当作 v1 静默接受。另如实测：空链能通过 `validate_contiguous`，是最坏情况的假通过。
+
+`crates/continuum-events/src/codec.rs` 两处替换：
+
+```rust
+    /// 版本号必须从 1 开始连续，且不得为空链。
+    ///
+    /// 空链返回 `CodecChainGap { missing: 1 }`：没有任何解码器时装配必须失败，
+    /// 否则每条记录都会因「链中无对应版本」被放过。
+    pub fn validate_contiguous(&self) -> Result<(), EventLogError> {
+        if self.decoders.is_empty() {
+            return Err(EventLogError::CodecChainGap { missing: 1 });
+        }
+        for (i, version) in self.decoders.keys().enumerate() {
+            let expected = i as u32 + 1;
+            if *version != expected {
+                return Err(EventLogError::CodecChainGap { missing: expected });
+            }
+        }
+        Ok(())
+    }
+```
+
+文件末尾追加：
+
+```rust
+/// P0 的解码器链：只有版本 1，解码器为 `decode_event`。
+///
+/// 这是运行期唯一的链装配点（由 `run_recovery` 第一阶段调用）。
+/// 将来新增 `schema_version` 时在此追加注册，
+/// 并由 `validate_contiguous` 保证版本号无缺口。
+pub fn default_chain() -> EventCodecChain {
+    let mut chain = EventCodecChain::new();
+    chain.register(1, decode_event);
+    chain
+}
+```
+
+`crates/continuum-events/src/lib.rs` 的 codec 导出行改为：
+
+```rust
+pub use codec::{
+    decode_event, default_chain, DecodedEvent, EventCodecChain, EventLogError, SkipReason,
+};
+```
+
+- [ ] **Step 2: 修 `scan_event_log` 的 payload 静默降级与版本分派**
+
+终审 I1：原实现把 payload 解析失败降级为 JSON `null`，而 `Event.payload` 是 `serde_json::Value`，`null` 合法，于是该行被计为 `decoded`——设计 §4.1 唯一写明的可跳过条件永不触发，且「可跳过记录之后存在 `intent.completed` 即致命」这条收口规则在最典型的损坏形态下漏判。另外 payload 列若为 INTEGER，`text_at` 直接返回 `Err` → 启动中止，与「可跳过」相反。
+
+终审 I2 的配套：扫描必须按记录的 `schema_version` 在链中取解码器，否则链接不上。
+
+`crates/continuum-persist/src/tx.rs` 的导入改为：
+
+```rust
+use continuum_events::audit::{record_hash, AuditKind, AuditRecord, GENESIS_HASH};
+use continuum_events::{DecodedEvent, Event, EventCodecChain, EventType};
+use serde_json::Value as JsonValue;
+```
+
+`Tx::scan_event_log` 全文替换为：
+
+```rust
+    /// 按 rowid 顺序解码事件日志，实现 P0 设计第 4.1 节的判定规则。
+    ///
+    /// `chain` 由调用方装配并校验过缺口（见 `run_recovery` 第一阶段）。
+    /// 每条记录按其 `schema_version` 列在该链中取解码器：版本号不在链中
+    /// （含未来版本）为致命，与「未知事件类型默认读时必需」同向。
+    ///
+    /// 致命：版本号不在链中；未知且未标记 ignorable 的事件类型；
+    ///       可跳过记录之后存在 intent.completed（含该记录本身不可读）。
+    /// 可跳过：payload 列不可读或不是合法 JSON；版本号列不可判定；
+    ///         信封其它字段类型错。
+    pub fn scan_event_log(&self, chain: &EventCodecChain) -> Result<EventLogScan, PersistError> {
+        let rows = self.query(
+            "SELECT event_id, event_type, schema_version, occurred_at, intent_id, node_id,
+                    ignorable, payload
+             FROM events ORDER BY rowid ASC",
+            &[],
+        )?;
+
+        let mut decoded = 0usize;
+        let mut skipped_records = 0usize;
+        let mut saw_skip = false;
+
+        for row in &rows {
+            let event_type = text_at(row, 1)?;
+
+            // payload 列不可读、或不是合法 JSON，一律记可跳过。
+            // 不要把解析失败降级成 JSON null：payload 的类型是 Value，
+            // null 合法，那样这类损坏会被计为已解码，收口升级随之漏判。
+            let payload = match row.get(7) {
+                Some(Value::Text(s)) => serde_json::from_str::<JsonValue>(s).ok(),
+                _ => None,
+            };
+
+            let version = match row.get(2) {
+                Some(Value::Int(v)) if *v > 0 && *v <= i64::from(u32::MAX) => Some(*v as u32),
+                _ => None,
+            };
+
+            let skipped = match (payload, version) {
+                (Some(payload), Some(version)) => {
+                    let envelope = serde_json::json!({
+                        "event_id": text_at(row, 0)?,
+                        "event_type": event_type,
+                        "schema_version": json_at(row, 2),
+                        "occurred_at": json_at(row, 3),
+                        "intent_id": json_at(row, 4),
+                        "node_id": json_at(row, 5),
+                        "ignorable": bool_at(row, 6),
+                        "payload": payload,
+                    });
+                    match chain.decode(version, &envelope.to_string()) {
+                        Ok(DecodedEvent::Event(_)) => false,
+                        Ok(DecodedEvent::Skippable(_)) => true,
+                        Err(e) => return Err(PersistError::Database(e.to_string())),
+                    }
+                }
+                // payload 不可读，或版本号不可判定
+                _ => true,
+            };
+
+            if skipped {
+                skipped_records += 1;
+                saw_skip = true;
+            } else {
+                decoded += 1;
+            }
+
+            if saw_skip && event_type == EventType::IntentCompleted.as_str() {
+                return Err(PersistError::Database(
+                    "可跳过事件之后存在 intent.completed，收口依据不成立".to_owned(),
+                ));
+            }
+        }
+
+        Ok(EventLogScan {
+            decoded,
+            skipped_records,
+        })
+    }
+```
+
+注意收口判定的位置：它在**每一行处理完之后**执行，因此「跳过的是 `intent.completed` 那一行本身」与「跳过行之后跟着一条可读的 `intent.completed`」两种形态都会致命；而「`intent.completed` 之后才出现跳过」不会致命。既有测试 `skippable_record_after_intent_completed_is_only_counted` 覆盖了最后一种。
+
+- [ ] **Step 3: 把第一阶段的内建工作收拢进 `run_recovery`**
+
+终审 I3：设计 §4.1 把「应用迁移」列为第一阶段第 1 项，但原实现不做迁移，顺序只由 `main.rs` 的调用次序维持；任何直接调用 `run_recovery` 的路径都会跳过迁移，失败形态是无语义的 `no such table: events`。
+
+`crates/continuum-persist/src/recovery.rs` 两处修改。
+
+`PhaseReport` 替换为：
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseReport {
+    pub phase: RecoveryPhase,
+    pub hooks_run: usize,
+    /// 该阶段是否执行了本子项目内置的工作（仅第一阶段为 true）。
+    /// 与 `hooks_run` 分开：第一阶段的内建工作不受注册表控制。
+    pub builtin_work: bool,
+}
+```
+
+`run_recovery` 全文替换为：
+
+```rust
+/// 按 §319 顺序执行五个阶段。报告覆盖全部五个阶段，
+/// 无钩子的阶段也出现在报告中，`hooks_run` 为 0。
+///
+/// 第一阶段的内建工作由本函数执行，不受注册表控制：
+/// 应用迁移 → 建链并校验缺口 → 解码事件日志 → 校验审计链。
+/// 迁移放在此处而非交给调用方：本函数可以被直接调用，
+/// 不能依赖调用方已经迁移过。
+pub fn run_recovery(db: &Db, registry: &RecoveryRegistry) -> Result<RecoveryReport, PersistError> {
+    let skipped_records = {
+        // migrate 幂等：重复调用返回 0，故与 main.rs 的调用不冲突。
+        db.migrate()?;
+
+        let chain = continuum_events::default_chain();
+        chain
+            .validate_contiguous()
+            .map_err(|e| PersistError::Database(e.to_string()))?;
+
+        let tx = db.begin()?;
+        let scan = tx.scan_event_log(&chain)?;
+        tx.verify_audit_chain()?;
+        tx.commit()?;
+        scan.skipped_records
+    };
+
+    let builtin = |phase: RecoveryPhase| phase == RecoveryPhase::LoadDurableState;
+
+    let mut phases = Vec::with_capacity(RecoveryPhase::ALL.len());
+    for phase in RecoveryPhase::ALL {
+        let matched: Vec<&Box<dyn RecoveryHook>> = registry
+            .hooks
+            .iter()
+            .filter(|h| h.phase() == phase)
+            .collect();
+        if matched.is_empty() {
+            phases.push(PhaseReport {
+                phase,
+                hooks_run: 0,
+                builtin_work: builtin(phase),
+            });
+            continue;
+        }
+        let tx = db.begin()?;
+        for hook in &matched {
+            hook.run(&tx)?;
+        }
+        tx.commit()?;
+        phases.push(PhaseReport {
+            phase,
+            hooks_run: matched.len(),
+            builtin_work: builtin(phase),
+        });
+    }
+    Ok(RecoveryReport {
+        phases,
+        skipped_records,
+    })
+}
+```
+
+- [ ] **Step 4: 三处护栏测试**
+
+**护栏 1 —— `with_ignorable(true)` 的写路径。** Task 7 首轮的缺陷正是该标志被静默丢弃，修复后仍无回归保护。在 `crates/continuum-persist/tests/transaction.rs` 追加：
+
+```rust
+#[test]
+fn ignorable_flag_survives_the_write_path() {
+    // 该标志曾在首轮被静默丢弃（INSERT 漏列）。直接查列，锁死写路径。
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.append_event(&Event::new(EventType::NodeStarted, "e1", 1, json!({})).with_ignorable(true))
+        .unwrap();
+    tx.append_event(&Event::new(EventType::NodeStarted, "e2", 2, json!({})))
+        .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query("SELECT event_id, ignorable FROM events ORDER BY event_id", &[])
+        .unwrap();
+    let flags: Vec<(String, i64)> = rows
+        .iter()
+        .map(|r| {
+            let id = match &r[0] {
+                Value::Text(s) => s.clone(),
+                other => panic!("event_id 应为文本，实际 {other:?}"),
+            };
+            let flag = match &r[1] {
+                Value::Int(i) => *i,
+                other => panic!("ignorable 应为整数，实际 {other:?}"),
+            };
+            (id, flag)
+        })
+        .collect();
+    assert_eq!(flags, vec![("e1".to_owned(), 1), ("e2".to_owned(), 0)]);
+}
+```
+
+**护栏 2 —— `serde_json` 的键序。** 若启用 `preserve_order`，键序变为插入序依赖，所有已存审计记录的哈希静默失效；黄金向量的两个键字面序恰等于排序序，覆盖不到。在 `crates/continuum-events/tests/audit_chain.rs` 追加：
+
+```rust
+#[test]
+fn record_hash_is_independent_of_payload_key_insertion_order() {
+    // serde_json 默认用有序 map；若启用 preserve_order 功能，
+    // 键序会变成插入序依赖，既有审计记录的哈希会全部失效。
+    // 该断言把「键序无关」这一假设锁死。
+    let a = json!({"a": 1, "b": 2});
+    let b = json!({"b": 2, "a": 1});
+    assert_eq!(
+        record_hash(GENESIS_HASH, 1, AuditKind::DeviceJoin, 1, &a),
+        record_hash(GENESIS_HASH, 1, AuditKind::DeviceJoin, 1, &b),
+        "payload 的键序不应影响哈希；此处失败说明 serde_json 启用了 preserve_order"
+    );
+}
+```
+
+**护栏 3 —— `ModelStream` 的可消费性。** 接口冻结是本子项目的交付物，而 `stream()` 的返回类型在全仓没有一次 poll；若在 P3 才证明不可用，返工的是接口本身。在 `crates/continuum-provider/tests/fake_provider.rs` 追加：
+
+```rust
+#[tokio::test]
+async fn model_stream_is_consumable() {
+    let m = FakeModel;
+    let stream = m
+        .stream(InvokeRequest {
+            model: ModelId::new("fake-1"),
+            messages: vec![],
+            max_tokens: None,
+        })
+        .await
+        .expect("流应可建立");
+
+    // 手动 poll，证明该接口能被消费而不只是能被构造
+    let mut chunks = stream.chunks;
+    let waker = std::task::Waker::noop();
+    let mut cx = std::task::Context::from_waker(waker);
+
+    match chunks.as_mut().poll_next(&mut cx) {
+        std::task::Poll::Ready(Some(Ok(chunk))) => {
+            assert_eq!(chunk.delta, "pong");
+            assert!(chunk.done, "首个分片应标记 done");
+        }
+        other => panic!("首个分片应为 Ready(Some(Ok(..)))，实际 {other:?}"),
+    }
+
+    match chunks.as_mut().poll_next(&mut cx) {
+        std::task::Poll::Ready(None) => {}
+        other => panic!("流应已结束，实际 {other:?}"),
+    }
+}
+```
+
+`Waker::noop()` 在 rust-version 1.95 下返回 `&'static Waker`，`Context::from_waker` 直接接受。若编译报类型不符，改为 `std::task::Waker::noop()` 的引用形式 `&std::task::Waker::noop()` 并如实记录。
+
+- [ ] **Step 5: 更新受签名变更影响的既有测试**
+
+`scan_event_log` 现在带链参数，`crates/continuum-persist/tests/transaction.rs` 中五处调用改为传入默认链：
+
+```rust
+    let scan = tx.scan_event_log(&continuum_events::default_chain()).unwrap();
+```
+
+涉及 `scan_counts_skippable_records`、`scan_is_clean_when_all_records_decode`、`unknown_event_type_is_fatal_on_scan`、`skippable_record_before_intent_completed_is_fatal`、`skippable_record_after_intent_completed_is_only_counted` 五处。只改这一处调用形态，断言不动。
+
+在 `crates/continuum-persist/tests/transaction.rs` 追加两条覆盖终审 I1 的用例：
+
+```rust
+#[test]
+fn unreadable_payload_is_skippable() {
+    // payload 列不是合法 JSON：应为可跳过，而不是被计为已解码
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("node.started"),
+            Value::Int(1),
+            Value::Int(1),
+            Value::text("not json at all"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let scan = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect("坏 payload 不应致命");
+    assert_eq!(scan.decoded, 0, "坏 payload 不得被计为已解码");
+    assert_eq!(scan.skipped_records, 1);
+}
+
+#[test]
+fn unreadable_payload_on_intent_completed_is_fatal() {
+    // 收口行本身不可读：跳过它会使收口依据不成立，必须致命
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("intent.completed"),
+            Value::Int(1),
+            Value::Int(1),
+            Value::text("not json at all"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect_err("不可读的收口行必须致命");
+    assert!(err.to_string().contains("intent.completed"), "实际: {err}");
+}
+```
+
+在 `crates/continuum-persist/tests/recovery.rs` 追加一条覆盖终审 I2 的用例：
+
+```rust
+#[test]
+fn unknown_schema_version_is_fatal() {
+    // 链中只有版本 1；版本 99 的记录不得被当作 v1 静默接受
+    let (_d, db) = db_with_probe();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        INSERT_EVENT,
+        &[
+            Value::text("e1"),
+            Value::text("node.started"),
+            Value::Int(99),
+            Value::Int(1),
+            Value::Int(0),
+            Value::text("{}"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let err = run_recovery(&db, &RecoveryRegistry::new())
+        .expect_err("未知 schema_version 必须致命");
+    assert!(err.to_string().contains("99"), "实际: {err}");
+}
+```
+
+并把 `phase_without_hooks_reports_zero` 的断言补上 `builtin_work`：
+
+```rust
+    assert!(load.builtin_work, "第一阶段应标记为执行了内建工作");
+    assert!(!lost.builtin_work, "非第一阶段不得标记内建工作");
+```
+
+- [ ] **Step 6: 运行测试**
+
+Run: `cargo test --workspace`
+Expected: 全部 PASS、0 warning。计数：
+
+```
+core 5、provider 2、events 20、persist 28、runtime 4，共 59 passed
+```
+
+其中 persist 28 = migrations 5 + transaction 14 + recovery 7 + crash_atomicity 2。若实际数与上述不符，**如实报告实际数**，不要改预期迁就实际。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add crates
+git commit -m "fix(p0): 终审修复——payload 静默降级、迁移链悬空、迁移内置与三项护栏"
+```
