@@ -3,8 +3,11 @@ use std::process::Command;
 
 fn cargo_tree(pkg: &str) -> String {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    // --edges all 同时覆盖 normal、build、dev。只查 normal 不够：
+    // dev-dependency 同样允许测试代码引用 provider 类型，
+    // 而 §346 的中立性约束要拦住所有引用路径。
     let out = Command::new(env!("CARGO"))
-        .args(["tree", "-p", pkg, "--edges", "normal", "--prefix", "none"])
+        .args(["tree", "-p", pkg, "--edges", "all", "--prefix", "none"])
         .current_dir(root)
         .output()
         .expect("cargo tree 无法执行");
