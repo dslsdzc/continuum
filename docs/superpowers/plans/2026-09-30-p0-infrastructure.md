@@ -251,6 +251,10 @@ git commit -m "feat: 建立 workspace 与五个 crate，断言依赖方向"
   - `continuum_core::model`：`ModelId`、`ModelDescriptor`、`Role`、`Message`、`InvokeRequest`、`InvokeResponse`、`Usage`、`StreamChunk`、`CallId`、`ProviderHealth`、`ModelStream`
   - `continuum_core::tool`：`ToolId`、`ToolDescriptor`、`ToolInvocation`、`ToolResult`
   - `continuum_core::connector`：`ConnectorId`、`ConnectorOp`、`ConnectorDescriptor`
+    - `ConnectorOp::new(op) -> Result<ConnectorOp, CoreError>`，空串与不含 `.` 的标识一律拒绝
+    - `ConnectorDescriptor` 字段私有，`new(id, operations) -> Result<Self, CoreError>` 是唯一构造入口；
+      `id()`、`operations()` 为访问器；反序列化经 `#[serde(try_from = "RawConnectorDescriptor")]` 回流到 `new`
+  - `CoreError`：`ConnectorWithoutOperations { connector }`、`MalformedConnectorOp { op }`
 
 - [ ] **Step 1: 写 §125 的操作级授权断言测试**
 
@@ -259,11 +263,17 @@ git commit -m "feat: 建立 workspace 与五个 crate，断言依赖方向"
 ```rust
 use continuum_core::connector::{ConnectorDescriptor, ConnectorId, ConnectorOp};
 
+fn op(s: &str) -> ConnectorOp {
+    ConnectorOp::new(s).expect("合法操作标识")
+}
+
+fn github() -> ConnectorId {
+    ConnectorId::new("GitHub")
+}
+
 #[test]
 fn empty_operation_list_is_rejected() {
-    let id = ConnectorId::new("GitHub");
-    let err = ConnectorDescriptor::new(id.clone(), vec![])
-        .expect_err("空操作列表必须被拒绝");
+    let err = ConnectorDescriptor::new(github(), vec![]).expect_err("空操作列表必须被拒绝");
     assert_eq!(
         err.to_string(),
         "Connector GitHub 未声明任何操作，退回服务级授权（§125）"
@@ -272,14 +282,41 @@ fn empty_operation_list_is_rejected() {
 
 #[test]
 fn operation_scoped_descriptor_is_accepted() {
-    let id = ConnectorId::new("GitHub");
-    let ops = vec![
-        ConnectorOp::new("GitHub.read_repo"),
-        ConnectorOp::new("GitHub.push_branch"),
-    ];
-    let d = ConnectorDescriptor::new(id, ops).expect("非空操作列表应被接受");
-    assert_eq!(d.operations.len(), 2);
-    assert_eq!(d.operations[0].as_str(), "GitHub.read_repo");
+    let d = ConnectorDescriptor::new(github(), vec![op("GitHub.read_repo"), op("GitHub.push_branch")])
+        .expect("非空操作列表应被接受");
+    assert_eq!(d.id().as_str(), "GitHub");
+    assert_eq!(d.operations().len(), 2);
+    assert_eq!(d.operations()[0].as_str(), "GitHub.read_repo");
+}
+
+#[test]
+fn malformed_operation_id_is_rejected() {
+    assert!(ConnectorOp::new("").is_err(), "空串必须被拒绝");
+    assert!(ConnectorOp::new("GitHub").is_err(), "不含 . 的标识必须被拒绝");
+    assert_eq!(op("GitHub.push_branch").as_str(), "GitHub.push_branch");
+}
+
+#[test]
+fn deserialization_cannot_bypass_the_operation_check() {
+    let empty = r#"{"id":"GitHub","operations":[]}"#;
+    let err = serde_json::from_str::<ConnectorDescriptor>(empty)
+        .expect_err("反序列化不得绕过 §125 的空操作检查");
+    assert!(err.to_string().contains("未声明任何操作"), "实际: {err}");
+
+    let bad_op = r#"{"id":"GitHub","operations":["GitHub"]}"#;
+    assert!(
+        serde_json::from_str::<ConnectorDescriptor>(bad_op).is_err(),
+        "反序列化不得接受形状非法的操作标识"
+    );
+}
+
+#[test]
+fn descriptor_round_trips_through_serde() {
+    let d = ConnectorDescriptor::new(github(), vec![op("GitHub.push_branch")])
+        .expect("非空操作列表应被接受");
+    let text = serde_json::to_string(&d).expect("可序列化");
+    let back: ConnectorDescriptor = serde_json::from_str(&text).expect("可反序列化");
+    assert_eq!(back, d);
 }
 ```
 
@@ -314,6 +351,8 @@ pub enum ProviderError {
 pub enum CoreError {
     #[error("Connector {connector} 未声明任何操作，退回服务级授权（§125）")]
     ConnectorWithoutOperations { connector: String },
+    #[error("Connector 操作标识 {op:?} 格式非法，要求形如 GitHub.push_branch（§125）")]
+    MalformedConnectorOp { op: String },
 }
 ```
 
@@ -463,8 +502,9 @@ pub struct ToolResult {
 ```rust
 //! §124 / §125 Connector 的接口类型。
 //!
-//! §125 要求按操作细分，不得退化为服务级授权。
-//! 该约束由 `ConnectorDescriptor::new` 拒绝空操作列表在类型层表达。
+//! §125 要求按操作细分，不得退化为服务级授权。该约束对三条构造路径
+//! 全部生效：`new()`、结构体字面量、以及反序列化。后者靠字段私有
+//! 加 `try_from` 回流到 `new()` 实现。
 
 use crate::error::CoreError;
 use serde::{Deserialize, Serialize};
@@ -482,22 +522,56 @@ impl ConnectorId {
 }
 
 /// 操作标识，形如 `GitHub.push_branch`（§125）。
+///
+/// 空串与不含 `.` 的标识一律拒绝：前者不构成操作，
+/// 后者只能表达服务级授权。
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String")]
 pub struct ConnectorOp(String);
 
 impl ConnectorOp {
-    pub fn new(op: impl Into<String>) -> Self {
-        Self(op.into())
+    pub fn new(op: impl Into<String>) -> Result<Self, CoreError> {
+        let op = op.into();
+        if op.is_empty() || !op.contains('.') {
+            return Err(CoreError::MalformedConnectorOp { op });
+        }
+        Ok(Self(op))
     }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
 }
 
+impl TryFrom<String> for ConnectorOp {
+    type Error = CoreError;
+
+    fn try_from(op: String) -> Result<Self, CoreError> {
+        ConnectorOp::new(op)
+    }
+}
+
+/// 字段私有，`new` 是唯一构造入口。反序列化经 `try_from`
+/// 回流到 `new`，因此三条构造路径都受 §125 约束。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(try_from = "RawConnectorDescriptor")]
 pub struct ConnectorDescriptor {
-    pub id: ConnectorId,
-    pub operations: Vec<ConnectorOp>,
+    id: ConnectorId,
+    operations: Vec<ConnectorOp>,
+}
+
+#[derive(Deserialize)]
+struct RawConnectorDescriptor {
+    id: ConnectorId,
+    operations: Vec<ConnectorOp>,
+}
+
+impl TryFrom<RawConnectorDescriptor> for ConnectorDescriptor {
+    type Error = CoreError;
+
+    fn try_from(raw: RawConnectorDescriptor) -> Result<Self, CoreError> {
+        ConnectorDescriptor::new(raw.id, raw.operations)
+    }
 }
 
 impl ConnectorDescriptor {
@@ -509,6 +583,14 @@ impl ConnectorDescriptor {
             });
         }
         Ok(Self { id, operations })
+    }
+
+    pub fn id(&self) -> &ConnectorId {
+        &self.id
+    }
+
+    pub fn operations(&self) -> &[ConnectorOp] {
+        &self.operations
     }
 }
 ```
@@ -529,7 +611,7 @@ pub use error::{CoreError, ProviderError};
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-core -v`
-Expected: PASS，2 passed。
+Expected: PASS，5 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -678,7 +760,7 @@ impl Connector for FakeConnector {
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor::new(
             ConnectorId::new("GitHub"),
-            vec![ConnectorOp::new("GitHub.push_branch")],
+            vec![ConnectorOp::new("GitHub.push_branch").expect("合法操作标识")],
         )
         .expect("非空操作列表")
     }
@@ -688,7 +770,7 @@ impl Connector for FakeConnector {
         op: &ConnectorOp,
         input: serde_json::Value,
     ) -> Result<serde_json::Value, ProviderError> {
-        if !self.descriptor().operations.iter().any(|o| o == op) {
+        if !self.descriptor().operations().iter().any(|o| o == op) {
             return Err(ProviderError::Protocol(format!(
                 "未声明的操作: {}",
                 op.as_str()
@@ -716,13 +798,19 @@ async fn fake_implementations_satisfy_the_frozen_interfaces() {
     assert_eq!(t.list_tools().await.unwrap().len(), 1);
 
     let c = FakeConnector;
-    assert_eq!(c.descriptor().operations.len(), 1);
+    assert_eq!(c.descriptor().operations().len(), 1);
     assert!(c
-        .invoke(&ConnectorOp::new("GitHub.merge"), json!({}))
+        .invoke(
+            &ConnectorOp::new("GitHub.merge").expect("合法操作标识"),
+            json!({})
+        )
         .await
         .is_err());
     assert!(c
-        .invoke(&ConnectorOp::new("GitHub.push_branch"), json!({"b": "x"}))
+        .invoke(
+            &ConnectorOp::new("GitHub.push_branch").expect("合法操作标识"),
+            json!({"b": "x"})
+        )
         .await
         .is_ok());
 }
@@ -3345,7 +3433,7 @@ Expected: PASS，3 passed。
 - [ ] **Step 5: 运行全量测试**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS。计数：core 2、provider 1、events 16、persist 24、runtime 3，共 46 passed。
+Expected: 全部 PASS。计数：core 5、provider 1、events 16、persist 24、runtime 3，共 49 passed。
 
 - [ ] **Step 6: 提交**
 
@@ -3365,6 +3453,7 @@ git commit -m "feat(runtime): 装配启动流程，应用迁移并执行 §319 �
 | 3 九类事件与版本 | Task 4 `nine_event_types_match_spec_310`、`all_event_types_round_trip`、`missing_optional_fields_deserialize_as_none`、`unknown_optional_field_does_not_break_deserialization`、`nine_types_are_never_ignorable`、`codec_chain_rejects_gaps`、`codec_chain_accepts_contiguous_versions` |
 | 4 八类审计与篡改检测 | Task 5 `eight_audit_kinds_match_spec_313`、`tampered_payload_is_detected`、Task 7 `tampered_audit_row_is_detected_on_read` |
 | 5 三接口冻结且 core/persist 中立 | Task 1 `core_and_persist_do_not_depend_on_provider`、Task 3 `fake_implementations_satisfy_the_frozen_interfaces` |
+| §125 操作级授权不可绕过 | Task 2 `empty_operation_list_is_rejected`、`malformed_operation_id_is_rejected`、`deserialization_cannot_bypass_the_operation_check` |
 | 5.2 未知事件类型 | Task 4 `unknown_non_ignorable_type_is_fatal`、`unknown_ignorable_type_is_skippable`、Task 7 `unknown_event_type_is_fatal_on_scan` |
 | 4.1 判定规则 | Task 7 `scan_counts_skippable_records`、`scan_is_clean_when_all_records_decode`、`skippable_record_before_intent_completed_is_fatal`、`skippable_record_after_intent_completed_is_only_counted` |
 
