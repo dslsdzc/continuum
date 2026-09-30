@@ -309,3 +309,59 @@ fn unreadable_payload_on_intent_completed_is_fatal() {
         .expect_err("不可读的收口行必须致命");
     assert!(err.to_string().contains("intent.completed"), "实际: {err}");
 }
+
+#[test]
+fn unknown_type_with_broken_payload_is_still_fatal() {
+    // 未知类型与坏 payload 同时出现时，不得因为 payload 先被判为
+    // 可跳过而绕过 §5.2 的 fail-closed 规则。
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("future.thing"),
+            Value::Int(1),
+            Value::Int(1),
+            Value::text("not json at all"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect_err("未知类型 + 坏 payload 必须致命");
+    assert!(err.to_string().contains("future.thing"), "实际: {err}");
+}
+
+#[test]
+fn invalid_schema_version_is_fatal() {
+    // 0 与 99 同属「可读但不在链中」，判定应一致为致命；
+    // 只有「列不是整数」才归可跳过。
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("node.started"),
+            Value::Int(0),
+            Value::Int(1),
+            Value::text("{}"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect_err("schema_version = 0 必须致命");
+    assert!(err.to_string().contains("schema_version"), "实际: {err}");
+}

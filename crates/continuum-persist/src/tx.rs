@@ -6,7 +6,7 @@
 use crate::value::Value;
 use crate::{Db, PersistError};
 use continuum_events::audit::{record_hash, AuditKind, AuditRecord, GENESIS_HASH};
-use continuum_events::{DecodedEvent, Event, EventCodecChain, EventType};
+use continuum_events::{DecodedEvent, Event, EventCodecChain, EventLogError, EventType};
 use serde_json::Value as JsonValue;
 
 pub struct Tx<'a> {
@@ -305,6 +305,18 @@ impl Tx<'_> {
         for row in &rows {
             let event_type = text_at(row, 1)?;
 
+            // 未知类型的判定必须先于 payload 与版本号的判定。
+            // 否则「未知类型 + payload 同时损坏」会走可跳过分支，
+            // 把 §5.2 的 fail-closed 规则反转成 fail-open。
+            if !EventType::ALL.iter().any(|t| t.as_str() == event_type) && !bool_at(row, 6) {
+                return Err(PersistError::Database(
+                    EventLogError::UnknownEventType {
+                        event_type: event_type.clone(),
+                    }
+                    .to_string(),
+                ));
+            }
+
             // payload 列不可读、或不是合法 JSON，一律记可跳过。
             // 不要把解析失败降级成 JSON null：payload 的类型是 Value，
             // null 合法，那样这类损坏会被计为已解码，收口升级随之漏判。
@@ -314,7 +326,14 @@ impl Tx<'_> {
             };
 
             let version = match row.get(2) {
-                Some(Value::Int(v)) if *v > 0 && *v <= i64::from(u32::MAX) => Some(*v as u32),
+                Some(Value::Int(v)) if (1..=i64::from(u32::MAX)).contains(v) => Some(*v as u32),
+                // 可读但不是合法版本号（0、负数、超出 u32）：按「不在链中」处理，致命
+                Some(Value::Int(_)) => {
+                    return Err(PersistError::Database(
+                        "schema_version 不是合法版本号，应在 1..=u32::MAX 之间".to_owned(),
+                    ))
+                }
+                // 列不是整数：不可判定，按可跳过处理
                 _ => None,
             };
 
