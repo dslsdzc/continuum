@@ -98,16 +98,18 @@ resume eligible tasks          P1 注册
 
 ```
 可跳过     单条事件的 payload 列不可读或不是合法 JSON
-           单条事件的 schema_version 列不可判定为正整数
+           单条事件的 schema_version 列不是整数
            信封其它字段类型错
            以上均计入 RecoveryReport.skipped_records
 
-致命       记录的 schema_version 不在链中（含未来版本）  第 5.1 节
-           未知事件类型且 ignorable = false               第 5.2 节
-           可跳过记录之后存在 intent.completed            见下
-           审计链任一哈希不匹配                           第 6 节
-           迁移失败                                       第 4 节
+致命       schema_version 是整数但不在链中（含 0、负数、未来版本）  第 5.1 节
+           未知事件类型且 ignorable = false                         第 5.2 节
+           可跳过记录之后存在 intent.completed                      见下
+           审计链任一哈希不匹配                                     第 6 节
+           迁移失败                                                 第 4 节
 ```
+
+判定顺序：未知事件类型的判定先于 payload 与版本号的判定。否则「未知类型 + payload 同时损坏」会走可跳过分支，把第 5.2 节的 fail-closed 规则反转成 fail-open。
 
 payload 解析失败必须归入可跳过，不得降级为一个合法值后计为已解码：那样会同时使本条规则永不触发，并使下面的收口升级漏判。
 

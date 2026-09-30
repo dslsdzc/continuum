@@ -4103,3 +4103,143 @@ core 5、provider 2、events 21、persist 28、runtime 4，共 60 passed
 git add crates
 git commit -m "fix(p0): 终审修复——payload 静默降级、迁移链悬空、迁移内置与三项护栏"
 ```
+
+---
+
+### Task 12: 复核回归修复
+
+**背景：** Task 11 的修复经终审复核，发现它**引入了一处反向回归**，另暴露一处与设计第 4.1 节不一致的判定。两者都在 `scan_event_log` 内，一并修。
+
+**Files:**
+- Modify: `crates/continuum-persist/src/tx.rs`
+- Modify: `crates/continuum-persist/tests/transaction.rs`
+
+**Interfaces:** 无新增公开接口；只改 `scan_event_log` 的内部判定顺序与版本号判定。
+
+- [ ] **Step 1: 把未知类型判定提到 payload 与版本号判定之前**
+
+**回归说明：** Task 11 把 payload 解析失败改为直接记可跳过，而未知类型的判定仍留在 `chain.decode` 里——该分支只在 payload 与版本号双双可读时才进入。于是 `event_type` 未知、`ignorable = 0`、且 payload 同时损坏的行，从致命降级为可跳过。修复前这条路径是致命的（旧代码把 payload 降级为 `null` 后仍会走到类型检查）。方向是 fail-closed → fail-open，绕过了第 5.2 节「ignorable = false 拒绝整份事件日志」与第 4.1 节的致命清单。
+
+`crates/continuum-persist/src/tx.rs` 的 `scan_event_log` 循环体开头，在读取 `event_type` 之后、payload 判定之前插入：
+
+```rust
+            // 未知类型的判定必须先于 payload 与版本号的判定。
+            // 否则「未知类型 + payload 同时损坏」会走可跳过分支，
+            // 把 §5.2 的 fail-closed 规则反转成 fail-open。
+            if !EventType::ALL.iter().any(|t| t.as_str() == event_type) && !bool_at(row, 6) {
+                return Err(PersistError::Database(
+                    EventLogError::UnknownEventType {
+                        event_type: event_type.clone(),
+                    }
+                    .to_string(),
+                ));
+            }
+```
+
+`chain.decode` 内的 `UnknownEventType` 分支保留不动，作为第二道防线。
+
+- [ ] **Step 2: 版本号列「可读但非法」应判致命，与设计一致**
+
+**不一致说明：** 设计第 4.1 节写明「记录的 `schema_version` 不在链中（含未来版本）」为致命，「`schema_version` 列不可判定为正整数」为可跳过。但实现把 `0`、负数、超出 `u32` 的整数一并归入「不可判定」→ 可跳过，而它们是可读的、只是不在链中。同一列上 `99` 致命而 `0` 可跳过，自相矛盾。
+
+同一循环内，`version` 的取值替换为：
+
+```rust
+            let version = match row.get(2) {
+                Some(Value::Int(v)) if (1..=i64::from(u32::MAX)).contains(v) => Some(*v as u32),
+                // 可读但不是合法版本号（0、负数、超出 u32）：按「不在链中」处理，致命
+                Some(Value::Int(_)) => {
+                    return Err(PersistError::Database(
+                        "schema_version 不是合法版本号，应在 1..=u32::MAX 之间".to_owned(),
+                    ))
+                }
+                // 列不是整数：不可判定，按可跳过处理
+                _ => None,
+            };
+```
+
+导入行相应增加 `EventLogError`：
+
+```rust
+use continuum_events::{DecodedEvent, Event, EventCodecChain, EventLogError, EventType};
+```
+
+- [ ] **Step 3: 两条回归测试**
+
+在 `crates/continuum-persist/tests/transaction.rs` 追加：
+
+```rust
+#[test]
+fn unknown_type_with_broken_payload_is_still_fatal() {
+    // 未知类型与坏 payload 同时出现时，不得因为 payload 先被判为
+    // 可跳过而绕过 §5.2 的 fail-closed 规则。
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("future.thing"),
+            Value::Int(1),
+            Value::Int(1),
+            Value::text("not json at all"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect_err("未知类型 + 坏 payload 必须致命");
+    assert!(err.to_string().contains("future.thing"), "实际: {err}");
+}
+
+#[test]
+fn invalid_schema_version_is_fatal() {
+    // 0 与 99 同属「可读但不在链中」，判定应一致为致命；
+    // 只有「列不是整数」才归可跳过。
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO events
+           (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+         VALUES (?1, ?2, ?3, ?4, NULL, NULL, 0, ?5)",
+        &[
+            Value::text("e1"),
+            Value::text("node.started"),
+            Value::Int(0),
+            Value::Int(1),
+            Value::text("{}"),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = tx
+        .scan_event_log(&continuum_events::default_chain())
+        .expect_err("schema_version = 0 必须致命");
+    assert!(err.to_string().contains("schema_version"), "实际: {err}");
+}
+```
+
+- [ ] **Step 4: 运行测试**
+
+Run: `cargo test --workspace`
+Expected: 全部 PASS、0 warning。计数：
+
+```
+core 5、provider 2、events 21、persist 30、runtime 4，共 62 passed
+```
+
+persist 30 = migrations 5 + transaction 16 + recovery 7 + crash_atomicity 2。实际数不符时如实报告。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add crates
+git commit -m "fix(p0): 复核回归——未知类型判定前置，非法版本号判致命"
+```
