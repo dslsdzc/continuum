@@ -66,6 +66,18 @@ fn unknown_optional_field_does_not_break_deserialization() {
 }
 
 #[test]
+fn serde_names_match_as_str_for_all_nine_types() {
+    for t in EventType::ALL {
+        let wire = serde_json::to_string(&t).expect("可序列化");
+        assert_eq!(
+            wire,
+            format!("\"{}\"", t.as_str()),
+            "serde rename 与 as_str 不一致: {t:?}"
+        );
+    }
+}
+
+#[test]
 fn nine_types_are_never_ignorable() {
     for t in EventType::ALL {
         let ev = Event::new(t, "ev-1", 1, json!({}));
