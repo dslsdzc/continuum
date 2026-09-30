@@ -19,4 +19,6 @@ pub enum ProviderError {
 pub enum CoreError {
     #[error("Connector {connector} 未声明任何操作，退回服务级授权（§125）")]
     ConnectorWithoutOperations { connector: String },
+    #[error("Connector 操作标识 {op:?} 格式非法，要求形如 GitHub.push_branch（§125）")]
+    MalformedConnectorOp { op: String },
 }
