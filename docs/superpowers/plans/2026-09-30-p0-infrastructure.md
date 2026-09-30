@@ -3875,7 +3875,7 @@ pub fn run_recovery(db: &Db, registry: &RecoveryRegistry) -> Result<RecoveryRepo
 }
 ```
 
-- [ ] **Step 4: 三处护栏测试**
+- [ ] **Step 4: 四处护栏测试**
 
 **护栏 1 —— `with_ignorable(true)` 的写路径。** Task 7 首轮的缺陷正是该标志被静默丢弃，修复后仍无回归保护。在 `crates/continuum-persist/tests/transaction.rs` 追加：
 
@@ -3931,7 +3931,21 @@ fn record_hash_is_independent_of_payload_key_insertion_order() {
 }
 ```
 
-**护栏 3 —— `ModelStream` 的可消费性。** 接口冻结是本子项目的交付物，而 `stream()` 的返回类型在全仓没有一次 poll；若在 P3 才证明不可用，返工的是接口本身。在 `crates/continuum-provider/tests/fake_provider.rs` 追加：
+**护栏 3 —— 空链拒绝装配。** 设计第 5.1 节要求空链装配失败，而该分支在测试套件内零覆盖：删掉它全套测试仍绿。在 `crates/continuum-events/tests/event_envelope.rs` 追加：
+
+```rust
+#[test]
+fn codec_chain_rejects_empty_chain() {
+    // 空链必须拒绝装配：否则任何记录都会因「链中无对应版本」而放过。
+    let chain = EventCodecChain::new();
+    match chain.validate_contiguous() {
+        Err(EventLogError::CodecChainGap { missing }) => assert_eq!(missing, 1),
+        other => panic!("空链必须被拒绝，实际 {other:?}"),
+    }
+}
+```
+
+**护栏 4 —— `ModelStream` 的可消费性。** 接口冻结是本子项目的交付物，而 `stream()` 的返回类型在全仓没有一次 poll；若在 P3 才证明不可用，返工的是接口本身。在 `crates/continuum-provider/tests/fake_provider.rs` 追加：
 
 ```rust
 #[tokio::test]
@@ -4078,7 +4092,7 @@ Run: `cargo test --workspace`
 Expected: 全部 PASS、0 warning。计数：
 
 ```
-core 5、provider 2、events 20、persist 28、runtime 4，共 59 passed
+core 5、provider 2、events 21、persist 28、runtime 4，共 60 passed
 ```
 
 其中 persist 28 = migrations 5 + transaction 14 + recovery 7 + crash_atomicity 2。若实际数与上述不符，**如实报告实际数**，不要改预期迁就实际。
