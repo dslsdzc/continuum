@@ -1409,7 +1409,7 @@ git commit -m "feat(events): 定义 §310 事件信封与九类事件"
 
 ```rust
 use continuum_events::audit::{
-    verify_chain, AuditKind, AuditRecord, AuditError, GENESIS_HASH,
+    record_hash, verify_chain, AuditKind, AuditRecord, AuditError, GENESIS_HASH,
 };
 use serde_json::json;
 
@@ -1509,8 +1509,8 @@ fn serde_names_match_as_str_for_all_eight_kinds() {
 #[test]
 fn record_hash_matches_the_frozen_vector() {
     // 黄金向量锁定 record_hash 的输入顺序与大端编码。
-    // 期望值由独立的 Python hashlib 实现按同一输入顺序算出，非本实现自产；
-    // 推导命令写在报告里，可复现。
+    // 期望值由两份相互独立的实现算出并核对一致（Python hashlib 与
+    // 部署后的 Rust 函数分别计算），非本实现自产；推导命令见实现报告。
     let payload = json!({"effect": "push_branch", "target": "origin/main"});
     let got = record_hash(
         GENESIS_HASH,
@@ -1520,7 +1520,7 @@ fn record_hash_matches_the_frozen_vector() {
         &payload,
     );
     assert_eq!(
-        got, "<GOLDEN>",
+        got, "ec9b6a9a3fc381a83dd6daca1a2d9fee76d0cf3ea4bbfd26c46688eba8b39f87",
         "record_hash 的输入顺序或编码被改动；既有审计记录将全部失效"
     );
 }
