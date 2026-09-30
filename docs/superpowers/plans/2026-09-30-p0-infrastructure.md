@@ -3255,8 +3255,8 @@ git commit -m "feat(persist): 实现 §319 恢复五阶段与钩子注册表"
 
 ```rust
 use continuum_persist::{Db, Migration, Value};
-use std::io::{BufRead, BufReader, Read};
-use std::process::{Child, ChildStdout, Command, Stdio};
+use std::io::{BufRead, BufReader};
+use std::process::{Child, Command, Stdio};
 
 /// 夹具迁移。两张表模拟 §318 的跨实体一致性要求。
 fn fixture_db(path: &std::path::Path) -> Db {
@@ -3284,11 +3284,14 @@ fn spawn_writer(path: &std::path::Path, commit: bool) -> std::process::Child {
 
 /// 读到 READY 表示两行已写入事务但未提交。
 ///
-/// 返回 reader 而不是就地析构：管道读端若在本函数返回时关闭，
-/// 夹具提交后那句 `println!("COMMITTED")` 会撞上断管而 panic，
-/// 退出码变成 101，对照组的 `status.success()` 断言会以错误的理由失败。
-fn wait_ready(child: &mut Child) -> BufReader<ChildStdout> {
-    let out = child.stdout.take().expect("stdout 已管道化");
+/// 用 `as_mut` 借用而非 `take` 取走：`take` 会把读端移进本函数的
+/// `BufReader`，函数返回即析构、读端关闭，夹具提交后那句
+/// `println!("COMMITTED")` 会撞上断管而 panic，退出码变成 101，
+/// 对照组的 `status.success()` 断言会以错误的理由失败。
+/// 借用则读端仍由 `child.stdout` 持有，活到用例结束，
+/// 也不依赖调用方记得绑定返回值。
+fn wait_ready(child: &mut Child) {
+    let out = child.stdout.as_mut().expect("stdout 已管道化");
     let mut reader = BufReader::new(out);
     let mut line = String::new();
     loop {
@@ -3299,7 +3302,6 @@ fn wait_ready(child: &mut Child) -> BufReader<ChildStdout> {
             break;
         }
     }
-    reader
 }
 
 fn count(db: &Db, table: &str) -> usize {
@@ -3323,8 +3325,7 @@ fn killed_mid_transaction_leaves_no_partial_state() {
     fixture_db(&path);
 
     let mut child = spawn_writer(&path, false);
-    // 绑住读端，避免管道提前关闭导致夹具 panic
-    let _out = wait_ready(&mut child);
+    wait_ready(&mut child);
     child.kill().expect("SIGKILL 失败");
     child.wait().expect("回收子进程失败");
 
@@ -3345,15 +3346,9 @@ fn committed_writer_leaves_both_rows_visible() {
     fixture_db(&path);
 
     let mut child = spawn_writer(&path, true);
-    let mut out = wait_ready(&mut child);
+    wait_ready(&mut child);
     let status = child.wait().expect("回收子进程失败");
-    // 读尽剩余输出：夹具退出后管道到达 EOF；失败时把输出带进断言信息
-    let mut rest = String::new();
-    let _ = out.read_to_string(&mut rest);
-    assert!(
-        status.success(),
-        "夹具应正常退出，实际 {status:?}；后续输出:\n{rest}"
-    );
+    assert!(status.success(), "夹具应正常退出，实际 {status:?}");
 
     let db = fixture_db(&path);
     assert_eq!(count(&db, "fx_artifact"), 1, "提交后 fx_artifact 应可见");
