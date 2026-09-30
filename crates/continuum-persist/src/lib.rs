@@ -10,5 +10,5 @@ mod tx;
 
 pub use db::{builtin_migrations, Db, Migration};
 pub use error::PersistError;
-pub use tx::Tx;
+pub use tx::{EventLogScan, Tx};
 pub use value::Value;

@@ -138,7 +138,12 @@ impl Db {
         Ok(applied)
     }
 
-    /// 开启写事务。同一时刻只有一个事务，第二个未提交时调用会阻塞。
+    /// 开启写事务。同一时刻只有一个事务。
+    ///
+    /// 连接由单把 `Mutex` 保护，`Tx` 在其整个生命周期持有该 guard。
+    /// 跨线程在 `Tx` 未提交时调用本方法会阻塞；
+    /// 同一线程在持有 `Tx` 期间调用本方法或 `migrate` 会死锁
+    /// （`std::sync::Mutex` 不可重入），不返回错误。
     pub fn begin(&self) -> Result<Tx<'_>, PersistError> {
         Tx::begin(self)
     }
