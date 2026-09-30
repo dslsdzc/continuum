@@ -3255,8 +3255,8 @@ git commit -m "feat(persist): 实现 §319 恢复五阶段与钩子注册表"
 
 ```rust
 use continuum_persist::{Db, Migration, Value};
-use std::io::{BufRead, BufReader};
-use std::process::{Command, Stdio};
+use std::io::{BufRead, BufReader, Read};
+use std::process::{Child, ChildStdout, Command, Stdio};
 
 /// 夹具迁移。两张表模拟 §318 的跨实体一致性要求。
 fn fixture_db(path: &std::path::Path) -> Db {
@@ -3283,7 +3283,11 @@ fn spawn_writer(path: &std::path::Path, commit: bool) -> std::process::Child {
 }
 
 /// 读到 READY 表示两行已写入事务但未提交。
-fn wait_ready(child: &mut std::process::Child) {
+///
+/// 返回 reader 而不是就地析构：管道读端若在本函数返回时关闭，
+/// 夹具提交后那句 `println!("COMMITTED")` 会撞上断管而 panic，
+/// 退出码变成 101，对照组的 `status.success()` 断言会以错误的理由失败。
+fn wait_ready(child: &mut Child) -> BufReader<ChildStdout> {
     let out = child.stdout.take().expect("stdout 已管道化");
     let mut reader = BufReader::new(out);
     let mut line = String::new();
@@ -3295,6 +3299,7 @@ fn wait_ready(child: &mut std::process::Child) {
             break;
         }
     }
+    reader
 }
 
 fn count(db: &Db, table: &str) -> usize {
@@ -3318,7 +3323,8 @@ fn killed_mid_transaction_leaves_no_partial_state() {
     fixture_db(&path);
 
     let mut child = spawn_writer(&path, false);
-    wait_ready(&mut child);
+    // 绑住读端，避免管道提前关闭导致夹具 panic
+    let _out = wait_ready(&mut child);
     child.kill().expect("SIGKILL 失败");
     child.wait().expect("回收子进程失败");
 
@@ -3339,9 +3345,15 @@ fn committed_writer_leaves_both_rows_visible() {
     fixture_db(&path);
 
     let mut child = spawn_writer(&path, true);
-    wait_ready(&mut child);
+    let mut out = wait_ready(&mut child);
     let status = child.wait().expect("回收子进程失败");
-    assert!(status.success(), "夹具应正常退出，实际 {status:?}");
+    // 读尽剩余输出：夹具退出后管道到达 EOF；失败时把输出带进断言信息
+    let mut rest = String::new();
+    let _ = out.read_to_string(&mut rest);
+    assert!(
+        status.success(),
+        "夹具应正常退出，实际 {status:?}；后续输出:\n{rest}"
+    );
 
     let db = fixture_db(&path);
     assert_eq!(count(&db, "fx_artifact"), 1, "提交后 fx_artifact 应可见");
