@@ -2324,9 +2324,12 @@ fn tampered_audit_row_is_detected_on_read() {
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
+    // 篡改 occurred_at 而非 payload：payload 列在磁盘上是 JSON 文本，
+    // 直接写裸字符串会让 audit_records() 在解析阶段就失败，走不到哈希校验。
+    // 改一个整数列既保持该行可解析，又同样验证「改任意一列即被检出」。
     tx.execute(
-        "UPDATE audit_log SET payload = ?1 WHERE seq = 1",
-        &[Value::text("dev-b")],
+        "UPDATE audit_log SET occurred_at = ?1 WHERE seq = 1",
+        &[Value::Int(999)],
     )
     .unwrap();
     let err = tx.verify_audit_chain().expect_err("改写的记录必须被检出");
@@ -2521,21 +2524,24 @@ impl<'a> Tx<'a> {
         let payload =
             serde_json::to_string(&event.payload).map_err(|e| PersistError::Database(e.to_string()))?;
         self.execute(
-            "INSERT INTO events (event_id, event_type, schema_version, occurred_at, intent_id, node_id, payload)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO events
+               (event_id, event_type, schema_version, occurred_at, intent_id, node_id, ignorable, payload)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             &[
                 Value::text(event.event_id.clone()),
                 Value::text(event.event_type.as_str()),
                 Value::Int(event.schema_version as i64),
                 Value::Int(event.occurred_at),
                 match &event.intent_id {
-                    Some(s) => Value::text(s),
+                    Some(s) => Value::text(s.clone()),
                     None => Value::Null,
                 },
                 match &event.node_id {
-                    Some(s) => Value::text(s),
+                    Some(s) => Value::text(s.clone()),
                     None => Value::Null,
                 },
+                // 必须显式写入，否则 with_ignorable(true) 会被静默丢弃
+                Value::Int(i64::from(event.ignorable)),
                 Value::text(payload),
             ],
         )?;
@@ -2729,6 +2735,13 @@ fn text_at(row: &[Value], index: usize) -> Result<String, PersistError> {
     }
 }
 
+/// ignorable 列是 INTEGER，而 `Event.ignorable` 是 bool。
+/// 经 `json_at` 会得到 JSON number，serde 拒绝 number→bool，
+/// 使每条正常写入的事件都被误判为可跳过。故单独还原为 JSON bool。
+fn bool_at(row: &[Value], index: usize) -> bool {
+    matches!(row.get(index), Some(Value::Int(i)) if *i != 0)
+}
+
 /// 宽松取值：列里存了非预期类型时按 JSON 原样交给解码器，
 /// 由解码器判定可跳过还是致命。schema_version 被写成文本即走这条路径。
 fn json_at(row: &[Value], index: usize) -> JsonValue {
@@ -2767,7 +2780,7 @@ impl Tx<'_> {
                 "occurred_at": json_at(row, 3),
                 "intent_id": json_at(row, 4),
                 "node_id": json_at(row, 5),
-                "ignorable": json_at(row, 6),
+                "ignorable": bool_at(row, 6),
                 "payload": serde_json::from_str::<JsonValue>(&text_at(row, 7)?)
                     .unwrap_or(JsonValue::Null),
             });
