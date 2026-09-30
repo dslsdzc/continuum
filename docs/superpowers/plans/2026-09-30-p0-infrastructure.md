@@ -2125,7 +2125,7 @@ mod tx;
 
 pub use db::{builtin_migrations, Db, Migration};
 pub use error::PersistError;
-pub use tx::{EventLogScan, Tx};
+pub use tx::Tx;
 pub use value::Value;
 ```
 
@@ -2136,9 +2136,10 @@ pub use value::Value;
 
 use crate::{Db, PersistError, Value};
 
+// Task 7 会加入 `done: bool` 字段与 Drop 实现。本 task 不含它们：
+// 该字段在此无人读取，提前声明会产生 dead_code 警告。
 pub struct Tx<'a> {
     pub(crate) guard: std::sync::MutexGuard<'a, rusqlite::Connection>,
-    done: bool,
 }
 
 impl<'a> Tx<'a> {
@@ -2147,7 +2148,7 @@ impl<'a> Tx<'a> {
         guard
             .execute_batch("BEGIN IMMEDIATE")
             .map_err(crate::error::db)?;
-        Ok(Tx { guard, done: false })
+        Ok(Tx { guard })
     }
 
     pub fn query(&self, sql: &str, params: &[Value]) -> Result<Vec<Vec<Value>>, PersistError> {
@@ -2437,7 +2438,8 @@ Expected: FAIL，编译错误 `no method named append_event`
 
 - [ ] **Step 3: 补全事务 API**
 
-`crates/continuum-persist/src/tx.rs` 全文替换为：
+`crates/continuum-persist/src/tx.rs` 全文替换为下面的内容。同时把 `crates/continuum-persist/src/lib.rs` 的
+`pub use tx::Tx;` 改为 `pub use tx::{EventLogScan, Tx};`——`EventLogScan` 在本 task 才引入。
 
 ```rust
 //! 事务 API。
