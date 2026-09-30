@@ -1034,6 +1034,18 @@ fn unknown_optional_field_does_not_break_deserialization() {
 }
 
 #[test]
+fn serde_names_match_as_str_for_all_nine_types() {
+    for t in EventType::ALL {
+        let wire = serde_json::to_string(&t).expect("可序列化");
+        assert_eq!(
+            wire,
+            format!("\"{}\"", t.as_str()),
+            "serde rename 与 as_str 不一致: {t:?}"
+        );
+    }
+}
+
+#[test]
 fn nine_types_are_never_ignorable() {
     for t in EventType::ALL {
         let ev = Event::new(t, "ev-1", 1, json!({}));
@@ -1363,7 +1375,7 @@ pub use event::{Event, EventType, CURRENT_SCHEMA_VERSION};
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-events -v`
-Expected: PASS，10 passed。
+Expected: PASS，11 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -3445,7 +3457,7 @@ Expected: PASS，3 passed。
 - [ ] **Step 5: 运行全量测试**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS。计数：core 5、provider 1、events 16、persist 24、runtime 3，共 49 passed。
+Expected: 全部 PASS。计数：core 5、provider 1、events 17、persist 24、runtime 3，共 50 passed。
 
 - [ ] **Step 6: 提交**
 
