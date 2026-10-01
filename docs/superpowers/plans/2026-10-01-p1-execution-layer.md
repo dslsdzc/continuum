@@ -4042,6 +4042,54 @@ Expected: FAIL，`迁移应用 4 项` 不在输出中。
 
 `crates/continuum-runtime/src/recovery.rs`
 
+`crates/continuum-runtime/tests/startup.rs` 另需一条用例，它是 Task 11 那处主键修复的唯一守卫：
+
+```rust
+#[test]
+fn recovery_handles_same_named_nodes_in_different_graphs() {
+    // node_id 只在图内唯一。两张图各有 n1 时，node_attempt 的主键若不含
+    // graph_id，第二条插入会撞键。Task 11 里无处可写这条用例（它不写该表）。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    run(&path);
+
+    {
+        let db = continuum_persist::Db::open(&path).unwrap();
+        let tx = db.begin().unwrap();
+        for graph in ["g1", "g2"] {
+            tx.execute(
+                "INSERT INTO adfir_graph (id, version, contract_id, entry_nodes, terminal_nodes)
+                 VALUES (?1, 1, 'c1', '[]', '[]')",
+                &[continuum_persist::Value::text(graph)],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO adfir_node
+                   (graph_id, node_id, operator_id, operator_version, state,
+                    execution_policy, verification_policy, constraints, capabilities)
+                 VALUES (?1, 'n1', 'op', 1, 'RUNNING', 'null', 'null', '[]', '[]')",
+                &[continuum_persist::Value::text(graph)],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    let out = run(&path);
+    assert!(out.contains("标记 LOST 2 个节点"), "实际输出:\n{out}");
+
+    let db = continuum_persist::Db::open(&path).unwrap();
+    let tx = db.begin().unwrap();
+    let rows = tx.query("SELECT COUNT(*) FROM node_attempt", &[]).unwrap();
+    match &rows[0][0] {
+        continuum_persist::Value::Int(n) => {
+            assert_eq!(*n, 2, "两张图各应有一条 attempt 记录")
+        }
+        other => panic!("计数应为整数，实际 {other:?}"),
+    }
+}
+```
+
 ```rust
 //! P1 注册到 P0 恢复流程的钩子。
 
