@@ -1,7 +1,7 @@
 use continuum_artifact::ArtifactType;
 use continuum_graph::{
-    apply_blocking, select_runnable, AdfirGraph, ContractIdRef, EdgeKind, GraphId, Node, NodeId,
-    NodeState, SchedulerConfig,
+    apply_blocking, apply_unblocking, select_runnable, AdfirGraph, ContractIdRef, EdgeKind,
+    GraphId, Node, NodeId, NodeState, SchedulerConfig,
 };
 use continuum_operator::{OperatorId, OperatorVersion};
 use continuum_port::{Direction, Port, PortId};
@@ -132,4 +132,45 @@ fn blocking_marks_descendants_of_failed_predecessors() {
     assert_eq!(names(&blocked), vec!["b", "c"]);
     assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
     assert_eq!(g.node(&NodeId::new("c")).unwrap().state, NodeState::Blocked);
+}
+
+#[test]
+fn blocking_is_transitive_regardless_of_node_insertion_order() {
+    // 插入序取逆拓扑序。这是「迭代到不动点」的唯一守卫：按拓扑序插入时，
+    // 单趟扫描同序遍历也能把阻塞传到间接后继，该用例便区分不出两者。
+    let mut g = graph(&["c", "b", "a"]);
+    link(&mut g, "a", "b", EdgeKind::Control);
+    link(&mut g, "b", "c", EdgeKind::Control);
+    set_state(&mut g, "a", NodeState::Failed);
+
+    assert_eq!(names(&apply_blocking(&mut g)), vec!["b", "c"]);
+}
+
+#[test]
+fn blocked_nodes_are_unblocked_when_predecessors_complete() {
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Control);
+    set_state(&mut g, "a", NodeState::Failed);
+    apply_blocking(&mut g);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
+
+    set_state(&mut g, "a", NodeState::Completed);
+    let unblocked = apply_unblocking(&mut g);
+    assert_eq!(names(&unblocked), vec!["b"]);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Ready);
+}
+
+#[test]
+fn unblocking_leaves_nodes_with_unfinished_predecessors_blocked() {
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Control);
+    set_state(&mut g, "a", NodeState::Failed);
+    apply_blocking(&mut g);
+
+    set_state(&mut g, "a", NodeState::Running);
+    assert!(
+        apply_unblocking(&mut g).is_empty(),
+        "前驱未 COMPLETED 时不得解除阻塞"
+    );
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
 }

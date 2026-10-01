@@ -115,3 +115,43 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
 
     blocked
 }
+
+/// 把 CONTROL 与 DEPENDENCY 前驱已全部 COMPLETED 的 BLOCKED 节点迁移为 READY。
+///
+/// 与 `apply_blocking` 对称（设计第 12 节的后半句）。返回被解除阻塞的节点。
+/// 无排序前驱的 BLOCKED 节点视为满足条件——没有阻塞来源。
+pub fn apply_unblocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
+    let mut unblocked: Vec<NodeId> = Vec::new();
+    let ids: Vec<NodeId> = graph.nodes().iter().map(|n| n.id.clone()).collect();
+
+    for id in ids {
+        if graph.node(&id).expect("节点应存在").state != NodeState::Blocked {
+            continue;
+        }
+        let all_completed = graph
+            .edges_to(&id)
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
+                )
+            })
+            .all(|e| {
+                graph
+                    .node(&e.from_node)
+                    .map(|n| n.state == NodeState::Completed)
+                    .unwrap_or(false)
+            });
+        if all_completed {
+            let next = transition(NodeState::Blocked, NodeState::Ready)
+                .expect("BLOCKED 到 READY 为合法迁移");
+            if let Some(node) = graph.node_mut(&id) {
+                node.state = next;
+            }
+            unblocked.push(id);
+        }
+    }
+
+    unblocked
+}
