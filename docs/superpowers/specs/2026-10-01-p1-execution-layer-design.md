@@ -105,11 +105,14 @@ crates/
 ```
 continuum-port      → continuum-artifact
 continuum-operator  → continuum-artifact
-continuum-graph     → continuum-port, continuum-operator, continuum-artifact, continuum-persist
-continuum-artifact  → continuum-persist, continuum-core
+continuum-graph     → continuum-port, continuum-operator, continuum-artifact, continuum-persist,
+                      continuum-events
+continuum-artifact  → continuum-persist, continuum-core, continuum-events
 ```
 
 该方向与 02 §3.3 的层内依赖序一致，且无环。Graph Scheduler 不单独成 crate：`§303` 的职责是判定 READY 与可并发，与图结构的耦合高于与其他组件的耦合。
+
+`continuum-events` 的两条边由第 16 节要求：`continuum-graph` 与 `continuum-artifact` 都要构造 `Event`，把事件写在调用方的事务里。`continuum-events` 只依赖 `continuum-core`，不构成环。`continuum-persist` 虽也依赖 `continuum-events`，但不转出 `Event` / `EventType`，故不能替代这两条边。
 
 # 6. Artifact 数据模型
 
