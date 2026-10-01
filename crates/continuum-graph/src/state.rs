@@ -50,6 +50,13 @@ pub fn transition(from: NodeState, to: NodeState) -> Result<NodeState, StateErro
     }
 }
 
+/// 判定状态是否为**终态**（设计第 9 节：COMPLETED、FAILED、CANCELLED、
+/// INVALIDATED、LOST 五种）。
+///
+/// 判据是「终态」而非「无出边」。INVALIDATED 与 CANCELLED 可由任意状态到达，
+/// 包括彼此与 COMPLETED（`§306`：输入变化时受影响节点被 INVALIDATED，已完成
+/// 节点同样适用），故 `Cancelled → Invalidated` 这类出边是存在的。消费方不得
+/// 据本谓词推断节点没有后继；需要「无出边」时请另查边集。
 pub fn is_terminal(state: NodeState) -> bool {
     matches!(
         state,
