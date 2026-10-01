@@ -21,6 +21,7 @@
 - 非幂等 Effect 不进入自动重试（§307）。`NonDeterministic` 的 Operator 不写缓存键（ENG-002）。
 - 代码注释、错误信息、测试断言信息用中文。标识符用英文。
 - 每个 task 结束时 `cargo test --workspace` 必须全绿，并提交一次。
+- 各 task 的 Step 里写了预期通过数。该数是**陈旧检查**，不是验收标准：若与实际不符，如实报告实际数并说明差异来源（多出或少掉的用例），**不要改预期去迁就实际，也不要为了让数对上而增删用例**。
 - 不在仓库中写入任何凭据。
 
 ## Global Constraints 的执行事实
@@ -2511,10 +2512,15 @@ git commit -m "feat(graph): 增量重算的复用判定与 determinism 分类"
 **Files:**
 - Create: `crates/continuum-graph/src/scheduler.rs`
 - Modify: `crates/continuum-graph/src/lib.rs`
+- Modify: `crates/continuum-graph/src/state.rs`
 - Test: `crates/continuum-graph/tests/scheduler.rs`
 
+**本 task 需先修 Task 6 的一处设计漏项。** 设计第 9 节的迁移表原来只有 `RUNNING → BLOCKED`，而第 12 节要求「CONTROL/DEPENDENCY 前驱失败时，依赖它的节点迁移为 BLOCKED」——这类节点通常处于 `PENDING` 或 `READY`。两条规则不能同时成立，`apply_blocking` 因此恒返回空。设计第 9 节与第 12 节已补，`state.rs` 的 `legal` 分支需增加 `(Pending, Blocked)` 与 `(Ready, Blocked)`。
+
+该改动不使既有用例失效：Task 6 的 `illegal_transitions_are_rejected` 所列九条非法迁移不含这两对。
+
 **Interfaces:**
-- Consumes: Task 5 的 `AdfirGraph`、`EdgeKind`、Task 6 的 `is_terminal`
+- Consumes: Task 5 的 `AdfirGraph`、`EdgeKind`、Task 6 的 `transition`
 - Produces:
   - `continuum_graph::SchedulerConfig { pub max_parallel: usize }`，含 `Default`，默认 `max_parallel: 1`
   - `continuum_graph::select_runnable(&AdfirGraph, &SchedulerConfig) -> Vec<NodeId>`
@@ -2535,7 +2541,8 @@ use continuum_port::{Direction, Port, PortId};
 
 fn graph(ids: &[&str]) -> AdfirGraph {
     let mut g = AdfirGraph::new(GraphId::new("g1"), ContractIdRef::new("c1"));
-    for id in ids {
+    // `for &id in ids`：ids 是 &[&str]，直接迭代得到 &&str
+    for &id in ids {
         let mut n = Node::new(NodeId::new(id), OperatorId::new("op"), OperatorVersion::new(1));
         n.state = NodeState::Pending;
         g.add_node(n).unwrap();
@@ -2728,44 +2735,66 @@ fn predecessors_completed(graph: &AdfirGraph, node: &NodeId) -> bool {
 /// 把 CONTROL 与 DEPENDENCY 前驱已失败的下游节点迁移为 BLOCKED。
 ///
 /// 失败态包含 FAILED、CANCELLED、INVALIDATED、LOST。返回被标记的节点。
+///
+/// 传递：某节点被标记 BLOCKED 后，依赖它的节点同样不可推进，一并标记。
+/// 迭代到不动点。只处理 PENDING 与 READY 的节点——已 QUEUED 或 RUNNING 的
+/// 节点不因前驱失败被拽回，只在下一轮调度时因前置条件不满足而不再 READY。
 pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
     let mut blocked: Vec<NodeId> = Vec::new();
-    let ids: Vec<NodeId> = graph.nodes().iter().map(|n| n.id.clone()).collect();
 
-    for id in ids {
-        let state = graph.node(&id).expect("节点应存在").state;
-        if !matches!(state, NodeState::Pending | NodeState::Ready) {
-            continue;
-        }
-        let predecessor_failed = graph.edges_to(&id).iter().any(|e| {
-            if !matches!(
-                e.kind,
-                crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
-            ) {
-                return false;
+    loop {
+        let mut changed = false;
+        let ids: Vec<NodeId> = graph.nodes().iter().map(|n| n.id.clone()).collect();
+
+        for id in ids {
+            if blocked.contains(&id) {
+                continue;
             }
-            graph
-                .node(&e.from_node)
-                .map(|n| {
-                    matches!(
-                        n.state,
-                        NodeState::Failed
-                            | NodeState::Cancelled
-                            | NodeState::Invalidated
-                            | NodeState::Lost
-                    )
-                })
-                .unwrap_or(false)
-        });
-        if predecessor_failed {
-            if let Ok(next) = transition(state, NodeState::Blocked) {
+            let state = graph.node(&id).expect("节点应存在").state;
+            if !matches!(state, NodeState::Pending | NodeState::Ready) {
+                continue;
+            }
+
+            let stalled = graph.edges_to(&id).iter().any(|e| {
+                if !matches!(
+                    e.kind,
+                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
+                ) {
+                    return false;
+                }
+                if blocked.contains(&e.from_node) {
+                    return true;
+                }
+                graph
+                    .node(&e.from_node)
+                    .map(|n| {
+                        matches!(
+                            n.state,
+                            NodeState::Failed
+                                | NodeState::Cancelled
+                                | NodeState::Invalidated
+                                | NodeState::Lost
+                        )
+                    })
+                    .unwrap_or(false)
+            });
+
+            if stalled {
+                let next = transition(state, NodeState::Blocked)
+                    .expect("PENDING 与 READY 到 BLOCKED 均为合法迁移");
                 if let Some(node) = graph.node_mut(&id) {
                     node.state = next;
                 }
                 blocked.push(id);
+                changed = true;
             }
         }
+
+        if !changed {
+            break;
+        }
     }
+
     blocked
 }
 ```
@@ -2781,7 +2810,7 @@ pub use scheduler::{apply_blocking, select_runnable, SchedulerConfig};
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，39 passed。
+Expected: PASS，40 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -3036,7 +3065,7 @@ pub use failure::{
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，46 passed。
+Expected: PASS，47 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -3671,7 +3700,7 @@ pub use persist::{load_graph, p1_graph_migrations, save_graph};
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，49 passed。
+Expected: PASS，50 passed。
 
 - [ ] **Step 6: 提交**
 
@@ -3879,7 +3908,7 @@ continuum-graph = { path = "../continuum-graph" }
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS、0 warning。计数：P0 的 62 加本子项目在 Task 2 至 11 新增的测试（artifact 7、port 4、operator 4、graph 49），runtime 由 4 增至 6，共 132 passed。
+Expected: 全部 PASS、0 warning。计数：P0 的 62 加本子项目在 Task 2 至 11 新增的测试（artifact 7、port 4、operator 4、graph 50），runtime 由 4 增至 6，共 133 passed。
 
 实际数与上述不符时**如实报告实际数**。
 
@@ -4149,7 +4178,7 @@ pub use execution::{is_candidate_backend, ArtifactRef, ExecutionProfile, NodeCon
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS、0 warning。计数：Task 12 结束时为 132，本 task 新增 7 条，共 **139 passed**。实际数不符时如实报告。
+Expected: 全部 PASS、0 warning。计数：Task 12 结束时为 133，本 task 新增 7 条，共 **140 passed**。实际数不符时如实报告。
 
 - [ ] **Step 5: 提交**
 

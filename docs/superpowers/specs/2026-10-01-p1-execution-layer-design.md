@@ -251,6 +251,8 @@ QUEUED ──→ RUNNING
 RUNNING ──→ VERIFYING ──→ COMPLETED
 RUNNING ──→ WAITING ──→ READY
 RUNNING ──→ BLOCKED ──→ READY
+PENDING ──→ BLOCKED ──→ READY
+READY   ──→ BLOCKED ──→ READY
 RUNNING │ WAITING │ BLOCKED ──→ SUSPENDED ──→ READY
 RUNNING │ VERIFYING ──→ FAILED
 RUNNING │ VERIFYING ──→ LOST
@@ -382,6 +384,10 @@ READY 条件   所有输入 Port 已有可用的 DATA 入边来源，
 可并发条件无需单独判定。「两个可执行节点之间存在 CONTROL 或 DATA 路径」在结构上不可能：候选节点处于 PENDING 或 READY，而排序前驱已 COMPLETED 的节点不在此列，故任两个候选之间不存在排序路径。
 
 Control 与 Dependency 的前驱进入 FAILED、CANCELLED、INVALIDATED 或 LOST 时，依赖它的节点迁移为 BLOCKED，不进入 READY。BLOCKED 节点在其全部此类前驱重新回到 COMPLETED 后迁移为 READY。
+
+阻塞是传递的：某节点被标记 BLOCKED 后，依赖它的节点同样不可推进，一并标记。标记迭代到不动点。
+
+迁移表中的 `PENDING → BLOCKED` 与 `READY → BLOCKED` 两条为此而设——被阻塞的节点通常尚未运行。已处于 QUEUED 或 RUNNING 的节点不因前驱失败被拽回，只在下一轮调度时因前置条件不满足而不再进入 READY。
 
 `§303` 未要求并发上限。本子项目取一个由配置给出的并行上限，默认值为 1，理由是在 P3 接入模型资源之前，资源约束不可知。
 
