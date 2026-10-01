@@ -1,0 +1,114 @@
+use continuum_artifact::ArtifactType;
+use continuum_graph::{
+    AdfirGraph, ContractIdRef, EdgeKind, GraphError, GraphId, Node, NodeId,
+};
+use continuum_operator::{OperatorId, OperatorVersion};
+use continuum_port::{Direction, Port, PortId};
+
+fn node(id: &str, op: &str) -> Node {
+    Node::new(NodeId::new(id), OperatorId::new(op), OperatorVersion::new(1))
+}
+
+fn out_port(id: &str, t: ArtifactType) -> Port {
+    Port::new(PortId::new(id), Direction::Output, id, t)
+}
+
+fn in_port(id: &str, t: ArtifactType) -> Port {
+    Port::new(PortId::new(id), Direction::Input, id, t)
+}
+
+fn empty_graph() -> AdfirGraph {
+    AdfirGraph::new(GraphId::new("g1"), ContractIdRef::new("c1"))
+}
+
+#[test]
+fn compatible_ports_connect() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Patch)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Patch)).unwrap();
+
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .expect("同类型端口应能连接");
+    assert_eq!(g.edges().len(), 1);
+}
+
+#[test]
+fn incompatible_ports_are_rejected_at_construction() {
+    // §239 的 MUST：运行时拒绝不兼容连接
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::SourceTree)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Patch)).unwrap();
+
+    let err = g
+        .connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .expect_err("类型不同必须被拒绝");
+    assert!(matches!(err, GraphError::PortMismatch { .. }), "实际 {err:?}");
+    assert!(g.edges().is_empty(), "被拒绝的连接不得留下边");
+}
+
+#[test]
+fn connecting_an_unknown_port_is_rejected() {
+    let mut g = empty_graph();
+    match g.connect(&PortId::new("nope"), &PortId::new("nope2"), EdgeKind::Data) {
+        Err(GraphError::UnknownPort { .. }) => {}
+        other => panic!("未知端口必须被拒绝，实际 {other:?}"),
+    }
+}
+
+#[test]
+fn cycles_through_data_edges_are_rejected() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n1", in_port("i1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", out_port("o2", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i2", ArtifactType::Text)).unwrap();
+
+    g.connect(&PortId::new("o1"), &PortId::new("i2"), EdgeKind::Data).unwrap();
+    let err = g
+        .connect(&PortId::new("o2"), &PortId::new("i1"), EdgeKind::Data)
+        .expect_err("成环的连接必须被拒绝");
+    assert!(matches!(err, GraphError::Cycle { .. }), "实际 {err:?}");
+    assert_eq!(g.edges().len(), 1);
+}
+
+#[test]
+fn evidence_edges_do_not_participate_in_cycle_detection() {
+    // 设计第 8.3 节：EVIDENCE 与 EFFECT 不参与环检测
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Json)).unwrap();
+    g.add_port("n1", in_port("i1", ArtifactType::Json)).unwrap();
+    g.add_port("n2", out_port("o2", ArtifactType::Json)).unwrap();
+    g.add_port("n2", in_port("i2", ArtifactType::Json)).unwrap();
+
+    g.connect(&PortId::new("o1"), &PortId::new("i2"), EdgeKind::Data).unwrap();
+    g.connect(&PortId::new("o2"), &PortId::new("i1"), EdgeKind::Evidence)
+        .expect("EVIDENCE 边成环应被允许");
+}
+
+#[test]
+fn adding_a_port_to_an_unknown_node_is_rejected() {
+    let mut g = empty_graph();
+    match g.add_port("nope", out_port("o1", ArtifactType::Text)) {
+        Err(GraphError::UnknownNode { .. }) => {}
+        other => panic!("未知节点必须被拒绝，实际 {other:?}"),
+    }
+}
+
+#[test]
+fn two_ports_with_the_same_id_are_rejected() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    match g.add_port("n1", in_port("o1", ArtifactType::Text)) {
+        Err(GraphError::DuplicatePort { .. }) => {}
+        other => panic!("端口 id 重复必须被拒绝，实际 {other:?}"),
+    }
+}
