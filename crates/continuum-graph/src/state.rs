@@ -18,9 +18,13 @@ pub fn transition(from: NodeState, to: NodeState) -> Result<NodeState, StateErro
         return Ok(to);
     }
 
+    // PENDING/READY → BLOCKED 由设计第 12 节的阻塞规则要求：CONTROL 与 DEPENDENCY
+    // 前驱失败时，依赖它的节点通常尚未运行，正处在 PENDING 或 READY。
     let legal = matches!(
         (from, to),
         (Pending, Ready)
+            | (Pending, Blocked)
+            | (Ready, Blocked)
             | (Ready, Queued)
             | (Queued, Running)
             | (Running, Verifying)

@@ -6,6 +6,7 @@ pub mod ids;
 pub mod invalidation;
 pub mod node;
 pub mod reuse;
+pub mod scheduler;
 pub mod state;
 
 pub use edge::{Edge, EdgeKind};
@@ -14,4 +15,5 @@ pub use ids::{ContractIdRef, GraphId, NodeId};
 pub use invalidation::propagate_invalidation;
 pub use node::{Node, NodeState, OperatorRef};
 pub use reuse::{cache_key, can_reuse, CacheKey};
+pub use scheduler::{apply_blocking, select_runnable, SchedulerConfig};
 pub use state::{is_terminal, transition, StateError};
