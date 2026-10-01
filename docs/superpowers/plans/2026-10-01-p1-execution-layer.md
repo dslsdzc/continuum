@@ -4356,7 +4356,24 @@ git commit -m "feat(runtime): 装配 P1 迁移与恢复钩子"
 - Modify: `crates/continuum-graph/src/failure.rs`
 - Test: `crates/continuum-graph/tests/execution.rs`
 
-`failure.rs` 的改动是给 `RetryPolicy` 加 `Default`（`ExecutionProfile` 的该字段非可选）。它在 Task 10 已实现，本次为跨 task 的补加。
+`failure.rs` 的改动是给 `RetryPolicy` 加 `Default`（`ExecutionProfile` 的该字段非可选）。它在 Task 10 已实现，本次为跨 task 的补加。加在 `RetryPolicy` 的定义之后：
+
+```rust
+impl Default for RetryPolicy {
+    /// 默认策略为「单次尝试、不重试」：`max_attempts = 1` 使 `decide_retry`
+    /// 在首次失败即升级或失败，不产生第二次尝试。
+    fn default() -> Self {
+        Self {
+            max_attempts: 1,
+            backoff: Backoff::Fixed { interval_ms: 1_000 },
+            retryable_errors: Vec::new(),
+            escalation_policy: EscalationPolicy::None,
+        }
+    }
+}
+```
+
+`Backoff::Fixed` 与 `EscalationPolicy::None` 是 Task 10 落地的变体名；若与实现不符以实际为准。
 
 **Interfaces:**
 - `continuum_graph::ExecutionProfile`
