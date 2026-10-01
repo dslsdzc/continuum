@@ -3179,6 +3179,21 @@ pub struct RetryPolicy {
     pub escalation_policy: EscalationPolicy,
 }
 
+impl Default for RetryPolicy {
+    /// 默认策略为「单次尝试、不重试」：`max_attempts = 1` 使 `decide_retry`
+    /// 在首次失败即升级或失败，不产生第二次尝试。
+    ///
+    /// `ExecutionProfile` 的 `retry_policy` 非可选，故需要此默认值。
+    fn default() -> Self {
+        Self {
+            max_attempts: 1,
+            backoff: Backoff::Fixed { interval_ms: 1_000 },
+            retryable_errors: Vec::new(),
+            escalation_policy: EscalationPolicy::None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryDecision {
     Retry { next_attempt: u32 },
@@ -4382,10 +4397,13 @@ fn execution_profile_starts_empty() {
     assert!(p.tool.is_none());
     assert!(p.backend.is_none());
     assert!(p.compute_node.is_none());
+    assert!(p.reasoning_effort.is_none());
     assert!(p.parallelism.is_none());
     assert!(p.timeout_ms.is_none());
-    assert!(p.retry_policy.is_none());
     assert!(p.cost_budget.is_none());
+    // retry_policy 非可选：默认策略是「单次尝试、不重试」
+    assert_eq!(p.retry_policy.max_attempts, 1);
+    assert!(p.retry_policy.retryable_errors.is_empty());
 }
 
 #[test]
@@ -4501,8 +4519,10 @@ use std::sync::Arc;
 
 /// `§246`。每次 Node 执行产生一条。
 ///
-/// 资源类字段在本子项目内恒为 None，并以 `String` 承载：
-/// P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id。
+/// 六处字段在本子项目内恒为 None 并以 `String` 承载：`model`、`provider`、
+/// `tool`、`compute_node`、`reasoning_effort`、`cost_budget`。
+/// 前四者 P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id；
+/// 后两者的对应类型在本子项目内不存在。`backend` 已是强类型 `BackendId`。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ExecutionProfile {
     pub model: Option<String>,
@@ -4513,7 +4533,8 @@ pub struct ExecutionProfile {
     pub reasoning_effort: Option<String>,
     pub parallelism: Option<u32>,
     pub timeout_ms: Option<u64>,
-    pub retry_policy: Option<RetryPolicy>,
+    /// 非可选：设计 §14 与第 15 节的表列都是非空。默认值为「单次尝试、不重试」。
+    pub retry_policy: RetryPolicy,
     pub cost_budget: Option<String>,
 }
 

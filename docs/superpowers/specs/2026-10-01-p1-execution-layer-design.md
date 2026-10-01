@@ -442,22 +442,28 @@ Failure condition：`NonIdempotent` 的节点在失败后不产生第二次尝�
 
 ```
 ExecutionProfile {
-    model            Option<ModelId>
-    provider         Option<ProviderId>
-    tool             Option<ToolId>
+    model            Option<String>
+    provider         Option<String>
+    tool             Option<String>
     backend          Option<BackendId>
-    compute_node     Option<NodeId>
-    reasoning_effort Option<ReasoningEffort>
+    compute_node     Option<String>
+    reasoning_effort Option<String>
     parallelism      Option<u32>
-    timeout          Option<Duration>
+    timeout_ms       Option<u64>
     retry_policy     RetryPolicy
-    cost_budget      Option<CostBudget>
+    cost_budget      Option<String>
 }
 ```
 
+`backend` 的类型是 `Option<BackendId>`——`BackendId` 已由 `§244` 的 Operator 定义提供，无需占位。
+
 本子项目内 `model`、`provider`、`tool`、`compute_node` 恒为 None——P3 与 P7 之前无对应资源。
 
-该类型定义在 `continuum-graph`，与第 11.2 节的执行接口同处一 crate。四个资源类字段在本子项目内以 `String` 承载，P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id。此时收紧不引入迁移成本：本子项目不产生 `ExecutionProfile` 记录（第 15 节的表已建，无写入方）。
+该类型定义在 `continuum-graph`，与第 11.2 节的执行接口同处一 crate。
+
+六处字段在本子项目内以 `String` 承载——`model`、`provider`、`tool`、`compute_node`、`reasoning_effort`、`cost_budget`。前四者对应 `§246` 的资源标识，P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id；后两者对应的类型在本子项目内不存在，先以 `String` 占位。此时收紧不引入迁移成本：本子项目不产生 `ExecutionProfile` 记录（第 15 节的表已建，无写入方）。
+
+`retry_policy` 非可选：`RetryPolicy` 自带默认值，语义为「单次尝试、不重试」。第 15 节的对应列也是 `NOT NULL`，两处一致。
 
 # 15. 持久化
 
