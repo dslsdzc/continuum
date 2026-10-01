@@ -322,14 +322,35 @@ SideEffectClass { Pure, Idempotent, NonIdempotent }
 
 ## 11.2 执行接口
 
+三个类型定义在 `continuum-graph`，不定义在 `continuum-operator`。理由：`NodeContext` 需要携带 `NodeId`，而 `NodeId` 属于 `continuum-graph`；若把执行接口放在 `continuum-operator`，则它必须反向依赖 `continuum-graph`，与设计第 5 节的依赖方向冲突。
+
 ```
+struct ArtifactRef {
+    id            ArtifactId
+    content_hash  ContentHash
+}
+
+struct NodeContext {
+    node          NodeId
+    profile       ExecutionProfile
+    cancelled     Arc<AtomicBool>
+}
+
 trait OperatorImpl {
     fn execute(&self, inputs: &[ArtifactRef], ctx: &NodeContext)
         -> Result<Vec<Artifact>, OperatorError>;
 }
 ```
 
-`NodeContext` 携带该节点的 `ExecutionProfile`、`Capability` 句柄与取消信号。
+`NodeContext` 携带取消信号，不携带 Capability 句柄：Capability 的强制点在第 5 层（P2），本子项目只保留 `ExecutionProfile` 中的记录。
+
+`§245` 的后端解析接口只做判定，不做选择：
+
+```
+fn is_candidate_backend(operator: &Operator, backend: &BackendId) -> bool
+```
+
+具体后端的选择由 Router 决定（P3）。本子项目不实现选择逻辑，也不定义选择失败的错误类型——那应在 P3 有真实选择器时确定。
 
 本子项目不提供领域算子。完成判据的验证由测试内的确定性实现承担。
 
@@ -423,6 +444,8 @@ ExecutionProfile {
 ```
 
 本子项目内 `model`、`provider`、`tool`、`compute_node` 恒为 None——P3 与 P7 之前无对应资源。
+
+该类型定义在 `continuum-graph`，与第 11.2 节的执行接口同处一 crate。四个资源类字段在本子项目内以 `String` 承载，P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id。此时收紧不引入迁移成本：本子项目不产生 `ExecutionProfile` 记录（第 15 节的表已建，无写入方）。
 
 # 15. 持久化
 
