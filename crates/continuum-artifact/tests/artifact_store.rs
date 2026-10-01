@@ -1,5 +1,6 @@
 use continuum_artifact::{
     Artifact, ArtifactError, ArtifactId, ArtifactStore, ArtifactType, ContentHash, PrivacyClass,
+    p1_artifact_migrations,
 };
 use serde_json::json;
 
@@ -99,4 +100,99 @@ fn committing_with_an_unknown_input_is_rejected() {
         Err(ArtifactError::UnresolvedInput { id }) => assert_eq!(id.as_str(), "nope"),
         other => panic!("输入 Artifact 不存在时必须拒绝，实际 {other:?}"),
     }
+}
+
+#[test]
+fn store_round_trips_through_the_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("a1", b"root", vec![])).unwrap();
+    store.commit(artifact("a2", b"derived", vec![ArtifactId::new("a1")])).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    assert_eq!(restored.get(&ArtifactId::new("a1")), store.get(&ArtifactId::new("a1")));
+    assert_eq!(restored.get(&ArtifactId::new("a2")), store.get(&ArtifactId::new("a2")));
+    assert_eq!(restored.lineage(&ArtifactId::new("a2")), vec![ArtifactId::new("a1")]);
+    assert_eq!(restored.stored_blob_count(), 2);
+}
+
+#[test]
+fn deduplication_holds_on_the_persisted_path() {
+    // 两个 id 不同的 Artifact 携带相同内容：落库后仍只算一份内容
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    let a1 = artifact("a1", b"same", vec![]);
+    let a2 = artifact("a2", b"same", vec![]); // 与 a1 内容相同、id 不同
+    let hash = a1.content_hash.clone();
+    assert_eq!(hash, a2.content_hash, "夹具前提：两者内容相同");
+    store.commit(a1).unwrap();
+    store.commit(a2).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    assert_eq!(restored.stored_blob_count(), 1, "相同内容只存一份");
+    assert!(restored.find_by_hash(&hash).is_some());
+}
+
+#[test]
+fn restore_follows_dependency_order_not_id_order() {
+    // "a1" 的输入是 "z1"：按 id 字典序重建会先撞上输入缺失，按依赖序不会
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("z1", b"root", vec![])).unwrap();
+    store.commit(artifact("a1", b"derived", vec![ArtifactId::new("z1")])).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).expect("按依赖序重建应当成功");
+    assert_eq!(restored.lineage(&ArtifactId::new("a1")), vec![ArtifactId::new("z1")]);
+}
+
+#[test]
+fn restore_reports_dangling_inputs_instead_of_dropping_them() {
+    // 库中存在一个输入不存在的 Artifact：重建必须报错，不能静默少一个
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("a1", b"root", vec![])).unwrap();
+    store.persist(&tx).unwrap();
+    // 绕过内存路径直接写一条输入悬空的记录
+    tx.execute(
+        "INSERT INTO artifact_input (artifact_id, input_artifact_id) VALUES ('a1', 'ghost')",
+        &[],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = ArtifactStore::restore(&tx).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("a1"), "错误应点名出问题的 Artifact，实际：{msg}");
+}
+
+fn migrations() -> Vec<continuum_persist::Migration> {
+    let mut m = continuum_persist::builtin_migrations();
+    m.extend(p1_artifact_migrations());
+    m
 }

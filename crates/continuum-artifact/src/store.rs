@@ -2,6 +2,8 @@
 
 use crate::artifact::{Artifact, ArtifactId};
 use crate::content::ContentHash;
+use crate::persist::{load_artifact, save_artifact};
+use continuum_persist::{PersistError, Tx, Value};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -16,7 +18,8 @@ pub enum ArtifactError {
 
 /// 内容寻址的 Artifact 集合。相同内容只保留一份。
 ///
-/// P1 的实现保存在内存中；落库在 Task 11。
+/// 本结构是工作副本，始终保存在内存中；元数据经 [`ArtifactStore::persist`] 落库、
+/// 经 [`ArtifactStore::restore`] 重建。二进制的落盘存储见 [`crate::blobstore`]。
 #[derive(Debug, Default)]
 pub struct ArtifactStore {
     by_id: HashMap<ArtifactId, Artifact>,
@@ -91,5 +94,72 @@ impl ArtifactStore {
             seen.push(current);
         }
         seen
+    }
+
+    /// 把内存中的全部 Artifact 元数据落入 `artifact` 与 `artifact_input`。
+    ///
+    /// 只使用调用方传入的 `Tx`，不自行开启或提交事务——提交由调用方负责，
+    /// 以便与同一事务内的其他写入（如事件）一起原子生效。
+    pub fn persist(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
+        for artifact in self.by_id.values() {
+            save_artifact(tx, artifact)?;
+        }
+        Ok(())
+    }
+
+    /// 从库中重建。
+    ///
+    /// 按**依赖序**重建而非 id 序：`commit` 要求输入 Artifact 已存在，而 id
+    /// 的字典序不保证输入在前（id 为 `z` 的 Artifact 可以依赖 `a`）。每轮提交
+    /// 所有输入已就位的 Artifact，直到一轮之内没有进展；此时若仍有剩余，说明
+    /// 存在环或输入的 id 缺失，返回错误而不是静默丢弃。
+    ///
+    /// `by_hash` 的「首次提交者胜出」随之由该顺序决定。
+    pub fn restore(tx: &Tx<'_>) -> Result<Self, PersistError> {
+        let rows = tx.query("SELECT id FROM artifact ORDER BY id", &[])?;
+        let mut pending: Vec<Artifact> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = match &row[0] {
+                Value::Text(s) => ArtifactId::new(s.clone()),
+                other => {
+                    return Err(PersistError::Database(format!(
+                        "artifact.id 应为文本，实际 {other:?}"
+                    )))
+                }
+            };
+            let artifact = load_artifact(tx, &id)?
+                .ok_or_else(|| PersistError::Database(format!("artifact {id} 在枚举后读不回")))?;
+            pending.push(artifact);
+        }
+
+        let mut store = Self::new();
+        while !pending.is_empty() {
+            let mut deferred = Vec::new();
+            let mut progressed = false;
+            for artifact in pending {
+                if artifact
+                    .input_artifacts
+                    .iter()
+                    .all(|input| store.get(input).is_some())
+                {
+                    // 走 commit 而不是直接插表：恢复到与内存路径同一套不变量
+                    let id = artifact.id.clone();
+                    store.commit(artifact).map_err(|e| {
+                        PersistError::Database(format!("恢复 Artifact {id} 被拒：{e}"))
+                    })?;
+                    progressed = true;
+                } else {
+                    deferred.push(artifact);
+                }
+            }
+            if !progressed {
+                let blocked: Vec<&str> = deferred.iter().map(|a| a.id.as_str()).collect();
+                return Err(PersistError::Database(format!(
+                    "以下 Artifact 的输入在库中不存在或依赖成环：{blocked:?}"
+                )));
+            }
+            pending = deferred;
+        }
+        Ok(store)
     }
 }
