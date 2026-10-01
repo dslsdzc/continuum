@@ -186,3 +186,41 @@ fn a_class_outside_retryable_errors_fails() {
         RetryDecision::Fail
     );
 }
+
+#[test]
+fn attempt_is_one_based() {
+    // 契约（设计 §13.2）：`attempt` 自 1 起计，首次尝试即 attempt = 1；
+    // `max_attempts` 是**总尝试次数**而非重试次数。attempt = 0 不在契约内。
+    //
+    // 既有用例只传 1 / 3 / 5，从不传 0，故 0 基实现同样能全绿——本用例把当前
+    // 实现钉住，使「把起点改成 0」必然可见。P2 的执行器要分配 attempt，若按
+    // 0 基分配，会与恢复钩子写入的 attempt = 1（表示第一次尝试）整体错位一位。
+    let p = RetryPolicy {
+        max_attempts: 1,
+        retryable_errors: vec![FailureClass::Transient],
+        ..Default::default()
+    };
+
+    // 0 基下 `attempt < max_attempts` 成立，max_attempts = 1 也会产生第二次尝试，
+    // 且 next_attempt 落回 1，与 1 基的首次尝试撞号
+    assert_eq!(
+        decide_retry(
+            &op(SideEffectClass::Pure),
+            &p,
+            FailureClass::Transient,
+            0
+        ),
+        RetryDecision::Retry { next_attempt: 1 },
+        "attempt = 0 不在契约内；此处固定住实现，使 0 基起点必然可见"
+    );
+    // 1 基的首次尝试已经没有余量
+    assert_eq!(
+        decide_retry(
+            &op(SideEffectClass::Pure),
+            &p,
+            FailureClass::Transient,
+            1
+        ),
+        RetryDecision::Fail,
+    );
+}
