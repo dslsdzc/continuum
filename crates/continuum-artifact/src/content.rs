@@ -30,6 +30,12 @@ impl ContentHash {
     }
 }
 
+impl std::fmt::Display for ContentHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 // 小写十六进制编码。与 continuum-events 的同类辅助函数重复，
 // 见本计划「遗留」一节。
 fn hex(bytes: &[u8]) -> String {
