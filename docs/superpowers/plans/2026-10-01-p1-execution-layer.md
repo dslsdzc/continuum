@@ -4961,6 +4961,7 @@ git commit -m "feat(artifact): 磁盘内容寻址存储与 ArtifactStore 落库�
 - Modify: `crates/continuum-graph/src/lib.rs`
 - Modify: `crates/continuum-graph/src/persist.rs`（`state_str` / `parse_state` 改 `pub(crate)`）
 - Modify: `crates/continuum-artifact/src/persist.rs`（`save_artifact` 加事件参数）
+- Modify: `crates/continuum-artifact/src/store.rs`（Task 14 的 `persist` 调用点随签名同步）
 - Modify: `crates/continuum-artifact/Cargo.toml`（加 `continuum-events` 依赖）
 - Modify: `crates/continuum-graph/Cargo.toml`（加 `continuum-events` 依赖；`continuum-events` 与 `tempfile` 加入 dev-dependencies）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 表）
