@@ -1,6 +1,7 @@
 use continuum_artifact::{Artifact, ArtifactId, ArtifactType, ContentHash, PrivacyClass};
 use continuum_graph::{
     is_candidate_backend, ArtifactRef, ExecutionProfile, NodeContext, NodeId, OperatorImpl,
+    RetryPolicy,
 };
 use continuum_operator::{
     BackendId, Determinism, Operator, OperatorId, OperatorVersion, SideEffectClass,
@@ -75,7 +76,7 @@ impl OperatorImpl for UpperCase {
     fn execute(
         &self,
         inputs: &[ArtifactRef],
-        _ctx: &NodeContext,
+        ctx: &NodeContext,
     ) -> Result<Vec<Artifact>, continuum_operator::OperatorError> {
         let first = inputs.first().ok_or_else(|| {
             continuum_operator::OperatorError::NotFound {
@@ -88,10 +89,13 @@ impl OperatorImpl for UpperCase {
             artifact_type: ArtifactType::Text,
             content_hash: ContentHash::of(first.id.as_str().as_bytes()),
             size: 0,
-            producer_node: None,
+            // 设计 §11.2 明列的两个访问器在这里被真正读到：
+            // producer 取自 `ctx.node()`，执行档案取自 `ctx.profile()`。
+            // 二者是 P3 后端解析与 P6 上下文编译的接入点，读取行为必须有覆盖。
+            producer_node: Some(ctx.node().as_str().to_owned()),
             input_artifacts: vec![first.id.clone()],
             metadata: json!({}),
-            provenance: json!({}),
+            provenance: json!({ "retry_policy": ctx.profile().retry_policy }),
             privacy_class: PrivacyClass::Personal,
             version: 1,
         }])
@@ -105,12 +109,32 @@ fn operator_impl_is_implementable_and_reads_its_inputs() {
         id: ArtifactId::new("a1"),
         content_hash: ContentHash::of(b"a1"),
     };
-    let ctx = NodeContext::new(NodeId::new("n1"), ExecutionProfile::default());
+    // 档案取非默认值：默认档案与「根本没读 ctx」在断言下无法区分
+    let profile = ExecutionProfile {
+        backend: Some(BackendId::new("builtin")),
+        timeout_ms: Some(30_000),
+        retry_policy: RetryPolicy {
+            max_attempts: 4,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let ctx = NodeContext::new(NodeId::new("n1"), profile);
 
     let out = implementation.execute(&[input.clone()], &ctx).expect("应能执行");
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].input_artifacts, vec![ArtifactId::new("a1")]);
     assert_eq!(out[0].content_hash, ContentHash::of(b"a1"));
+    // `ctx.node()` 与 `ctx.profile()` 取回的值必须等于构造时传入的那两个
+    assert_eq!(
+        out[0].producer_node.as_deref(),
+        Some("n1"),
+        "producer 应取自 ctx.node()"
+    );
+    assert_eq!(
+        out[0].provenance["retry_policy"]["max_attempts"], 4,
+        "执行档案应取自 ctx.profile()"
+    );
 }
 
 #[test]
