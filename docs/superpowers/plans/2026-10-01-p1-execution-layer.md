@@ -5590,7 +5590,8 @@ Task 12（恢复与钩子）：
   - 钩子只挂 ReconcileRunningNodes，MarkLostExecutions 阶段恒为 0 钩子。
 Task 13（ExecutionProfile 与重试策略）：
   - 设计 §14 一段把「恒为 None」只列四个字段（model/provider/tool/compute_node），
-    实际六个（另含 reasoning_effort、cost_budget）；同段下文与第 15 节表均按六个。设计未订正。
+    实际六个（另含 reasoning_effort、cost_budget）；同段下文与第 15 节表均按六个。
+    已订正（docs 262d358）——上一轮只改了 §18 的同一处，§14 漏改。
   - attempt 起点原标「需人裁决」，已裁定：attempt 自 1 起计，max_attempts 是总尝试次数，
     retryable_errors 是收窄白名单，三条均已写入设计 §13.2。另明确 RetryPolicy::default()
     表示「未配置」而非任何类别的固有策略，RESOURCE 的固有策略须由 P3 的 Router 显式给出
