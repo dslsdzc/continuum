@@ -1303,7 +1303,7 @@ Expected: FAIL，编译错误 `unresolved import continuum_graph`
 ```rust
 //! ADFIR Node（§236）。
 
-use crate::ids::{NodeId, OperatorRef};
+use crate::ids::NodeId;
 use continuum_operator::OperatorId;
 use continuum_port::PortId;
 use serde::{Deserialize, Serialize};
@@ -1353,7 +1353,7 @@ impl OperatorRef {
     }
 }
 
-/// §237 的十四个状态。
+/// §237 的十三个状态。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum NodeState {
@@ -1404,6 +1404,13 @@ macro_rules! id_type {
         impl std::fmt::Display for $name {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 f.write_str(&self.0)
+            }
+        }
+
+        // 便于按字面量构造，例如 `graph.add_port("n1", port)`。
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(value.to_owned())
             }
         }
     };
@@ -1501,8 +1508,6 @@ pub enum GraphError {
     PortMismatch(#[from] PortError),
     #[error("连接 {from} → {to} 会成环")]
     Cycle { from: PortId, to: PortId },
-    #[error("端口 {id} 不属于节点 {node}")]
-    PortNotOnNode { id: PortId, node: NodeId },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1535,7 +1540,13 @@ impl AdfirGraph {
         Ok(())
     }
 
-    pub fn add_port(&mut self, node: NodeId, port: Port) -> Result<(), GraphError> {
+    /// `node` 接受 `&str` 与 `NodeId` 两种写法。
+    pub fn add_port(
+        &mut self,
+        node: impl Into<NodeId>,
+        port: Port,
+    ) -> Result<(), GraphError> {
+        let node: NodeId = node.into();
         let target = self
             .nodes
             .iter_mut()
@@ -1584,9 +1595,10 @@ impl AdfirGraph {
 
     /// 建立一条连接。
     ///
-    /// 校验顺序：两端端口存在 → 属于不同节点 → 方向一进一出 →
-    /// `artifact_type` 相同（§239）→ 参与环检测的边类型不成环。
-    /// 任一校验失败时不留下边。
+    /// 校验顺序：两端端口存在 → 方向一进一出 → `artifact_type` 相同（§239）
+    /// → 参与环检测的边类型不成环。任一校验失败时不留下边。
+    ///
+    /// 同节点的输出连回自身输入不单设检查：那是一条环，由环检测拦下。
     pub fn connect(
         &mut self,
         from: &PortId,
