@@ -21,6 +21,14 @@ pub enum GraphError {
     PortMismatch(#[from] PortError),
     #[error("连接 {from} → {to} 会成环")]
     Cycle { from: PortId, to: PortId },
+    #[error("边已存在：{from_node}.{from_port} → {to_node}.{to_port}（{kind:?}）")]
+    DuplicateEdge {
+        from_node: NodeId,
+        from_port: PortId,
+        to_node: NodeId,
+        to_port: PortId,
+        kind: EdgeKind,
+    },
     #[error("连接的起点 {from} 必须是输出端口，终点 {to} 必须是输入端口")]
     WrongOrientation { from: PortId, to: PortId },
     #[error("入口节点 {id} 的输入端口存在入边")]
@@ -168,7 +176,14 @@ impl AdfirGraph {
     /// 建立一条连接。
     ///
     /// 校验顺序：两端端口存在 → 朝向（起点输出、终点输入）→ `artifact_type` 相同
-    /// （§239）→ 参与环检测的边类型不成环。任一校验失败时不留下边。
+    /// （§239）→ 参与环检测的边类型不成环 → 不是已有的同一条边。任一校验失败时
+    /// 不留下边。
+    ///
+    /// 重复边必须在本层拦下：`adfir_edge` 表没有主键，重复的行会原样落库并往返
+    /// 读回，而 `edges_to` / `edges_from` 按行计数，重复边会让调度侧双倍计数。
+    /// 「同一条边」按两端节点、两端端口与 `kind` 全同判定——同一对端口之间允许
+    /// 并存不同 `kind` 的边（例如 DATA 与 EVIDENCE 各一条）。本检查排在其余判定
+    /// 之后、插入之前：重复边既不是朝向错也不是类型错，两者都不成立时它才成立。
     ///
     /// 朝向必须在本层校验：`compatible` 只要求两端方向不同，是方向对称的；
     /// 而本层的边有方向（`from_node → to_node`），失效传播与调度排序都按它解读。
@@ -208,6 +223,16 @@ impl AdfirGraph {
             return Err(GraphError::Cycle {
                 from: from.clone(),
                 to: to.clone(),
+            });
+        }
+
+        if self.edges.contains(&edge) {
+            return Err(GraphError::DuplicateEdge {
+                from_node: from_node.clone(),
+                from_port: from.clone(),
+                to_node: to_node.clone(),
+                to_port: to.clone(),
+                kind,
             });
         }
 

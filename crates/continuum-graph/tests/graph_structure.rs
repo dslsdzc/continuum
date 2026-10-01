@@ -60,6 +60,45 @@ fn connecting_an_unknown_port_is_rejected() {
 }
 
 #[test]
+fn connecting_the_same_edge_twice_is_rejected() {
+    // adfir_edge 表无主键，重复行会原样往返落库；而 edges_to / edges_from 按行计数，
+    // 重复边会让 P2 的调度侧双倍计数。故重复边必须在构造层拦下。
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Patch)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Patch)).unwrap();
+
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .expect("首次连接应成功");
+    let err = g
+        .connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .expect_err("同一对端口以同一 kind 连两次必须被拒绝");
+    assert!(
+        matches!(err, GraphError::DuplicateEdge { .. }),
+        "实际 {err:?}"
+    );
+    assert_eq!(g.edges().len(), 1, "被拒绝的重复边不得留下第二条");
+}
+
+#[test]
+fn the_same_port_pair_may_carry_different_edge_kinds() {
+    // 重复的判据是「两端节点、两端端口、kind 全同」，kind 是边身份的一部分：
+    // 同一对端口之间并存 DATA 与 EVIDENCE 是合法的。
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Patch)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Patch)).unwrap();
+
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .unwrap();
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Evidence)
+        .expect("同一对端口上的不同 kind 不是重复边");
+    assert_eq!(g.edges().len(), 2);
+}
+
+#[test]
 fn cycles_through_data_edges_are_rejected() {
     let mut g = empty_graph();
     g.add_node(node("n1", "a")).unwrap();
