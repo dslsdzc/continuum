@@ -5,6 +5,10 @@ members = [
     "crates/continuum-events",
     "crates/continuum-persist",
     "crates/continuum-provider",
+    "crates/continuum-artifact",
+    "crates/continuum-port",
+    "crates/continuum-operator",
+    "crates/continuum-graph",
     "crates/continuum-runtime",
 ]
 

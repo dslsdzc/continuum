@@ -1,0 +1,14 @@
+[package]
+name = "continuum-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-operator = { path = "../continuum-operator" }
+continuum-persist = { path = "../continuum-persist" }
+continuum-port = { path = "../continuum-port" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
