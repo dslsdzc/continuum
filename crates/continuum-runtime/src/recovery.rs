@@ -30,7 +30,7 @@ impl RecoveryHook for MarkRunningNodesLost {
 
     fn run(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
         let rows = tx.query(
-            "SELECT graph_id, node_id FROM adfir_node WHERE state IN ('RUNNING', 'VERIFYING')",
+            "SELECT graph_id, node_id FROM adfir_node WHERE state IN ('running', 'verifying')",
             &[],
         )?;
         for row in &rows {
@@ -52,13 +52,13 @@ impl RecoveryHook for MarkRunningNodesLost {
             };
             // node_id 只在图内唯一，两张图各有 "n1" 会撞主键，故带 graph_id
             tx.execute(
-                "UPDATE adfir_node SET state = 'LOST' WHERE graph_id = ?1 AND node_id = ?2",
+                "UPDATE adfir_node SET state = 'lost' WHERE graph_id = ?1 AND node_id = ?2",
                 &[Value::text(graph_id.clone()), Value::text(node_id.clone())],
             )?;
             tx.execute(
                 "INSERT OR REPLACE INTO node_attempt
                    (graph_id, node_id, attempt, state, failure_class)
-                 VALUES (?1, ?2, 1, 'LOST', 'UNKNOWN')",
+                 VALUES (?1, ?2, 1, 'lost', 'unknown')",
                 &[Value::text(graph_id), Value::text(node_id)],
             )?;
         }

@@ -116,7 +116,7 @@ fn recovery_marks_running_nodes_as_lost() {
                 continuum_persist::Value::text("n1"),
                 continuum_persist::Value::text("op"),
                 continuum_persist::Value::Int(1),
-                continuum_persist::Value::text("RUNNING"),
+                continuum_persist::Value::text("running"),
                 continuum_persist::Value::text("null"),
                 continuum_persist::Value::text("null"),
                 continuum_persist::Value::text("[]"),
@@ -136,7 +136,7 @@ fn recovery_marks_running_nodes_as_lost() {
         .query("SELECT state FROM adfir_node WHERE node_id = 'n1'", &[])
         .unwrap();
     match &rows[0][0] {
-        continuum_persist::Value::Text(s) => assert_eq!(s, "LOST"),
+        continuum_persist::Value::Text(s) => assert_eq!(s, "lost"),
         other => panic!("state 应为文本，实际 {other:?}"),
     }
 }
@@ -163,7 +163,7 @@ fn recovery_handles_same_named_nodes_in_different_graphs() {
                 "INSERT INTO adfir_node
                    (graph_id, node_id, operator_id, operator_version, state,
                     execution_policy, verification_policy, constraints, capabilities)
-                 VALUES (?1, 'n1', 'op', 1, 'RUNNING', 'null', 'null', '[]', '[]')",
+                 VALUES (?1, 'n1', 'op', 1, 'running', 'null', 'null', '[]', '[]')",
                 &[continuum_persist::Value::text(graph)],
             )
             .unwrap();
@@ -206,7 +206,7 @@ fn recovery_marks_verifying_nodes_as_lost() {
             "INSERT INTO adfir_node
                (graph_id, node_id, operator_id, operator_version, state,
                 execution_policy, verification_policy, constraints, capabilities)
-             VALUES ('g1', 'n1', 'op', 1, 'VERIFYING', 'null', 'null', '[]', '[]')",
+             VALUES ('g1', 'n1', 'op', 1, 'verifying', 'null', 'null', '[]', '[]')",
             &[],
         )
         .unwrap();
@@ -227,7 +227,7 @@ fn recovery_does_not_touch_same_named_nodes_in_other_graphs() {
     {
         let db = continuum_persist::Db::open(&path).unwrap();
         let tx = db.begin().unwrap();
-        for (graph, state) in [("g1", "RUNNING"), ("g2", "COMPLETED")] {
+        for (graph, state) in [("g1", "running"), ("g2", "completed")] {
             tx.execute(
                 "INSERT INTO adfir_graph (id, version, contract_id, entry_nodes, terminal_nodes)
                  VALUES (?1, 1, 'c1', '[]', '[]')",
@@ -273,8 +273,8 @@ fn recovery_does_not_touch_same_named_nodes_in_other_graphs() {
     assert_eq!(
         states,
         vec![
-            ("g1".to_owned(), "LOST".to_owned()),
-            ("g2".to_owned(), "COMPLETED".to_owned())
+            ("g1".to_owned(), "lost".to_owned()),
+            ("g2".to_owned(), "completed".to_owned())
         ],
         "另一张图里同名的已完成节点不得被改动"
     );
