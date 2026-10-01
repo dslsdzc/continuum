@@ -1,12 +1,18 @@
 //! Artifact 的提交与寻址（§241、§242）。
 
 use crate::artifact::{Artifact, ArtifactId};
+use crate::blobstore::{BlobError, BlobStore};
 use crate::content::ContentHash;
 use crate::persist::{load_artifact, save_artifact};
 use continuum_persist::{PersistError, Tx, Value};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+// 不派生 Clone/PartialEq/Eq：`Blob` 变体携带的 `BlobError::Io` 内含
+// `std::io::Error`，既不实现 `Clone` 也不实现 `PartialEq`，本枚举因此无法诚实
+// 地实现这两者；把 `BlobError` 压成字符串可以绕过，但会丢掉 `#[from]` 建立的
+// source 链，而那正是「落盘为何失败」的唯一线索，故不取。
+// 全仓无调用方依赖 ArtifactError 的克隆或相等比较（消费方一律模式匹配）。
+#[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
     #[error("Artifact {id} 已提交，修改必须产生新版本（§241）")]
     AlreadyCommitted { id: ArtifactId },
@@ -14,6 +20,10 @@ pub enum ArtifactError {
     NotFound { id: ArtifactId },
     #[error("输入 Artifact {id} 不存在")]
     UnresolvedInput { id: ArtifactId },
+    #[error("Artifact {id} 声明的 content_hash 与其字节不符")]
+    ContentMismatch { id: ArtifactId },
+    #[error("内容落盘失败：{0}")]
+    Blob(#[from] BlobError),
 }
 
 /// 内容寻址的 Artifact 集合。相同内容只保留一份。
@@ -59,6 +69,29 @@ impl ArtifactStore {
         }
         self.by_id.insert(artifact.id.clone(), artifact);
         Ok(())
+    }
+
+    /// 提交一个 Artifact，并把它的字节按 `content_hash` 落盘。
+    ///
+    /// 与 [`ArtifactStore::commit`] 的分工：`commit` 只登记元数据，用于
+    /// [`ArtifactStore::restore`] 这类「字节不在手上」的场景；本函数是**产生**
+    /// Artifact 的路径，它保证字节在任何元数据写入之前已按哈希落盘，并校验
+    /// `artifact.content_hash` 与实际字节相符——设计 §15 的「内容按哈希寻址
+    /// 落磁盘、元数据入库」由它闭合。
+    ///
+    /// 落盘先于登记：若登记阶段失败（如 id 重复），已写入的字节留在盘上。
+    /// 内容寻址存储是幂等的，孤儿内容可被其他 Artifact 复用，故不回收。
+    pub fn commit_with_content(
+        &mut self,
+        blob: &BlobStore,
+        artifact: Artifact,
+        bytes: &[u8],
+    ) -> Result<(), ArtifactError> {
+        if ContentHash::of(bytes) != artifact.content_hash {
+            return Err(ArtifactError::ContentMismatch { id: artifact.id });
+        }
+        blob.put(bytes)?;
+        self.commit(artifact)
     }
 
     pub fn get(&self, id: &ArtifactId) -> Option<&Artifact> {
@@ -142,7 +175,13 @@ impl ArtifactStore {
                     .iter()
                     .all(|input| store.get(input).is_some())
                 {
-                    // 走 commit 而不是直接插表：恢复到与内存路径同一套不变量
+                    // 走 commit 而不是直接插表：恢复到与内存路径同一套不变量。
+                    //
+                    // 当前不可达：进入本分支的前提是输入全在 store 中、id 尚未
+                    // 提交，这恰好是 commit 通过的两项检查，故 commit 必成功。
+                    // 保留该分支作为防御——commit 日后新增失败模式时在此报错，
+                    // 而不是静默丢 Artifact。现有用例覆盖的是循环末尾那条
+                    // 「输入不存在或依赖成环」（见 restore_reports_dangling_...）。
                     let id = artifact.id.clone();
                     store.commit(artifact).map_err(|e| {
                         PersistError::Database(format!("恢复 Artifact {id} 被拒：{e}"))

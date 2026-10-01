@@ -1,6 +1,6 @@
 use continuum_artifact::{
-    Artifact, ArtifactError, ArtifactId, ArtifactStore, ArtifactType, ContentHash, PrivacyClass,
-    p1_artifact_migrations,
+    Artifact, ArtifactError, ArtifactId, ArtifactStore, ArtifactType, BlobStore, ContentHash,
+    PrivacyClass, p1_artifact_migrations,
 };
 use serde_json::json;
 
@@ -168,7 +168,10 @@ fn restore_follows_dependency_order_not_id_order() {
 
 #[test]
 fn restore_reports_dangling_inputs_instead_of_dropping_them() {
-    // 库中存在一个输入不存在的 Artifact：重建必须报错，不能静默少一个
+    // 库中存在一个输入不存在的 Artifact：重建必须报错，不能静默少一个。
+    //
+    // 命中的是 `restore` 循环末尾那条分支（一轮之内无进展 → 点名 deferred
+    // 集合）；`store.commit(...)` 的 map_err 分支在此不可达，见其上方注释。
     let dir = tempfile::tempdir().unwrap();
     let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
     db.migrate().unwrap();
@@ -189,6 +192,115 @@ fn restore_reports_dangling_inputs_instead_of_dropping_them() {
     let err = ArtifactStore::restore(&tx).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("a1"), "错误应点名出问题的 Artifact，实际：{msg}");
+}
+
+#[test]
+fn commit_with_content_puts_the_bytes_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    let a = artifact("a1", b"payload", vec![]);
+    let hash = a.content_hash.clone();
+    store.commit_with_content(&blob, a, b"payload").unwrap();
+
+    assert!(blob.contains(&hash), "字节必须已按哈希落盘");
+    assert_eq!(blob.get(&hash).unwrap(), b"payload");
+    assert_eq!(store.stored_blob_count(), 1);
+}
+
+#[test]
+fn commit_with_content_rejects_bytes_that_do_not_match_the_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    // artifact 声明的哈希由 b"declared" 算出，实际传入 b"other"
+    let a = artifact("a1", b"declared", vec![]);
+    let hash = a.content_hash.clone();
+    let err = store.commit_with_content(&blob, a, b"other").unwrap_err();
+
+    assert!(
+        matches!(err, ArtifactError::ContentMismatch { .. }),
+        "实际 {err:?}"
+    );
+    assert!(!blob.contains(&hash), "被拒的提交不得留下字节");
+    assert!(
+        store.get(&ArtifactId::new("a1")).is_none(),
+        "被拒的提交不得登记元数据"
+    );
+}
+
+#[test]
+fn identical_content_under_two_ids_shares_one_blob_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    store
+        .commit_with_content(&blob, artifact("a1", b"same", vec![]), b"same")
+        .unwrap();
+    store
+        .commit_with_content(&blob, artifact("a2", b"same", vec![]), b"same")
+        .unwrap();
+
+    assert_eq!(store.stored_blob_count(), 1, "相同内容只登记一份");
+    // 磁盘上也只应有一份：BlobStore 按哈希寻址，相同内容落在同一路径
+    assert_eq!(count_files(dir.path()), 1, "相同内容在盘上只占一份");
+}
+
+#[test]
+fn content_survives_commit_persist_restore_and_read_back() {
+    // 设计 §15 的完整回路：字节落盘、元数据落库、从库重建后仍能按哈希取回字节
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path().join("blobs"));
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+
+    let tx = db.begin().unwrap();
+    let mut store = ArtifactStore::new();
+    store
+        .commit_with_content(&blob, artifact("z1", b"root", vec![]), b"root")
+        .unwrap();
+    store
+        .commit_with_content(
+            &blob,
+            artifact("a1", b"derived", vec![ArtifactId::new("z1")]),
+            b"derived",
+        )
+        .unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    let hash = restored
+        .get(&ArtifactId::new("z1"))
+        .unwrap()
+        .content_hash
+        .clone();
+    assert_eq!(blob.get(&hash).unwrap(), b"root", "重建后仍能按哈希取回原始字节");
+    assert_eq!(
+        restored.lineage(&ArtifactId::new("a1")),
+        vec![ArtifactId::new("z1")]
+    );
+}
+
+fn count_files(root: &std::path::Path) -> usize {
+    walk(root).len()
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            out.extend(walk(&path));
+        } else {
+            out.push(path);
+        }
+    }
+    out
 }
 
 fn migrations() -> Vec<continuum_persist::Migration> {
