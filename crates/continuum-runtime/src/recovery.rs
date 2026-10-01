@@ -1,5 +1,6 @@
 //! P1 注册到 P0 恢复流程的钩子。
 
+use continuum_graph::mark_node_lost;
 use continuum_persist::{PersistError, RecoveryHook, RecoveryPhase, Tx, Value};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -50,23 +51,10 @@ impl RecoveryHook for MarkRunningNodesLost {
                     )))
                 }
             };
-            // node_id 只在图内唯一，两张图各有 "n1" 会撞主键，故带 graph_id
-            tx.execute(
-                "UPDATE adfir_node SET state = 'lost' WHERE graph_id = ?1 AND node_id = ?2",
-                &[Value::text(graph_id.clone()), Value::text(node_id.clone())],
-            )?;
-            // attempt 号必须追加而非写死 1：写死会覆盖既有的 (graph_id, node_id, 1)
-            // 行，把该节点早先的尝试史抹掉。P1 尚无执行器分配 attempt，
-            // 但这条写入现在就会写坏数据。
-            tx.execute(
-                "INSERT OR REPLACE INTO node_attempt
-                   (graph_id, node_id, attempt, state, failure_class)
-                 VALUES (?1, ?2,
-                         (SELECT COALESCE(MAX(attempt), 0) + 1 FROM node_attempt
-                           WHERE graph_id = ?1 AND node_id = ?2),
-                         'lost', 'unknown')",
-                &[Value::text(graph_id), Value::text(node_id)],
-            )?;
+            // 写入交给 continuum-graph：两列的编码辅助函数住在那边，
+            // 本 crate 不拼任何列取值字面量，避免两处各写一套再分叉。
+            // 上面的 SELECT 保留在本 crate——「哪些节点要处理」是恢复策略。
+            mark_node_lost(tx, &graph_id, &node_id)?;
         }
         self.marked.store(rows.len(), Ordering::Relaxed);
         Ok(())

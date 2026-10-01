@@ -21,7 +21,7 @@ pub use graph::{AdfirGraph, GraphError};
 pub use ids::{ContractIdRef, GraphId, NodeId};
 pub use invalidation::propagate_invalidation;
 pub use node::{Node, NodeState, OperatorRef};
-pub use persist::{load_graph, p1_graph_migrations, save_graph};
+pub use persist::{load_graph, mark_node_lost, p1_graph_migrations, save_graph};
 pub use reuse::{cache_key, can_reuse, CacheKey};
 pub use scheduler::{apply_blocking, apply_unblocking, select_runnable, SchedulerConfig};
 pub use state::{is_terminal, transition, StateError};

@@ -1,6 +1,7 @@
 //! 图、节点、端口、边的落库（§317）。
 
 use crate::edge::EdgeKind;
+use crate::failure::FailureClass;
 use crate::graph::AdfirGraph;
 use crate::ids::{ContractIdRef, GraphId, NodeId};
 use crate::node::{Node, NodeState};
@@ -144,6 +145,39 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
     Ok(())
 }
 
+/// 把崩溃时正在运行的节点记为一次新尝试，并置为 LOST（设计 §319 的
+/// `reconcile running nodes` 与 `mark lost executions`）。
+///
+/// 与 `state_str` / `failure_class_str` 放在一起，使这两列的编码只有一个来源：
+/// 本函数与 `save_graph` / `load_graph` 经同一套辅助函数读写同一批列。
+/// 调用方不得自行拼这两列的取值字面量——此前的 Critical 正是这么来的。
+///
+/// `attempt` 取该节点当前的 `MAX(attempt) + 1`，即追加新尝试而非覆盖既有历史。
+pub fn mark_node_lost(tx: &Tx<'_>, graph_id: &str, node_id: &str) -> Result<(), PersistError> {
+    tx.execute(
+        "UPDATE adfir_node SET state = ?3 WHERE graph_id = ?1 AND node_id = ?2",
+        &[
+            Value::text(graph_id),
+            Value::text(node_id),
+            Value::text(state_str(NodeState::Lost)),
+        ],
+    )?;
+    tx.execute(
+        "INSERT INTO node_attempt (graph_id, node_id, attempt, state, failure_class)
+         VALUES (?1, ?2,
+                 (SELECT COALESCE(MAX(attempt), 0) + 1 FROM node_attempt
+                   WHERE graph_id = ?1 AND node_id = ?2),
+                 ?3, ?4)",
+        &[
+            Value::text(graph_id),
+            Value::text(node_id),
+            Value::text(state_str(NodeState::Lost)),
+            Value::text(failure_class_str(FailureClass::Unknown)),
+        ],
+    )?;
+    Ok(())
+}
+
 pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, PersistError> {
     let head = tx.query(
         "SELECT id, version, contract_id, entry_nodes, terminal_nodes
@@ -280,6 +314,24 @@ fn state_str(s: NodeState) -> &'static str {
         NodeState::Cancelled => "cancelled",
         NodeState::Invalidated => "invalidated",
         NodeState::Lost => "lost",
+    }
+}
+
+/// `node_attempt.failure_class` 列的唯一编码来源。
+///
+/// 与 `state_str` 同样用小写，**不**沿用 `FailureClass` 的 serde 表示
+/// （那是 `SCREAMING_SNAKE_CASE`，见 `failure.rs`）：该列自 P1 起就按底层约定
+/// 小写写入，P2 读该表时须按同一套写 `parse_failure_class`，不得直接
+/// serde 反序列化本列。
+fn failure_class_str(c: FailureClass) -> &'static str {
+    match c {
+        FailureClass::Transient => "transient",
+        FailureClass::Permanent => "permanent",
+        FailureClass::Constraint => "constraint",
+        FailureClass::Authorization => "authorization",
+        FailureClass::Resource => "resource",
+        FailureClass::Verification => "verification",
+        FailureClass::Unknown => "unknown",
     }
 }
 
