@@ -2686,6 +2686,18 @@ fn blocking_is_transitive_regardless_of_node_insertion_order() {
 }
 
 #[test]
+fn a_failed_data_predecessor_blocks_its_consumer() {
+    // DATA 前驱失败时其 Artifact 永不出现，下游同样不可推进。
+    // 边集若只算 CONTROL 与 DEPENDENCY，这类节点会永久搁死在 PENDING。
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Data);
+    set_state(&mut g, "a", NodeState::Failed);
+
+    assert_eq!(names(&apply_blocking(&mut g)), vec!["b"]);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
+}
+
+#[test]
 fn blocked_nodes_are_unblocked_when_predecessors_complete() {
     let mut g = graph(&["a", "b"]);
     link(&mut g, "a", "b", EdgeKind::Control);
@@ -2802,26 +2814,27 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
                 continue;
             }
 
+            // 边集与 `select_runnable` 的 READY 判据一致：DATA 前驱失败时其
+            // Artifact 永不出现，下游同样不可推进。只算 Control 与 Dependency
+            // 会让这类节点既不可 READY 也不 BLOCKED，永久搁死在 PENDING。
+            //
+            // 前驱处于 BLOCKED 也计为不可推进，且按状态判定而非「本次调用新标记」——
+            // 后者在多轮调度下会漏传。
             let stalled = graph.edges_to(&id).iter().any(|e| {
-                if !matches!(
-                    e.kind,
-                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
-                ) {
+                if !e.kind.orders_execution() {
                     return false;
-                }
-                if blocked.contains(&e.from_node) {
-                    return true;
                 }
                 graph
                     .node(&e.from_node)
                     .map(|n| {
-                        matches!(
-                            n.state,
-                            NodeState::Failed
-                                | NodeState::Cancelled
-                                | NodeState::Invalidated
-                                | NodeState::Lost
-                        )
+                        n.state == NodeState::Blocked
+                            || matches!(
+                                n.state,
+                                NodeState::Failed
+                                    | NodeState::Cancelled
+                                    | NodeState::Invalidated
+                                    | NodeState::Lost
+                            )
                     })
                     .unwrap_or(false)
             });
@@ -2860,12 +2873,7 @@ pub fn apply_unblocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
         let all_completed = graph
             .edges_to(&id)
             .iter()
-            .filter(|e| {
-                matches!(
-                    e.kind,
-                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
-                )
-            })
+            .filter(|e| e.kind.orders_execution())
             .all(|e| {
                 graph
                     .node(&e.from_node)
@@ -2897,7 +2905,7 @@ pub use scheduler::{apply_blocking, apply_unblocking, select_runnable, Scheduler
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，43 passed。
+Expected: PASS，44 passed。
 
 - [ ] **Step 5: 提交**
 
