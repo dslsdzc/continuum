@@ -116,3 +116,65 @@ fn recovery_reads_what_save_graph_wrote_and_load_graph_reads_it_back() {
         NodeState::Lost
     );
 }
+
+#[test]
+fn recovery_appends_a_new_attempt_instead_of_overwriting_the_first() {
+    // 钩子若把 attempt 写死为 1，`INSERT OR REPLACE` 会覆盖既有的
+    // (graph_id, node_id, 1) 行。本用例是「追加新尝试号」的唯一守卫。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    let db = open(&path);
+    save_running_graph(&db);
+    {
+        let tx = db.begin().unwrap();
+        tx.execute(
+            "INSERT INTO node_attempt (graph_id, node_id, attempt, state, failure_class)
+             VALUES ('g1', 'n1', 1, 'failed', 'transient')",
+            &[],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+    drop(db);
+
+    run(&path);
+
+    let db = open(&path);
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query(
+            "SELECT attempt, state, failure_class FROM node_attempt
+             WHERE graph_id = 'g1' AND node_id = 'n1' ORDER BY attempt",
+            &[],
+        )
+        .unwrap();
+    let got: Vec<(i64, String, Option<String>)> = rows
+        .iter()
+        .map(|r| {
+            let attempt = match &r[0] {
+                Value::Int(i) => *i,
+                other => panic!("attempt 应为整数，实际 {other:?}"),
+            };
+            let state = match &r[1] {
+                Value::Text(s) => s.clone(),
+                other => panic!("state 应为文本，实际 {other:?}"),
+            };
+            let class = match &r[2] {
+                Value::Text(s) => Some(s.clone()),
+                Value::Null => None,
+                other => panic!("failure_class 类型不符，实际 {other:?}"),
+            };
+            (attempt, state, class)
+        })
+        .collect();
+    tx.commit().unwrap();
+
+    assert_eq!(
+        got,
+        vec![
+            (1, "failed".to_owned(), Some("transient".to_owned())),
+            (2, "lost".to_owned(), Some("unknown".to_owned())),
+        ],
+        "恢复应追加 attempt = 2，且不得覆盖既有 attempt = 1"
+    );
+}

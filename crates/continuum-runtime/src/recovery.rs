@@ -55,10 +55,16 @@ impl RecoveryHook for MarkRunningNodesLost {
                 "UPDATE adfir_node SET state = 'lost' WHERE graph_id = ?1 AND node_id = ?2",
                 &[Value::text(graph_id.clone()), Value::text(node_id.clone())],
             )?;
+            // attempt 号必须追加而非写死 1：写死会覆盖既有的 (graph_id, node_id, 1)
+            // 行，把该节点早先的尝试史抹掉。P1 尚无执行器分配 attempt，
+            // 但这条写入现在就会写坏数据。
             tx.execute(
                 "INSERT OR REPLACE INTO node_attempt
                    (graph_id, node_id, attempt, state, failure_class)
-                 VALUES (?1, ?2, 1, 'lost', 'unknown')",
+                 VALUES (?1, ?2,
+                         (SELECT COALESCE(MAX(attempt), 0) + 1 FROM node_attempt
+                           WHERE graph_id = ?1 AND node_id = ?2),
+                         'lost', 'unknown')",
                 &[Value::text(graph_id), Value::text(node_id)],
             )?;
         }
