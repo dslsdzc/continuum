@@ -3113,6 +3113,9 @@ fn sample_graph() -> AdfirGraph {
         .unwrap();
     g.connect(&PortId::new("o2"), &PortId::new("i1"), EdgeKind::Data)
         .unwrap();
+    // n2 的输入无入边、n1 的输出无出边，故这一对满足设计 §8.3 的两条约束
+    g.set_entry_nodes(vec![NodeId::new("n2")]);
+    g.set_terminal_nodes(vec![NodeId::new("n1")]);
     g
 }
 
@@ -3155,6 +3158,9 @@ fn graph_round_trips_through_the_database() {
         ArtifactType::Patch
     );
     assert_eq!(back.edges()[0].kind, EdgeKind::Data);
+    assert_eq!(back.entry_nodes(), graph.entry_nodes());
+    assert_eq!(back.terminal_nodes(), graph.terminal_nodes());
+    // load_graph 内部调用过 validate()，能读回即说明两条约束成立
 }
 
 #[test]
@@ -3421,7 +3427,9 @@ pub fn p1_graph_migrations() -> Vec<Migration> {
         "CREATE TABLE adfir_graph (
             id TEXT PRIMARY KEY,
             version INTEGER NOT NULL,
-            contract_id TEXT NOT NULL
+            contract_id TEXT NOT NULL,
+            entry_nodes TEXT NOT NULL,
+            terminal_nodes TEXT NOT NULL
         );
         CREATE TABLE adfir_node (
             graph_id TEXT NOT NULL,
@@ -3470,12 +3478,17 @@ pub fn p1_graph_migrations() -> Vec<Migration> {
 }
 
 pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
+    let entry: Vec<&str> = graph.entry_nodes().iter().map(|n| n.as_str()).collect();
+    let terminal: Vec<&str> = graph.terminal_nodes().iter().map(|n| n.as_str()).collect();
     tx.execute(
-        "INSERT INTO adfir_graph (id, version, contract_id) VALUES (?1, ?2, ?3)",
+        "INSERT INTO adfir_graph (id, version, contract_id, entry_nodes, terminal_nodes)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
         &[
             Value::text(graph.id.as_str()),
             Value::Int(i64::from(graph.version)),
             Value::text(graph.contract_id.as_str()),
+            Value::text(serde_json::to_string(&entry).expect("可序列化")),
+            Value::text(serde_json::to_string(&terminal).expect("可序列化")),
         ],
     )?;
 
@@ -3542,7 +3555,8 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
 ```rust
 pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, PersistError> {
     let head = tx.query(
-        "SELECT id, version, contract_id FROM adfir_graph WHERE id = ?1",
+        "SELECT id, version, contract_id, entry_nodes, terminal_nodes
+         FROM adfir_graph WHERE id = ?1",
         &[Value::text(id.as_str())],
     )?;
     let Some(head) = head.into_iter().next() else {
@@ -3610,6 +3624,19 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
             parse_edge_kind(&text(&row[2])?)?,
         )?;
     }
+
+    let entry: Vec<String> =
+        serde_json::from_str(&text(&head[3])?).map_err(|e| PersistError::Database(e.to_string()))?;
+    let terminal: Vec<String> =
+        serde_json::from_str(&text(&head[4])?).map_err(|e| PersistError::Database(e.to_string()))?;
+    graph.set_entry_nodes(entry.into_iter().map(NodeId::new).collect());
+    graph.set_terminal_nodes(terminal.into_iter().map(NodeId::new).collect());
+
+    // 读回路径同样要过设计 §8.3 的两条约束校验。这是 validate() 在本子项目内的
+    // 唯一调用点：图从库中读回后投入使用前必须成立。
+    graph
+        .validate()
+        .map_err(|e| PersistError::Database(e.to_string()))?;
 
     Ok(Some(graph))
 }
