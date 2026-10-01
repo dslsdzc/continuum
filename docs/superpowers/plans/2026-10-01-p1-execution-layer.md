@@ -460,7 +460,11 @@ pub enum PrivacyClass {
 }
 
 /// 图引用与版本身份。稳定，不随内容变化。
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+///
+/// 派生 `Ord`：id 上的字典序构成全序，排序场景需要它。
+/// 实现 `Display`：`ArtifactError` 的三条格式串以 `{id}` 引用该字段，
+/// thiserror 要求该字段实现 `Display`。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ArtifactId(String);
 
 impl ArtifactId {
@@ -470,6 +474,12 @@ impl ArtifactId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl std::fmt::Display for ArtifactId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
