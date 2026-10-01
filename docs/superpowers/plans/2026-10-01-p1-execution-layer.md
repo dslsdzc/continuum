@@ -3278,6 +3278,15 @@ git commit -m "feat(graph): 失败分类与重试判定"
 
 ### Task 11: 图与 Artifact 的持久化
 
+> **订正（2026-10-01，合并前终审后补）。** 本 task 与 Task 12 的代码块在
+> `adfir_node.state` 这一列上写了大写字面量（`'RUNNING'`、`'VERIFYING'`、`'LOST'`、
+> `'UNKNOWN'`），与 `state_str` / `parse_state` 的小写约定冲突（`adfir_edge.kind`、
+> `adfir_port.direction`、`artifact.artifact_type` 也都是小写）。两处大写曾导致一个
+> Critical：恢复钩子对 `save_graph` 写出的数据恒 0 行命中，且钩子写出的 `'LOST'`
+> 读不回图。实际实现已统一为小写（见 `crates/continuum-runtime/src/recovery.rs`）。
+> **照抄本节代码时请一律改用小写。** 本段的代码块保留原样，以维持计划作为历史记录的可追溯性。
+
+
 **Files:**
 - Create: `crates/continuum-artifact/src/persist.rs`
 - Create: `crates/continuum-graph/src/persist.rs`
@@ -3966,6 +3975,11 @@ git commit -m "feat(p1): 图与 Artifact 元数据的持久化"
 ---
 
 ### Task 12: runtime 装配与恢复钩子
+
+> **订正（2026-10-01，合并前终审后补）。** 同 Task 11：本节代码块里的 `'RUNNING'`、
+> `'VERIFYING'`、`'LOST'`、`'UNKNOWN'` 应为小写。实际实现已统一为小写。
+> **照抄本节代码时请一律改用小写。**
+
 
 **Files:**
 - Modify: `crates/continuum-runtime/src/main.rs`
