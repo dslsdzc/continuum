@@ -23,6 +23,8 @@ fn legal_transitions_are_accepted() {
         (NodeState::Verifying, NodeState::Failed),
         (NodeState::Running, NodeState::Lost),
         (NodeState::Verifying, NodeState::Lost),
+        (NodeState::Pending, NodeState::Blocked),
+        (NodeState::Ready, NodeState::Blocked),
     ];
     for (from, to) in legal {
         assert_eq!(
