@@ -2686,6 +2686,19 @@ fn blocking_is_transitive_regardless_of_node_insertion_order() {
 }
 
 #[test]
+fn an_already_blocked_predecessor_blocks_its_descendants() {
+    // 调用开始时前驱已是 BLOCKED，而非本次调用新标记的。
+    // 「只算本次新标记」的实现在此返回空，按前驱状态判定的实现能覆盖。
+    // 这是该判定的唯一守卫：其余用例的前驱要么是失败态，要么在同一次调用内被标记。
+    let mut g = graph(&["b", "c"]);
+    link(&mut g, "b", "c", EdgeKind::Control);
+    set_state(&mut g, "b", NodeState::Blocked);
+
+    assert_eq!(names(&apply_blocking(&mut g)), vec!["c"]);
+    assert_eq!(g.node(&NodeId::new("c")).unwrap().state, NodeState::Blocked);
+}
+
+#[test]
 fn a_failed_data_predecessor_blocks_its_consumer() {
     // DATA 前驱失败时其 Artifact 永不出现，下游同样不可推进。
     // 边集若只算 CONTROL 与 DEPENDENCY，这类节点会永久搁死在 PENDING。
@@ -2791,9 +2804,11 @@ fn predecessors_completed(graph: &AdfirGraph, node: &NodeId) -> bool {
     })
 }
 
-/// 把 CONTROL 与 DEPENDENCY 前驱已失败的下游节点迁移为 BLOCKED。
+/// 把调度排序前驱（DATA、CONTROL、DEPENDENCY）已失败或已阻塞的下游节点
+/// 迁移为 BLOCKED。
 ///
-/// 失败态包含 FAILED、CANCELLED、INVALIDATED、LOST。返回被标记的节点。
+/// 不可推进的前驱态包含 BLOCKED、FAILED、CANCELLED、INVALIDATED、LOST。
+/// 返回被标记的节点。
 ///
 /// 传递：某节点被标记 BLOCKED 后，依赖它的节点同样不可推进，一并标记。
 /// 迭代到不动点。只处理 PENDING 与 READY 的节点——已 QUEUED 或 RUNNING 的
@@ -2806,9 +2821,6 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
         let ids: Vec<NodeId> = graph.nodes().iter().map(|n| n.id.clone()).collect();
 
         for id in ids {
-            if blocked.contains(&id) {
-                continue;
-            }
             let state = graph.node(&id).expect("节点应存在").state;
             if !matches!(state, NodeState::Pending | NodeState::Ready) {
                 continue;
@@ -2858,7 +2870,8 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
     blocked
 }
 
-/// 把 CONTROL 与 DEPENDENCY 前驱已全部 COMPLETED 的 BLOCKED 节点迁移为 READY。
+/// 把调度排序前驱（DATA、CONTROL、DEPENDENCY）已全部 COMPLETED 的 BLOCKED
+/// 节点迁移为 READY。
 ///
 /// 与 `apply_blocking` 对称（设计第 12 节的后半句）。返回被解除阻塞的节点。
 /// 无排序前驱的 BLOCKED 节点视为满足条件——没有阻塞来源。
@@ -2905,7 +2918,7 @@ pub use scheduler::{apply_blocking, apply_unblocking, select_runnable, Scheduler
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，44 passed。
+Expected: PASS，45 passed。
 
 - [ ] **Step 5: 提交**
 
