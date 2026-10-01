@@ -4033,7 +4033,15 @@ fn recovery_marks_running_nodes_as_lost() {
 }
 ```
 
-第一次启动的迁移条数从 2 变为 4，既有的 `startup_applies_migrations_and_runs_five_phases` 断言「迁移应用 2 项」与 `second_startup_applies_no_migration` 断言「迁移应用 0 项」需要同步更新前者为 4。
+第一次启动的迁移条数从 2 变为 4，既有的三条用例都要同步：
+
+```
+startup_applies_migrations_and_runs_five_phases   「迁移应用 2 项」→ 4 项
+second_startup_applies_no_migration               不变（第二次启动仍为 0）
+startup_reports_skipped_records                   「迁移应用 0 项」→ 2 项
+```
+
+第三条的原因是：该用例用 `Db::open` 预迁移（只含 P0 的两条内置迁移），而二进制启动时还要补应用 P1 的两条，故是 2 项。该用例的真实目的是证明跳过计数从库里读出，迁移数只是顺带——更新断言时加注释说明，不要改动它的其余部分。
 
 - [ ] **Step 2: 运行测试确认失败**
 
