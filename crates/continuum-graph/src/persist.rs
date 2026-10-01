@@ -186,8 +186,9 @@ pub fn mark_node_lost(tx: &Tx<'_>, graph_id: &str, node_id: &str) -> Result<(), 
 /// 让两处失配。本函数与 `mark_node_lost` 是该表这两列在本仓库内的唯一读写入点：
 /// 调用方不得自行拼列名或列取值。
 pub fn mark_running_nodes_lost(tx: &Tx<'_>) -> Result<usize, PersistError> {
-    // WHERE 用参数而非插值：取值仍由 `state_str` 提供，编码源头只有一个，
-    // 且不必把 `state_str` 提升为 pub。
+    // WHERE 用参数而非插值：取值仍由 `state_str` 提供，编码源头只有一个。
+    // （`state_str` 现为 `pub(crate)`，那是给同 crate 的 `transition_tx` 用的，
+    // 本函数不因它可以插值就把编码抄成字面量。）
     let rows = tx.query(
         "SELECT graph_id, node_id FROM adfir_node WHERE state IN (?1, ?2)",
         &[
@@ -338,7 +339,11 @@ fn int(v: &Value) -> Result<i64, PersistError> {
     }
 }
 
-fn state_str(s: NodeState) -> &'static str {
+/// `adfir_node.state` 列的唯一编码来源。
+///
+/// `pub(crate)` 而非 `pub`：同 crate 的 `transition_tx` 需要它，crate 外不需要。
+/// 调用方（含 `transition_tx`）不得自行拼该列的取值字面量。
+pub(crate) fn state_str(s: NodeState) -> &'static str {
     match s {
         NodeState::Pending => "pending",
         NodeState::Ready => "ready",
@@ -374,7 +379,8 @@ fn failure_class_str(c: FailureClass) -> &'static str {
     }
 }
 
-fn parse_state(s: &str) -> Result<NodeState, PersistError> {
+/// [`state_str`] 的逆。`pub(crate)` 的理由同 `state_str`。
+pub(crate) fn parse_state(s: &str) -> Result<NodeState, PersistError> {
     Ok(match s {
         "pending" => NodeState::Pending,
         "ready" => NodeState::Ready,

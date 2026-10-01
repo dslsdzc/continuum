@@ -55,6 +55,7 @@ name = "continuum-artifact"
 version = "0.1.0"
 dependencies = [
  "continuum-core",
+ "continuum-events",
  "continuum-persist",
  "serde",
  "serde_json",
@@ -89,6 +90,7 @@ name = "continuum-graph"
 version = "0.1.0"
 dependencies = [
  "continuum-artifact",
+ "continuum-events",
  "continuum-operator",
  "continuum-persist",
  "continuum-port",

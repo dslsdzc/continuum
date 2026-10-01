@@ -11,6 +11,7 @@ pub mod persist;
 pub mod reuse;
 pub mod scheduler;
 pub mod state;
+pub mod transition_tx;
 
 pub use edge::{Edge, EdgeKind};
 pub use execution::{is_candidate_backend, ArtifactRef, ExecutionProfile, NodeContext, OperatorImpl};
@@ -27,3 +28,4 @@ pub use persist::{
 pub use reuse::{cache_key, can_reuse, CacheKey};
 pub use scheduler::{apply_blocking, apply_unblocking, select_runnable, SchedulerConfig};
 pub use state::{is_terminal, transition, StateError};
+pub use transition_tx::{apply_transition, ApplyError};

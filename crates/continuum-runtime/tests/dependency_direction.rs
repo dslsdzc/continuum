@@ -27,16 +27,21 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("continuum-events", &["continuum-core"]),
     ("continuum-persist", &["continuum-events"]),
     ("continuum-provider", &["continuum-core"]),
+    // Task 15 起 artifact 直接依赖 continuum-events：`save_artifact` 与元数据
+    // 同事务写入 ArtifactCreated（§16）。
     (
         "continuum-artifact",
-        &["continuum-core", "continuum-persist"],
+        &["continuum-core", "continuum-events", "continuum-persist"],
     ),
     ("continuum-port", &["continuum-artifact"]),
     ("continuum-operator", &["continuum-artifact"]),
+    // Task 15 起 graph 直接依赖 continuum-events（`apply_transition` 在迁移的
+    // 同一事务内写 NodeStarted / NodeCompleted），dev-dependencies 同一条。
     (
         "continuum-graph",
         &[
             "continuum-artifact",
+            "continuum-events",
             "continuum-port",
             "continuum-operator",
             "continuum-persist",

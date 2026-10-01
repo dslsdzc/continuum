@@ -26,8 +26,21 @@ pub fn p1_artifact_migrations() -> Vec<Migration> {
     ]
 }
 
-/// 写入一个 Artifact 的元数据。同 id 已存在时返回数据库错误，不覆盖（§241）。
-pub fn save_artifact(tx: &Tx<'_>, artifact: &Artifact) -> Result<(), PersistError> {
+/// 写入一个 Artifact 的元数据，并在同一事务内写入 `ArtifactCreated`（§16）。
+///
+/// 同 id 已存在时返回数据库错误，不覆盖（§241）。
+///
+/// 「入库」与「写事件」不可分离：本函数没有只写元数据的旁路，二者要么一起
+/// 由调用方提交，要么一起回滚。这与 `continuum_graph::apply_transition` 是同
+/// 一条规矩——状态/元数据的写入与它对应的事件必须在同一事务内（`§318`）。
+///
+/// `event_id` 的唯一性由调用方保证（`events.event_id` 是主键）。
+pub fn save_artifact(
+    tx: &Tx<'_>,
+    artifact: &Artifact,
+    event_id: &str,
+    occurred_at: i64,
+) -> Result<(), PersistError> {
     tx.execute(
         "INSERT INTO artifact
            (id, artifact_type, content_hash, size, producer_node, privacy_class,
@@ -54,6 +67,16 @@ pub fn save_artifact(tx: &Tx<'_>, artifact: &Artifact) -> Result<(), PersistErro
             &[Value::text(artifact.id.as_str()), Value::text(input.as_str())],
         )?;
     }
+
+    // 事件写在元数据之后：元数据写入失败时（如同 id 已存在）直接返回错误，
+    // 不产生 ArtifactCreated——否则库里会留下一个指向不存在 Artifact 的事件。
+    let event = continuum_events::Event::new(
+        continuum_events::EventType::ArtifactCreated,
+        event_id.to_owned(),
+        occurred_at,
+        serde_json::json!({ "artifact_id": artifact.id.as_str() }),
+    );
+    tx.append_event(&event)?;
     Ok(())
 }
 

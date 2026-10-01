@@ -36,6 +36,12 @@ pub enum ArtifactError {
     Blob(#[from] BlobError),
 }
 
+/// [`ArtifactStore::persist`] 写 `ArtifactCreated` 时用的时间戳。
+///
+/// 本桥不感知时钟，设计也未要求它记录真实时间，故取 0 作为「未记录」的哨兵值
+/// 而不是伪造一个时刻。P2 若有真实时钟，应在调用 `save_artifact` 时显式传入。
+const PERSIST_EVENT_OCCURRED_AT: i64 = 0;
+
 /// 内容寻址的 Artifact 集合。相同内容只保留一份。
 ///
 /// 本结构是工作副本，始终保存在内存中；元数据经 [`ArtifactStore::persist`] 落库、
@@ -153,7 +159,8 @@ impl ArtifactStore {
         seen
     }
 
-    /// 把内存中的全部 Artifact 元数据落入 `artifact` 与 `artifact_input`。
+    /// 把内存中的全部 Artifact 元数据落入 `artifact` 与 `artifact_input`，
+    /// 每个 Artifact 同时产生一条 `ArtifactCreated`（§16）。
     ///
     /// 只使用调用方传入的 `Tx`，不自行开启或提交事务——提交由调用方负责，
     /// 以便与同一事务内的其他写入（如事件）一起原子生效。
@@ -166,7 +173,15 @@ impl ArtifactStore {
     /// id」这一查询的答案；落盘路径按哈希寻址，也不受影响。
     pub fn persist(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
         for artifact in self.by_id.values() {
-            save_artifact(tx, artifact)?;
+            // 事件 id 由 artifact id 决定：`events.event_id` 是主键，同一份存储
+            // 在同一事务内重复落库会被拒（`save_artifact` 对同 id 也本就拒绝），
+            // 因此不需要额外的序号来源。
+            save_artifact(
+                tx,
+                artifact,
+                &format!("artifact/{}", artifact.id.as_str()),
+                PERSIST_EVENT_OCCURRED_AT,
+            )?;
         }
         Ok(())
     }

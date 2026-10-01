@@ -109,7 +109,7 @@ fn artifact_round_trips_through_the_database() {
     let artifact = sample_artifact();
 
     let tx = db.begin().unwrap();
-    save_artifact(&tx, &artifact).unwrap();
+    save_artifact(&tx, &artifact, "e1", 1_000).unwrap();
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
@@ -119,6 +119,35 @@ fn artifact_round_trips_through_the_database() {
     tx.commit().unwrap();
 
     assert_eq!(back, artifact);
+}
+
+#[test]
+fn artifact_creation_emits_an_event_in_the_same_transaction() {
+    // §16 的三个外发事件中的第三个：Artifact 入库时写 ArtifactCreated。
+    // 与 apply_transition 同一条规矩——元数据与事件同一事务（§318）。
+    let (_d, db) = db();
+
+    let tx = db.begin().unwrap();
+    save_artifact(&tx, &sample_artifact(), "artifact/a1", 1_000).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query(
+            "SELECT event_type, occurred_at, payload FROM events WHERE node_id IS NULL",
+            &[],
+        )
+        .unwrap();
+    tx.commit().unwrap();
+
+    assert_eq!(rows.len(), 1, "入库应当且只当产生一条事件：{rows:?}");
+    assert_eq!(text_of(&rows[0][0]), "artifact.created");
+    assert_eq!(int_of(&rows[0][1]), 1_000);
+    assert!(
+        text_of(&rows[0][2]).contains("\"artifact_id\":\"a1\""),
+        "payload 应点名是哪个 Artifact，实际 {}",
+        text_of(&rows[0][2])
+    );
 }
 
 #[test]
