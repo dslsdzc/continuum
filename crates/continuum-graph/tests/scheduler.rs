@@ -147,6 +147,19 @@ fn blocking_is_transitive_regardless_of_node_insertion_order() {
 }
 
 #[test]
+fn an_already_blocked_predecessor_blocks_its_descendants() {
+    // 调用开始时前驱已是 BLOCKED，而非本次调用新标记的。
+    // 「只算本次新标记」的实现在此返回空，按前驱状态判定的实现能覆盖。
+    // 这是该判定的唯一守卫：其余用例的前驱要么是失败态，要么在同一次调用内被标记。
+    let mut g = graph(&["b", "c"]);
+    link(&mut g, "b", "c", EdgeKind::Control);
+    set_state(&mut g, "b", NodeState::Blocked);
+
+    assert_eq!(names(&apply_blocking(&mut g)), vec!["c"]);
+    assert_eq!(g.node(&NodeId::new("c")).unwrap().state, NodeState::Blocked);
+}
+
+#[test]
 fn a_failed_data_predecessor_blocks_its_consumer() {
     // DATA 前驱失败时其 Artifact 永不出现，下游同样不可推进。
     // 边集若只算 CONTROL 与 DEPENDENCY，这类节点会永久搁死在 PENDING。
