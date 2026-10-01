@@ -3058,6 +3058,25 @@ fn permanent_verification_and_unknown_fail_without_retry() {
 }
 
 #[test]
+fn resource_retries_when_listed_and_budget_allows() {
+    let p = policy(3, vec![FailureClass::Resource]);
+    assert_eq!(
+        decide_retry(&op(SideEffectClass::Pure), &p, FailureClass::Resource, 1),
+        RetryDecision::Retry { next_attempt: 2 }
+    );
+}
+
+#[test]
+fn whitelisting_a_permanent_class_does_not_make_it_retryable() {
+    // retryable_errors 只能收窄 §13.1 的固有归属，不能放宽
+    let p = policy(5, vec![FailureClass::Permanent]);
+    assert_eq!(
+        decide_retry(&op(SideEffectClass::Pure), &p, FailureClass::Permanent, 1),
+        RetryDecision::Fail
+    );
+}
+
+#[test]
 fn a_class_outside_retryable_errors_fails() {
     let p = policy(5, vec![FailureClass::Transient]);
     assert_eq!(
@@ -3130,8 +3149,18 @@ pub enum RetryDecision {
 
 /// 判定一次失败后的动作。
 ///
-/// 判定顺序：非幂等副作用直接升级 → 无升级策略时失败 →
-/// 类别不在 `retryable_errors` 内时失败 → 仍有尝试余量时重试 → 否则升级。
+/// 判定顺序：
+///
+/// 1. 非幂等副作用直接升级（`§307` 的 MUST），白名单不改变它
+/// 2. 按类别取 `§309` 的固有归属：
+///    `CONSTRAINT` / `AUTHORIZATION` 升级；`PERMANENT` / `VERIFICATION` /
+///    `UNKNOWN` 失败；`TRANSIENT` / `RESOURCE` 继续往下判
+/// 3. 类别不在 `retryable_errors` 内时失败
+/// 4. 仍有尝试余量时重试
+/// 5. 否则升级
+///
+/// `retryable_errors` 只能**收窄**固有归属，不能放宽：把一个 `PERMANENT`
+/// 类别加进白名单不会让它变成可重试。第 2 步先于第 3 步，故这一点由结构保证。
 pub fn decide_retry(
     operator: &Operator,
     policy: &RetryPolicy,
@@ -3141,6 +3170,15 @@ pub fn decide_retry(
     if operator.side_effect_class == SideEffectClass::NonIdempotent {
         return escalate(policy);
     }
+
+    match class {
+        FailureClass::Constraint | FailureClass::Authorization => return escalate(policy),
+        FailureClass::Permanent | FailureClass::Verification | FailureClass::Unknown => {
+            return RetryDecision::Fail
+        }
+        FailureClass::Transient | FailureClass::Resource => {}
+    }
+
     if !policy.retryable_errors.contains(&class) {
         return RetryDecision::Fail;
     }
@@ -3173,7 +3211,7 @@ pub use failure::{
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，47 passed。
+Expected: PASS，54 passed（Task 9 结束时 45 + 本 task 9 条）。
 
 - [ ] **Step 5: 提交**
 
