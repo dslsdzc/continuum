@@ -28,10 +28,13 @@ fn execution_profile_starts_empty() {
     assert!(p.tool.is_none());
     assert!(p.backend.is_none());
     assert!(p.compute_node.is_none());
+    assert!(p.reasoning_effort.is_none());
     assert!(p.parallelism.is_none());
     assert!(p.timeout_ms.is_none());
-    assert!(p.retry_policy.is_none());
     assert!(p.cost_budget.is_none());
+    // retry_policy 非可选：默认策略是「单次尝试、不重试」
+    assert_eq!(p.retry_policy.max_attempts, 1);
+    assert!(p.retry_policy.retryable_errors.is_empty());
 }
 
 #[test]

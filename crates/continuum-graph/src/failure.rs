@@ -61,6 +61,19 @@ pub struct RetryPolicy {
     pub escalation_policy: EscalationPolicy,
 }
 
+impl Default for RetryPolicy {
+    /// 默认策略为「单次尝试、不重试」：`max_attempts = 1` 使 `decide_retry`
+    /// 在首次失败即升级或失败，不产生第二次尝试。
+    fn default() -> Self {
+        Self {
+            max_attempts: 1,
+            backoff: Backoff::Fixed { interval_ms: 1_000 },
+            retryable_errors: Vec::new(),
+            escalation_policy: EscalationPolicy::None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RetryDecision {
     Retry { next_attempt: u32 },

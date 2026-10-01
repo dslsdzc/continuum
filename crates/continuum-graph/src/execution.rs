@@ -12,8 +12,10 @@ use std::sync::Arc;
 
 /// `§246`。每次 Node 执行产生一条。
 ///
-/// 资源类字段在本子项目内恒为 None，并以 `String` 承载：
-/// P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id。
+/// 六处字段在本子项目内恒为 None 并以 `String` 承载：`model`、`provider`、
+/// `tool`、`compute_node`、`reasoning_effort`、`cost_budget`。
+/// 前四者 P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id；
+/// 后两者的对应类型在本子项目内不存在。`backend` 已是强类型 `BackendId`。
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ExecutionProfile {
     pub model: Option<String>,
@@ -24,7 +26,8 @@ pub struct ExecutionProfile {
     pub reasoning_effort: Option<String>,
     pub parallelism: Option<u32>,
     pub timeout_ms: Option<u64>,
-    pub retry_policy: Option<RetryPolicy>,
+    /// 非可选：设计 §14 与第 15 节的表列都是非空。默认值为「单次尝试、不重试」。
+    pub retry_policy: RetryPolicy,
     pub cost_budget: Option<String>,
 }
 
