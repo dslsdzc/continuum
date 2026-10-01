@@ -3321,7 +3321,10 @@ fn sample_graph() -> AdfirGraph {
     let mut n2 = Node::new(NodeId::new("n2"), OperatorId::new("op2"), OperatorVersion::new(2));
     n2.state = NodeState::Completed;
     g.add_node(n2).unwrap();
-    g.add_port("n2", Port::new(PortId::new("o2"), Direction::Output, "o", ArtifactType::Patch))
+    // o2 的类型必须与 i1 一致（SourceTree），否则 §239 会拒绝这条连接。
+    // 取 SourceTree 而非把 i1 改成 Patch：前者保住夹具里两种不同的
+    // ArtifactType，往返覆盖更强。
+    g.add_port("n2", Port::new(PortId::new("o2"), Direction::Output, "o", ArtifactType::SourceTree))
         .unwrap();
     g.add_port("n2", Port::new(PortId::new("i2"), Direction::Input, "i", ArtifactType::Patch))
         .unwrap();
@@ -3401,6 +3404,27 @@ fn loading_an_unknown_graph_returns_none() {
     let tx = db.begin().unwrap();
     assert!(load_graph(&tx, &GraphId::new("nope")).unwrap().is_none());
     tx.commit().unwrap();
+}
+
+#[test]
+fn load_graph_rejects_a_stored_graph_violating_entry_constraints() {
+    // 该用例是 load_graph 内 validate() 调用的唯一守卫：
+    // 没有它，删掉那行调用不会有任何用例变红。
+    let (_d, db) = db();
+    let graph = sample_graph();
+    let tx = db.begin().unwrap();
+    save_graph(&tx, &graph).unwrap();
+    // 把入口改成 n1——它的输入端口 i1 有入边（来自 o2），违反设计 §8.3
+    tx.execute(
+        "UPDATE adfir_graph SET entry_nodes = ?1 WHERE id = ?2",
+        &[Value::text(r#"["n1"]"#), Value::text("g1")],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = load_graph(&tx, &GraphId::new("g1")).expect_err("违反入口约束的图必须被拒绝");
+    assert!(err.to_string().contains("入口"), "实际: {err}");
 }
 ```
 
@@ -3626,10 +3650,11 @@ impl ContentHash {
 ```rust
 //! 图、节点、端口、边的落库（§317）。
 
-use crate::edge::{Edge, EdgeKind};
+use crate::edge::EdgeKind;
 use crate::graph::AdfirGraph;
 use crate::ids::{ContractIdRef, GraphId, NodeId};
-use crate::node::{Node, NodeState, OperatorRef};
+use crate::node::{Node, NodeState};
+use continuum_artifact::ArtifactType;
 use continuum_operator::{OperatorId, OperatorVersion};
 use continuum_persist::{Migration, PersistError, Tx, Value};
 use continuum_port::{Direction, Port, PortId};
@@ -3885,7 +3910,7 @@ pub use persist::{load_graph, p1_graph_migrations, save_graph};
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，50 passed。
+Expected: PASS，59 passed（Task 10 补 backoff 用例后为 55，本 task 4 条）。
 
 - [ ] **Step 6: 提交**
 
