@@ -3313,6 +3313,9 @@ fn sample_graph() -> AdfirGraph {
     let mut g = AdfirGraph::new(GraphId::new("g1"), ContractIdRef::new("c1"));
     let mut n = Node::new(NodeId::new("n1"), OperatorId::new("op"), OperatorVersion::new(1));
     n.state = NodeState::Ready;
+    // 非空值：这两项曾不落库，读回时静默归零
+    n.constraints = vec!["c1".to_owned()];
+    n.capabilities = vec!["cap1".to_owned()];
     g.add_node(n).unwrap();
     g.add_port("n1", Port::new(PortId::new("o1"), Direction::Output, "o", ArtifactType::Patch))
         .unwrap();
@@ -3370,6 +3373,16 @@ fn graph_round_trips_through_the_database() {
     assert_eq!(back.edges().len(), 1);
     assert_eq!(back.node(&NodeId::new("n1")).unwrap().state, NodeState::Ready);
     assert_eq!(back.node(&NodeId::new("n2")).unwrap().state, NodeState::Completed);
+    assert_eq!(
+        back.node(&NodeId::new("n1")).unwrap().constraints,
+        vec!["c1".to_owned()],
+        "constraints 不得在读回时归零"
+    );
+    assert_eq!(
+        back.node(&NodeId::new("n1")).unwrap().capabilities,
+        vec!["cap1".to_owned()],
+        "capabilities 不得在读回时归零"
+    );
     assert_eq!(
         back.port(&PortId::new("o1")).unwrap().1.artifact_type(),
         ArtifactType::Patch
@@ -3678,6 +3691,8 @@ pub fn p1_graph_migrations() -> Vec<Migration> {
             state TEXT NOT NULL,
             execution_policy TEXT NOT NULL,
             verification_policy TEXT NOT NULL,
+            constraints TEXT NOT NULL,
+            capabilities TEXT NOT NULL,
             PRIMARY KEY (graph_id, node_id)
         );
         CREATE TABLE adfir_port (
@@ -3698,20 +3713,22 @@ pub fn p1_graph_migrations() -> Vec<Migration> {
             kind TEXT NOT NULL
         );
         CREATE TABLE execution_profile (
+            graph_id TEXT NOT NULL,
             node_id TEXT NOT NULL,
             attempt INTEGER NOT NULL,
             backend TEXT,
             timeout_ms INTEGER,
             retry_policy TEXT NOT NULL,
             cost_budget TEXT,
-            PRIMARY KEY (node_id, attempt)
+            PRIMARY KEY (graph_id, node_id, attempt)
         );
         CREATE TABLE node_attempt (
+            graph_id TEXT NOT NULL,
             node_id TEXT NOT NULL,
             attempt INTEGER NOT NULL,
             state TEXT NOT NULL,
             failure_class TEXT,
-            PRIMARY KEY (node_id, attempt)
+            PRIMARY KEY (graph_id, node_id, attempt)
         );",
     )]
 }
@@ -3735,8 +3752,8 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
         tx.execute(
             "INSERT INTO adfir_node
                (graph_id, node_id, operator_id, operator_version, state,
-                execution_policy, verification_policy)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                execution_policy, verification_policy, constraints, capabilities)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             &[
                 Value::text(graph.id.as_str()),
                 Value::text(node.id.as_str()),
@@ -3745,6 +3762,8 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
                 Value::text(state_str(node.state)),
                 Value::text(serde_json::to_string(&node.execution_policy).expect("可序列化")),
                 Value::text(serde_json::to_string(&node.verification_policy).expect("可序列化")),
+                Value::text(serde_json::to_string(&node.constraints).expect("可序列化")),
+                Value::text(serde_json::to_string(&node.capabilities).expect("可序列化")),
             ],
         )?;
         for port_id in node.inputs.iter().chain(node.outputs.iter()) {
@@ -3810,7 +3829,7 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
 
     let nodes = tx.query(
         "SELECT node_id, operator_id, operator_version, state,
-                execution_policy, verification_policy
+                execution_policy, verification_policy, constraints, capabilities
          FROM adfir_node WHERE graph_id = ?1 ORDER BY node_id",
         &[Value::text(id.as_str())],
     )?;
@@ -3823,6 +3842,9 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
         node.state = parse_state(&text(&row[3])?)?;
         node.execution_policy = parse_json(&text(&row[4])?)?;
         node.verification_policy = parse_json(&text(&row[5])?)?;
+        // 这两项若不回填会静默归零：Node::new 把它们初始化为空 Vec
+        node.constraints = parse_json(&text(&row[6])?)?;
+        node.capabilities = parse_json(&text(&row[7])?)?;
         graph.add_node(node)?;
     }
 
@@ -3969,8 +3991,8 @@ fn recovery_marks_running_nodes_as_lost() {
         tx.execute(
             "INSERT INTO adfir_node
                (graph_id, node_id, operator_id, operator_version, state,
-                execution_policy, verification_policy)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                execution_policy, verification_policy, constraints, capabilities)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             &[
                 continuum_persist::Value::text("g1"),
                 continuum_persist::Value::text("n1"),
@@ -3979,6 +4001,8 @@ fn recovery_marks_running_nodes_as_lost() {
                 continuum_persist::Value::text("RUNNING"),
                 continuum_persist::Value::text("null"),
                 continuum_persist::Value::text("null"),
+                continuum_persist::Value::text("[]"),
+                continuum_persist::Value::text("[]"),
             ],
         )
         .unwrap();
@@ -4044,11 +4068,19 @@ impl RecoveryHook for MarkRunningNodesLost {
 
     fn run(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
         let rows = tx.query(
-            "SELECT node_id FROM adfir_node WHERE state IN ('RUNNING', 'VERIFYING')",
+            "SELECT graph_id, node_id FROM adfir_node WHERE state IN ('RUNNING', 'VERIFYING')",
             &[],
         )?;
         for row in &rows {
-            let node_id = match &row[0] {
+            let graph_id = match &row[0] {
+                Value::Text(s) => s.clone(),
+                other => {
+                    return Err(PersistError::Database(format!(
+                        "graph_id 应为文本，实际 {other:?}"
+                    )))
+                }
+            };
+            let node_id = match &row[1] {
                 Value::Text(s) => s.clone(),
                 other => {
                     return Err(PersistError::Database(format!(
@@ -4056,14 +4088,16 @@ impl RecoveryHook for MarkRunningNodesLost {
                     )))
                 }
             };
+            // node_id 只在图内唯一，两张图各有 "n1" 会撞主键，故带 graph_id
             tx.execute(
-                "UPDATE adfir_node SET state = 'LOST' WHERE node_id = ?1",
-                &[Value::text(node_id.clone())],
+                "UPDATE adfir_node SET state = 'LOST' WHERE graph_id = ?1 AND node_id = ?2",
+                &[Value::text(graph_id.clone()), Value::text(node_id.clone())],
             )?;
             tx.execute(
-                "INSERT OR REPLACE INTO node_attempt (node_id, attempt, state, failure_class)
-                 VALUES (?1, 1, 'LOST', 'UNKNOWN')",
-                &[Value::text(node_id)],
+                "INSERT OR REPLACE INTO node_attempt
+                   (graph_id, node_id, attempt, state, failure_class)
+                 VALUES (?1, ?2, 1, 'LOST', 'UNKNOWN')",
+                &[Value::text(graph_id), Value::text(node_id)],
             )?;
         }
         self.marked.store(rows.len(), Ordering::Relaxed);
