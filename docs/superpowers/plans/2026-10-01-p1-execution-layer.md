@@ -80,16 +80,14 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // 本 task 结束时 runtime 的直接依赖只有这四个。
+    // Task 12 会给它加上 continuum-artifact 与 continuum-graph，届时此表要同步扩充。
     (
         "continuum-runtime",
         &[
-            "continuum-artifact",
             "continuum-core",
             "continuum-events",
-            "continuum-graph",
-            "continuum-operator",
             "continuum-persist",
-            "continuum-port",
             "continuum-provider",
         ],
     ),
@@ -107,10 +105,33 @@ const ALL_CRATES: &[&str] = &[
     "continuum-runtime",
 ];
 
+/// 只取直接依赖（`--depth 1`）。
+///
+/// 既有的 `cargo_tree()` 不带 `--depth`，输出的是整棵传递树，
+/// 与 `ALLOWED` 表的语义不符——`ALLOWED` 列的是直接边，
+/// 与设计第 5 节的依赖方向一致。直接边足以拦住反向依赖：
+/// 任何反向边本身必然是一条直接边。
+fn cargo_tree_direct(pkg: &str) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let out = Command::new(env!("CARGO"))
+        .args([
+            "tree", "-p", pkg, "--depth", "1", "--edges", "all", "--prefix", "none",
+        ])
+        .current_dir(root)
+        .output()
+        .expect("cargo tree 无法执行");
+    assert!(
+        out.status.success(),
+        "cargo tree -p {pkg} 失败: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).expect("cargo tree 输出不是 UTF-8")
+}
+
 #[test]
 fn every_crate_depends_only_on_its_allowed_set() {
     for (pkg, allowed) in ALLOWED {
-        let tree = cargo_tree(pkg);
+        let tree = cargo_tree_direct(pkg);
         for other in ALL_CRATES {
             if other == pkg {
                 continue;
@@ -3643,6 +3664,8 @@ fn startup(path: &Path) -> Result<(), PersistError> {
 continuum-artifact = { path = "../continuum-artifact" }
 continuum-graph = { path = "../continuum-graph" }
 ```
+
+同时扩充 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表中 runtime 那一行，把 `continuum-artifact` 与 `continuum-graph` 加入允许集合——本 task 给它加了两条直接依赖，不更新该行会使 `every_crate_depends_only_on_its_allowed_set` 失败。
 
 - [ ] **Step 5: 运行测试确认通过**
 
