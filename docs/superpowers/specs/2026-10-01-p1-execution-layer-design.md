@@ -383,7 +383,13 @@ READY 条件   所有输入 Port 已有可用的 DATA 入边来源，
 
 可并发条件无需单独判定。「两个可执行节点之间存在 CONTROL 或 DATA 路径」在结构上不可能：候选节点处于 PENDING 或 READY，而排序前驱已 COMPLETED 的节点不在此列，故任两个候选之间不存在排序路径。
 
-Control 与 Dependency 的前驱进入 FAILED、CANCELLED、INVALIDATED 或 LOST 时，依赖它的节点迁移为 BLOCKED，不进入 READY。BLOCKED 节点在其全部此类前驱重新回到 COMPLETED 后迁移为 READY。
+参与调度排序的三类边（DATA、CONTROL、DEPENDENCY）的前驱进入 FAILED、CANCELLED、INVALIDATED 或 LOST 时，依赖它的节点迁移为 BLOCKED，不进入 READY。
+
+边集与 READY 判据一致是必需的：DATA 前驱失败时其 Artifact 永不出现，下游同样不可推进；若阻塞只看 CONTROL 与 DEPENDENCY，这类节点既不可 READY 也不 BLOCKED，会永久搁死在 PENDING。
+
+前驱处于 BLOCKED 同样计为不可推进，因此阻塞沿依赖链传递。
+
+BLOCKED 节点在其全部此类前驱重新回到 COMPLETED 后迁移为 READY。
 
 阻塞是传递的：某节点被标记 BLOCKED 后，依赖它的节点同样不可推进，一并标记。标记迭代到不动点。
 
