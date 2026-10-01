@@ -426,6 +426,10 @@ RetryPolicy {
 }
 ```
 
+`attempt` 自 1 起计：首次尝试的 `attempt` 为 1。`max_attempts` 是该节点允许的**总尝试次数**，不是重试次数。判据为 `attempt < max_attempts` 时重试（`next_attempt = attempt + 1`），否则升级。故 `max_attempts = 1` 表示只尝试一次、不重试。
+
+`retryable_errors` 是在 `§13.1` 固有归属之上**收窄**的白名单：类别既要在固有归属上可重试，又要在白名单内，才会被重试。空白名单使所有类别都不重试。
+
 `§307` 要求非幂等 Effect 不得直接自动重试。判定依据为 `Operator.side_effect_class`：
 
 ```
@@ -529,7 +533,7 @@ EventType::ArtifactCreated     Artifact 入库时写入
 §237 的迁移表     规范未定义，本设计定义。若规范后续给出迁移表，以规范为准。
 §238 的三类边     规范未描述 DEPENDENCY、EFFECT、INVALIDATION，本设计定义。
 ArtifactType 集合 本子项目取六种。P5 引入媒体类型时为编译期可见的破坏性变更。
-ExecutionProfile  四个资源字段在 P3、P7 之前恒为 None，其写入路径未被覆盖。
+ExecutionProfile  六个资源字段在 P3、P7 之前恒为 None，其写入路径未被覆盖。
 检查点            只定义接口，无实现，无测试。
 并行上限          默认值 1 是占位取值，P3 接入资源模型后需重估。
 ```
