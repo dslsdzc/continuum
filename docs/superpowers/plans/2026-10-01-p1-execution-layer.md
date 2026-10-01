@@ -5499,6 +5499,26 @@ save_graph 是裸 INSERT，同一 graph_id 二次保存撞主键。P2 每次状�
   届时必须补 UPDATE/UPSERT 路径（Task 15 的 apply_transition 只更新状态列，不受影响）。
 operator 的 Checkpointable 与 FailureClass::ALL、ArtifactError::NotFound 无生产者，
   均记为 P2 项，见终审分诊。
+
+Task 14/16（磁盘内容寻址与落库桥）转交的 P2 项：
+ArtifactStore 仍不持有 BlobStore —— commit_with_content 要调用方传 &BlobStore，
+  故 §15 有一条执行路径但 P1 内无生产调用方（除测试外零调用点）。Runtime 侧接线属 P2。
+ArtifactStore::persist 继承 save_artifact 的裸 INSERT，加一个 Artifact 再 persist 必撞主键，
+  与 save_graph 同类，P2 每次状态变化都要落库时需 UPSERT。
+restore 每行走一次 load_artifact（两条查询），N+1。
+restore 里 commit(...).map_err 那条分支不可达（id TEXT PRIMARY KEY 排除 AlreadyCommitted，
+  进入分支的守卫排除 UnresolvedInput），保留为防御，属零覆盖代码。
+commit_with_content 的 BlobError 传播路径无测试（触发需制造 IO 失败）。
+put 的原子落盘无测试覆盖（效果只在进程崩溃时可见，进程内无确定性观测点）。
+artifact_store 的「哈希不符」用例隐含依赖两个字节串等长（否则 size 校验先命中）。
+ArtifactError 失去了 Clone/PartialEq/Eq（Blob 变体含 io::Error，不可 Clone）。
+  裁定不手写忽略 io::Error 的 PartialEq —— 两个不同的 IO 失败会比较相等，是陷阱。
+  日后若需要比较，应显式比较变体与 payload。
+孤儿字节（落盘成功但登记失败）无计数、无回收；commit_with_content 的错误分不出两种情形。
+
+Task 15（状态迁移与事件同事务）转交的 P2 项：
+执行器须用单调序号分配 event_id；用可由节点状态派生的可复用 id 会在合法路径
+  （Running → Waiting → Ready → Queued → Running）上撞 events.event_id 主键。
 ```
 
 ## 完成判据对照
