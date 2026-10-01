@@ -17,6 +17,17 @@ impl ContentHash {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// 从已存的十六进制字符串还原。长度非 64 或含非十六进制字符时返回 `None`。
+    pub fn parse(value: &str) -> Option<Self> {
+        let ok = value.len() == 64
+            && value.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+        if ok {
+            Some(Self(value.to_owned()))
+        } else {
+            None
+        }
+    }
 }
 
 // 小写十六进制编码。与 continuum-events 的同类辅助函数重复，
