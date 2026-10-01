@@ -26,6 +26,9 @@ fn sample_graph() -> AdfirGraph {
     let mut g = AdfirGraph::new(GraphId::new("g1"), ContractIdRef::new("c1"));
     let mut n = Node::new(NodeId::new("n1"), OperatorId::new("op"), OperatorVersion::new(1));
     n.state = NodeState::Ready;
+    // 非空值：这两项曾不落库，读回时静默归零
+    n.constraints = vec!["c1".to_owned()];
+    n.capabilities = vec!["cap1".to_owned()];
     g.add_node(n).unwrap();
     g.add_port("n1", Port::new(PortId::new("o1"), Direction::Output, "o", ArtifactType::Patch))
         .unwrap();
@@ -80,6 +83,16 @@ fn graph_round_trips_through_the_database() {
     assert_eq!(back.edges().len(), 1);
     assert_eq!(back.node(&NodeId::new("n1")).unwrap().state, NodeState::Ready);
     assert_eq!(back.node(&NodeId::new("n2")).unwrap().state, NodeState::Completed);
+    assert_eq!(
+        back.node(&NodeId::new("n1")).unwrap().constraints,
+        vec!["c1".to_owned()],
+        "constraints 不得在读回时归零"
+    );
+    assert_eq!(
+        back.node(&NodeId::new("n1")).unwrap().capabilities,
+        vec!["cap1".to_owned()],
+        "capabilities 不得在读回时归零"
+    );
     assert_eq!(
         back.port(&PortId::new("o1")).unwrap().1.artifact_type(),
         ArtifactType::Patch

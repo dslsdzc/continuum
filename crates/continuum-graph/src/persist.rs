@@ -28,6 +28,8 @@ pub fn p1_graph_migrations() -> Vec<Migration> {
             state TEXT NOT NULL,
             execution_policy TEXT NOT NULL,
             verification_policy TEXT NOT NULL,
+            constraints TEXT NOT NULL,
+            capabilities TEXT NOT NULL,
             PRIMARY KEY (graph_id, node_id)
         );
         CREATE TABLE adfir_port (
@@ -48,20 +50,22 @@ pub fn p1_graph_migrations() -> Vec<Migration> {
             kind TEXT NOT NULL
         );
         CREATE TABLE execution_profile (
+            graph_id TEXT NOT NULL,
             node_id TEXT NOT NULL,
             attempt INTEGER NOT NULL,
             backend TEXT,
             timeout_ms INTEGER,
             retry_policy TEXT NOT NULL,
             cost_budget TEXT,
-            PRIMARY KEY (node_id, attempt)
+            PRIMARY KEY (graph_id, node_id, attempt)
         );
         CREATE TABLE node_attempt (
+            graph_id TEXT NOT NULL,
             node_id TEXT NOT NULL,
             attempt INTEGER NOT NULL,
             state TEXT NOT NULL,
             failure_class TEXT,
-            PRIMARY KEY (node_id, attempt)
+            PRIMARY KEY (graph_id, node_id, attempt)
         );",
     )]
 }
@@ -85,8 +89,8 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
         tx.execute(
             "INSERT INTO adfir_node
                (graph_id, node_id, operator_id, operator_version, state,
-                execution_policy, verification_policy)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                execution_policy, verification_policy, constraints, capabilities)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             &[
                 Value::text(graph.id.as_str()),
                 Value::text(node.id.as_str()),
@@ -95,6 +99,8 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
                 Value::text(state_str(node.state)),
                 Value::text(serde_json::to_string(&node.execution_policy).expect("可序列化")),
                 Value::text(serde_json::to_string(&node.verification_policy).expect("可序列化")),
+                Value::text(serde_json::to_string(&node.constraints).expect("可序列化")),
+                Value::text(serde_json::to_string(&node.capabilities).expect("可序列化")),
             ],
         )?;
         for port_id in node.inputs.iter().chain(node.outputs.iter()) {
@@ -156,7 +162,7 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
 
     let nodes = tx.query(
         "SELECT node_id, operator_id, operator_version, state,
-                execution_policy, verification_policy
+                execution_policy, verification_policy, constraints, capabilities
          FROM adfir_node WHERE graph_id = ?1 ORDER BY node_id",
         &[Value::text(id.as_str())],
     )?;
@@ -169,6 +175,9 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
         node.state = parse_state(&text(&row[3])?)?;
         node.execution_policy = parse_json(&text(&row[4])?)?;
         node.verification_policy = parse_json(&text(&row[5])?)?;
+        // 这两项若不回填会静默归零：Node::new 把它们初始化为空 Vec
+        node.constraints = parse_strings(&text(&row[6])?)?;
+        node.capabilities = parse_strings(&text(&row[7])?)?;
         graph.add_node(node).map_err(graph_err)?;
     }
 
@@ -233,6 +242,12 @@ fn graph_err(e: crate::graph::GraphError) -> PersistError {
 }
 
 fn parse_json(s: &str) -> Result<serde_json::Value, PersistError> {
+    serde_json::from_str(s).map_err(|e| PersistError::Database(e.to_string()))
+}
+
+/// `Node::constraints` / `Node::capabilities` 是 `Vec<String>`，
+/// 不是 `serde_json::Value`，故不能走 `parse_json`。
+fn parse_strings(s: &str) -> Result<Vec<String>, PersistError> {
     serde_json::from_str(s).map_err(|e| PersistError::Database(e.to_string()))
 }
 
