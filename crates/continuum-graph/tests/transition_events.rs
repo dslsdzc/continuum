@@ -150,8 +150,12 @@ fn illegal_transition_writes_neither_state_nor_event() {
     let err = apply_transition(&tx, &graph_id, "n1", NodeState::Completed, 1_000, "e1").unwrap_err();
     assert!(matches!(err, ApplyError::Illegal(_)), "实际 {err:?}");
 
-    // 事务被丢弃后，状态与事件都不得留下痕迹
-    drop(tx);
+    // 非法迁移之后**仍然提交**：写入若真的发生，就会留在这条已提交的事务里。
+    //
+    // 这里不能用 drop(tx)：回滚必然把事务清干净，于是「状态与事件不得留下痕迹」
+    // 无论实现写没写都成立——断言就成了空断言，把合法性判定挪到 UPDATE 之后
+    // 也照样全绿。提交才让「一行都没写」成为一个可证伪的断言。
+    tx.commit().unwrap();
     assert_eq!(state_of(&db, &graph_id, "n1"), NodeState::Pending);
     assert!(events_of(&db, &graph_id, "n1").is_empty());
 }
@@ -159,7 +163,10 @@ fn illegal_transition_writes_neither_state_nor_event() {
 #[test]
 fn rollback_discards_both_state_and_event() {
     // §318 的另一半：合法迁移写完两行之后，只要调用方不提交，两行都不得留下。
-    // 若 apply_transition 自行提交（或分两个事务写状态与事件），本用例变红。
+    // 钉住的是「丢弃即回滚」，由 M6（Tx::drop 改 COMMIT）验证。
+    //
+    // 「apply_transition 自行提交」这一支在本仓写不出来——该函数拿不到 Db，
+    // 而 Tx::commit 消费 self，故不存在可构造的变异，本用例也不覆盖它。
     let (_d, db, graph_id) = fixture();
     let tx = db.begin().unwrap();
     run_to_running(&tx, &graph_id);
@@ -204,6 +211,7 @@ fn unknown_node_is_rejected() {
     let tx = db.begin().unwrap();
     let err = apply_transition(&tx, &graph_id, "nope", NodeState::Ready, 1_000, "e1").unwrap_err();
     assert!(matches!(err, ApplyError::UnknownNode { .. }), "实际 {err:?}");
-    drop(tx);
+    // 同 illegal_transition_…：提交而非丢弃，否则「没写任何东西」不可证伪
+    tx.commit().unwrap();
     assert!(events_of(&db, &graph_id, "nope").is_empty());
 }

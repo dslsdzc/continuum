@@ -34,6 +34,13 @@ pub fn p1_artifact_migrations() -> Vec<Migration> {
 /// 由调用方提交，要么一起回滚。这与 `continuum_graph::apply_transition` 是同
 /// 一条规矩——状态/元数据的写入与它对应的事件必须在同一事务内（`§318`）。
 ///
+/// # 返回 `Err` 之后调用方必须回滚该事务，不得提交
+///
+/// 元数据先写、事件后写。事件写入失败（`events.event_id` 是主键，撞上重复
+/// id 即失败）时返回 `Err`，而**元数据已经留在事务里**。调用方若收集错误、
+/// 最后统一 `commit()`，就会提交出一个没有 `ArtifactCreated` 的 Artifact。
+/// 理由与不可代劳回滚的原因同 `continuum_graph::apply_transition`。
+///
 /// `event_id` 的唯一性由调用方保证（`events.event_id` 是主键）。
 pub fn save_artifact(
     tx: &Tx<'_>,

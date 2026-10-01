@@ -151,6 +151,29 @@ fn artifact_creation_emits_an_event_in_the_same_transaction() {
 }
 
 #[test]
+fn artifact_metadata_and_its_event_are_discarded_together() {
+    // 上一条用例只演示了正向（同一事务写两样并提交）。这里是另一半：只要调用方
+    // 不提交，元数据与事件都不得留下——二者确实是同一条事务里的两行，而不是
+    // 「元数据走传入的 tx、事件另起一条自行提交的连接」。
+    //
+    // 用例名保留 "in the same transaction" 的说法：正反两条合起来才配得上它，
+    // 故不改为纯正向的名字。
+    let (_d, db) = db();
+
+    let tx = db.begin().unwrap();
+    save_artifact(&tx, &sample_artifact(), "artifact/a1", 1_000).unwrap();
+    drop(tx);
+
+    let tx = db.begin().unwrap();
+    let artifacts = tx.query("SELECT id FROM artifact", &[]).unwrap();
+    let events = tx.query("SELECT event_id FROM events", &[]).unwrap();
+    tx.commit().unwrap();
+
+    assert!(artifacts.is_empty(), "丢弃事务后元数据不得留下：{artifacts:?}");
+    assert!(events.is_empty(), "丢弃事务后事件不得留下：{events:?}");
+}
+
+#[test]
 fn loading_an_unknown_graph_returns_none() {
     let (_d, db) = db();
     let tx = db.begin().unwrap();

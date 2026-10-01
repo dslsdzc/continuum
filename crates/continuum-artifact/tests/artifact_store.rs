@@ -2,6 +2,7 @@ use continuum_artifact::{
     Artifact, ArtifactError, ArtifactId, ArtifactStore, ArtifactType, BlobStore, ContentHash,
     PrivacyClass, p1_artifact_migrations,
 };
+use continuum_persist::Value;
 use serde_json::json;
 
 fn artifact(id: &str, bytes: &[u8], inputs: Vec<ArtifactId>) -> Artifact {
@@ -112,7 +113,7 @@ fn store_round_trips_through_the_database() {
     let mut store = ArtifactStore::new();
     store.commit(artifact("a1", b"root", vec![])).unwrap();
     store.commit(artifact("a2", b"derived", vec![ArtifactId::new("a1")])).unwrap();
-    store.persist(&tx).unwrap();
+    store.persist(&tx, 1_000).unwrap();
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
@@ -138,7 +139,7 @@ fn deduplication_holds_on_the_persisted_path() {
     assert_eq!(hash, a2.content_hash, "夹具前提：两者内容相同");
     store.commit(a1).unwrap();
     store.commit(a2).unwrap();
-    store.persist(&tx).unwrap();
+    store.persist(&tx, 1_000).unwrap();
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
@@ -158,7 +159,7 @@ fn restore_follows_dependency_order_not_id_order() {
     let mut store = ArtifactStore::new();
     store.commit(artifact("z1", b"root", vec![])).unwrap();
     store.commit(artifact("a1", b"derived", vec![ArtifactId::new("z1")])).unwrap();
-    store.persist(&tx).unwrap();
+    store.persist(&tx, 1_000).unwrap();
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
@@ -179,7 +180,7 @@ fn restore_reports_dangling_inputs_instead_of_dropping_them() {
 
     let mut store = ArtifactStore::new();
     store.commit(artifact("a1", b"root", vec![])).unwrap();
-    store.persist(&tx).unwrap();
+    store.persist(&tx, 1_000).unwrap();
     // 绕过内存路径直接写一条输入悬空的记录
     tx.execute(
         "INSERT INTO artifact_input (artifact_id, input_artifact_id) VALUES ('a1', 'ghost')",
@@ -304,7 +305,7 @@ fn content_survives_commit_persist_restore_and_read_back() {
             b"derived",
         )
         .unwrap();
-    store.persist(&tx).unwrap();
+    store.persist(&tx, 1_000).unwrap();
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
@@ -318,6 +319,57 @@ fn content_survives_commit_persist_restore_and_read_back() {
     assert_eq!(
         restored.lineage(&ArtifactId::new("a1")),
         vec![ArtifactId::new("z1")]
+    );
+}
+
+#[test]
+fn persist_writes_artifact_created_with_the_time_it_was_given() {
+    // 唯一一条走**真实生产路径**（`ArtifactStore::persist`）覆盖 `ArtifactCreated`
+    // 的用例。`save_artifact` 由 graph 侧的用例直接调，走不到 persist 里的事件 id
+    // 派生与时间戳传递。
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+
+    let tx = db.begin().unwrap();
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("a1", b"one", vec![])).unwrap();
+    store.commit(artifact("a2", b"two", vec![])).unwrap();
+    store.persist(&tx, 1_724_000_000_000).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query(
+            "SELECT event_id, event_type, occurred_at FROM events ORDER BY event_id",
+            &[],
+        )
+        .unwrap();
+    tx.commit().unwrap();
+
+    let got: Vec<(String, String, i64)> = rows
+        .iter()
+        .map(|r| match (&r[0], &r[1], &r[2]) {
+            (Value::Text(id), Value::Text(t), Value::Int(at)) => (id.clone(), t.clone(), *at),
+            other => panic!("events 行的列类型不符：{other:?}"),
+        })
+        .collect();
+
+    assert_eq!(
+        got,
+        vec![
+            (
+                "artifact/a1".to_owned(),
+                "artifact.created".to_owned(),
+                1_724_000_000_000
+            ),
+            (
+                "artifact/a2".to_owned(),
+                "artifact.created".to_owned(),
+                1_724_000_000_000
+            ),
+        ],
+        "每个 Artifact 一条事件，id 由 artifact id 派生，时刻为调用方传入值"
     );
 }
 
