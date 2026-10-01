@@ -3987,7 +3987,9 @@ fn recovery_marks_running_nodes_as_lost() {
         let db = continuum_persist::Db::open(&path).unwrap();
         let tx = db.begin().unwrap();
         tx.execute(
-            "INSERT INTO adfir_graph (id, version, contract_id) VALUES (?1, ?2, ?3)",
+            "INSERT INTO adfir_graph
+               (id, version, contract_id, entry_nodes, terminal_nodes)
+             VALUES (?1, ?2, ?3, '[]', '[]')",
             &[
                 continuum_persist::Value::text("g1"),
                 continuum_persist::Value::Int(1),
