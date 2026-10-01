@@ -112,3 +112,65 @@ fn two_ports_with_the_same_id_are_rejected() {
         other => panic!("端口 id 重复必须被拒绝，实际 {other:?}"),
     }
 }
+
+#[test]
+fn reversed_orientation_is_rejected() {
+    // 边有方向（from_node → to_node），失效传播与调度排序按它解读。
+    // 以输入端为起点、输出端为终点必须被拒绝。
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Text)).unwrap();
+
+    let err = g
+        .connect(&PortId::new("i1"), &PortId::new("o1"), EdgeKind::Data)
+        .expect_err("反向连接必须被拒绝");
+    assert!(
+        matches!(err, GraphError::WrongOrientation { .. }),
+        "实际 {err:?}"
+    );
+    assert!(g.edges().is_empty(), "被拒绝的连接不得留下边");
+}
+
+#[test]
+fn entry_node_with_incoming_edges_is_rejected() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Text)).unwrap();
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .unwrap();
+
+    g.set_entry_nodes(vec![NodeId::new("n2")]);
+    let err = g.validate().expect_err("入口节点的输入端口有入边时必须拒绝");
+    assert!(
+        matches!(err, GraphError::InvalidEntryNode { .. }),
+        "实际 {err:?}"
+    );
+
+    g.set_entry_nodes(vec![NodeId::new("n1")]);
+    g.validate().expect("n1 无输入端口，应通过");
+}
+
+#[test]
+fn terminal_node_with_outgoing_edges_is_rejected() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Text)).unwrap();
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .unwrap();
+
+    g.set_terminal_nodes(vec![NodeId::new("n1")]);
+    let err = g.validate().expect_err("出口节点的输出端口有出边时必须拒绝");
+    assert!(
+        matches!(err, GraphError::InvalidTerminalNode { .. }),
+        "实际 {err:?}"
+    );
+
+    g.set_terminal_nodes(vec![NodeId::new("n2")]);
+    g.validate().expect("n2 无输出端口，应通过");
+}

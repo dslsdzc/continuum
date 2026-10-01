@@ -21,6 +21,12 @@ pub enum GraphError {
     PortMismatch(#[from] PortError),
     #[error("连接 {from} → {to} 会成环")]
     Cycle { from: PortId, to: PortId },
+    #[error("连接的起点 {from} 必须是输出端口，终点 {to} 必须是输入端口")]
+    WrongOrientation { from: PortId, to: PortId },
+    #[error("入口节点 {id} 的输入端口存在入边")]
+    InvalidEntryNode { id: NodeId },
+    #[error("出口节点 {id} 的输出端口存在出边")]
+    InvalidTerminalNode { id: NodeId },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -30,6 +36,8 @@ pub struct AdfirGraph {
     nodes: Vec<Node>,
     ports: HashMap<PortId, (NodeId, Port)>,
     edges: Vec<Edge>,
+    entry_nodes: Vec<NodeId>,
+    terminal_nodes: Vec<NodeId>,
     pub contract_id: ContractIdRef,
 }
 
@@ -41,8 +49,59 @@ impl AdfirGraph {
             nodes: Vec::new(),
             ports: HashMap::new(),
             edges: Vec::new(),
+            entry_nodes: Vec::new(),
+            terminal_nodes: Vec::new(),
             contract_id,
         }
+    }
+
+    pub fn entry_nodes(&self) -> &[NodeId] {
+        &self.entry_nodes
+    }
+
+    pub fn terminal_nodes(&self) -> &[NodeId] {
+        &self.terminal_nodes
+    }
+
+    pub fn set_entry_nodes(&mut self, nodes: Vec<NodeId>) {
+        self.entry_nodes = nodes;
+    }
+
+    pub fn set_terminal_nodes(&mut self, nodes: Vec<NodeId>) {
+        self.terminal_nodes = nodes;
+    }
+
+    /// 校验入口与出口节点的两条约束（设计第 8.3 节）。
+    ///
+    /// 入口节点的输入端口不得有入边；出口节点的输出端口不得有出边。
+    /// 图在投入使用前必须通过本校验——增量构造过程中不检查，
+    /// 因为构造完成前这些约束无意义。
+    pub fn validate(&self) -> Result<(), GraphError> {
+        for id in &self.entry_nodes {
+            let node = self
+                .node(id)
+                .ok_or_else(|| GraphError::UnknownNode { id: id.clone() })?;
+            let has_incoming = node
+                .inputs
+                .iter()
+                .any(|p| self.edges.iter().any(|e| e.to_port == *p));
+            if has_incoming {
+                return Err(GraphError::InvalidEntryNode { id: id.clone() });
+            }
+        }
+        for id in &self.terminal_nodes {
+            let node = self
+                .node(id)
+                .ok_or_else(|| GraphError::UnknownNode { id: id.clone() })?;
+            let has_outgoing = node
+                .outputs
+                .iter()
+                .any(|p| self.edges.iter().any(|e| e.from_port == *p));
+            if has_outgoing {
+                return Err(GraphError::InvalidTerminalNode { id: id.clone() });
+            }
+        }
+        Ok(())
     }
 
     pub fn add_node(&mut self, node: Node) -> Result<(), GraphError> {
@@ -108,8 +167,11 @@ impl AdfirGraph {
 
     /// 建立一条连接。
     ///
-    /// 校验顺序：两端端口存在 → 方向一进一出 → `artifact_type` 相同（§239）
-    /// → 参与环检测的边类型不成环。任一校验失败时不留下边。
+    /// 校验顺序：两端端口存在 → 朝向（起点输出、终点输入）→ `artifact_type` 相同
+    /// （§239）→ 参与环检测的边类型不成环。任一校验失败时不留下边。
+    ///
+    /// 朝向必须在本层校验：`compatible` 只要求两端方向不同，是方向对称的；
+    /// 而本层的边有方向（`from_node → to_node`），失效传播与调度排序都按它解读。
     ///
     /// 同节点的输出连回自身输入不单设检查：那是一条环，由环检测拦下。
     pub fn connect(
@@ -124,6 +186,13 @@ impl AdfirGraph {
         let (to_node, to_port) = self
             .port(to)
             .ok_or_else(|| GraphError::UnknownPort { id: to.clone() })?;
+
+        if from_port.direction() != Direction::Output || to_port.direction() != Direction::Input {
+            return Err(GraphError::WrongOrientation {
+                from: from.clone(),
+                to: to.clone(),
+            });
+        }
 
         compatible(from_port, to_port)?;
 
