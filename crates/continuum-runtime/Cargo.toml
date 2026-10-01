@@ -5,8 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+continuum-artifact = { path = "../continuum-artifact" }
 continuum-core = { path = "../continuum-core" }
 continuum-events = { path = "../continuum-events" }
+continuum-graph = { path = "../continuum-graph" }
 continuum-persist = { path = "../continuum-persist" }
 continuum-provider = { path = "../continuum-provider" }
 tokio = { workspace = true }

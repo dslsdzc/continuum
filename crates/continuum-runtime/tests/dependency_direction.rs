@@ -42,13 +42,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
-    // 本 task 结束时 runtime 的直接依赖只有这四个。
-    // Task 12 会给它加上 continuum-artifact 与 continuum-graph，届时此表要同步扩充。
+    // Task 12 起 runtime 直接依赖这六个：后两者用于在启动流程里
+    // 注册 P1 迁移。
     (
         "continuum-runtime",
         &[
+            "continuum-artifact",
             "continuum-core",
             "continuum-events",
+            "continuum-graph",
             "continuum-persist",
             "continuum-provider",
         ],

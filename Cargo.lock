@@ -143,8 +143,10 @@ dependencies = [
 name = "continuum-runtime"
 version = "0.1.0"
 dependencies = [
+ "continuum-artifact",
  "continuum-core",
  "continuum-events",
+ "continuum-graph",
  "continuum-persist",
  "continuum-provider",
  "tempfile",
