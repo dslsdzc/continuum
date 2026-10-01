@@ -186,6 +186,30 @@ fn blocked_nodes_are_unblocked_when_predecessors_complete() {
 }
 
 #[test]
+fn unblocking_waits_for_a_data_predecessor_too() {
+    // 与上一条同形，但走 DATA 边。`apply_unblocking` 的 filter 若只算
+    // CONTROL 与 DEPENDENCY，DATA 边会被滤掉，`.all()` 对空集为真，
+    // 节点在前驱尚未 COMPLETED 时就被提前解除阻塞。既有用例全用 CONTROL
+    // 边，故该 filter 无守卫——本用例是它的唯一守卫。
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Data);
+    set_state(&mut g, "a", NodeState::Failed);
+    apply_blocking(&mut g);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
+
+    set_state(&mut g, "a", NodeState::Running);
+    assert!(
+        apply_unblocking(&mut g).is_empty(),
+        "DATA 前驱未 COMPLETED 时不得解除阻塞"
+    );
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
+
+    set_state(&mut g, "a", NodeState::Completed);
+    assert_eq!(names(&apply_unblocking(&mut g)), vec!["b"]);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Ready);
+}
+
+#[test]
 fn unblocking_leaves_nodes_with_unfinished_predecessors_blocked() {
     let mut g = graph(&["a", "b"]);
     link(&mut g, "a", "b", EdgeKind::Control);
