@@ -3294,7 +3294,7 @@ use continuum_graph::{
     NodeId, NodeState,
 };
 use continuum_operator::{OperatorId, OperatorVersion};
-use continuum_persist::{builtin_migrations, Db, Migration};
+use continuum_persist::{builtin_migrations, Db, Migration, Value};
 use continuum_port::{Direction, Port, PortId};
 use serde_json::json;
 
