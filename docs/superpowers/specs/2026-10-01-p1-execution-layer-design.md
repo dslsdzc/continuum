@@ -355,8 +355,10 @@ trait Checkpointable {
 ```
 READY 条件   所有输入 Port 已有可用的 DATA 入边来源，
              且所有 CONTROL 与 DEPENDENCY 入边来源处于 COMPLETED
-可并发条件   两个 READY 节点之间没有 CONTROL 或 DATA 路径
+可并发条件   所有 READY 节点之间均可并发
 ```
+
+可并发条件无需单独判定。「两个可执行节点之间存在 CONTROL 或 DATA 路径」在结构上不可能：候选节点处于 PENDING 或 READY，而排序前驱已 COMPLETED 的节点不在此列，故任两个候选之间不存在排序路径。
 
 Control 与 Dependency 的前驱进入 FAILED、CANCELLED、INVALIDATED 或 LOST 时，依赖它的节点迁移为 BLOCKED，不进入 READY。BLOCKED 节点在其全部此类前驱重新回到 COMPLETED 后迁移为 READY。
 

@@ -2422,14 +2422,26 @@ fn parallel_limit_caps_the_returned_set() {
 }
 
 #[test]
-fn nodes_on_a_shared_data_path_are_not_returned_together() {
+fn completed_nodes_are_not_returned_for_execution() {
     let mut g = graph(&["a", "b"]);
     link(&mut g, "a", "b", EdgeKind::Data);
-    // 两者都满足 READY 前置（a 无入边；b 的入边来源 a 处于 COMPLETED 之外的假设不成立），
-    // 因此改为直接断言：a 与 b 之间有 DATA 路径时不同时返回。
     set_state(&mut g, "a", NodeState::Completed);
-    let picked = select_runnable(&g, &config(8));
-    assert_eq!(names(&picked), vec!["b"], "a 已 COMPLETED，不应再被返回");
+
+    assert_eq!(
+        names(&select_runnable(&g, &config(8))),
+        vec!["b"],
+        "已 COMPLETED 的节点不应再次进入可执行集合"
+    );
+}
+
+#[test]
+fn independent_nodes_are_returned_together_up_to_the_limit() {
+    let g = graph(&["a", "b", "c"]);
+    assert_eq!(
+        names(&select_runnable(&g, &config(8))),
+        vec!["a", "b", "c"],
+        "无排序依赖的节点应同批返回"
+    );
 }
 
 #[test]
@@ -2446,7 +2458,7 @@ fn blocking_marks_descendants_of_failed_predecessors() {
 }
 ```
 
-`nodes_on_a_shared_data_path_are_not_returned_together` 只断言一条较弱但可确定的性质。若实现方发现它无法在不引入额外状态的前提下表达「两节点同批返回」的否定，**如实报告**并说明理由，不要把它写成空转断言。
+「返回集合内任两点之间不得存在 CONTROL 或 DATA 路径」这一性质由 READY 条件蕴含，无独立测试对象：候选只取 PENDING 与 READY，而排序前驱已 COMPLETED 的节点不在此列，故两个候选之间不可能有排序路径。实现时不要为它补连通性检查或空转测试。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -2480,7 +2492,11 @@ impl Default for SchedulerConfig {
 /// 返回本轮可提升为 QUEUED 的节点。
 ///
 /// READY 条件：所有 DATA、CONTROL、DEPENDENCY 入边来源处于 COMPLETED。
-/// 返回数量不超过 `max_parallel`；返回集合内任两点之间不得存在 CONTROL 或 DATA 路径。
+/// 返回数量不超过 `max_parallel`。
+///
+/// 返回集合内任两点之间不存在 CONTROL 或 DATA 路径——该性质由 READY 条件
+/// 直接蕴含：排序前驱已 COMPLETED 的节点不会被选为候选（候选只取 PENDING
+/// 与 READY），因此不另设连通性检查。设计第 12 节已按此改写。
 pub fn select_runnable(graph: &AdfirGraph, config: &SchedulerConfig) -> Vec<NodeId> {
     let mut candidates: Vec<NodeId> = graph
         .nodes()
@@ -2490,18 +2506,8 @@ pub fn select_runnable(graph: &AdfirGraph, config: &SchedulerConfig) -> Vec<Node
         .map(|n| n.id.clone())
         .collect();
     candidates.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-
-    let mut picked: Vec<NodeId> = Vec::new();
-    for candidate in candidates {
-        if picked.len() >= config.max_parallel {
-            break;
-        }
-        if picked.iter().any(|p| connected(graph, p, &candidate)) {
-            continue;
-        }
-        picked.push(candidate);
-    }
-    picked
+    candidates.truncate(config.max_parallel);
+    candidates
 }
 
 fn predecessors_completed(graph: &AdfirGraph, node: &NodeId) -> bool {
@@ -2514,30 +2520,6 @@ fn predecessors_completed(graph: &AdfirGraph, node: &NodeId) -> bool {
             .map(|n| n.state == NodeState::Completed)
             .unwrap_or(false)
     })
-}
-
-/// 两个节点之间是否已有 CONTROL 或 DATA 路径（任一方向）。
-fn connected(graph: &AdfirGraph, a: &NodeId, b: &NodeId) -> bool {
-    let reaches = |from: &NodeId, to: &NodeId| -> bool {
-        let mut stack = vec![from.clone()];
-        let mut seen: Vec<NodeId> = Vec::new();
-        while let Some(current) = stack.pop() {
-            if current == *to {
-                return true;
-            }
-            if seen.contains(&current) {
-                continue;
-            }
-            seen.push(current.clone());
-            for e in graph.edges_from(&current) {
-                if matches!(e.kind, crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Data) {
-                    stack.push(e.to_node.clone());
-                }
-            }
-        }
-        false
-    };
-    reaches(a, b) || reaches(b, a)
 }
 
 /// 把 CONTROL 与 DEPENDENCY 前驱已失败的下游节点迁移为 BLOCKED。
