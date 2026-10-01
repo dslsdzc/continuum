@@ -86,8 +86,11 @@ pub enum PortError {
 
 /// 判定两个端口能否连接。
 ///
-/// 条件为方向相反且 `artifact_type` 相同（§239）。
-/// `from` 为输出端，`to` 为输入端——顺序不影响判定结果，但错误信息按此顺序给出。
+/// 条件为方向不同且 `artifact_type` 相同（§239）。
+///
+/// 本函数对方向是对称的：只要求两端方向不同，不要求哪一端是输出。
+/// 图层的边有方向（`from_node → to_node` 被失效传播与调度排序依赖），
+/// 因此**朝向由 `AdfirGraph::connect` 另行校验**，不在本函数内。
 pub fn compatible(from: &Port, to: &Port) -> Result<(), PortError> {
     if from.direction == to.direction {
         return Err(PortError::DirectionMismatch {
