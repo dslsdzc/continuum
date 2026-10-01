@@ -745,6 +745,14 @@ impl PortId {
     }
 }
 
+// `PortError` 的两条格式串以 `{from}` / `{to}` 引用 PortId，
+// thiserror 要求该字段实现 Display。
+impl std::fmt::Display for PortId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -992,6 +1000,14 @@ impl OperatorId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+// `OperatorError` 的格式串以 `{id}` 引用 OperatorId，
+// thiserror 要求该字段实现 Display。
+impl std::fmt::Display for OperatorId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
     }
 }
 
@@ -1366,10 +1382,13 @@ pub enum NodeState {
 
 use serde::{Deserialize, Serialize};
 
+// 派生 `Ord`：id 的字典序构成全序，排序场景需要它。
+// 实现 `Display`：`GraphError` 的格式串以 `{id}` / `{from}` / `{to}` 引用 id，
+// thiserror 要求这些字段实现 `Display`。两者对所有 id 类型统一给出。
 macro_rules! id_type {
     ($name:ident, $doc:literal) => {
         #[doc = $doc]
-        #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
         pub struct $name(String);
 
         impl $name {
@@ -1379,6 +1398,12 @@ macro_rules! id_type {
 
             pub fn as_str(&self) -> &str {
                 &self.0
+            }
+        }
+
+        impl std::fmt::Display for $name {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(&self.0)
             }
         }
     };
