@@ -68,3 +68,22 @@ pub enum NodeState {
     Invalidated,
     Lost,
 }
+
+impl NodeState {
+    /// 全部十三个状态。
+    pub const ALL: [NodeState; 13] = [
+        NodeState::Pending,
+        NodeState::Ready,
+        NodeState::Queued,
+        NodeState::Running,
+        NodeState::Waiting,
+        NodeState::Blocked,
+        NodeState::Suspended,
+        NodeState::Verifying,
+        NodeState::Completed,
+        NodeState::Failed,
+        NodeState::Cancelled,
+        NodeState::Invalidated,
+        NodeState::Lost,
+    ];
+}
