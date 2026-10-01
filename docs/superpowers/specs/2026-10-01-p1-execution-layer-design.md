@@ -105,11 +105,14 @@ crates/
 ```
 continuum-port      → continuum-artifact
 continuum-operator  → continuum-artifact
-continuum-graph     → continuum-port, continuum-operator, continuum-artifact, continuum-persist
-continuum-artifact  → continuum-persist, continuum-core
+continuum-graph     → continuum-port, continuum-operator, continuum-artifact, continuum-persist,
+                      continuum-events
+continuum-artifact  → continuum-persist, continuum-core, continuum-events
 ```
 
 该方向与 02 §3.3 的层内依赖序一致，且无环。Graph Scheduler 不单独成 crate：`§303` 的职责是判定 READY 与可并发，与图结构的耦合高于与其他组件的耦合。
+
+`continuum-events` 的两条边由第 16 节要求：`continuum-graph` 与 `continuum-artifact` 都要构造 `Event`，把事件写在调用方的事务里。`continuum-events` 只依赖 `continuum-core`，不构成环。`continuum-persist` 虽也依赖 `continuum-events`，但不转出 `Event` / `EventType`，故不能替代这两条边。
 
 # 6. Artifact 数据模型
 
@@ -415,6 +418,8 @@ VERIFICATION    不可重试，进入验证路径
 UNKNOWN         不可自动重试
 ```
 
+上表是该类别在**固有归属**上是否允许重试，不是对某次执行的保证：一次失败是否真的重试，还要经第 13.2 节的白名单与尝试余量两道判定。`RESOURCE` 与前两类的区别在升级时机——`CONSTRAINT` / `AUTHORIZATION` 立即升级为决策，`RESOURCE` 是退避重试耗尽后再升级。
+
 ## 13.2 重试
 
 ```
@@ -425,6 +430,12 @@ RetryPolicy {
     escalation_policy  EscalationPolicy
 }
 ```
+
+`attempt` 自 1 起计：首次尝试的 `attempt` 为 1。`max_attempts` 是该节点允许的**总尝试次数**，不是重试次数。判据为 `attempt < max_attempts` 时重试（`next_attempt = attempt + 1`），否则升级。故 `max_attempts = 1` 表示只尝试一次、不重试。
+
+`retryable_errors` 是在 `§13.1` 固有归属之上**收窄**的白名单：类别既要在固有归属上可重试，又要在白名单内，才会被重试。空白名单使所有类别都不重试。
+
+`RetryPolicy::default()`（`max_attempts = 1`、空白名单、`EscalationPolicy::None`）表示**不重试**，适用于未声明重试策略的 Operator。它不满足 `§13.1` 对 `RESOURCE` 的「退避后仍失败则升级」：该类别拿到默认策略时会在首次失败即失败，没有任何退避重试。故 `RESOURCE` 的固有策略必须由后端解析方（P3 的 Router）在构造 `ExecutionProfile` 时显式给出 `max_attempts >= 2` 与退避参数，不能依赖默认值。默认值是「未配置」的表示，不是任何类别的固有策略。
 
 `§307` 要求非幂等 Effect 不得直接自动重试。判定依据为 `Operator.side_effect_class`：
 
@@ -457,7 +468,7 @@ ExecutionProfile {
 
 `backend` 的类型是 `Option<BackendId>`——`BackendId` 已由 `§244` 的 Operator 定义提供，无需占位。
 
-本子项目内 `model`、`provider`、`tool`、`compute_node` 恒为 None——P3 与 P7 之前无对应资源。
+本子项目内 `model`、`provider`、`tool`、`compute_node`、`reasoning_effort`、`cost_budget` 恒为 None——P3 与 P7 之前无对应资源。
 
 该类型定义在 `continuum-graph`，与第 11.2 节的执行接口同处一 crate。
 
@@ -471,18 +482,38 @@ ExecutionProfile {
 
 ```
 adfir_graph          id, version, contract_id, entry_nodes, terminal_nodes
+                     PK (id)
 adfir_node           graph_id, node_id, operator_id, operator_version, state,
-                     execution_policy, verification_policy
-adfir_port           graph_id, node_id, direction, name, artifact_type
+                     execution_policy, verification_policy, constraints, capabilities
+                     PK (graph_id, node_id)
+adfir_port           graph_id, node_id, port_id, direction, name, artifact_type
+                     PK (graph_id, port_id)
 adfir_edge           graph_id, from_node, from_port, to_node, to_port, kind
+                     无主键；同一对端口可重复连边，见下文「边的去重」
 artifact             id, artifact_type, content_hash, size, producer_node,
                      privacy_class, version, metadata, provenance
+                     PK (id)；索引 idx_artifact_hash (content_hash)
 artifact_input       artifact_id, input_artifact_id
-execution_profile    node_id, attempt, backend, timeout, retry_policy, cost_budget
-node_attempt         node_id, attempt, state, failure_class
+                     PK (artifact_id, input_artifact_id)
+execution_profile    graph_id, node_id, attempt, backend, timeout_ms, retry_policy, cost_budget
+                     PK (graph_id, node_id, attempt)
+node_attempt         graph_id, node_id, attempt, state, failure_class
+                     PK (graph_id, node_id, attempt)
 ```
 
 Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元数据入库。
+
+**枚举列的编码。** `adfir_node.state`、`node_attempt.state`、`node_attempt.failure_class`、`adfir_edge.kind`、`adfir_port.direction`、`artifact.artifact_type`、`artifact.privacy_class` 一律用**小写**、多词以 `_` 连接（`source_tree`、`local_only`）。这不等于 Rust 枚举的 serde 表示：`NodeState` 与 `FailureClass` 的 serde 是 `SCREAMING_SNAKE_CASE`，直接反序列化会失败。落库与读回一律经 `continuum-graph::persist` 的显式辅助函数（`state_str` / `parse_state`），不得依赖 serde，也不得在别处硬写字面量。
+
+**`attempt` 的键空间。** `node_attempt` 与 `execution_profile` 共用同一套 `attempt` 编号，键为 `(graph_id, node_id)`。编号自 1 起，同一节点每新增一次尝试取 `MAX(attempt) + 1`。分配方是执行器；恢复钩子把崩溃时正在运行的节点记为一次新尝试，也走同一规则。两处若各起计数器会错位或撞主键。
+
+**每次尝试必须同时写这两张表。** 这是上面「单表取 `MAX` 即等价」成立的前提：现有实现（`mark_node_lost`）只从 `node_attempt` 取 `MAX(attempt)`，若将来有写入方只更新 `execution_profile` 而漏写 `node_attempt`，恢复钩子算出的号会与执行器的错位——不撞主键，但两表的同一个号不再指同一次执行。写入方新增时必须遵守此条。
+
+**边的去重。** `adfir_edge` 无主键，而 `AdfirGraph::connect` 不去重——同一对端口可以连两次并原样往返。P1 内无消费者受害；P2 接入调度后重复边会让 `edges_to` 双倍计数。`connect` 应对完全相同的边（两端节点、两端端口、`kind` 全同）返回错误而非静默接受。
+
+**表的读写方。** 每张表的读写函数与表定义放在同一 crate。`continuum-runtime` 不直接对这些列写 SQL 字面量——编码分歧正是这样产生的。查询条件里的列取值同样属于该 crate：`WHERE state IN (...)` 的两个取值是编码，不是策略，故也参数化并取自 `state_str`。
+
+这条约束是**构造性质，没有行为守卫**：把 WHERE 的参数换回取值正确的字面量，`cargo test --workspace` 全绿——「用参数」与「用字面量且取值恰好正确」在行为上不可区分。把它变成可执行约束需要源码层检查（仿 `dependency_direction.rs` 的结构性做法），本项目尚未引入这种测试形态。当前由 crate 边界与本节约束维持；若后续有第二个 crate 开始对同一批列写 SQL，再考虑加检查。
 
 `continuum-runtime` 的启动改为 `Db::open_with(builtin_migrations + p1_migrations)`，否则 P0 的 `run_recovery` 内建迁移与 P1 的表不会同时生效。
 
@@ -498,6 +529,17 @@ EventType::ArtifactCreated     Artifact 入库时写入
 ```
 
 第 9 节的恢复钩子同时闭合 P0 遗留的一项：在此之前 `run_recovery` 的四个阶段无钩子可调用，`§317` 的恢复保证不成立。
+
+**写入函数的事务契约。** 凡「状态变迁 + 事件」这类成对写入，函数只使用调用方传入的 `Tx`，不自行开启或提交事务——提交由调用方负责，这是 `§318` 原子性的前提。由此有两条调用方义务：
+
+1. **函数返回 `Err` 之后，调用方必须回滚该事务，不得提交。** 函数可能在失败前已写入部分行（例如先写状态、再写事件时事件写入失败）。「先收集错误、最后统一提交」的批量写法会写进一个没有对应事件的状态变迁。
+2. **事件 id 由调用方分配且必须唯一。** 同一次执行中节点可以多次到达同一状态（`Running → Waiting → Ready → Queued → Running` 是合法路径，会写两条 `NodeStarted`），故不能用可由节点与状态派生的可复用 id。执行器应使用单调序号。
+
+   例外：当「被记录的对象」与「事件」一一对应、且该对象的 id 全局唯一时，可用派生 id。`ArtifactCreated` 即属此类——一个 Artifact 恰产生一条该事件，`artifact.id` 是主键，重复落库在事件写入之前就被拒，故 `artifact/{id}` 是安全的。节点状态变迁不满足此条件，必须用序号。
+
+这两条不是实现细节：函数自身提交不了（它拿不到 `Db`），原子性在端到端意义上由调用方兑现。
+
+「状态与元数据先写、事件后写」这个顺序本身**没有行为守卫**：把事件块整体前移，全部用例保持全绿——在调用方遵守上面第 1 条的前提下，两种顺序不可区分（要么一起提交、要么一起回滚）。与第 15 节的「WHERE 参数化无守卫」同类，属构造性质。
 
 # 17. 测试策略
 
@@ -529,8 +571,22 @@ EventType::ArtifactCreated     Artifact 入库时写入
 §237 的迁移表     规范未定义，本设计定义。若规范后续给出迁移表，以规范为准。
 §238 的三类边     规范未描述 DEPENDENCY、EFFECT、INVALIDATION，本设计定义。
 ArtifactType 集合 本子项目取六种。P5 引入媒体类型时为编译期可见的破坏性变更。
-ExecutionProfile  四个资源字段在 P3、P7 之前恒为 None，其写入路径未被覆盖。
+ExecutionProfile  六个资源字段在 P3、P7 之前恒为 None，其写入路径未被覆盖。
 检查点            只定义接口，无实现，无测试。
+算子解析的落点    §11.2 的 Failure condition「注册表中不存在 (operator_id, operator_version)
+                  时节点不进入 RUNNING，返回 OperatorNotFound」在 P1 无执行点：
+                  Node::operator 是 OperatorRef，Node::new 不查注册表，transition 也不收注册表。
+                  P2 的 Queued → Running 是它唯一的合法落点，必须在彼处调 OperatorRegistry::resolve
+                  并做前置判定，否则未注册的算子也能进入 RUNNING。
+RESOURCE 的默认策略 §13.1 给 RESOURCE 的「退避后仍失败则升级」不能由 RetryPolicy::default()
+                  满足（默认 max_attempts = 1，首次失败即失败）。P3 的 Router 必须显式给出。
+无执行点的机制    P1 定义了但没有生产调用方的机制，P2 接执行器时才有消费者：
+                  apply_transition（第 16 节的写入函数）、save_graph / load_graph、
+                  ArtifactStore::{persist, restore} 与 commit_with_content、
+                  BlobStore 的落盘路径。P1 内除测试外无调用点，接线属 P2。
+                  （select_runnable / apply_blocking / apply_unblocking / propagate_invalidation /
+                  can_reuse / decide_retry / is_terminal / is_candidate_backend / OperatorRegistry
+                  同属此类，见第 11.1、11.2、14 节的自陈。）
 并行上限          默认值 1 是占位取值，P3 接入资源模型后需重估。
 ```
 

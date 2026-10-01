@@ -3278,6 +3278,15 @@ git commit -m "feat(graph): 失败分类与重试判定"
 
 ### Task 11: 图与 Artifact 的持久化
 
+> **订正（2026-10-01，合并前终审后补）。** 本 task 与 Task 12 的代码块在
+> `adfir_node.state` 这一列上写了大写字面量（`'RUNNING'`、`'VERIFYING'`、`'LOST'`、
+> `'UNKNOWN'`），与 `state_str` / `parse_state` 的小写约定冲突（`adfir_edge.kind`、
+> `adfir_port.direction`、`artifact.artifact_type` 也都是小写）。两处大写曾导致一个
+> Critical：恢复钩子对 `save_graph` 写出的数据恒 0 行命中，且钩子写出的 `'LOST'`
+> 读不回图。实际实现已统一为小写（见 `crates/continuum-runtime/src/recovery.rs`）。
+> **照抄本节代码时请一律改用小写。** 本段的代码块保留原样，以维持计划作为历史记录的可追溯性。
+
+
 **Files:**
 - Create: `crates/continuum-artifact/src/persist.rs`
 - Create: `crates/continuum-graph/src/persist.rs`
@@ -3967,6 +3976,16 @@ git commit -m "feat(p1): 图与 Artifact 元数据的持久化"
 
 ### Task 12: runtime 装配与恢复钩子
 
+> **订正（2026-10-01，合并前终审后补）。** 同 Task 11：本节代码块里的 `'RUNNING'`、
+> `'VERIFYING'`、`'LOST'`、`'UNKNOWN'` 应为小写。实际实现已统一为小写。
+> **照抄本节代码时请一律改用小写。**
+>
+> 另有 `node_attempt` 的 attempt 列：代码块写死为 `1`，实际实现已改为
+> `(SELECT COALESCE(MAX(attempt), 0) + 1 FROM node_attempt WHERE graph_id = ?1 AND node_id = ?2)`，
+> 以免同一节点的第二次尝试覆盖第一次的记录。`attempt` 自 1 起计，与 `execution_profile`
+> 共用同一套编号，见设计第 15 节。
+
+
 **Files:**
 - Modify: `crates/continuum-runtime/src/main.rs`
 - Modify: `crates/continuum-runtime/Cargo.toml`
@@ -4638,17 +4657,962 @@ git commit -m "feat(graph): 执行接口与执行档案（补设计 §11.2 与 �
 
 ---
 
+### Task 14: 磁盘内容寻址存储与 ArtifactStore 落库桥（补设计 §15 与 §242）
+
+**背景：** 设计 §15 明写「Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元数据入库。」P1 终审确认：`crates/` 下无 `std::fs` 调用，磁盘存储不存在；`ArtifactStore`（内存）与 `save_artifact`（落库）互不引用，于是 P1 有两条互不相通的 Artifact 写入路径，而唯一断言「相同内容只存一份」的用例打在内存路径上，真正持久的路径只有一个非唯一索引。本 task 闭合这两处。
+
+**依赖：** Task 11（`save_artifact` / `load_artifact` / `p1_artifact_migrations`）。
+
+**Files:**
+- Create: `crates/continuum-artifact/src/blobstore.rs`
+- Modify: `crates/continuum-artifact/src/lib.rs`
+- Modify: `crates/continuum-artifact/src/store.rs`
+- Test: `crates/continuum-artifact/tests/blobstore.rs`
+- Test: `crates/continuum-artifact/tests/artifact_store.rs`
+
+`crates/continuum-artifact/Cargo.toml` 目前**没有** `[dev-dependencies]` 段，两个测试都要建临时库，
+需补 `tempfile = { workspace = true }`。`continuum-persist` 已是正式依赖，测试可直接用。
+
+`artifact_store.rs:6` 已有夹具 `fn artifact(id: &str, bytes: &[u8], inputs: Vec<ArtifactId>) -> Artifact`，
+直接复用，不要另造。
+
+**Interfaces:**
+- Produces: `continuum_artifact::BlobStore` —— `new`、`put`、`get`、`contains`
+- Produces: `continuum_artifact::BlobError` —— `Io` / `Corrupt` / `Missing`
+- Produces: `ArtifactStore::persist(&self, tx) -> Result<(), PersistError>`
+- Produces: `ArtifactStore::restore(tx) -> Result<Self, PersistError>`
+
+- [ ] **Step 1: 写 BlobStore 的测试**
+
+`crates/continuum-artifact/tests/blobstore.rs`
+
+```rust
+use continuum_artifact::{BlobStore, ContentHash};
+
+#[test]
+fn same_content_is_stored_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+
+    let a = store.put(b"hello").unwrap();
+    let b = store.put(b"hello").unwrap();
+
+    assert_eq!(a, b, "相同内容必须得到相同哈希");
+    assert_eq!(a, ContentHash::of(b"hello"));
+    // 磁盘上只有一份：目录下的文件总数不随重复写入增长
+    assert_eq!(count_files(dir.path()), 1);
+}
+
+#[test]
+fn different_content_lands_on_different_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+    store.put(b"one").unwrap();
+    store.put(b"two").unwrap();
+    assert_eq!(count_files(dir.path()), 2);
+}
+
+#[test]
+fn content_round_trips_through_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+    let hash = store.put(b"\x00\xff binary").unwrap();
+    assert_eq!(store.get(&hash).unwrap(), b"\x00\xff binary");
+}
+
+#[test]
+fn tampered_content_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+    let hash = store.put(b"original").unwrap();
+
+    // 找到落盘文件并改写它，模拟存储被篡改
+    let path = find_file(dir.path());
+    std::fs::write(&path, b"tampered").unwrap();
+
+    let err = store.get(&hash).unwrap_err();
+    assert!(matches!(err, continuum_artifact::BlobError::Corrupt { .. }), "实际 {err:?}");
+}
+
+#[test]
+fn missing_content_reports_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+    let err = store.get(&ContentHash::of(b"never written")).unwrap_err();
+    assert!(matches!(err, continuum_artifact::BlobError::Missing { .. }), "实际 {err:?}");
+}
+
+fn count_files(root: &std::path::Path) -> usize {
+    walk(root).len()
+}
+
+fn find_file(root: &std::path::Path) -> std::path::PathBuf {
+    walk(root).into_iter().next().expect("至少有一个文件")
+}
+
+fn walk(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            out.extend(walk(&path));
+        } else {
+            out.push(path);
+        }
+    }
+    out
+}
+```
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+cargo test -p continuum-artifact --test blobstore
+```
+
+预期：编译失败，`BlobStore` 不存在。
+
+- [ ] **Step 3: 实现 BlobStore**
+
+`crates/continuum-artifact/src/blobstore.rs`
+
+```rust
+//! 内容寻址的二进制存储（设计 §15、§242）。
+//!
+//! 内容不存库：按 `content_hash` 落磁盘，路径为 `<root>/<哈希前两位>/<哈希>`。
+//! 该布局使得相同内容必然落在同一路径，磁盘上的去重由路径本身保证，
+//! 不需要额外的索引或引用计数。
+
+use crate::content::ContentHash;
+use std::fs;
+use std::path::PathBuf;
+
+#[derive(Debug, thiserror::Error)]
+pub enum BlobError {
+    #[error("内容 {hash} 的读写失败：{source}")]
+    Io {
+        hash: ContentHash,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("内容 {hash} 的字节与其哈希不符（存储已损坏或被篡改）")]
+    Corrupt { hash: ContentHash },
+    #[error("内容 {hash} 不存在")]
+    Missing { hash: ContentHash },
+}
+
+pub struct BlobStore {
+    root: PathBuf,
+}
+
+impl BlobStore {
+    pub fn new(root: impl Into<PathBuf>) -> Self {
+        Self { root: root.into() }
+    }
+
+    /// 内容的落盘路径。用哈希前两位分目录，避免单目录下文件过多。
+    fn path_of(&self, hash: &ContentHash) -> PathBuf {
+        let s = hash.as_str();
+        self.root.join(&s[..2]).join(s)
+    }
+
+    /// 写入内容并返回其哈希。相同内容重复写入不产生第二份。
+    pub fn put(&self, bytes: &[u8]) -> Result<ContentHash, BlobError> {
+        let hash = ContentHash::of(bytes);
+        let path = self.path_of(&hash);
+        if path.exists() {
+            return Ok(hash);
+        }
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir).map_err(|source| BlobError::Io {
+                hash: hash.clone(),
+                source,
+            })?;
+        }
+        fs::write(&path, bytes).map_err(|source| BlobError::Io {
+            hash: hash.clone(),
+            source,
+        })?;
+        Ok(hash)
+    }
+
+    /// 读回内容并校验哈希。校验失败说明存储被改动，返回 `Corrupt` 而不是坏数据。
+    pub fn get(&self, hash: &ContentHash) -> Result<Vec<u8>, BlobError> {
+        let path = self.path_of(hash);
+        if !path.exists() {
+            return Err(BlobError::Missing { hash: hash.clone() });
+        }
+        let bytes = fs::read(&path).map_err(|source| BlobError::Io {
+            hash: hash.clone(),
+            source,
+        })?;
+        if &ContentHash::of(&bytes) != hash {
+            return Err(BlobError::Corrupt { hash: hash.clone() });
+        }
+        Ok(bytes)
+    }
+
+    pub fn contains(&self, hash: &ContentHash) -> bool {
+        self.path_of(hash).exists()
+    }
+}
+```
+
+`crates/continuum-artifact/src/lib.rs` 加 `pub mod blobstore;` 与
+`pub use blobstore::{BlobError, BlobStore};`。
+
+- [ ] **Step 4: 运行测试，确认通过**
+
+```bash
+cargo test -p continuum-artifact --test blobstore
+```
+
+- [ ] **Step 5: 写落库桥的测试**
+
+在 `crates/continuum-artifact/tests/artifact_store.rs` 追加（并新建一个临时库文件）：
+
+```rust
+#[test]
+fn store_round_trips_through_the_database() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("a1", b"root", vec![])).unwrap();
+    store.commit(artifact("a2", b"derived", vec![ArtifactId::new("a1")])).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    assert_eq!(restored.get(&ArtifactId::new("a1")), store.get(&ArtifactId::new("a1")));
+    assert_eq!(restored.get(&ArtifactId::new("a2")), store.get(&ArtifactId::new("a2")));
+    assert_eq!(restored.lineage(&ArtifactId::new("a2")), vec![ArtifactId::new("a1")]);
+    assert_eq!(restored.stored_blob_count(), 2);
+}
+
+#[test]
+fn deduplication_holds_on_the_persisted_path() {
+    // 两个 id 不同的 Artifact 携带相同内容：落库后仍只算一份内容
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    let a1 = artifact("a1", b"same", vec![]);
+    let a2 = artifact("a2", b"same", vec![]); // 与 a1 内容相同、id 不同
+    let hash = a1.content_hash.clone();
+    assert_eq!(hash, a2.content_hash, "夹具前提：两者内容相同");
+    store.commit(a1).unwrap();
+    store.commit(a2).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    assert_eq!(restored.stored_blob_count(), 1, "相同内容只存一份");
+    assert!(restored.find_by_hash(&hash).is_some());
+}
+
+#[test]
+fn restore_follows_dependency_order_not_id_order() {
+    // "a1" 的输入是 "z1"：按 id 字典序重建会先撞上输入缺失，按依赖序不会
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("z1", b"root", vec![])).unwrap();
+    store.commit(artifact("a1", b"derived", vec![ArtifactId::new("z1")])).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).expect("按依赖序重建应当成功");
+    assert_eq!(restored.lineage(&ArtifactId::new("a1")), vec![ArtifactId::new("z1")]);
+}
+
+#[test]
+fn restore_reports_dangling_inputs_instead_of_dropping_them() {
+    // 库中存在一个输入不存在的 Artifact：重建必须报错，不能静默少一个
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("a1", b"root", vec![])).unwrap();
+    store.persist(&tx).unwrap();
+    // 绕过内存路径直接写一条输入悬空的记录
+    tx.execute(
+        "INSERT INTO artifact_input (artifact_id, input_artifact_id) VALUES ('a1', 'ghost')",
+        &[],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = ArtifactStore::restore(&tx).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("a1"), "错误应点名出问题的 Artifact，实际：{msg}");
+}
+
+fn migrations() -> Vec<continuum_persist::Migration> {
+    let mut m = continuum_persist::builtin_migrations();
+    m.extend(p1_artifact_migrations());
+    m
+}
+```
+
+`source_tree` / `patch` 是本文件已有的夹具函数；若名称不同按实际调整。`ArtifactStore`
+与 `save_artifact` 已在同一 crate，`persist` / `restore` 内部应复用它们而非另写 SQL。
+
+- [ ] **Step 6: 实现 persist / restore**
+
+在 `crates/continuum-artifact/src/store.rs` 追加：
+
+```rust
+use crate::persist::{load_artifact, save_artifact};
+use continuum_persist::{PersistError, Tx, Value};
+
+impl ArtifactStore {
+    /// 把内存中的全部 Artifact 元数据落入 `artifact` 与 `artifact_input`。
+    ///
+    /// 只使用调用方传入的 `Tx`，不自行开启或提交事务——提交由调用方负责，
+    /// 以便与同一事务内的其他写入（如事件）一起原子生效。
+    pub fn persist(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
+        for artifact in self.by_id.values() {
+            save_artifact(tx, artifact)?;
+        }
+        Ok(())
+    }
+
+    /// 从库中重建。
+    ///
+    /// 按**依赖序**重建而非 id 序：`commit` 要求输入 Artifact 已存在，而 id
+    /// 的字典序不保证输入在前（id 为 `z` 的 Artifact 可以依赖 `a`）。每轮提交
+    /// 所有输入已就位的 Artifact，直到一轮之内没有进展；此时若仍有剩余，说明
+    /// 存在环或输入的 id 缺失，返回错误而不是静默丢弃。
+    ///
+    /// `by_hash` 的「首次提交者胜出」随之由该顺序决定。
+    pub fn restore(tx: &Tx<'_>) -> Result<Self, PersistError> {
+        let rows = tx.query("SELECT id FROM artifact ORDER BY id", &[])?;
+        let mut pending: Vec<Artifact> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id = match &row[0] {
+                Value::Text(s) => ArtifactId::new(s.clone()),
+                other => {
+                    return Err(PersistError::Database(format!(
+                        "artifact.id 应为文本，实际 {other:?}"
+                    )))
+                }
+            };
+            let artifact = load_artifact(tx, &id)?
+                .ok_or_else(|| PersistError::Database(format!("artifact {id} 在枚举后读不回")))?;
+            pending.push(artifact);
+        }
+
+        let mut store = Self::new();
+        while !pending.is_empty() {
+            let mut deferred = Vec::new();
+            let mut progressed = false;
+            for artifact in pending {
+                if artifact
+                    .input_artifacts
+                    .iter()
+                    .all(|input| store.get(input).is_some())
+                {
+                    // 走 commit 而不是直接插表：恢复到与内存路径同一套不变量
+                    store.commit(artifact).map_err(|e| {
+                        PersistError::Database(format!("恢复 Artifact 被拒：{e}"))
+                    })?;
+                    progressed = true;
+                } else {
+                    deferred.push(artifact);
+                }
+            }
+            if !progressed {
+                let blocked: Vec<&str> = deferred.iter().map(|a| a.id.as_str()).collect();
+                return Err(PersistError::Database(format!(
+                    "以下 Artifact 的输入在库中不存在或依赖成环：{blocked:?}"
+                )));
+            }
+            pending = deferred;
+        }
+        Ok(store)
+    }
+}
+```
+
+`blobs` 字段与 `stored_blob_count` 保持不动（它的冗余清理已记为 P2 项）。
+
+- [ ] **Step 7: 把 `store.rs` 的过时注释改掉**
+
+`crates/continuum-artifact/src/store.rs:19` 现写「P1 的实现保存在内存中；落库在 Task 11」，
+已不成立。改为说明内存结构是工作副本，经 `persist` / `restore` 与库往返。
+
+- [ ] **Step 8: 运行全部测试并提交**
+
+```bash
+cargo test --workspace
+git add -A
+git commit -m "feat(artifact): 磁盘内容寻址存储与 ArtifactStore 落库桥"
+```
+
+---
+
+### Task 15: 状态迁移与事件同事务写入（补设计 §16 与 §17 的事务边界判据）
+
+**背景：** 设计 §16 要求 `NodeStarted` / `NodeCompleted` / `ArtifactCreated` 分别在节点进入 RUNNING、进入 COMPLETED、Artifact 入库时写入；§17 把「节点状态迁移与对应事件在同一事务内提交（§318）」列为 P1 的测试判据。P1 终审确认这三型在 `crates/` 下零引用，`transition()` 是纯函数、不接受 `Tx`，该判据无 task 覆盖。本 task 补上。
+
+**依赖：** Task 6（迁移表）、Task 11（`save_graph` / `persist.rs`）、Task 14。
+
+**Files:**
+- Create: `crates/continuum-graph/src/transition_tx.rs`
+- Modify: `crates/continuum-graph/src/lib.rs`
+- Modify: `crates/continuum-graph/src/persist.rs`（`state_str` / `parse_state` 改 `pub(crate)`）
+- Modify: `crates/continuum-artifact/src/persist.rs`（`save_artifact` 加事件参数）
+- Modify: `crates/continuum-artifact/src/store.rs`（Task 14 的 `persist` 调用点随签名同步）
+- Modify: `crates/continuum-artifact/Cargo.toml`（`[dependencies]` 加 `continuum-events`）
+- Modify: `crates/continuum-graph/Cargo.toml`（`[dependencies]` 与 `[dev-dependencies]` 各加 `continuum-events`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 表）
+- Test: `crates/continuum-graph/tests/transition_events.rs`
+- Test: `crates/continuum-graph/tests/persistence.rs`（`save_artifact` 调用点同步）
+
+**Interfaces:**
+- Produces: `continuum_graph::apply_transition`
+- Produces: `continuum_graph::ApplyError`
+- 变更: `continuum_artifact::save_artifact(tx, artifact, event_id, occurred_at)`
+
+**依赖方向的两条新边（设计第 5 节已修订）。** `continuum-graph` 与
+`continuum-artifact` 都需要构造 `continuum_events::Event`，两者目前的 `Cargo.toml`
+都没有该依赖，需补：
+
+- `crates/continuum-artifact/Cargo.toml` 的 `[dependencies]` 加
+  `continuum-events = { path = "../continuum-events" }`。
+- `crates/continuum-graph/Cargo.toml` 的 `[dependencies]` 加同一条；**另需在
+  `[dev-dependencies]` 也加一条**——`tests/transition_events.rs` 是独立 crate，
+  要能直接写 `continuum_events::EventType`。（`tempfile` 已在 dev-dependencies 里。）
+- `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表加这两条边：
+  `continuum-artifact` 的数组加 `"continuum-events"`，`continuum-graph` 的数组同样。
+  该表用 `cargo tree --depth 1 --edges all` 取值，**dev-dependencies 也算直接边**，
+  漏加会让 `every_crate_depends_only_on_its_allowed_set` 失败。
+
+这两条边不构成环（`continuum-events` 只依赖 `continuum-core`）。
+
+`EventType` 已派生 `Debug, Clone, Copy, PartialEq, Eq, Hash`（`event.rs:12`），
+测试可直接 `assert_eq!`，无需补派生。
+
+- [ ] **Step 1: 写事务边界与事件的测试**
+
+`crates/continuum-graph/tests/transition_events.rs`
+
+```rust
+use continuum_events::EventType;
+use continuum_graph::{apply_transition, save_graph, ApplyError, NodeState};
+use continuum_persist::{Db, Migration, Value};
+
+#[test]
+fn transition_and_its_event_commit_together() {
+    let (_d, db, graph_id) = fixture();
+    let tx = db.begin().unwrap();
+    // 夹具的节点是 PENDING，而迁移表里 PENDING 只有 →READY / →BLOCKED 两条出边，
+    // 故进 RUNNING 必须先走 READY → QUEUED
+    apply_transition(&tx, &graph_id, "n1", NodeState::Ready, 900, "e0").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Queued, 950, "e0b").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Running, 1_000, "e1").unwrap();
+    tx.commit().unwrap();
+
+    // 状态确实落库
+    assert_eq!(state_of(&db, &graph_id, "n1"), NodeState::Running);
+    // 且对应事件同事务写入
+    assert_eq!(events_of(&db, &graph_id, "n1"), vec![EventType::NodeStarted]);
+}
+
+#[test]
+fn illegal_transition_writes_neither_state_nor_event() {
+    let (db, graph_id) = fixture();
+    // PENDING → COMPLETED 不在迁移表内
+    let tx = db.begin().unwrap();
+    let err =
+        apply_transition(&tx, &graph_id, "n1", NodeState::Completed, 1_000, "e1").unwrap_err();
+    assert!(matches!(err, ApplyError::Illegal(_)), "实际 {err:?}");
+
+    // 事务被丢弃后，状态与事件都不得留下痕迹
+    drop(tx);
+    assert_eq!(state_of(&db, &graph_id, "n1"), NodeState::Pending);
+    assert!(events_of(&db, &graph_id, "n1").is_empty());
+}
+
+#[test]
+fn completed_transition_emits_node_completed() {
+    let (db, graph_id) = fixture();
+    let tx = db.begin().unwrap();
+    // PENDING → READY → QUEUED → RUNNING → VERIFYING → COMPLETED
+    apply_transition(&tx, &graph_id, "n1", NodeState::Ready, 1_000, "e1").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Queued, 1_100, "e2").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Running, 1_200, "e3").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Verifying, 1_300, "e4").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Completed, 1_400, "e5").unwrap();
+    tx.commit().unwrap();
+
+    assert_eq!(
+        events_of(&db, &graph_id, "n1"),
+        vec![EventType::NodeStarted, EventType::NodeCompleted],
+        "五个迁移里只有进入 RUNNING 与 COMPLETED 的两个产生事件"
+    );
+}
+
+#[test]
+fn intermediate_states_emit_no_event() {
+    let (db, graph_id) = fixture();
+    let tx = db.begin().unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Ready, 1_000, "e1").unwrap();
+    tx.commit().unwrap();
+    assert!(
+        events_of(&db, &graph_id, "n1").is_empty(),
+        "READY 不是 §16 列举的外发事件"
+    );
+}
+
+#[test]
+fn unknown_node_is_rejected() {
+    let (db, graph_id) = fixture();
+    let tx = db.begin().unwrap();
+    let err = apply_transition(&tx, &graph_id, "nope", NodeState::Ready, 1_000, "e1").unwrap_err();
+    assert!(matches!(err, ApplyError::UnknownNode { .. }), "实际 {err:?}");
+}
+```
+
+夹具 `fixture()` 建库、跑迁移、`save_graph` 一张图，返回
+`(TempDir, Db, String /* graph_id */)`。
+
+**图必须有至少两个节点。** 单节点无法连出 Port 对——`connect` 只接受自环 `o1 → i1`，
+而 `EdgeKind::Data` 参与环检测（`edge.rs`，仅 Evidence/Effect 豁免），自环会被判为 `Cycle`。
+用 `n1`（PENDING）+ `n2` 两节点、一条 `n1.o1(Text) → n2.i2(Text)` 的 Data 边，
+`entry_nodes = [n1]`、`terminal_nodes = [n2]`，与
+`crates/continuum-graph/tests/persistence.rs` 的既有夹具同构，且能过 `load_graph` 的 `validate()`。
+
+**`TempDir` 必须被持有到用例结束**（故解构为 `let (_d, db, graph_id) = fixture();`）：
+WAL 模式下临时目录一旦回收，后续事务建日志文件会失败。
+
+`state_of(db, graph_id, node_id) -> NodeState` 与
+`events_of(db, graph_id, node_id) -> Vec<EventType>` 是两个辅助函数，各自开事务用
+`Tx::query` 读 `adfir_node.state` 与 `events`；后者按 `node_id` 过滤、按
+`occurred_at` 升序，把 `event_type` 文本经 `EventType` 的反序列化还原
+（`continuum-events` 的 serde `rename` 就是 `"node.started"` 这类短名）。
+
+注意 `NodeState` 与 `EventType` 都需要 `Debug + PartialEq` 才能被 `assert_eq!`
+比较；`NodeState` 已有，`EventType` 若没有则补派生。
+
+- [ ] **Step 2: 运行测试，确认失败**
+
+```bash
+cargo test -p continuum-graph --test transition_events
+```
+
+预期：编译失败，`apply_transition` / `ApplyError` 不存在。
+
+- [ ] **Step 3: 实现 apply_transition**
+
+`crates/continuum-graph/src/transition_tx.rs`
+
+```rust
+//! 状态迁移与对应事件的同事务写入（设计 §16、§17、`§318`）。
+
+use crate::node::NodeState;
+use crate::persist::{parse_state, state_str};
+use crate::state::{transition, StateError};
+use continuum_events::{Event, EventType};
+use continuum_persist::{PersistError, Tx, Value};
+
+#[derive(Debug, thiserror::Error)]
+pub enum ApplyError {
+    #[error("图 {graph_id} 中不存在节点 {node_id}")]
+    UnknownNode { graph_id: String, node_id: String },
+    #[error("迁移被拒：{0}")]
+    Illegal(#[from] StateError),
+    #[error("持久化失败：{0}")]
+    Persist(#[from] PersistError),
+}
+
+/// 在同一个事务内：读当前状态 → 校验迁移 → 写回状态 → 写对应事件。
+///
+/// 只使用调用方传入的 `Tx`，不自行开启或提交事务——提交由调用方负责，
+/// 这正是 `§318` 所要求的原子性：状态与事件要么一起生效，要么一起不生效。
+///
+/// `event_id` 的唯一性由调用方保证。P1 内由测试提供；P2 的执行器按自己的
+/// 序号分配。
+pub fn apply_transition(
+    tx: &Tx<'_>,
+    graph_id: &str,
+    node_id: &str,
+    to: NodeState,
+    occurred_at: i64,
+    event_id: &str,
+) -> Result<NodeState, ApplyError> {
+    let rows = tx.query(
+        "SELECT state FROM adfir_node WHERE graph_id = ?1 AND node_id = ?2",
+        &[Value::text(graph_id), Value::text(node_id)],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Err(ApplyError::UnknownNode {
+            graph_id: graph_id.to_owned(),
+            node_id: node_id.to_owned(),
+        });
+    };
+    let from = parse_state(&text(&row[0])?)?;
+
+    // 先判合法性再写。非法的迁移不产生任何写入。
+    let next = transition(from, to)?;
+
+    tx.execute(
+        "UPDATE adfir_node SET state = ?3 WHERE graph_id = ?1 AND node_id = ?2",
+        &[
+            Value::text(graph_id),
+            Value::text(node_id),
+            Value::text(state_str(next)),
+        ],
+    )?;
+
+    // 只有 §16 列举的三个到达态产生事件；其余迁移只改状态。
+    if let Some(event_type) = event_for(next) {
+        let event = Event::new(
+            event_type,
+            event_id.to_owned(),
+            occurred_at,
+            serde_json::json!({ "graph_id": graph_id, "node_id": node_id }),
+        )
+        .with_node(node_id.to_owned());
+        tx.append_event(&event)?;
+    }
+
+    Ok(next)
+}
+
+/// §16 列举的三个外发事件中与节点状态相关的两个。
+fn event_for(state: NodeState) -> Option<EventType> {
+    match state {
+        NodeState::Running => Some(EventType::NodeStarted),
+        NodeState::Completed => Some(EventType::NodeCompleted),
+        _ => None,
+    }
+}
+
+fn text(v: &Value) -> Result<String, PersistError> {
+    match v {
+        Value::Text(s) => Ok(s.clone()),
+        other => Err(PersistError::Database(format!("列应为文本，实际 {other:?}"))),
+    }
+}
+```
+
+`crates/continuum-graph/src/persist.rs` 的 `state_str` 与 `parse_state` 改为
+`pub(crate)`。`crates/continuum-graph/src/lib.rs` 加 `mod transition_tx;` 与
+`pub use transition_tx::{apply_transition, ApplyError};`。
+
+- [ ] **Step 4: 让 Artifact 入库也产生事件**
+
+`crates/continuum-artifact/src/persist.rs` 的 `save_artifact` 增加两个参数，
+使「入库」与「写 `ArtifactCreated`」不可分离——不提供只写元数据的旁路：
+
+```rust
+pub fn save_artifact(
+    tx: &Tx<'_>,
+    artifact: &Artifact,
+    event_id: &str,
+    occurred_at: i64,
+) -> Result<(), PersistError> {
+    // ... 原有的元数据写入与 artifact_input 写入保持不变 ...
+
+    let event = continuum_events::Event::new(
+        continuum_events::EventType::ArtifactCreated,
+        event_id.to_owned(),
+        occurred_at,
+        serde_json::json!({ "artifact_id": artifact.id.as_str() }),
+    );
+    tx.append_event(&event)?;
+    Ok(())
+}
+```
+
+唯一调用点在 `crates/continuum-graph/tests/persistence.rs:112`，随之补上
+`event_id` 与 `occurred_at` 两个实参。`ArtifactStore::persist`（Task 14）传给
+`save_artifact` 的事件 id 用 `format!("artifact/{}", artifact.id)`，
+`occurred_at` 用一个常量（该桥不感知时钟，设计未要求它记录真实时间）。
+
+- [ ] **Step 5: 运行全部测试并提交**
+
+```bash
+cargo test --workspace
+git add -A
+git commit -m "feat(graph): 状态迁移与事件同事务写入（§16、§17）"
+```
+
+**注意：** `save_artifact` 现在必须与 `apply_transition` 一样在调用方的事务内提交，
+否则事件与元数据不同步。这是刻意为之：它消除了「Artifact 入库但不发事件」的旁路，
+而这正是终审在 I2 里发现的那类缺陷。
+
+---
+
+### Task 16: 把 BlobStore 接到 ArtifactStore 上（收口设计 §15）
+
+**背景：** Task 14 建了 `BlobStore`（内容寻址落盘）与 `ArtifactStore` 的落库桥，但**两者互不引用**：`BlobStore` 除测试外全仓无调用方，`ArtifactStore::commit` 只登记元数据、不碰字节。结果是 Artifact 的 `content_hash` 入了库，其字节可能从未落盘——设计 §15 的「二进制内容按 `content_hash` 寻址落磁盘」在 P1 内仍无执行路径触发。这与本子项目反复出现的「机制建好但没接上」是同一形态，Task 14 只闭合了一半，本 task 闭合另一半。
+
+**依赖：** Task 14。
+
+**Files:**
+- Modify: `crates/continuum-artifact/src/store.rs`
+- Test: `crates/continuum-artifact/tests/artifact_store.rs`
+
+**Interfaces:**
+- Produces: `ArtifactStore::commit_with_content(&mut self, blob, artifact, bytes) -> Result<(), ArtifactError>`
+- Produces: `ArtifactError::ContentMismatch { id }`、`ArtifactError::Blob(BlobError)`
+
+- [ ] **Step 1: 写测试**
+
+```rust
+#[test]
+fn commit_with_content_puts_the_bytes_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    let a = artifact("a1", b"payload", vec![]);
+    let hash = a.content_hash.clone();
+    store.commit_with_content(&blob, a, b"payload").unwrap();
+
+    assert!(blob.contains(&hash), "字节必须已按哈希落盘");
+    assert_eq!(blob.get(&hash).unwrap(), b"payload");
+    assert_eq!(store.stored_blob_count(), 1);
+}
+
+#[test]
+fn commit_with_content_rejects_bytes_that_do_not_match_the_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    // artifact 声明的哈希由 b"declared" 算出，实际传入 b"other"
+    let a = artifact("a1", b"declared", vec![]);
+    let hash = a.content_hash.clone();
+    let err = store.commit_with_content(&blob, a, b"other").unwrap_err();
+
+    assert!(matches!(err, ArtifactError::ContentMismatch { .. }), "实际 {err:?}");
+    assert!(!blob.contains(&hash), "被拒的提交不得留下字节");
+    assert!(store.get(&ArtifactId::new("a1")).is_none(), "被拒的提交不得登记元数据");
+}
+
+#[test]
+fn identical_content_under_two_ids_shares_one_blob_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    store.commit_with_content(&blob, artifact("a1", b"same", vec![]), b"same").unwrap();
+    store.commit_with_content(&blob, artifact("a2", b"same", vec![]), b"same").unwrap();
+
+    assert_eq!(store.stored_blob_count(), 1, "相同内容只登记一份");
+    // 磁盘上也只应有一份：BlobStore 按哈希寻址，相同内容落在同一路径。
+    // 用一个只数文件的辅助函数钉住（blobstore.rs 的测试里已有同形的 walk，
+    // 本文件自行加一个即可）。
+    assert_eq!(count_files(dir.path()), 1, "相同内容在盘上只占一份");
+}
+
+#[test]
+fn content_survives_commit_persist_restore_and_read_back() {
+    // 设计 §15 的完整回路：字节落盘、元数据落库、从库重建后仍能按哈希取回字节
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path().join("blobs"));
+    // 建库与跑迁移按本文件既有写法（见同文件其它用例的 open_with + migrate）
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
+
+    let tx = db.begin().unwrap();
+    let mut store = ArtifactStore::new();
+    store.commit_with_content(&blob, artifact("z1", b"root", vec![]), b"root").unwrap();
+    store
+        .commit_with_content(&blob, artifact("a1", b"derived", vec![ArtifactId::new("z1")]), b"derived")
+        .unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    let hash = restored.get(&ArtifactId::new("z1")).unwrap().content_hash.clone();
+    assert_eq!(blob.get(&hash).unwrap(), b"root", "重建后仍能按哈希取回原始字节");
+    assert_eq!(restored.lineage(&ArtifactId::new("a1")), vec![ArtifactId::new("z1")]);
+}
+```
+
+- [ ] **Step 2: 实现**
+
+在 `crates/continuum-artifact/src/store.rs`：
+
+```rust
+use crate::blobstore::{BlobError, BlobStore};
+
+// ArtifactError 增加两个变体：
+    #[error("Artifact {id} 声明的 content_hash 与其字节不符")]
+    ContentMismatch { id: ArtifactId },
+    #[error("内容落盘失败：{0}")]
+    Blob(#[from] BlobError),
+```
+
+```rust
+impl ArtifactStore {
+    /// 提交一个 Artifact，并把它的字节按 `content_hash` 落盘。
+    ///
+    /// 与 [`ArtifactStore::commit`] 的分工：`commit` 只登记元数据，用于
+    /// [`ArtifactStore::restore`] 这类「字节不在手上」的场景；本函数是**产生**
+    /// Artifact 的路径，它保证字节在任何元数据写入之前已按哈希落盘，并校验
+    /// `artifact.content_hash` 与实际字节相符——设计 §15 的「内容按哈希寻址
+    /// 落磁盘、元数据入库」由它闭合。
+    ///
+    /// 落盘先于登记：若登记阶段失败（如 id 重复），已写入的字节留在盘上。
+    /// 内容寻址存储是幂等的，孤儿内容可被其他 Artifact 复用，故不回收。
+    pub fn commit_with_content(
+        &mut self,
+        blob: &BlobStore,
+        artifact: Artifact,
+        bytes: &[u8],
+    ) -> Result<(), ArtifactError> {
+        if ContentHash::of(bytes) != artifact.content_hash {
+            return Err(ArtifactError::ContentMismatch { id: artifact.id });
+        }
+        blob.put(bytes)?;
+        self.commit(artifact)
+    }
+}
+```
+
+- [ ] **Step 3: 收尾两处 Task 14 报出的未覆盖项**
+
+1. `BlobStore::contains` 此前零覆盖（变异成恒 `false` 仍全绿）。Step 1 的用例现在会真正经过它；请确认「把 `contains` 改成恒 `false`」能让 `commit_with_content_puts_the_bytes_on_disk` 变红，若不能则说明该断言未承重，如实回报。
+2. `restore` 里 `store.commit(artifact).map_err(...)` 那条分支在现有用例下**不可达**（其触发条件与循环前的输入检查同条件）。Task 14 的实现方为此把错误信息改成点名 id，但其变异显示：改回原样测试**仍全绿**——即该断言实际命中的是循环末尾那条「输入不存在或依赖成环」的错误。处置：保留该分支作为防御（`commit` 日后可能新增失败模式），但在其上方加注释写明「当前不可达，现有用例覆盖的是循环末尾那条」，并把 `restore_reports_dangling_inputs_instead_of_dropping_them` 的注释改成如实描述它命中的是哪条分支。**不要为了让它可达而削弱循环前的检查。**
+
+- [ ] **Step 4: 运行全部测试并提交**
+
+```bash
+cargo test --workspace
+git add -A
+git commit -m "feat(artifact): commit_with_content 把字节按 content_hash 落盘（收口 §15）"
+```
+
+---
+
 ## 遗留
 
 ```
 hex 辅助函数在 continuum-events 与 continuum-artifact 各有一份，未提取到 core。
   P0 的 audit.rs 已有私有实现，P1 未改动 P0 代码。属可接受的重复，交终审分诊。
 Checkpointable 在 Task 4 定义，无实现、无调用点、无测试。设计第 11.3 节如此要求。
-ExecutionProfile 的表随 Task 11 建立，但四个资源字段在 P3、P7 之前恒为 None，
+ExecutionProfile 的表随 Task 11 建立，但六个资源字段在 P3、P7 之前恒为 None，
   其写入路径无 task 覆盖——本子项目不产生 ExecutionProfile 记录。
 SchedulerConfig 的 max_parallel 默认 1 是占位取值，P3 接入资源模型后重估。
 本计划未安排「一张图完整执行」的端到端 task。设计第 17 节的判据 1 由
   Task 7 至 Task 10 的单元测试分项覆盖，缺一条把它们串起来的集成用例。
+save_graph 是裸 INSERT，同一 graph_id 二次保存撞主键。P2 每次状态变化都要落库，
+  届时必须补 UPDATE/UPSERT 路径（Task 15 的 apply_transition 只更新状态列，不受影响）。
+operator 的 Checkpointable 与 FailureClass::ALL、ArtifactError::NotFound 无生产者，
+  均记为 P2 项，见终审分诊。
+
+Task 14/16（磁盘内容寻址与落库桥）转交的 P2 项：
+ArtifactStore 仍不持有 BlobStore —— commit_with_content 要调用方传 &BlobStore，
+  故 §15 有一条执行路径但 P1 内无生产调用方（除测试外零调用点）。Runtime 侧接线属 P2。
+ArtifactStore::persist 继承 save_artifact 的裸 INSERT，加一个 Artifact 再 persist 必撞主键，
+  与 save_graph 同类，P2 每次状态变化都要落库时需 UPSERT。
+restore 每行走一次 load_artifact（两条查询），N+1。
+restore 里 commit(...).map_err 那条分支不可达（id TEXT PRIMARY KEY 排除 AlreadyCommitted，
+  进入分支的守卫排除 UnresolvedInput），保留为防御，属零覆盖代码。
+commit_with_content 的 BlobError 传播路径无测试（触发需制造 IO 失败）。
+put 的原子落盘无测试覆盖（效果只在进程崩溃时可见，进程内无确定性观测点）。
+artifact_store 的「哈希不符」用例隐含依赖两个字节串等长（否则 size 校验先命中）。
+ArtifactError 失去了 Clone/PartialEq/Eq（Blob 变体含 io::Error，不可 Clone）。
+  裁定不手写忽略 io::Error 的 PartialEq —— 两个不同的 IO 失败会比较相等，是陷阱。
+  日后若需要比较，应显式比较变体与 payload。
+孤儿字节（落盘成功但登记失败）无计数、无回收；commit_with_content 的错误分不出两种情形。
+
+Task 15（状态迁移与事件同事务）转交的 P2 项：
+执行器须用单调序号分配 event_id；用可由节点状态派生的可复用 id 会在合法路径
+  （Running → Waiting → Ready → Queued → Running）上撞 events.event_id 主键。
+
+Task 1–13 累计的分诊条目（此前只活在 .superpowers/sdd/progress.md，而该目录是
+gitignore 的 scratch，随时可能丢失）。均为「不修 / 留后续 / 记 P2」档。
+理由与条目同等重要：只抄条目会把已经走过的判断重新走一遍。
+
+Task 1（依赖方向检查）：
+  - dependency_direction.rs:22 注释写「自身 + 允许依赖」，而实现跳过自身不校验。plan-mandated。
+  - cfg 门控的直接边对断言不可见：给 persist 加 target cfg 的 dev-dependency 反向边后测试仍 PASS。
+    普通非 dev 的 target 门控反向边会构成 cargo cycle 被拒，故现实风险低。
+  - ALL_CRATES 与 workspace members 无交叉校验：少列则静默通过，将来新增 crate 漏同步即漏检。
+  - cargo_tree_direct 与 cargo_tree 除 --depth 1 外逐字重复。plan-mandated。
+  - 「未跑 fmt/clippy」不构成问题：P0 的 19 个文件普遍 fmt-dirty，fmt 不是本项目门禁。
+Task 2（Artifact 模型与内容寻址）：
+  - blobs 是手工维护的冗余计数，恒等于 by_hash.len()。plan-mandated，
+    曾拟在 Task 11 落库时顺手合并为一行，未做，字段仍在。
+  - lineage 对未知 id 的输入无覆盖；commit 已挡住该路径，日后若支持删除则成幽灵 id。
+  - ArtifactId 的 doc 注释只有首行，brief 修订后附的四行说明
+    （为何派生 Ord、为何实现 Display）未落盘。
+Task 3（端口兼容）：
+  - port.rs 的 DirectionMismatch 不带类型信息。plan-mandated：方向相同本身即拒因。
+  - compatibility.rs 只覆盖 Output/Output，Input/Input 无用例（同一判断，无独立失效模式）。
+Task 4（Operator 定义与注册表）：
+  - registry.rs resolve 每次 id.clone()，热路径可优化。
+  - registry.rs 先 contains_key 再 insert，两次哈希。
+  - definition.rs 的 Checkpointable 用 String 作错误类型，设计写的是 OperatorError。plan-mandated。
+  - lib.rs:1 文档注释声称覆盖 §245，但 crate 内并无后端解析接口。plan-mandated。
+  - Checkpointable 未 re-export，只能经 definition:: 引用。
+  - 设计 §11.2 的 trait OperatorImpl 与 §11.1 的后端解析接口在 P1 无任何覆盖，
+    根因是 spec 未指定 NodeContext / ArtifactRef / ExecutionProfile 的归属 crate。曾标「需人裁决」，
+    终审裁定为「设计已声明的形态，可接受」。其中 NodeContext::node()/profile() 原连测试都没读过，
+    已由 F8 补上行为覆盖；未造生产调用点，与设计 §14/§18 的自陈一致。
+Task 5（图结构与连接校验）：
+  - validate() 只查两条节点约束，未含 §8.3 的「图必须无环」——无环由 connect 增量保证。
+  - connect(o1, o1) 报 WrongOrientation 而非 DirectionMismatch，是判定顺序的必然结果，非缺陷。
+  - validate() 对未知节点返回 UnknownNode 的分支无用例。
+Task 6（状态迁移表）：
+  - state.rs 的 `let legal = matches!(..)` 多一层绑定。plan-mandated。
+  - is_terminal 与 transition 的语义一致性无回归守卫（当前一致，靠人工比对确认）。
+Task 7（失效传播）：
+  - tests/invalidation.rs 的 evidence_and_effect_..._not_traversed 名不副实：只连了 Evidence，
+    从未构造 EFFECT 边；EFFECT 不参与仅由否定式间接保证。plan-mandated。
+  - invalidation.rs 有一处死分支：transition 失败被映射为 UnknownNode（不可达）。plan-mandated。
+  - invalidation.rs 用线性去重，O(n^2)。plan-mandated。
+  - 无「changed 节点不存在」的错误路径用例。
+  - tests/invalidation.rs 一处断言未排序，依赖 DFS 弹栈序；同文件另两处已显式排序。
+Task 8（缓存键与复用）：
+  - tests/reuse.rs 手工构造 CacheKey，验的是 can_reuse 的防御检查而非端到端；
+    判定 plan-mandated 且非缺陷，后续引入缓存存储的 task 应补端到端用例。
+  - tests/reuse.rs 两处不符 rustfmt。plan-mandated。
+  - reuse.rs 一处用 != 而另一处用穷尽 match，同一 crate 两种约定并存。
+Task 9（调度与阻塞）：
+  - 计划的 Task 10/12 预期通过数相对新基线增量不成比例（已把预期数降级为陈旧检查）。
+  - scheduler.rs:27 文档串称返回「可提升为 QUEUED 的节点」，但返回集含 PENDING
+    （PENDING 需先转 READY）。
+  - blocked_nodes_are_unblocked_when_predecessors_complete 用 set_state 绕过 transition
+    （FAILED → COMPLETED 不在合法表内）。
+Task 10（失败分类与重试决策）：
+  - EscalationPolicy::None 时 escalate 返回 Fail，使 CONSTRAINT/AUTHORIZATION 得到 Fail 而非升级。
+  - VERIFICATION 的「进入验证路径」压成 Fail（RetryDecision 无对应变体）。
+Task 11（落库与往返）：
+  - save_graph 不校验 §8.3 而 load_graph 校验（校验点是图构造，后者属额外纵深）。
+  - 整数转换未检查（size as u64、version as u32 等）。
+  - producer_node 的 _ => None 与其余列的严格 text()/int() 风格不齐（语义正确）。
+  - graph_err 辅助函数与代码块的 inline 形式不同（正文明确允许两者）。
+  - 迁移按 version 记账但无校验和：对已应用过该 version 的旧库会静默跳过，
+    直到运行期 no such column 才暴露。P1 未发布前提下无实际影响。
+Task 12（恢复与钩子）：
+  - 计数用 SELECT 行数而非 Tx::execute 的 affected rows（此处恒等）。
+  - 钩子只挂 ReconcileRunningNodes，MarkLostExecutions 阶段恒为 0 钩子。
+Task 13（ExecutionProfile 与重试策略）：
+  - 设计 §14 一段把「恒为 None」只列四个字段（model/provider/tool/compute_node），
+    实际六个（另含 reasoning_effort、cost_budget）；同段下文与第 15 节表均按六个。
+    已订正（docs 262d358）——上一轮只改了 §18 的同一处，§14 漏改。
+  - attempt 起点原标「需人裁决」，已裁定：attempt 自 1 起计，max_attempts 是总尝试次数，
+    retryable_errors 是收窄白名单，三条均已写入设计 §13.2。另明确 RetryPolicy::default()
+    表示「未配置」而非任何类别的固有策略，RESOURCE 的固有策略须由 P3 的 Router 显式给出
+    max_attempts >= 2 与退避参数，不能依赖默认值。
 ```
 
 ## 完成判据对照
@@ -4660,4 +5624,4 @@ SchedulerConfig 的 max_parallel 默认 1 是占位取值，P3 接入资源模�
 | 3 只有下游被 INVALIDATED | Task 7 `upstream_and_unrelated_branches_are_untouched` |
 | 4 失败按 §309 分类，非幂等不自动重试 | Task 10 `non_idempotent_side_effect_never_retries`、`permanent_verification_and_unknown_fail_without_retry` |
 | 5 NonDeterministic 不产生缓存键 | Task 8 `non_deterministic_operator_produces_no_cache_key` |
-
+| 事务边界：状态迁移与对应事件同事务提交（§318） | Task 15 `transition_and_its_event_commit_together`、`illegal_transition_writes_neither_state_nor_event` |

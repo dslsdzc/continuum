@@ -1,0 +1,31 @@
+//! ADFIR 图、Node、Edge 与连接校验。
+
+pub mod edge;
+pub mod execution;
+pub mod failure;
+pub mod graph;
+pub mod ids;
+pub mod invalidation;
+pub mod node;
+pub mod persist;
+pub mod reuse;
+pub mod scheduler;
+pub mod state;
+pub mod transition_tx;
+
+pub use edge::{Edge, EdgeKind};
+pub use execution::{is_candidate_backend, ArtifactRef, ExecutionProfile, NodeContext, OperatorImpl};
+pub use failure::{
+    decide_retry, Backoff, EscalationPolicy, FailureClass, RetryDecision, RetryPolicy,
+};
+pub use graph::{AdfirGraph, GraphError};
+pub use ids::{ContractIdRef, GraphId, NodeId};
+pub use invalidation::propagate_invalidation;
+pub use node::{Node, NodeState, OperatorRef};
+pub use persist::{
+    load_graph, mark_node_lost, mark_running_nodes_lost, p1_graph_migrations, save_graph,
+};
+pub use reuse::{cache_key, can_reuse, CacheKey};
+pub use scheduler::{apply_blocking, apply_unblocking, select_runnable, SchedulerConfig};
+pub use state::{is_terminal, transition, StateError};
+pub use transition_tx::{apply_transition, ApplyError};

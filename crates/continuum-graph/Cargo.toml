@@ -1,0 +1,22 @@
+[package]
+name = "continuum-graph"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-events = { path = "../continuum-events" }
+continuum-operator = { path = "../continuum-operator" }
+continuum-persist = { path = "../continuum-persist" }
+continuum-port = { path = "../continuum-port" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# `tests/transition_events.rs` 是独立 crate，直接引用 `continuum_events::EventType`。
+# 该包已在 [dependencies] 中（`transition_tx` 用它构造事件），此处是显式声明，
+# 使测试对它的使用不依赖「实现恰好也依赖它」这一巧合。
+continuum-events = { path = "../continuum-events" }
+tempfile = { workspace = true }
