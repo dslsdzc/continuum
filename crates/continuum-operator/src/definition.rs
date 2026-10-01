@@ -54,6 +54,14 @@ impl OperatorVersion {
     }
 }
 
+// 同 OperatorId：`OperatorError` 的格式串以 `{version}` 引用该字段，
+// 缺 Display 时错误文案会渲染成 `OperatorVersion(1)`。
+impl std::fmt::Display for OperatorVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct BackendId(String);
 

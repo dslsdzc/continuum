@@ -5,9 +5,9 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum OperatorError {
-    #[error("Operator {id} 版本 {version:?} 未注册")]
+    #[error("Operator {id} 版本 {version} 未注册")]
     NotFound { id: OperatorId, version: OperatorVersion },
-    #[error("Operator {id} 版本 {version:?} 已注册")]
+    #[error("Operator {id} 版本 {version} 已注册")]
     Duplicate { id: OperatorId, version: OperatorVersion },
 }
 

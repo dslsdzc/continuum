@@ -52,6 +52,26 @@ fn same_id_with_different_versions_coexist() {
 }
 
 #[test]
+fn error_messages_render_the_version_as_a_plain_number() {
+    // OperatorVersion 缺 Display 时错误文案渲染为 `OperatorVersion(1)`，
+    // 与同 crate 的 OperatorId 风格不一。
+    let registry = OperatorRegistry::new();
+    let not_found = registry
+        .resolve(&OperatorId::new("patch.apply"), &OperatorVersion::new(1))
+        .expect_err("未注册必须被拒绝");
+    assert_eq!(not_found.to_string(), "Operator patch.apply 版本 1 未注册");
+
+    let mut registry = OperatorRegistry::new();
+    registry
+        .register(op("patch.apply", 1, Determinism::Deterministic))
+        .unwrap();
+    let duplicate = registry
+        .register(op("patch.apply", 1, Determinism::Deterministic))
+        .expect_err("重复注册必须被拒绝");
+    assert_eq!(duplicate.to_string(), "Operator patch.apply 版本 1 已注册");
+}
+
+#[test]
 fn duplicate_id_and_version_is_rejected() {
     let mut registry = OperatorRegistry::new();
     registry.register(op("patch.apply", 1, Determinism::Deterministic)).unwrap();
