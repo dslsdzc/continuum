@@ -1,4 +1,4 @@
-use continuum_artifact::{BlobStore, ContentHash};
+use continuum_artifact::{BlobError, BlobStore, ContentHash};
 
 #[test]
 fn same_content_is_stored_once() {
@@ -42,7 +42,21 @@ fn tampered_content_is_rejected() {
     std::fs::write(&path, b"tampered").unwrap();
 
     let err = store.get(&hash).unwrap_err();
-    assert!(matches!(err, continuum_artifact::BlobError::Corrupt { .. }), "实际 {err:?}");
+    assert!(matches!(err, BlobError::Corrupt { .. }), "实际 {err:?}");
+}
+
+#[test]
+fn truncated_content_is_rejected() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+    let hash = store.put(b"original payload").unwrap();
+
+    // 模拟写盘中途崩溃留下的截断文件：内容是原文前缀，长度不符
+    let path = find_file(dir.path());
+    std::fs::write(&path, b"orig").unwrap();
+
+    let err = store.get(&hash).unwrap_err();
+    assert!(matches!(err, BlobError::Corrupt { .. }), "实际 {err:?}");
 }
 
 #[test]
@@ -50,7 +64,25 @@ fn missing_content_reports_missing() {
     let dir = tempfile::tempdir().unwrap();
     let store = BlobStore::new(dir.path());
     let err = store.get(&ContentHash::of(b"never written")).unwrap_err();
-    assert!(matches!(err, continuum_artifact::BlobError::Missing { .. }), "实际 {err:?}");
+    assert!(matches!(err, BlobError::Missing { .. }), "实际 {err:?}");
+}
+
+#[test]
+fn malformed_hash_is_rejected_instead_of_panicking() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = BlobStore::new(dir.path());
+
+    // ContentHash 派生 Deserialize，可绕过 ContentHash::parse 的 64 位十六进制校验。
+    // 空串会让 &s[..2] 越界，非 ASCII 会切在字符边界上，含 .. 的则会让路径逃出 root。
+    for raw in ["\"\"", "\"日本語\"", "\"../../etc/passwd\"", "\"ZZZZ\""] {
+        let hash: ContentHash = serde_json::from_str(raw).unwrap();
+        let err = store.get(&hash).unwrap_err();
+        assert!(
+            matches!(err, BlobError::MalformedHash { .. }),
+            "哈希 {raw} 应被拒，实际 {err:?}"
+        );
+        assert!(!store.contains(&hash), "非法哈希不可能是已落盘的内容");
+    }
 }
 
 fn count_files(root: &std::path::Path) -> usize {

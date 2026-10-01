@@ -215,16 +215,51 @@ fn commit_with_content_rejects_bytes_that_do_not_match_the_hash() {
     let blob = BlobStore::new(dir.path());
     let mut store = ArtifactStore::new();
 
-    // artifact 声明的哈希由 b"declared" 算出，实际传入 b"other"
+    // artifact 声明的哈希由 b"declared" 算出，实际传入 b"tampered"。
+    // 两者必须**等长**（均为 8 字节）：否则 size 校验会先于哈希校验命中，
+    // 本用例就变成在测 SizeMismatch，而钉不住哈希校验这一条。
     let a = artifact("a1", b"declared", vec![]);
     let hash = a.content_hash.clone();
-    let err = store.commit_with_content(&blob, a, b"other").unwrap_err();
+    let err = store.commit_with_content(&blob, a, b"tampered").unwrap_err();
 
     assert!(
         matches!(err, ArtifactError::ContentMismatch { .. }),
         "实际 {err:?}"
     );
     assert!(!blob.contains(&hash), "被拒的提交不得留下字节");
+    // 上面那条钉的是「声明的哈希」不在盘上；若哈希校验被挪到 blob.put 之后，
+    // 落盘的是 b"tampered" 的内容（挂在另一个哈希下），contains(&hash) 仍为假、
+    // 断言照样通过。所以必须直接数文件：拒绝的提交不得留下任何字节。
+    assert_eq!(count_files(dir.path()), 0, "被拒的提交不得留下任何字节");
+    assert!(
+        store.get(&ArtifactId::new("a1")).is_none(),
+        "被拒的提交不得登记元数据"
+    );
+}
+
+#[test]
+fn commit_with_content_rejects_a_size_that_does_not_match_the_bytes() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    // 哈希由 b"payload" 算出（相符），size 声明为 999（不符）
+    let mut a = artifact("a1", b"payload", vec![]);
+    a.size = 999;
+    let err = store.commit_with_content(&blob, a, b"payload").unwrap_err();
+
+    assert!(
+        matches!(
+            err,
+            ArtifactError::SizeMismatch {
+                declared: 999,
+                actual: 7,
+                ..
+            }
+        ),
+        "实际 {err:?}"
+    );
+    assert_eq!(count_files(dir.path()), 0, "被拒的提交不得留下任何字节");
     assert!(
         store.get(&ArtifactId::new("a1")).is_none(),
         "被拒的提交不得登记元数据"

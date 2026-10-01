@@ -12,6 +12,10 @@ use std::collections::HashMap;
 // 地实现这两者；把 `BlobError` 压成字符串可以绕过，但会丢掉 `#[from]` 建立的
 // source 链，而那正是「落盘为何失败」的唯一线索，故不取。
 // 全仓无调用方依赖 ArtifactError 的克隆或相等比较（消费方一律模式匹配）。
+//
+// 日后若确需比较，应显式比较变体与 payload，**不要**实现一个忽略 `io::Error`
+// 的 `PartialEq`：那会让两个不同的 IO 失败（如权限不足与磁盘写满）比较相等，
+// 是个比「不能比较」更坏的陷阱。
 #[derive(Debug, thiserror::Error)]
 pub enum ArtifactError {
     #[error("Artifact {id} 已提交，修改必须产生新版本（§241）")]
@@ -22,6 +26,12 @@ pub enum ArtifactError {
     UnresolvedInput { id: ArtifactId },
     #[error("Artifact {id} 声明的 content_hash 与其字节不符")]
     ContentMismatch { id: ArtifactId },
+    #[error("Artifact {id} 声明的 size 为 {declared}，实际字节长度为 {actual}")]
+    SizeMismatch {
+        id: ArtifactId,
+        declared: u64,
+        actual: u64,
+    },
     #[error("内容落盘失败：{0}")]
     Blob(#[from] BlobError),
 }
@@ -81,6 +91,13 @@ impl ArtifactStore {
     ///
     /// 落盘先于登记：若登记阶段失败（如 id 重复），已写入的字节留在盘上。
     /// 内容寻址存储是幂等的，孤儿内容可被其他 Artifact 复用，故不回收。
+    /// **代价**：此时返回的是裸 `AlreadyCommitted`/`UnresolvedInput`，调用方
+    /// 无法从错误区分「字节未落盘」与「字节已落盘但未登记」两种情形。
+    /// 孤儿字节的回收与计数记为 P2 项。
+    ///
+    /// `bytes` 同时被两项声明校验：`content_hash` 与 `size`。二者都必须在任何
+    /// 写入之前判定——`commit` 手上没有字节，查不了这两项，本函数有字节却不查
+    /// 就会让一份自相矛盾的元数据落库。
     pub fn commit_with_content(
         &mut self,
         blob: &BlobStore,
@@ -89,6 +106,13 @@ impl ArtifactStore {
     ) -> Result<(), ArtifactError> {
         if ContentHash::of(bytes) != artifact.content_hash {
             return Err(ArtifactError::ContentMismatch { id: artifact.id });
+        }
+        if artifact.size != bytes.len() as u64 {
+            return Err(ArtifactError::SizeMismatch {
+                id: artifact.id,
+                declared: artifact.size,
+                actual: bytes.len() as u64,
+            });
         }
         blob.put(bytes)?;
         self.commit(artifact)
@@ -133,6 +157,13 @@ impl ArtifactStore {
     ///
     /// 只使用调用方传入的 `Tx`，不自行开启或提交事务——提交由调用方负责，
     /// 以便与同一事务内的其他写入（如事件）一起原子生效。
+    ///
+    /// 本函数与 [`ArtifactStore::restore`] 的往返对 `by_hash` **不是恒等映射**：
+    /// 库中不记录「首次提交者」，`restore` 按依赖序（同序内按 id 序）重建，
+    /// 「首次提交者胜出」随之由重建顺序决定。若原提交顺序与 id 序不同——例如
+    /// 先提交 `a2` 再提交 `a1`、二者内容相同——重建后 `find_by_hash` 会指回
+    /// `a1`。`by_id` 与 `content_hash` 不受影响，受影响的只是「相同内容取哪个
+    /// id」这一查询的答案；落盘路径按哈希寻址，也不受影响。
     pub fn persist(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
         for artifact in self.by_id.values() {
             save_artifact(tx, artifact)?;
