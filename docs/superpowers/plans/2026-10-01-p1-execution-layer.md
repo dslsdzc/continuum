@@ -5519,6 +5519,82 @@ ArtifactError 失去了 Clone/PartialEq/Eq（Blob 变体含 io::Error，不可 C
 Task 15（状态迁移与事件同事务）转交的 P2 项：
 执行器须用单调序号分配 event_id；用可由节点状态派生的可复用 id 会在合法路径
   （Running → Waiting → Ready → Queued → Running）上撞 events.event_id 主键。
+
+Task 1–13 累计的分诊条目（此前只活在 .superpowers/sdd/progress.md，而该目录是
+gitignore 的 scratch，随时可能丢失）。均为「不修 / 留后续 / 记 P2」档。
+理由与条目同等重要：只抄条目会把已经走过的判断重新走一遍。
+
+Task 1（依赖方向检查）：
+  - dependency_direction.rs:22 注释写「自身 + 允许依赖」，而实现跳过自身不校验。plan-mandated。
+  - cfg 门控的直接边对断言不可见：给 persist 加 target cfg 的 dev-dependency 反向边后测试仍 PASS。
+    普通非 dev 的 target 门控反向边会构成 cargo cycle 被拒，故现实风险低。
+  - ALL_CRATES 与 workspace members 无交叉校验：少列则静默通过，将来新增 crate 漏同步即漏检。
+  - cargo_tree_direct 与 cargo_tree 除 --depth 1 外逐字重复。plan-mandated。
+  - 「未跑 fmt/clippy」不构成问题：P0 的 19 个文件普遍 fmt-dirty，fmt 不是本项目门禁。
+Task 2（Artifact 模型与内容寻址）：
+  - blobs 是手工维护的冗余计数，恒等于 by_hash.len()。plan-mandated，
+    曾拟在 Task 11 落库时顺手合并为一行，未做，字段仍在。
+  - lineage 对未知 id 的输入无覆盖；commit 已挡住该路径，日后若支持删除则成幽灵 id。
+  - ArtifactId 的 doc 注释只有首行，brief 修订后附的四行说明
+    （为何派生 Ord、为何实现 Display）未落盘。
+Task 3（端口兼容）：
+  - port.rs 的 DirectionMismatch 不带类型信息。plan-mandated：方向相同本身即拒因。
+  - compatibility.rs 只覆盖 Output/Output，Input/Input 无用例（同一判断，无独立失效模式）。
+Task 4（Operator 定义与注册表）：
+  - registry.rs resolve 每次 id.clone()，热路径可优化。
+  - registry.rs 先 contains_key 再 insert，两次哈希。
+  - definition.rs 的 Checkpointable 用 String 作错误类型，设计写的是 OperatorError。plan-mandated。
+  - lib.rs:1 文档注释声称覆盖 §245，但 crate 内并无后端解析接口。plan-mandated。
+  - Checkpointable 未 re-export，只能经 definition:: 引用。
+  - 设计 §11.2 的 trait OperatorImpl 与 §11.1 的后端解析接口在 P1 无任何覆盖，
+    根因是 spec 未指定 NodeContext / ArtifactRef / ExecutionProfile 的归属 crate。曾标「需人裁决」，
+    终审裁定为「设计已声明的形态，可接受」。其中 NodeContext::node()/profile() 原连测试都没读过，
+    已由 F8 补上行为覆盖；未造生产调用点，与设计 §14/§18 的自陈一致。
+Task 5（图结构与连接校验）：
+  - validate() 只查两条节点约束，未含 §8.3 的「图必须无环」——无环由 connect 增量保证。
+  - connect(o1, o1) 报 WrongOrientation 而非 DirectionMismatch，是判定顺序的必然结果，非缺陷。
+  - validate() 对未知节点返回 UnknownNode 的分支无用例。
+Task 6（状态迁移表）：
+  - state.rs 的 `let legal = matches!(..)` 多一层绑定。plan-mandated。
+  - is_terminal 与 transition 的语义一致性无回归守卫（当前一致，靠人工比对确认）。
+Task 7（失效传播）：
+  - tests/invalidation.rs 的 evidence_and_effect_..._not_traversed 名不副实：只连了 Evidence，
+    从未构造 EFFECT 边；EFFECT 不参与仅由否定式间接保证。plan-mandated。
+  - invalidation.rs 有一处死分支：transition 失败被映射为 UnknownNode（不可达）。plan-mandated。
+  - invalidation.rs 用线性去重，O(n^2)。plan-mandated。
+  - 无「changed 节点不存在」的错误路径用例。
+  - tests/invalidation.rs 一处断言未排序，依赖 DFS 弹栈序；同文件另两处已显式排序。
+Task 8（缓存键与复用）：
+  - tests/reuse.rs 手工构造 CacheKey，验的是 can_reuse 的防御检查而非端到端；
+    判定 plan-mandated 且非缺陷，后续引入缓存存储的 task 应补端到端用例。
+  - tests/reuse.rs 两处不符 rustfmt。plan-mandated。
+  - reuse.rs 一处用 != 而另一处用穷尽 match，同一 crate 两种约定并存。
+Task 9（调度与阻塞）：
+  - 计划的 Task 10/12 预期通过数相对新基线增量不成比例（已把预期数降级为陈旧检查）。
+  - scheduler.rs:27 文档串称返回「可提升为 QUEUED 的节点」，但返回集含 PENDING
+    （PENDING 需先转 READY）。
+  - blocked_nodes_are_unblocked_when_predecessors_complete 用 set_state 绕过 transition
+    （FAILED → COMPLETED 不在合法表内）。
+Task 10（失败分类与重试决策）：
+  - EscalationPolicy::None 时 escalate 返回 Fail，使 CONSTRAINT/AUTHORIZATION 得到 Fail 而非升级。
+  - VERIFICATION 的「进入验证路径」压成 Fail（RetryDecision 无对应变体）。
+Task 11（落库与往返）：
+  - save_graph 不校验 §8.3 而 load_graph 校验（校验点是图构造，后者属额外纵深）。
+  - 整数转换未检查（size as u64、version as u32 等）。
+  - producer_node 的 _ => None 与其余列的严格 text()/int() 风格不齐（语义正确）。
+  - graph_err 辅助函数与代码块的 inline 形式不同（正文明确允许两者）。
+  - 迁移按 version 记账但无校验和：对已应用过该 version 的旧库会静默跳过，
+    直到运行期 no such column 才暴露。P1 未发布前提下无实际影响。
+Task 12（恢复与钩子）：
+  - 计数用 SELECT 行数而非 Tx::execute 的 affected rows（此处恒等）。
+  - 钩子只挂 ReconcileRunningNodes，MarkLostExecutions 阶段恒为 0 钩子。
+Task 13（ExecutionProfile 与重试策略）：
+  - 设计 §14 一段把「恒为 None」只列四个字段（model/provider/tool/compute_node），
+    实际六个（另含 reasoning_effort、cost_budget）；同段下文与第 15 节表均按六个。设计未订正。
+  - attempt 起点原标「需人裁决」，已裁定：attempt 自 1 起计，max_attempts 是总尝试次数，
+    retryable_errors 是收窄白名单，三条均已写入设计 §13.2。另明确 RetryPolicy::default()
+    表示「未配置」而非任何类别的固有策略，RESOURCE 的固有策略须由 P3 的 Router 显式给出
+    max_attempts >= 2 与退避参数，不能依赖默认值。
 ```
 
 ## 完成判据对照
@@ -5531,14 +5607,3 @@ Task 15（状态迁移与事件同事务）转交的 P2 项：
 | 4 失败按 §309 分类，非幂等不自动重试 | Task 10 `non_idempotent_side_effect_never_retries`、`permanent_verification_and_unknown_fail_without_retry` |
 | 5 NonDeterministic 不产生缓存键 | Task 8 `non_deterministic_operator_produces_no_cache_key` |
 | 事务边界：状态迁移与对应事件同事务提交（§318） | Task 15 `transition_and_its_event_commit_together`、`illegal_transition_writes_neither_state_nor_event` |
-
-## 完成判据对照
-
-| 设计判据 | 由哪些 task 的测试覆盖 |
-|---|---|
-| 1 一张图能完整执行，状态按 §237 迁移 | Task 6 `legal_transitions_are_accepted`、Task 9 `select_runnable` 系列；**缺端到端集成用例，见遗留** |
-| 2 不兼容 Port 在构造阶段被拒 | Task 5 `incompatible_ports_are_rejected_at_construction`、Task 11 `graph_round_trips_through_the_database` |
-| 3 只有下游被 INVALIDATED | Task 7 `upstream_and_unrelated_branches_are_untouched` |
-| 4 失败按 §309 分类，非幂等不自动重试 | Task 10 `non_idempotent_side_effect_never_retries`、`permanent_verification_and_unknown_fail_without_retry` |
-| 5 NonDeterministic 不产生缓存键 | Task 8 `non_deterministic_operator_produces_no_cache_key` |
-
