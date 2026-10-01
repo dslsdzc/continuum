@@ -1868,6 +1868,8 @@ fn legal_transitions_are_accepted() {
         (NodeState::Verifying, NodeState::Failed),
         (NodeState::Running, NodeState::Lost),
         (NodeState::Verifying, NodeState::Lost),
+        (NodeState::Pending, NodeState::Blocked),
+        (NodeState::Ready, NodeState::Blocked),
     ];
     for (from, to) in legal {
         assert_eq!(
@@ -2000,6 +2002,9 @@ pub fn transition(from: NodeState, to: NodeState) -> Result<NodeState, StateErro
             | (Verifying, Failed)
             | (Running, Lost)
             | (Verifying, Lost)
+            // 设计第 12 节：被阻塞的节点通常尚未运行，故这两条必需
+            | (Pending, Blocked)
+            | (Ready, Blocked)
     );
 
     if legal {
@@ -2525,6 +2530,7 @@ git commit -m "feat(graph): 增量重算的复用判定与 determinism 分类"
   - `continuum_graph::SchedulerConfig { pub max_parallel: usize }`，含 `Default`，默认 `max_parallel: 1`
   - `continuum_graph::select_runnable(&AdfirGraph, &SchedulerConfig) -> Vec<NodeId>`
   - `continuum_graph::apply_blocking(&mut AdfirGraph) -> Vec<NodeId>`
+  - `continuum_graph::apply_unblocking(&mut AdfirGraph) -> Vec<NodeId>`
 
 - [ ] **Step 1: 写调度测试**
 
@@ -2533,8 +2539,8 @@ git commit -m "feat(graph): 增量重算的复用判定与 determinism 分类"
 ```rust
 use continuum_artifact::ArtifactType;
 use continuum_graph::{
-    apply_blocking, select_runnable, AdfirGraph, ContractIdRef, EdgeKind, GraphId, Node, NodeId,
-    NodeState, SchedulerConfig,
+    apply_blocking, apply_unblocking, select_runnable, AdfirGraph, ContractIdRef, EdgeKind,
+    GraphId, Node, NodeId, NodeState, SchedulerConfig,
 };
 use continuum_operator::{OperatorId, OperatorVersion};
 use continuum_port::{Direction, Port, PortId};
@@ -2665,6 +2671,47 @@ fn blocking_marks_descendants_of_failed_predecessors() {
     assert_eq!(names(&blocked), vec!["b", "c"]);
     assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
     assert_eq!(g.node(&NodeId::new("c")).unwrap().state, NodeState::Blocked);
+}
+
+#[test]
+fn blocking_is_transitive_regardless_of_node_insertion_order() {
+    // 插入序取逆拓扑序。这是「迭代到不动点」的唯一守卫：按拓扑序插入时，
+    // 单趟扫描同序遍历也能把阻塞传到间接后继，该用例便区分不出两者。
+    let mut g = graph(&["c", "b", "a"]);
+    link(&mut g, "a", "b", EdgeKind::Control);
+    link(&mut g, "b", "c", EdgeKind::Control);
+    set_state(&mut g, "a", NodeState::Failed);
+
+    assert_eq!(names(&apply_blocking(&mut g)), vec!["b", "c"]);
+}
+
+#[test]
+fn blocked_nodes_are_unblocked_when_predecessors_complete() {
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Control);
+    set_state(&mut g, "a", NodeState::Failed);
+    apply_blocking(&mut g);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
+
+    set_state(&mut g, "a", NodeState::Completed);
+    let unblocked = apply_unblocking(&mut g);
+    assert_eq!(names(&unblocked), vec!["b"]);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Ready);
+}
+
+#[test]
+fn unblocking_leaves_nodes_with_unfinished_predecessors_blocked() {
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Control);
+    set_state(&mut g, "a", NodeState::Failed);
+    apply_blocking(&mut g);
+
+    set_state(&mut g, "a", NodeState::Running);
+    assert!(
+        apply_unblocking(&mut g).is_empty(),
+        "前驱未 COMPLETED 时不得解除阻塞"
+    );
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
 }
 ```
 
@@ -2797,6 +2844,46 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
 
     blocked
 }
+
+/// 把 CONTROL 与 DEPENDENCY 前驱已全部 COMPLETED 的 BLOCKED 节点迁移为 READY。
+///
+/// 与 `apply_blocking` 对称（设计第 12 节的后半句）。返回被解除阻塞的节点。
+/// 无排序前驱的 BLOCKED 节点视为满足条件——没有阻塞来源。
+pub fn apply_unblocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
+    let mut unblocked: Vec<NodeId> = Vec::new();
+    let ids: Vec<NodeId> = graph.nodes().iter().map(|n| n.id.clone()).collect();
+
+    for id in ids {
+        if graph.node(&id).expect("节点应存在").state != NodeState::Blocked {
+            continue;
+        }
+        let all_completed = graph
+            .edges_to(&id)
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
+                )
+            })
+            .all(|e| {
+                graph
+                    .node(&e.from_node)
+                    .map(|n| n.state == NodeState::Completed)
+                    .unwrap_or(false)
+            });
+        if all_completed {
+            let next = transition(NodeState::Blocked, NodeState::Ready)
+                .expect("BLOCKED 到 READY 为合法迁移");
+            if let Some(node) = graph.node_mut(&id) {
+                node.state = next;
+            }
+            unblocked.push(id);
+        }
+    }
+
+    unblocked
+}
 ```
 
 `crates/continuum-graph/src/lib.rs` 追加：
@@ -2804,13 +2891,13 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
 ```rust
 pub mod scheduler;
 
-pub use scheduler::{apply_blocking, select_runnable, SchedulerConfig};
+pub use scheduler::{apply_blocking, apply_unblocking, select_runnable, SchedulerConfig};
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，40 passed。
+Expected: PASS，43 passed。
 
 - [ ] **Step 5: 提交**
 
