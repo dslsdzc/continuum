@@ -184,3 +184,98 @@ fn recovery_handles_same_named_nodes_in_different_graphs() {
         other => panic!("计数应为整数，实际 {other:?}"),
     }
 }
+
+#[test]
+fn recovery_marks_verifying_nodes_as_lost() {
+    // §319 的 mark lost executions：崩溃时处于 VERIFYING 的节点同样丢失。
+    // 该用例是钩子里 VERIFYING 分支的唯一守卫——没有它，
+    // 把 VERIFYING 从 WHERE 条件里删掉不会有任何用例变红。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    run(&path);
+    {
+        let db = continuum_persist::Db::open(&path).unwrap();
+        let tx = db.begin().unwrap();
+        tx.execute(
+            "INSERT INTO adfir_graph (id, version, contract_id, entry_nodes, terminal_nodes)
+             VALUES ('g1', 1, 'c1', '[]', '[]')",
+            &[],
+        )
+        .unwrap();
+        tx.execute(
+            "INSERT INTO adfir_node
+               (graph_id, node_id, operator_id, operator_version, state,
+                execution_policy, verification_policy, constraints, capabilities)
+             VALUES ('g1', 'n1', 'op', 1, 'VERIFYING', 'null', 'null', '[]', '[]')",
+            &[],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+
+    let out = run(&path);
+    assert!(out.contains("标记 LOST 1 个节点"), "实际输出:\n{out}");
+}
+
+#[test]
+fn recovery_does_not_touch_same_named_nodes_in_other_graphs() {
+    // 钩子的 UPDATE 必须带 graph_id：否则会改到另一张图里同名的已完成节点。
+    // 该用例是那条 WHERE 条件的唯一守卫。
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    run(&path);
+    {
+        let db = continuum_persist::Db::open(&path).unwrap();
+        let tx = db.begin().unwrap();
+        for (graph, state) in [("g1", "RUNNING"), ("g2", "COMPLETED")] {
+            tx.execute(
+                "INSERT INTO adfir_graph (id, version, contract_id, entry_nodes, terminal_nodes)
+                 VALUES (?1, 1, 'c1', '[]', '[]')",
+                &[continuum_persist::Value::text(graph)],
+            )
+            .unwrap();
+            tx.execute(
+                "INSERT INTO adfir_node
+                   (graph_id, node_id, operator_id, operator_version, state,
+                    execution_policy, verification_policy, constraints, capabilities)
+                 VALUES (?1, 'n1', 'op', 1, ?2, 'null', 'null', '[]', '[]')",
+                &[
+                    continuum_persist::Value::text(graph),
+                    continuum_persist::Value::text(state),
+                ],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+    }
+
+    run(&path);
+
+    let db = continuum_persist::Db::open(&path).unwrap();
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query("SELECT graph_id, state FROM adfir_node ORDER BY graph_id", &[])
+        .unwrap();
+    let states: Vec<(String, String)> = rows
+        .iter()
+        .map(|r| {
+            let graph = match &r[0] {
+                continuum_persist::Value::Text(s) => s.clone(),
+                other => panic!("graph_id 应为文本，实际 {other:?}"),
+            };
+            let state = match &r[1] {
+                continuum_persist::Value::Text(s) => s.clone(),
+                other => panic!("state 应为文本，实际 {other:?}"),
+            };
+            (graph, state)
+        })
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            ("g1".to_owned(), "LOST".to_owned()),
+            ("g2".to_owned(), "COMPLETED".to_owned())
+        ],
+        "另一张图里同名的已完成节点不得被改动"
+    );
+}
