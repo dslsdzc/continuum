@@ -7,7 +7,7 @@ use continuum_graph::{
     NodeId, NodeState,
 };
 use continuum_operator::{OperatorId, OperatorVersion};
-use continuum_persist::{builtin_migrations, Db, Migration};
+use continuum_persist::{builtin_migrations, Db, Migration, Value};
 use continuum_port::{Direction, Port, PortId};
 use serde_json::json;
 
@@ -114,4 +114,25 @@ fn loading_an_unknown_graph_returns_none() {
     let tx = db.begin().unwrap();
     assert!(load_graph(&tx, &GraphId::new("nope")).unwrap().is_none());
     tx.commit().unwrap();
+}
+
+#[test]
+fn load_graph_rejects_a_stored_graph_violating_entry_constraints() {
+    // 该用例是 load_graph 内 validate() 调用的唯一守卫：
+    // 没有它，删掉那行调用不会有任何用例变红。
+    let (_d, db) = db();
+    let graph = sample_graph();
+    let tx = db.begin().unwrap();
+    save_graph(&tx, &graph).unwrap();
+    // 把入口改成 n1——它的输入端口 i1 有入边（来自 o2），违反设计 §8.3
+    tx.execute(
+        "UPDATE adfir_graph SET entry_nodes = ?1 WHERE id = ?2",
+        &[Value::text(r#"["n1"]"#), Value::text("g1")],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = load_graph(&tx, &GraphId::new("g1")).expect_err("违反入口约束的图必须被拒绝");
+    assert!(err.to_string().contains("入口"), "实际: {err}");
 }
