@@ -3842,9 +3842,10 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
         node.state = parse_state(&text(&row[3])?)?;
         node.execution_policy = parse_json(&text(&row[4])?)?;
         node.verification_policy = parse_json(&text(&row[5])?)?;
-        // 这两项若不回填会静默归零：Node::new 把它们初始化为空 Vec
-        node.constraints = parse_json(&text(&row[6])?)?;
-        node.capabilities = parse_json(&text(&row[7])?)?;
+        // 这两项若不回填会静默归零：Node::new 把它们初始化为空 Vec。
+        // 它们是 Vec<String> 而非 serde_json::Value，故走 parse_strings。
+        node.constraints = parse_strings(&text(&row[6])?)?;
+        node.capabilities = parse_strings(&text(&row[7])?)?;
         graph.add_node(node)?;
     }
 
@@ -3903,6 +3904,12 @@ pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, Persi
 }
 
 fn parse_json(s: &str) -> Result<serde_json::Value, PersistError> {
+    serde_json::from_str(s).map_err(|e| PersistError::Database(e.to_string()))
+}
+
+/// 与 `parse_json` 同构，仅返回类型不同：`Node.constraints` 与
+/// `Node.capabilities` 是 `Vec<String>` 而非 `serde_json::Value`。
+fn parse_strings(s: &str) -> Result<Vec<String>, PersistError> {
     serde_json::from_str(s).map_err(|e| PersistError::Database(e.to_string()))
 }
 ```
