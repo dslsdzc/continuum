@@ -4353,7 +4353,10 @@ git commit -m "feat(runtime): 装配 P1 迁移与恢复钩子"
 **Files:**
 - Create: `crates/continuum-graph/src/execution.rs`
 - Modify: `crates/continuum-graph/src/lib.rs`
+- Modify: `crates/continuum-graph/src/failure.rs`
 - Test: `crates/continuum-graph/tests/execution.rs`
+
+`failure.rs` 的改动是给 `RetryPolicy` 加 `Default`（`ExecutionProfile` 的该字段非可选）。它在 Task 10 已实现，本次为跨 task 的补加。
 
 **Interfaces:**
 - `continuum_graph::ExecutionProfile`
