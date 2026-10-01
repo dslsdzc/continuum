@@ -499,7 +499,9 @@ Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元�
 
 **`attempt` 的键空间。** `node_attempt` 与 `execution_profile` 共用同一套 `attempt` 编号，键为 `(graph_id, node_id)`。编号自 1 起，同一节点每新增一次尝试取 `MAX(attempt) + 1`。分配方是执行器；恢复钩子把崩溃时正在运行的节点记为一次新尝试，也走同一规则。两处若各起计数器会错位或撞主键。
 
-**表的写入方。** 每张表的读写函数与表定义放在同一 crate。`continuum-runtime` 不直接对这些列写 SQL 字面量——编码分歧正是这样产生的。
+**表的读写方。** 每张表的读写函数与表定义放在同一 crate。`continuum-runtime` 不直接对这些列写 SQL 字面量——编码分歧正是这样产生的。查询条件里的列取值同样属于该 crate：`WHERE state IN (...)` 的两个取值是编码，不是策略，故也参数化并取自 `state_str`。
+
+这条约束是**构造性质，没有行为守卫**：把 WHERE 的参数换回取值正确的字面量，`cargo test --workspace` 全绿——「用参数」与「用字面量且取值恰好正确」在行为上不可区分。把它变成可执行约束需要源码层检查（仿 `dependency_direction.rs` 的结构性做法），本项目尚未引入这种测试形态。当前由 crate 边界与本节约束维持；若后续有第二个 crate 开始对同一批列写 SQL，再考虑加检查。
 
 `continuum-runtime` 的启动改为 `Db::open_with(builtin_migrations + p1_migrations)`，否则 P0 的 `run_recovery` 内建迁移与 P1 的表不会同时生效。
 
