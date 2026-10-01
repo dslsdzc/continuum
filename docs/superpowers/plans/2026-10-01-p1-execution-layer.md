@@ -5056,8 +5056,8 @@ git commit -m "feat(artifact): 磁盘内容寻址存储与 ArtifactStore 落库�
 - Modify: `crates/continuum-graph/src/persist.rs`（`state_str` / `parse_state` 改 `pub(crate)`）
 - Modify: `crates/continuum-artifact/src/persist.rs`（`save_artifact` 加事件参数）
 - Modify: `crates/continuum-artifact/src/store.rs`（Task 14 的 `persist` 调用点随签名同步）
-- Modify: `crates/continuum-artifact/Cargo.toml`（加 `continuum-events` 依赖）
-- Modify: `crates/continuum-graph/Cargo.toml`（加 `continuum-events` 依赖；`continuum-events` 与 `tempfile` 加入 dev-dependencies）
+- Modify: `crates/continuum-artifact/Cargo.toml`（`[dependencies]` 加 `continuum-events`）
+- Modify: `crates/continuum-graph/Cargo.toml`（`[dependencies]` 与 `[dev-dependencies]` 各加 `continuum-events`）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 表）
 - Test: `crates/continuum-graph/tests/transition_events.rs`
 - Test: `crates/continuum-graph/tests/persistence.rs`（`save_artifact` 调用点同步）
@@ -5067,12 +5067,24 @@ git commit -m "feat(artifact): 磁盘内容寻址存储与 ArtifactStore 落库�
 - Produces: `continuum_graph::ApplyError`
 - 变更: `continuum_artifact::save_artifact(tx, artifact, event_id, occurred_at)`
 
-**依赖方向的两条新边。** `continuum-graph` 与 `continuum-artifact` 都需要构造
-`continuum_events::Event`。设计第 5 节的允许清单与
-`crates/continuum-runtime/tests/dependency_direction.rs:25` 的 `ALLOWED` 表都要加上
-`continuum-events`：`continuum-artifact → continuum-events`、
-`continuum-graph → continuum-events`。这两条边不构成环（`continuum-events` 只依赖 `continuum-core`）。
-设计第 5 节同步修订。
+**依赖方向的两条新边（设计第 5 节已修订）。** `continuum-graph` 与
+`continuum-artifact` 都需要构造 `continuum_events::Event`，两者目前的 `Cargo.toml`
+都没有该依赖，需补：
+
+- `crates/continuum-artifact/Cargo.toml` 的 `[dependencies]` 加
+  `continuum-events = { path = "../continuum-events" }`。
+- `crates/continuum-graph/Cargo.toml` 的 `[dependencies]` 加同一条；**另需在
+  `[dev-dependencies]` 也加一条**——`tests/transition_events.rs` 是独立 crate，
+  要能直接写 `continuum_events::EventType`。（`tempfile` 已在 dev-dependencies 里。）
+- `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表加这两条边：
+  `continuum-artifact` 的数组加 `"continuum-events"`，`continuum-graph` 的数组同样。
+  该表用 `cargo tree --depth 1 --edges all` 取值，**dev-dependencies 也算直接边**，
+  漏加会让 `every_crate_depends_only_on_its_allowed_set` 失败。
+
+这两条边不构成环（`continuum-events` 只依赖 `continuum-core`）。
+
+`EventType` 已派生 `Debug, Clone, Copy, PartialEq, Eq, Hash`（`event.rs:12`），
+测试可直接 `assert_eq!`，无需补派生。
 
 - [ ] **Step 1: 写事务边界与事件的测试**
 
