@@ -815,8 +815,11 @@ pub enum PortError {
 
 /// 判定两个端口能否连接。
 ///
-/// 条件为方向相反且 `artifact_type` 相同（§239）。
-/// `from` 为输出端，`to` 为输入端——顺序不影响判定结果，但错误信息按此顺序给出。
+/// 条件为方向不同且 `artifact_type` 相同（§239）。
+///
+/// 本函数对方向是对称的：只要求两端方向不同，不要求哪一端是输出。
+/// 图层的边有方向（`from_node → to_node` 被失效传播与调度排序依赖），
+/// 因此**朝向由 `AdfirGraph::connect` 另行校验**，不在本函数内。
 pub fn compatible(from: &Port, to: &Port) -> Result<(), PortError> {
     if from.direction == to.direction {
         return Err(PortError::DirectionMismatch {
@@ -1167,7 +1170,7 @@ git commit -m "feat(operator): Operator 定义、注册表与检查点接口"
   - `continuum_graph::Node`：字段见设计第 8.1 节
   - `continuum_graph::EdgeKind`：`Data`、`Control`、`Dependency`、`Evidence`、`Effect`、`Invalidation`
   - `continuum_graph::Edge`
-  - `continuum_graph::AdfirGraph`：`new`、`add_node`、`add_port`、`connect`、`port`、`node`、`node_mut`、`nodes`、`edges`、`edges_from`、`edges_to`
+  - `continuum_graph::AdfirGraph`：`new`、`add_node`、`add_port`、`connect`、`port`、`node`、`node_mut`、`nodes`、`edges`、`edges_from`、`edges_to`、`entry_nodes`、`terminal_nodes`、`set_entry_nodes`、`set_terminal_nodes`、`validate`
     （无 `is_acyclic`：环的拒绝在 `connect` 时强制，设计第 8.3 节不要求查询方法）
   - `continuum_graph::GraphError`
 
@@ -1289,6 +1292,68 @@ fn two_ports_with_the_same_id_are_rejected() {
         Err(GraphError::DuplicatePort { .. }) => {}
         other => panic!("端口 id 重复必须被拒绝，实际 {other:?}"),
     }
+}
+
+#[test]
+fn reversed_orientation_is_rejected() {
+    // 边有方向（from_node → to_node），失效传播与调度排序按它解读。
+    // 以输入端为起点、输出端为终点必须被拒绝。
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Text)).unwrap();
+
+    let err = g
+        .connect(&PortId::new("i1"), &PortId::new("o1"), EdgeKind::Data)
+        .expect_err("反向连接必须被拒绝");
+    assert!(
+        matches!(err, GraphError::WrongOrientation { .. }),
+        "实际 {err:?}"
+    );
+    assert!(g.edges().is_empty(), "被拒绝的连接不得留下边");
+}
+
+#[test]
+fn entry_node_with_incoming_edges_is_rejected() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Text)).unwrap();
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .unwrap();
+
+    g.set_entry_nodes(vec![NodeId::new("n2")]);
+    let err = g.validate().expect_err("入口节点的输入端口有入边时必须拒绝");
+    assert!(
+        matches!(err, GraphError::InvalidEntryNode { .. }),
+        "实际 {err:?}"
+    );
+
+    g.set_entry_nodes(vec![NodeId::new("n1")]);
+    g.validate().expect("n1 无输入端口，应通过");
+}
+
+#[test]
+fn terminal_node_with_outgoing_edges_is_rejected() {
+    let mut g = empty_graph();
+    g.add_node(node("n1", "a")).unwrap();
+    g.add_node(node("n2", "b")).unwrap();
+    g.add_port("n1", out_port("o1", ArtifactType::Text)).unwrap();
+    g.add_port("n2", in_port("i1", ArtifactType::Text)).unwrap();
+    g.connect(&PortId::new("o1"), &PortId::new("i1"), EdgeKind::Data)
+        .unwrap();
+
+    g.set_terminal_nodes(vec![NodeId::new("n1")]);
+    let err = g.validate().expect_err("出口节点的输出端口有出边时必须拒绝");
+    assert!(
+        matches!(err, GraphError::InvalidTerminalNode { .. }),
+        "实际 {err:?}"
+    );
+
+    g.set_terminal_nodes(vec![NodeId::new("n2")]);
+    g.validate().expect("n2 无输出端口，应通过");
 }
 ```
 
@@ -1509,6 +1574,12 @@ pub enum GraphError {
     PortMismatch(#[from] PortError),
     #[error("连接 {from} → {to} 会成环")]
     Cycle { from: PortId, to: PortId },
+    #[error("连接的起点 {from} 必须是输出端口，终点 {to} 必须是输入端口")]
+    WrongOrientation { from: PortId, to: PortId },
+    #[error("入口节点 {id} 的输入端口存在入边")]
+    InvalidEntryNode { id: NodeId },
+    #[error("出口节点 {id} 的输出端口存在出边")]
+    InvalidTerminalNode { id: NodeId },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -1518,6 +1589,8 @@ pub struct AdfirGraph {
     nodes: Vec<Node>,
     ports: HashMap<PortId, (NodeId, Port)>,
     edges: Vec<Edge>,
+    entry_nodes: Vec<NodeId>,
+    terminal_nodes: Vec<NodeId>,
     pub contract_id: ContractIdRef,
 }
 
@@ -1529,8 +1602,59 @@ impl AdfirGraph {
             nodes: Vec::new(),
             ports: HashMap::new(),
             edges: Vec::new(),
+            entry_nodes: Vec::new(),
+            terminal_nodes: Vec::new(),
             contract_id,
         }
+    }
+
+    pub fn entry_nodes(&self) -> &[NodeId] {
+        &self.entry_nodes
+    }
+
+    pub fn terminal_nodes(&self) -> &[NodeId] {
+        &self.terminal_nodes
+    }
+
+    pub fn set_entry_nodes(&mut self, nodes: Vec<NodeId>) {
+        self.entry_nodes = nodes;
+    }
+
+    pub fn set_terminal_nodes(&mut self, nodes: Vec<NodeId>) {
+        self.terminal_nodes = nodes;
+    }
+
+    /// 校验入口与出口节点的两条约束（设计第 8.3 节）。
+    ///
+    /// 入口节点的输入端口不得有入边；出口节点的输出端口不得有出边。
+    /// 图在投入使用前必须通过本校验——增量构造过程中不检查，
+    /// 因为构造完成前这些约束无意义。
+    pub fn validate(&self) -> Result<(), GraphError> {
+        for id in &self.entry_nodes {
+            let node = self
+                .node(id)
+                .ok_or_else(|| GraphError::UnknownNode { id: id.clone() })?;
+            let has_incoming = node
+                .inputs
+                .iter()
+                .any(|p| self.edges.iter().any(|e| e.to_port == *p));
+            if has_incoming {
+                return Err(GraphError::InvalidEntryNode { id: id.clone() });
+            }
+        }
+        for id in &self.terminal_nodes {
+            let node = self
+                .node(id)
+                .ok_or_else(|| GraphError::UnknownNode { id: id.clone() })?;
+            let has_outgoing = node
+                .outputs
+                .iter()
+                .any(|p| self.edges.iter().any(|e| e.from_port == *p));
+            if has_outgoing {
+                return Err(GraphError::InvalidTerminalNode { id: id.clone() });
+            }
+        }
+        Ok(())
     }
 
     pub fn add_node(&mut self, node: Node) -> Result<(), GraphError> {
@@ -1596,8 +1720,11 @@ impl AdfirGraph {
 
     /// 建立一条连接。
     ///
-    /// 校验顺序：两端端口存在 → 方向一进一出 → `artifact_type` 相同（§239）
-    /// → 参与环检测的边类型不成环。任一校验失败时不留下边。
+    /// 校验顺序：两端端口存在 → 朝向（起点输出、终点输入）→ `artifact_type` 相同
+    /// （§239）→ 参与环检测的边类型不成环。任一校验失败时不留下边。
+    ///
+    /// 朝向必须在本层校验：`compatible` 只要求两端方向不同，是方向对称的；
+    /// 而本层的边有方向（`from_node → to_node`），失效传播与调度排序都按它解读。
     ///
     /// 同节点的输出连回自身输入不单设检查：那是一条环，由环检测拦下。
     pub fn connect(
@@ -1612,6 +1739,13 @@ impl AdfirGraph {
         let (to_node, to_port) = self
             .port(to)
             .ok_or_else(|| GraphError::UnknownPort { id: to.clone() })?;
+
+        if from_port.direction() != Direction::Output || to_port.direction() != Direction::Input {
+            return Err(GraphError::WrongOrientation {
+                from: from.clone(),
+                to: to.clone(),
+            });
+        }
 
         compatible(from_port, to_port)?;
 
@@ -1677,7 +1811,7 @@ pub use node::{Node, NodeState, OperatorRef};
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，7 passed。
+Expected: PASS，10 passed。
 
 - [ ] **Step 6: 提交**
 
@@ -1922,7 +2056,7 @@ impl NodeState {
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，14 passed（图结构 7 + 状态机 7）。
+Expected: PASS，17 passed（图结构 10 + 状态机 7）。
 
 - [ ] **Step 5: 提交**
 
@@ -2163,7 +2297,7 @@ pub use invalidation::propagate_invalidation;
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，20 passed（图结构 7 + 状态机 7 + 失效 6）。
+Expected: PASS，23 passed（图结构 10 + 状态机 7 + 失效 6）。
 
 - [ ] **Step 5: 提交**
 
@@ -2361,7 +2495,7 @@ pub use reuse::{cache_key, can_reuse, CacheKey};
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，28 passed。
+Expected: PASS，31 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -2647,7 +2781,7 @@ pub use scheduler::{apply_blocking, select_runnable, SchedulerConfig};
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，36 passed。
+Expected: PASS，39 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -2902,7 +3036,7 @@ pub use failure::{
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，43 passed。
+Expected: PASS，46 passed。
 
 - [ ] **Step 5: 提交**
 
@@ -3510,7 +3644,7 @@ pub use persist::{load_graph, p1_graph_migrations, save_graph};
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cargo test -p continuum-graph -v`
-Expected: PASS，46 passed。
+Expected: PASS，49 passed。
 
 - [ ] **Step 6: 提交**
 
@@ -3718,7 +3852,7 @@ continuum-graph = { path = "../continuum-graph" }
 - [ ] **Step 5: 运行测试确认通过**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS、0 warning。计数：P0 的 62 加本子项目在 Task 2 至 11 新增的测试（artifact 7、port 4、operator 4、graph 46），runtime 由 4 增至 6，共 129 passed。
+Expected: 全部 PASS、0 warning。计数：P0 的 62 加本子项目在 Task 2 至 11 新增的测试（artifact 7、port 4、operator 4、graph 49），runtime 由 4 增至 6，共 132 passed。
 
 实际数与上述不符时**如实报告实际数**。
 
@@ -3988,7 +4122,7 @@ pub use execution::{is_candidate_backend, ArtifactRef, ExecutionProfile, NodeCon
 - [ ] **Step 4: 运行测试确认通过**
 
 Run: `cargo test --workspace`
-Expected: 全部 PASS、0 warning。计数：Task 12 结束时为 129，本 task 新增 7 条，共 **136 passed**。实际数不符时如实报告。
+Expected: 全部 PASS、0 warning。计数：Task 12 结束时为 132，本 task 新增 7 条，共 **139 passed**。实际数不符时如实报告。
 
 - [ ] **Step 5: 提交**
 
