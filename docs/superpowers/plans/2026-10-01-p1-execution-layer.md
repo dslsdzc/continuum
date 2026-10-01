@@ -5097,8 +5097,12 @@ use continuum_persist::{Db, Migration, Value};
 
 #[test]
 fn transition_and_its_event_commit_together() {
-    let (db, graph_id) = fixture();
+    let (_d, db, graph_id) = fixture();
     let tx = db.begin().unwrap();
+    // 夹具的节点是 PENDING，而迁移表里 PENDING 只有 →READY / →BLOCKED 两条出边，
+    // 故进 RUNNING 必须先走 READY → QUEUED
+    apply_transition(&tx, &graph_id, "n1", NodeState::Ready, 900, "e0").unwrap();
+    apply_transition(&tx, &graph_id, "n1", NodeState::Queued, 950, "e0b").unwrap();
     apply_transition(&tx, &graph_id, "n1", NodeState::Running, 1_000, "e1").unwrap();
     tx.commit().unwrap();
 
@@ -5163,8 +5167,17 @@ fn unknown_node_is_rejected() {
 }
 ```
 
-夹具 `fixture()` 建库、跑迁移、`save_graph` 一张含单个 PENDING 节点 `n1` 与一个
-已连好的 Port 对（`text` → `text`）的图，返回 `(Db, String /* graph_id */)`。
+夹具 `fixture()` 建库、跑迁移、`save_graph` 一张图，返回
+`(TempDir, Db, String /* graph_id */)`。
+
+**图必须有至少两个节点。** 单节点无法连出 Port 对——`connect` 只接受自环 `o1 → i1`，
+而 `EdgeKind::Data` 参与环检测（`edge.rs`，仅 Evidence/Effect 豁免），自环会被判为 `Cycle`。
+用 `n1`（PENDING）+ `n2` 两节点、一条 `n1.o1(Text) → n2.i2(Text)` 的 Data 边，
+`entry_nodes = [n1]`、`terminal_nodes = [n2]`，与
+`crates/continuum-graph/tests/persistence.rs` 的既有夹具同构，且能过 `load_graph` 的 `validate()`。
+
+**`TempDir` 必须被持有到用例结束**（故解构为 `let (_d, db, graph_id) = fixture();`）：
+WAL 模式下临时目录一旦回收，后续事务建日志文件会失败。
 
 `state_of(db, graph_id, node_id) -> NodeState` 与
 `events_of(db, graph_id, node_id) -> Vec<EventType>` 是两个辅助函数，各自开事务用
