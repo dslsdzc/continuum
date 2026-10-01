@@ -178,6 +178,45 @@ pub fn mark_node_lost(tx: &Tx<'_>, graph_id: &str, node_id: &str) -> Result<(), 
     Ok(())
 }
 
+/// 把崩溃时正在运行或正在验证的节点全部记为一次新尝试并置为 LOST（设计 §319）。
+///
+/// 返回值是被标记的节点数，供调用方报告进度。
+///
+/// 查询条件里的状态取值与写入取值同源——都来自 `state_str`，故编码变更不会
+/// 让两处失配。本函数与 `mark_node_lost` 是该表这两列在本仓库内的唯一读写入点：
+/// 调用方不得自行拼列名或列取值。
+pub fn mark_running_nodes_lost(tx: &Tx<'_>) -> Result<usize, PersistError> {
+    // WHERE 用参数而非插值：取值仍由 `state_str` 提供，编码源头只有一个，
+    // 且不必把 `state_str` 提升为 pub。
+    let rows = tx.query(
+        "SELECT graph_id, node_id FROM adfir_node WHERE state IN (?1, ?2)",
+        &[
+            Value::text(state_str(NodeState::Running)),
+            Value::text(state_str(NodeState::Verifying)),
+        ],
+    )?;
+    for row in &rows {
+        let graph_id = match &row[0] {
+            Value::Text(s) => s.clone(),
+            other => {
+                return Err(PersistError::Database(format!(
+                    "graph_id 应为文本，实际 {other:?}"
+                )))
+            }
+        };
+        let node_id = match &row[1] {
+            Value::Text(s) => s.clone(),
+            other => {
+                return Err(PersistError::Database(format!(
+                    "node_id 应为文本，实际 {other:?}"
+                )))
+            }
+        };
+        mark_node_lost(tx, &graph_id, &node_id)?;
+    }
+    Ok(rows.len())
+}
+
 pub fn load_graph(tx: &Tx<'_>, id: &GraphId) -> Result<Option<AdfirGraph>, PersistError> {
     let head = tx.query(
         "SELECT id, version, contract_id, entry_nodes, terminal_nodes

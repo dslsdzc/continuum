@@ -1,7 +1,7 @@
 //! P1 注册到 P0 恢复流程的钩子。
 
-use continuum_graph::mark_node_lost;
-use continuum_persist::{PersistError, RecoveryHook, RecoveryPhase, Tx, Value};
+use continuum_graph::mark_running_nodes_lost;
+use continuum_persist::{PersistError, RecoveryHook, RecoveryPhase, Tx};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -30,33 +30,10 @@ impl RecoveryHook for MarkRunningNodesLost {
     }
 
     fn run(&self, tx: &Tx<'_>) -> Result<(), PersistError> {
-        let rows = tx.query(
-            "SELECT graph_id, node_id FROM adfir_node WHERE state IN ('running', 'verifying')",
-            &[],
-        )?;
-        for row in &rows {
-            let graph_id = match &row[0] {
-                Value::Text(s) => s.clone(),
-                other => {
-                    return Err(PersistError::Database(format!(
-                        "graph_id 应为文本，实际 {other:?}"
-                    )))
-                }
-            };
-            let node_id = match &row[1] {
-                Value::Text(s) => s.clone(),
-                other => {
-                    return Err(PersistError::Database(format!(
-                        "node_id 应为文本，实际 {other:?}"
-                    )))
-                }
-            };
-            // 写入交给 continuum-graph：两列的编码辅助函数住在那边，
-            // 本 crate 不拼任何列取值字面量，避免两处各写一套再分叉。
-            // 上面的 SELECT 保留在本 crate——「哪些节点要处理」是恢复策略。
-            mark_node_lost(tx, &graph_id, &node_id)?;
-        }
-        self.marked.store(rows.len(), Ordering::Relaxed);
+        // 该表的读写整体交给 continuum-graph：本 crate 不再出现列名、列取值
+        // 或 Value 的类型匹配。编码与查询条件同源，两处不会分叉。
+        let marked = mark_running_nodes_lost(tx)?;
+        self.marked.store(marked, Ordering::Relaxed);
         Ok(())
     }
 }
