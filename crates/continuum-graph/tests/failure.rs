@@ -1,5 +1,7 @@
 use continuum_artifact::ArtifactType;
-use continuum_graph::{decide_retry, EscalationPolicy, FailureClass, RetryDecision, RetryPolicy};
+use continuum_graph::{
+    decide_retry, Backoff, EscalationPolicy, FailureClass, RetryDecision, RetryPolicy,
+};
 use continuum_operator::{
     BackendId, Determinism, Operator, OperatorId, OperatorVersion, SideEffectClass,
 };
@@ -19,9 +21,27 @@ fn op(side_effect: SideEffectClass) -> Operator {
 fn policy(max_attempts: u32, retryable: Vec<FailureClass>) -> RetryPolicy {
     RetryPolicy {
         max_attempts,
+        backoff: Backoff::Fixed { interval_ms: 1_000 },
         retryable_errors: retryable,
         escalation_policy: EscalationPolicy::Manual,
     }
+}
+
+#[test]
+fn backoff_expresses_both_strategies() {
+    // 该字段本 task 不消费，但必须能表达 §13.1 给 RESOURCE 的「退避后升级」
+    let fixed = Backoff::Fixed { interval_ms: 500 };
+    let exponential = Backoff::Exponential {
+        initial_ms: 100,
+        factor: 2,
+        max_ms: 30_000,
+    };
+    assert_ne!(fixed, exponential);
+    assert_eq!(
+        serde_json::from_str::<Backoff>(&serde_json::to_string(&exponential).expect("可序列化"))
+            .expect("可反序列化"),
+        exponential
+    );
 }
 
 #[test]

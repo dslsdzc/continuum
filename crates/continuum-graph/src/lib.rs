@@ -11,7 +11,9 @@ pub mod scheduler;
 pub mod state;
 
 pub use edge::{Edge, EdgeKind};
-pub use failure::{decide_retry, EscalationPolicy, FailureClass, RetryDecision, RetryPolicy};
+pub use failure::{
+    decide_retry, Backoff, EscalationPolicy, FailureClass, RetryDecision, RetryPolicy,
+};
 pub use graph::{AdfirGraph, GraphError};
 pub use ids::{ContractIdRef, GraphId, NodeId};
 pub use invalidation::propagate_invalidation;

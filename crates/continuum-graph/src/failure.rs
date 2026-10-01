@@ -35,9 +35,28 @@ pub enum EscalationPolicy {
     Manual,
 }
 
+/// 退避策略。`§307` 的 `RetryPolicy` 含 `backoff`，`§13.1` 给 RESOURCE 的
+/// 固有策略是「可重试，退避后仍失败则升级」——缺该字段则接口无法表达退避。
+///
+/// 本子项目的 `decide_retry` 不使用它：退避是执行方等待时的事，此处只让类型
+/// 能表达该策略。消费方在 P3 之后的调度路径。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backoff {
+    /// 固定间隔。
+    Fixed { interval_ms: u64 },
+    /// 指数退避：首次 `initial_ms`，每次乘 `factor`，单次不超过 `max_ms`。
+    Exponential {
+        initial_ms: u64,
+        factor: u32,
+        max_ms: u64,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RetryPolicy {
     pub max_attempts: u32,
+    pub backoff: Backoff,
     pub retryable_errors: Vec<FailureClass>,
     pub escalation_policy: EscalationPolicy,
 }
