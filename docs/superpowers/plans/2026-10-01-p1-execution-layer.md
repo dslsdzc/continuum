@@ -5313,6 +5313,151 @@ git commit -m "feat(graph): 状态迁移与事件同事务写入（§16、§17�
 
 ---
 
+### Task 16: 把 BlobStore 接到 ArtifactStore 上（收口设计 §15）
+
+**背景：** Task 14 建了 `BlobStore`（内容寻址落盘）与 `ArtifactStore` 的落库桥，但**两者互不引用**：`BlobStore` 除测试外全仓无调用方，`ArtifactStore::commit` 只登记元数据、不碰字节。结果是 Artifact 的 `content_hash` 入了库，其字节可能从未落盘——设计 §15 的「二进制内容按 `content_hash` 寻址落磁盘」在 P1 内仍无执行路径触发。这与本子项目反复出现的「机制建好但没接上」是同一形态，Task 14 只闭合了一半，本 task 闭合另一半。
+
+**依赖：** Task 14。
+
+**Files:**
+- Modify: `crates/continuum-artifact/src/store.rs`
+- Test: `crates/continuum-artifact/tests/artifact_store.rs`
+
+**Interfaces:**
+- Produces: `ArtifactStore::commit_with_content(&mut self, blob, artifact, bytes) -> Result<(), ArtifactError>`
+- Produces: `ArtifactError::ContentMismatch { id }`、`ArtifactError::Blob(BlobError)`
+
+- [ ] **Step 1: 写测试**
+
+```rust
+#[test]
+fn commit_with_content_puts_the_bytes_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    let a = artifact("a1", b"payload", vec![]);
+    let hash = a.content_hash.clone();
+    store.commit_with_content(&blob, a, b"payload").unwrap();
+
+    assert!(blob.contains(&hash), "字节必须已按哈希落盘");
+    assert_eq!(blob.get(&hash).unwrap(), b"payload");
+    assert_eq!(store.stored_blob_count(), 1);
+}
+
+#[test]
+fn commit_with_content_rejects_bytes_that_do_not_match_the_hash() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    // artifact 声明的哈希由 b"declared" 算出，实际传入 b"other"
+    let a = artifact("a1", b"declared", vec![]);
+    let hash = a.content_hash.clone();
+    let err = store.commit_with_content(&blob, a, b"other").unwrap_err();
+
+    assert!(matches!(err, ArtifactError::ContentMismatch { .. }), "实际 {err:?}");
+    assert!(!blob.contains(&hash), "被拒的提交不得留下字节");
+    assert!(store.get(&ArtifactId::new("a1")).is_none(), "被拒的提交不得登记元数据");
+}
+
+#[test]
+fn identical_content_under_two_ids_shares_one_blob_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path());
+    let mut store = ArtifactStore::new();
+
+    store.commit_with_content(&blob, artifact("a1", b"same", vec![]), b"same").unwrap();
+    store.commit_with_content(&blob, artifact("a2", b"same", vec![]), b"same").unwrap();
+
+    assert_eq!(store.stored_blob_count(), 1, "相同内容只登记一份");
+    // 磁盘上也只应有一份：BlobStore 按哈希寻址，相同内容落在同一路径。
+    // 用一个只数文件的辅助函数钉住（blobstore.rs 的测试里已有同形的 walk，
+    // 本文件自行加一个即可）。
+    assert_eq!(count_files(dir.path()), 1, "相同内容在盘上只占一份");
+}
+
+#[test]
+fn content_survives_commit_persist_restore_and_read_back() {
+    // 设计 §15 的完整回路：字节落盘、元数据落库、从库重建后仍能按哈希取回字节
+    let dir = tempfile::tempdir().unwrap();
+    let blob = BlobStore::new(dir.path().join("blobs"));
+    // 建库与跑迁移按本文件既有写法（本文件已有 migrations() 辅助函数）
+    let db = open_migrated(&dir.path().join("t.db"));
+
+    let tx = db.begin().unwrap();
+    let mut store = ArtifactStore::new();
+    store.commit_with_content(&blob, artifact("z1", b"root", vec![]), b"root").unwrap();
+    store
+        .commit_with_content(&blob, artifact("a1", b"derived", vec![ArtifactId::new("z1")]), b"derived")
+        .unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).unwrap();
+    let hash = restored.get(&ArtifactId::new("z1")).unwrap().content_hash.clone();
+    assert_eq!(blob.get(&hash).unwrap(), b"root", "重建后仍能按哈希取回原始字节");
+    assert_eq!(restored.lineage(&ArtifactId::new("a1")), vec![ArtifactId::new("z1")]);
+}
+```
+
+- [ ] **Step 2: 实现**
+
+在 `crates/continuum-artifact/src/store.rs`：
+
+```rust
+use crate::blobstore::{BlobError, BlobStore};
+
+// ArtifactError 增加两个变体：
+    #[error("Artifact {id} 声明的 content_hash 与其字节不符")]
+    ContentMismatch { id: ArtifactId },
+    #[error("内容落盘失败：{0}")]
+    Blob(#[from] BlobError),
+```
+
+```rust
+impl ArtifactStore {
+    /// 提交一个 Artifact，并把它的字节按 `content_hash` 落盘。
+    ///
+    /// 与 [`ArtifactStore::commit`] 的分工：`commit` 只登记元数据，用于
+    /// [`ArtifactStore::restore`] 这类「字节不在手上」的场景；本函数是**产生**
+    /// Artifact 的路径，它保证字节在任何元数据写入之前已按哈希落盘，并校验
+    /// `artifact.content_hash` 与实际字节相符——设计 §15 的「内容按哈希寻址
+    /// 落磁盘、元数据入库」由它闭合。
+    ///
+    /// 落盘先于登记：若登记阶段失败（如 id 重复），已写入的字节留在盘上。
+    /// 内容寻址存储是幂等的，孤儿内容可被其他 Artifact 复用，故不回收。
+    pub fn commit_with_content(
+        &mut self,
+        blob: &BlobStore,
+        artifact: Artifact,
+        bytes: &[u8],
+    ) -> Result<(), ArtifactError> {
+        if ContentHash::of(bytes) != artifact.content_hash {
+            return Err(ArtifactError::ContentMismatch { id: artifact.id });
+        }
+        blob.put(bytes)?;
+        self.commit(artifact)
+    }
+}
+```
+
+- [ ] **Step 3: 收尾两处 Task 14 报出的未覆盖项**
+
+1. `BlobStore::contains` 此前零覆盖（变异成恒 `false` 仍全绿）。Step 1 的用例现在会真正经过它；请确认「把 `contains` 改成恒 `false`」能让 `commit_with_content_puts_the_bytes_on_disk` 变红，若不能则说明该断言未承重，如实回报。
+2. `restore` 里 `store.commit(artifact).map_err(...)` 那条分支在现有用例下**不可达**（其触发条件与循环前的输入检查同条件）。Task 14 的实现方为此把错误信息改成点名 id，但其变异显示：改回原样测试**仍全绿**——即该断言实际命中的是循环末尾那条「输入不存在或依赖成环」的错误。处置：保留该分支作为防御（`commit` 日后可能新增失败模式），但在其上方加注释写明「当前不可达，现有用例覆盖的是循环末尾那条」，并把 `restore_reports_dangling_inputs_instead_of_dropping_them` 的注释改成如实描述它命中的是哪条分支。**不要为了让它可达而削弱循环前的检查。**
+
+- [ ] **Step 4: 运行全部测试并提交**
+
+```bash
+cargo test --workspace
+git add -A
+git commit -m "feat(artifact): commit_with_content 把字节按 content_hash 落盘（收口 §15）"
+```
+
+---
+
 ## 遗留
 
 ```
