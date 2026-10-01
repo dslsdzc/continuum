@@ -1167,7 +1167,8 @@ git commit -m "feat(operator): Operator 定义、注册表与检查点接口"
   - `continuum_graph::Node`：字段见设计第 8.1 节
   - `continuum_graph::EdgeKind`：`Data`、`Control`、`Dependency`、`Evidence`、`Effect`、`Invalidation`
   - `continuum_graph::Edge`
-  - `continuum_graph::AdfirGraph`：`new`、`add_node`、`add_port`、`connect`、`port`、`node`、`nodes`、`edges`、`is_acyclic`
+  - `continuum_graph::AdfirGraph`：`new`、`add_node`、`add_port`、`connect`、`port`、`node`、`node_mut`、`nodes`、`edges`、`edges_from`、`edges_to`
+    （无 `is_acyclic`：环的拒绝在 `connect` 时强制，设计第 8.3 节不要求查询方法）
   - `continuum_graph::GraphError`
 
 - [ ] **Step 1: 写图结构测试**
