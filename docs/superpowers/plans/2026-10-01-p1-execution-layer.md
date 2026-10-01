@@ -3286,12 +3286,12 @@ git commit -m "feat(graph): 失败分类与重试判定"
 
 ```rust
 use continuum_artifact::{
-    p1_artifact_migrations, save_artifact, Artifact, ArtifactId, ArtifactType, ContentHash,
-    PrivacyClass,
+    load_artifact, p1_artifact_migrations, save_artifact, Artifact, ArtifactId, ArtifactType,
+    ContentHash, PrivacyClass,
 };
 use continuum_graph::{
-    p1_graph_migrations, save_graph, AdfirGraph, ContractIdRef, EdgeKind, GraphId, Node, NodeId,
-    NodeState,
+    load_graph, p1_graph_migrations, save_graph, AdfirGraph, ContractIdRef, EdgeKind, GraphId, Node,
+    NodeId, NodeState,
 };
 use continuum_operator::{OperatorId, OperatorVersion};
 use continuum_persist::{builtin_migrations, Db, Migration};
