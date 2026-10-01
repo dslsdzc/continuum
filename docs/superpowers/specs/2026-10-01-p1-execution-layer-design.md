@@ -482,15 +482,23 @@ ExecutionProfile {
 
 ```
 adfir_graph          id, version, contract_id, entry_nodes, terminal_nodes
+                     PK (id)
 adfir_node           graph_id, node_id, operator_id, operator_version, state,
-                     execution_policy, verification_policy
-adfir_port           graph_id, node_id, direction, name, artifact_type
+                     execution_policy, verification_policy, constraints, capabilities
+                     PK (graph_id, node_id)
+adfir_port           graph_id, node_id, port_id, direction, name, artifact_type
+                     PK (graph_id, port_id)
 adfir_edge           graph_id, from_node, from_port, to_node, to_port, kind
+                     无主键；同一对端口可重复连边，见下文「边的去重」
 artifact             id, artifact_type, content_hash, size, producer_node,
                      privacy_class, version, metadata, provenance
+                     PK (id)；索引 idx_artifact_hash (content_hash)
 artifact_input       artifact_id, input_artifact_id
-execution_profile    node_id, attempt, backend, timeout, retry_policy, cost_budget
-node_attempt         node_id, attempt, state, failure_class
+                     PK (artifact_id, input_artifact_id)
+execution_profile    graph_id, node_id, attempt, backend, timeout_ms, retry_policy, cost_budget
+                     PK (graph_id, node_id, attempt)
+node_attempt         graph_id, node_id, attempt, state, failure_class
+                     PK (graph_id, node_id, attempt)
 ```
 
 Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元数据入库。
@@ -498,6 +506,10 @@ Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元�
 **枚举列的编码。** `adfir_node.state`、`node_attempt.state`、`node_attempt.failure_class`、`adfir_edge.kind`、`adfir_port.direction`、`artifact.artifact_type`、`artifact.privacy_class` 一律用**小写**、多词以 `_` 连接（`source_tree`、`local_only`）。这不等于 Rust 枚举的 serde 表示：`NodeState` 与 `FailureClass` 的 serde 是 `SCREAMING_SNAKE_CASE`，直接反序列化会失败。落库与读回一律经 `continuum-graph::persist` 的显式辅助函数（`state_str` / `parse_state`），不得依赖 serde，也不得在别处硬写字面量。
 
 **`attempt` 的键空间。** `node_attempt` 与 `execution_profile` 共用同一套 `attempt` 编号，键为 `(graph_id, node_id)`。编号自 1 起，同一节点每新增一次尝试取 `MAX(attempt) + 1`。分配方是执行器；恢复钩子把崩溃时正在运行的节点记为一次新尝试，也走同一规则。两处若各起计数器会错位或撞主键。
+
+**每次尝试必须同时写这两张表。** 这是上面「单表取 `MAX` 即等价」成立的前提：现有实现（`mark_node_lost`）只从 `node_attempt` 取 `MAX(attempt)`，若将来有写入方只更新 `execution_profile` 而漏写 `node_attempt`，恢复钩子算出的号会与执行器的错位——不撞主键，但两表的同一个号不再指同一次执行。写入方新增时必须遵守此条。
+
+**边的去重。** `adfir_edge` 无主键，而 `AdfirGraph::connect` 不去重——同一对端口可以连两次并原样往返。P1 内无消费者受害；P2 接入调度后重复边会让 `edges_to` 双倍计数。`connect` 应对完全相同的边（两端节点、两端端口、`kind` 全同）返回错误而非静默接受。
 
 **表的读写方。** 每张表的读写函数与表定义放在同一 crate。`continuum-runtime` 不直接对这些列写 SQL 字面量——编码分歧正是这样产生的。查询条件里的列取值同样属于该 crate：`WHERE state IN (...)` 的两个取值是编码，不是策略，故也参数化并取自 `state_str`。
 
@@ -522,6 +534,8 @@ EventType::ArtifactCreated     Artifact 入库时写入
 
 1. **函数返回 `Err` 之后，调用方必须回滚该事务，不得提交。** 函数可能在失败前已写入部分行（例如先写状态、再写事件时事件写入失败）。「先收集错误、最后统一提交」的批量写法会写进一个没有对应事件的状态变迁。
 2. **事件 id 由调用方分配且必须唯一。** 同一次执行中节点可以多次到达同一状态（`Running → Waiting → Ready → Queued → Running` 是合法路径，会写两条 `NodeStarted`），故不能用可由节点与状态派生的可复用 id。执行器应使用单调序号。
+
+   例外：当「被记录的对象」与「事件」一一对应、且该对象的 id 全局唯一时，可用派生 id。`ArtifactCreated` 即属此类——一个 Artifact 恰产生一条该事件，`artifact.id` 是主键，重复落库在事件写入之前就被拒，故 `artifact/{id}` 是安全的。节点状态变迁不满足此条件，必须用序号。
 
 这两条不是实现细节：函数自身提交不了（它拿不到 `Db`），原子性在端到端意义上由调用方兑现。
 
@@ -564,6 +578,13 @@ ExecutionProfile  六个资源字段在 P3、P7 之前恒为 None，其写入路
                   并做前置判定，否则未注册的算子也能进入 RUNNING。
 RESOURCE 的默认策略 §13.1 给 RESOURCE 的「退避后仍失败则升级」不能由 RetryPolicy::default()
                   满足（默认 max_attempts = 1，首次失败即失败）。P3 的 Router 必须显式给出。
+无执行点的机制    P1 定义了但没有生产调用方的机制，P2 接执行器时才有消费者：
+                  apply_transition（第 16 节的写入函数）、save_graph / load_graph、
+                  ArtifactStore::{persist, restore} 与 commit_with_content、
+                  BlobStore 的落盘路径。P1 内除测试外无调用点，接线属 P2。
+                  （select_runnable / apply_blocking / apply_unblocking / propagate_invalidation /
+                  can_reuse / decide_retry / is_terminal / is_candidate_backend / OperatorRegistry
+                  同属此类，见第 11.1、11.2、14 节的自陈。）
 并行上限          默认值 1 是占位取值，P3 接入资源模型后需重估。
 ```
 
