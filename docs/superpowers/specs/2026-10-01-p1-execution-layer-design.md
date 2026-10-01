@@ -468,7 +468,7 @@ ExecutionProfile {
 
 `backend` 的类型是 `Option<BackendId>`——`BackendId` 已由 `§244` 的 Operator 定义提供，无需占位。
 
-本子项目内 `model`、`provider`、`tool`、`compute_node` 恒为 None——P3 与 P7 之前无对应资源。
+本子项目内 `model`、`provider`、`tool`、`compute_node`、`reasoning_effort`、`cost_budget` 恒为 None——P3 与 P7 之前无对应资源。
 
 该类型定义在 `continuum-graph`，与第 11.2 节的执行接口同处一 crate。
 
