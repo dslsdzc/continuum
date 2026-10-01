@@ -73,26 +73,27 @@ pub fn apply_blocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
                 continue;
             }
 
+            // 边集与 `select_runnable` 的 READY 判据一致：DATA 前驱失败时其
+            // Artifact 永不出现，下游同样不可推进。只算 Control 与 Dependency
+            // 会让这类节点既不可 READY 也不 BLOCKED，永久搁死在 PENDING。
+            //
+            // 前驱处于 BLOCKED 也计为不可推进，且按状态判定而非「本次调用新标记」——
+            // 后者在多轮调度下会漏传。
             let stalled = graph.edges_to(&id).iter().any(|e| {
-                if !matches!(
-                    e.kind,
-                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
-                ) {
+                if !e.kind.orders_execution() {
                     return false;
-                }
-                if blocked.contains(&e.from_node) {
-                    return true;
                 }
                 graph
                     .node(&e.from_node)
                     .map(|n| {
-                        matches!(
-                            n.state,
-                            NodeState::Failed
-                                | NodeState::Cancelled
-                                | NodeState::Invalidated
-                                | NodeState::Lost
-                        )
+                        n.state == NodeState::Blocked
+                            || matches!(
+                                n.state,
+                                NodeState::Failed
+                                    | NodeState::Cancelled
+                                    | NodeState::Invalidated
+                                    | NodeState::Lost
+                            )
                     })
                     .unwrap_or(false)
             });
@@ -131,12 +132,7 @@ pub fn apply_unblocking(graph: &mut AdfirGraph) -> Vec<NodeId> {
         let all_completed = graph
             .edges_to(&id)
             .iter()
-            .filter(|e| {
-                matches!(
-                    e.kind,
-                    crate::edge::EdgeKind::Control | crate::edge::EdgeKind::Dependency
-                )
-            })
+            .filter(|e| e.kind.orders_execution())
             .all(|e| {
                 graph
                     .node(&e.from_node)

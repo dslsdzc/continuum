@@ -147,6 +147,18 @@ fn blocking_is_transitive_regardless_of_node_insertion_order() {
 }
 
 #[test]
+fn a_failed_data_predecessor_blocks_its_consumer() {
+    // DATA 前驱失败时其 Artifact 永不出现，下游同样不可推进。
+    // 边集若只算 CONTROL 与 DEPENDENCY，这类节点会永久搁死在 PENDING。
+    let mut g = graph(&["a", "b"]);
+    link(&mut g, "a", "b", EdgeKind::Data);
+    set_state(&mut g, "a", NodeState::Failed);
+
+    assert_eq!(names(&apply_blocking(&mut g)), vec!["b"]);
+    assert_eq!(g.node(&NodeId::new("b")).unwrap().state, NodeState::Blocked);
+}
+
+#[test]
 fn blocked_nodes_are_unblocked_when_predecessors_complete() {
     let mut g = graph(&["a", "b"]);
     link(&mut g, "a", "b", EdgeKind::Control);
