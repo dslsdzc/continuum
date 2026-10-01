@@ -418,6 +418,8 @@ VERIFICATION    不可重试，进入验证路径
 UNKNOWN         不可自动重试
 ```
 
+上表是该类别在**固有归属**上是否允许重试，不是对某次执行的保证：一次失败是否真的重试，还要经第 13.2 节的白名单与尝试余量两道判定。`RESOURCE` 与前两类的区别在升级时机——`CONSTRAINT` / `AUTHORIZATION` 立即升级为决策，`RESOURCE` 是退避重试耗尽后再升级。
+
 ## 13.2 重试
 
 ```
@@ -432,6 +434,8 @@ RetryPolicy {
 `attempt` 自 1 起计：首次尝试的 `attempt` 为 1。`max_attempts` 是该节点允许的**总尝试次数**，不是重试次数。判据为 `attempt < max_attempts` 时重试（`next_attempt = attempt + 1`），否则升级。故 `max_attempts = 1` 表示只尝试一次、不重试。
 
 `retryable_errors` 是在 `§13.1` 固有归属之上**收窄**的白名单：类别既要在固有归属上可重试，又要在白名单内，才会被重试。空白名单使所有类别都不重试。
+
+`RetryPolicy::default()`（`max_attempts = 1`、空白名单、`EscalationPolicy::None`）表示**不重试**，适用于未声明重试策略的 Operator。它不满足 `§13.1` 对 `RESOURCE` 的「退避后仍失败则升级」：该类别拿到默认策略时会在首次失败即失败，没有任何退避重试。故 `RESOURCE` 的固有策略必须由后端解析方（P3 的 Router）在构造 `ExecutionProfile` 时显式给出 `max_attempts >= 2` 与退避参数，不能依赖默认值。默认值是「未配置」的表示，不是任何类别的固有策略。
 
 `§307` 要求非幂等 Effect 不得直接自动重试。判定依据为 `Operator.side_effect_class`：
 
@@ -538,6 +542,13 @@ EventType::ArtifactCreated     Artifact 入库时写入
 ArtifactType 集合 本子项目取六种。P5 引入媒体类型时为编译期可见的破坏性变更。
 ExecutionProfile  六个资源字段在 P3、P7 之前恒为 None，其写入路径未被覆盖。
 检查点            只定义接口，无实现，无测试。
+算子解析的落点    §11.2 的 Failure condition「注册表中不存在 (operator_id, operator_version)
+                  时节点不进入 RUNNING，返回 OperatorNotFound」在 P1 无执行点：
+                  Node::operator 是 OperatorRef，Node::new 不查注册表，transition 也不收注册表。
+                  P2 的 Queued → Running 是它唯一的合法落点，必须在彼处调 OperatorRegistry::resolve
+                  并做前置判定，否则未注册的算子也能进入 RUNNING。
+RESOURCE 的默认策略 §13.1 给 RESOURCE 的「退避后仍失败则升级」不能由 RetryPolicy::default()
+                  满足（默认 max_attempts = 1，首次失败即失败）。P3 的 Router 必须显式给出。
 并行上限          默认值 1 是占位取值，P3 接入资源模型后需重估。
 ```
 
