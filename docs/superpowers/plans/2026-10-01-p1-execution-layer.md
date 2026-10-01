@@ -4653,9 +4653,11 @@ git commit -m "feat(graph): 执行接口与执行档案（补设计 §11.2 与 �
 - Test: `crates/continuum-artifact/tests/blobstore.rs`
 - Test: `crates/continuum-artifact/tests/artifact_store.rs`
 
-`crates/continuum-artifact/Cargo.toml` 若缺 `tempfile` 与 `continuum-persist` 的
-dev-dependencies 需补上（`artifact_store.rs` 已有用例，多半已具备）。
-`artifact_store.rs` 里已有的 `source_tree` / `patch` 夹具直接复用，不要另造。
+`crates/continuum-artifact/Cargo.toml` 目前**没有** `[dev-dependencies]` 段，两个测试都要建临时库，
+需补 `tempfile = { workspace = true }`。`continuum-persist` 已是正式依赖，测试可直接用。
+
+`artifact_store.rs:6` 已有夹具 `fn artifact(id: &str, bytes: &[u8], inputs: Vec<ArtifactId>) -> Artifact`，
+直接复用，不要另造。
 
 **Interfaces:**
 - Produces: `continuum_artifact::BlobStore` —— `new`、`put`、`get`、`contains`
@@ -4860,16 +4862,17 @@ fn store_round_trips_through_the_database() {
     let tx = db.begin().unwrap();
 
     let mut store = ArtifactStore::new();
-    store.commit(source_tree("a1")).unwrap();
-    store.commit(patch("a2", "a1")).unwrap();
+    store.commit(artifact("a1", b"root", vec![])).unwrap();
+    store.commit(artifact("a2", b"derived", vec![ArtifactId::new("a1")])).unwrap();
     store.persist(&tx).unwrap();
     tx.commit().unwrap();
 
     let tx = db.begin().unwrap();
     let restored = ArtifactStore::restore(&tx).unwrap();
     assert_eq!(restored.get(&ArtifactId::new("a1")), store.get(&ArtifactId::new("a1")));
+    assert_eq!(restored.get(&ArtifactId::new("a2")), store.get(&ArtifactId::new("a2")));
     assert_eq!(restored.lineage(&ArtifactId::new("a2")), vec![ArtifactId::new("a1")]);
-    assert_eq!(restored.stored_blob_count(), 1);
+    assert_eq!(restored.stored_blob_count(), 2);
 }
 
 #[test]
@@ -4880,8 +4883,8 @@ fn deduplication_holds_on_the_persisted_path() {
     let tx = db.begin().unwrap();
 
     let mut store = ArtifactStore::new();
-    let a1 = source_tree("a1");
-    let a2 = source_tree("a2"); // 与 a1 内容相同、id 不同
+    let a1 = artifact("a1", b"same", vec![]);
+    let a2 = artifact("a2", b"same", vec![]); // 与 a1 内容相同、id 不同
     let hash = a1.content_hash.clone();
     assert_eq!(hash, a2.content_hash, "夹具前提：两者内容相同");
     store.commit(a1).unwrap();
@@ -4893,6 +4896,48 @@ fn deduplication_holds_on_the_persisted_path() {
     let restored = ArtifactStore::restore(&tx).unwrap();
     assert_eq!(restored.stored_blob_count(), 1, "相同内容只存一份");
     assert!(restored.find_by_hash(&hash).is_some());
+}
+
+#[test]
+fn restore_follows_dependency_order_not_id_order() {
+    // "a1" 的输入是 "z1"：按 id 字典序重建会先撞上输入缺失，按依赖序不会
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("z1", b"root", vec![])).unwrap();
+    store.commit(artifact("a1", b"derived", vec![ArtifactId::new("z1")])).unwrap();
+    store.persist(&tx).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let restored = ArtifactStore::restore(&tx).expect("按依赖序重建应当成功");
+    assert_eq!(restored.lineage(&ArtifactId::new("a1")), vec![ArtifactId::new("z1")]);
+}
+
+#[test]
+fn restore_reports_dangling_inputs_instead_of_dropping_them() {
+    // 库中存在一个输入不存在的 Artifact：重建必须报错，不能静默少一个
+    let dir = tempfile::tempdir().unwrap();
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    let mut store = ArtifactStore::new();
+    store.commit(artifact("a1", b"root", vec![])).unwrap();
+    store.persist(&tx).unwrap();
+    // 绕过内存路径直接写一条输入悬空的记录
+    tx.execute(
+        "INSERT INTO artifact_input (artifact_id, input_artifact_id) VALUES ('a1', 'ghost')",
+        &[],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    let err = ArtifactStore::restore(&tx).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("a1"), "错误应点名出问题的 Artifact，实际：{msg}");
 }
 
 fn migrations() -> Vec<continuum_persist::Migration> {
@@ -4925,11 +4970,17 @@ impl ArtifactStore {
         Ok(())
     }
 
-    /// 从库中重建。`by_hash` 的「首次提交者胜出」按 id 升序重建，
-    /// 使同一份内容的多个 id 之间的胜者与插入顺序无关。
+    /// 从库中重建。
+    ///
+    /// 按**依赖序**重建而非 id 序：`commit` 要求输入 Artifact 已存在，而 id
+    /// 的字典序不保证输入在前（id 为 `z` 的 Artifact 可以依赖 `a`）。每轮提交
+    /// 所有输入已就位的 Artifact，直到一轮之内没有进展；此时若仍有剩余，说明
+    /// 存在环或输入的 id 缺失，返回错误而不是静默丢弃。
+    ///
+    /// `by_hash` 的「首次提交者胜出」随之由该顺序决定。
     pub fn restore(tx: &Tx<'_>) -> Result<Self, PersistError> {
         let rows = tx.query("SELECT id FROM artifact ORDER BY id", &[])?;
-        let mut store = Self::new();
+        let mut pending: Vec<Artifact> = Vec::with_capacity(rows.len());
         for row in rows {
             let id = match &row[0] {
                 Value::Text(s) => ArtifactId::new(s.clone()),
@@ -4939,13 +4990,37 @@ impl ArtifactStore {
                     )))
                 }
             };
-            let artifact = load_artifact(tx, &id)?.ok_or_else(|| {
-                PersistError::Database(format!("artifact {id} 在枚举后读不回"))
-            })?;
-            // 走 commit 而不是直接插表：保证恢复到与内存路径同一套不变量
-            store.commit(artifact).map_err(|e| {
-                PersistError::Database(format!("恢复 Artifact {id} 被拒：{e}"))
-            })?;
+            let artifact = load_artifact(tx, &id)?
+                .ok_or_else(|| PersistError::Database(format!("artifact {id} 在枚举后读不回")))?;
+            pending.push(artifact);
+        }
+
+        let mut store = Self::new();
+        while !pending.is_empty() {
+            let mut deferred = Vec::new();
+            let mut progressed = false;
+            for artifact in pending {
+                if artifact
+                    .input_artifacts
+                    .iter()
+                    .all(|input| store.get(input).is_some())
+                {
+                    // 走 commit 而不是直接插表：恢复到与内存路径同一套不变量
+                    store.commit(artifact).map_err(|e| {
+                        PersistError::Database(format!("恢复 Artifact 被拒：{e}"))
+                    })?;
+                    progressed = true;
+                } else {
+                    deferred.push(artifact);
+                }
+            }
+            if !progressed {
+                let blocked: Vec<&str> = deferred.iter().map(|a| a.id.as_str()).collect();
+                return Err(PersistError::Database(format!(
+                    "以下 Artifact 的输入在库中不存在或依赖成环：{blocked:?}"
+                )));
+            }
+            pending = deferred;
         }
         Ok(store)
     }
