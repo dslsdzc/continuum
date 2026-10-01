@@ -5382,8 +5382,9 @@ fn content_survives_commit_persist_restore_and_read_back() {
     // 设计 §15 的完整回路：字节落盘、元数据落库、从库重建后仍能按哈希取回字节
     let dir = tempfile::tempdir().unwrap();
     let blob = BlobStore::new(dir.path().join("blobs"));
-    // 建库与跑迁移按本文件既有写法（本文件已有 migrations() 辅助函数）
-    let db = open_migrated(&dir.path().join("t.db"));
+    // 建库与跑迁移按本文件既有写法（见同文件其它用例的 open_with + migrate）
+    let db = continuum_persist::Db::open_with(&dir.path().join("t.db"), migrations()).unwrap();
+    db.migrate().unwrap();
 
     let tx = db.begin().unwrap();
     let mut store = ArtifactStore::new();
