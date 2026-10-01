@@ -63,8 +63,15 @@ pub struct RetryPolicy {
 }
 
 impl Default for RetryPolicy {
-    /// 默认策略为「单次尝试、不重试」：`max_attempts = 1` 使 `decide_retry`
-    /// 在首次失败即升级或失败，不产生第二次尝试。
+    /// 默认策略为「单次尝试、不重试」。三道闸各自独立，缺一不可：
+    ///
+    /// - **空白名单是走到判定的那一闸**。设计 `§13.2` 规定 `retryable_errors`
+    ///   是在 `§13.1` 固有归属之上**收窄**的白名单，空白名单使所有类别都在
+    ///   `decide_retry` 第 3 步被拒，第 5 步的升级分支根本不会被走到。
+    /// - `max_attempts = 1` 独立地把总尝试数限为一次：`attempt` 自 1 起计，
+    ///   仅当 `attempt < max_attempts` 才重试，故首次尝试失败时已无余量。
+    ///   将来若为默认策略填入 `retryable_errors`，这一条仍然拦得住。
+    /// - `EscalationPolicy::None` 决定走到第 5 步时的动作：升级退化为失败。
     fn default() -> Self {
         Self {
             max_attempts: 1,

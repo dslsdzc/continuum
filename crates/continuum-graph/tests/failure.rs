@@ -145,6 +145,40 @@ fn whitelisting_a_permanent_class_does_not_make_it_retryable() {
 }
 
 #[test]
+fn the_default_policy_never_retries() {
+    // 默认策略「单次尝试、不重试」由三道闸共同保证：空白名单、max_attempts = 1、
+    // EscalationPolicy::None。既有用例一律经 `policy()` 构造，白名单非空且升级为
+    // Manual，故这三条都无守卫。
+    let p = RetryPolicy::default();
+    assert_eq!(p.max_attempts, 1);
+    assert!(p.retryable_errors.is_empty());
+    assert_eq!(p.escalation_policy, EscalationPolicy::None);
+
+    // 空白名单先于尝试余量判定：`§13.1` 固有归属上可重试的 TRANSIENT 也被拒
+    assert_eq!(
+        decide_retry(&op(SideEffectClass::Pure), &p, FailureClass::Transient, 1),
+        RetryDecision::Fail
+    );
+}
+
+#[test]
+fn escalation_policy_none_turns_escalation_into_failure() {
+    // 白名单非空时第 3 步放行，尝试耗尽后走到第 5 步；None 使升级退化为失败。
+    // 该分支此前无任何用例经过（`policy()` 恒为 Manual）。
+    let p = RetryPolicy {
+        max_attempts: 3,
+        backoff: Backoff::Fixed { interval_ms: 1_000 },
+        retryable_errors: vec![FailureClass::Transient],
+        escalation_policy: EscalationPolicy::None,
+    };
+    assert_eq!(
+        decide_retry(&op(SideEffectClass::Pure), &p, FailureClass::Transient, 3),
+        RetryDecision::Fail,
+        "EscalationPolicy::None 下耗尽尝试应失败而非升级"
+    );
+}
+
+#[test]
 fn a_class_outside_retryable_errors_fails() {
     let p = policy(5, vec![FailureClass::Transient]);
     assert_eq!(
