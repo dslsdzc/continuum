@@ -495,6 +495,12 @@ node_attempt         node_id, attempt, state, failure_class
 
 Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元数据入库。
 
+**枚举列的编码。** `adfir_node.state`、`node_attempt.state`、`node_attempt.failure_class`、`adfir_edge.kind`、`adfir_port.direction`、`artifact.artifact_type`、`artifact.privacy_class` 一律用**小写**、多词以 `_` 连接（`source_tree`、`local_only`）。这不等于 Rust 枚举的 serde 表示：`NodeState` 与 `FailureClass` 的 serde 是 `SCREAMING_SNAKE_CASE`，直接反序列化会失败。落库与读回一律经 `continuum-graph::persist` 的显式辅助函数（`state_str` / `parse_state`），不得依赖 serde，也不得在别处硬写字面量。
+
+**`attempt` 的键空间。** `node_attempt` 与 `execution_profile` 共用同一套 `attempt` 编号，键为 `(graph_id, node_id)`。编号自 1 起，同一节点每新增一次尝试取 `MAX(attempt) + 1`。分配方是执行器；恢复钩子把崩溃时正在运行的节点记为一次新尝试，也走同一规则。两处若各起计数器会错位或撞主键。
+
+**表的写入方。** 每张表的读写函数与表定义放在同一 crate。`continuum-runtime` 不直接对这些列写 SQL 字面量——编码分歧正是这样产生的。
+
 `continuum-runtime` 的启动改为 `Db::open_with(builtin_migrations + p1_migrations)`，否则 P0 的 `run_recovery` 内建迁移与 P1 的表不会同时生效。
 
 # 16. 与 P0 的接口

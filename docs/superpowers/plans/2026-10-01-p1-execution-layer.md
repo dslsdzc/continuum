@@ -3979,6 +3979,11 @@ git commit -m "feat(p1): 图与 Artifact 元数据的持久化"
 > **订正（2026-10-01，合并前终审后补）。** 同 Task 11：本节代码块里的 `'RUNNING'`、
 > `'VERIFYING'`、`'LOST'`、`'UNKNOWN'` 应为小写。实际实现已统一为小写。
 > **照抄本节代码时请一律改用小写。**
+>
+> 另有 `node_attempt` 的 attempt 列：代码块写死为 `1`，实际实现已改为
+> `(SELECT COALESCE(MAX(attempt), 0) + 1 FROM node_attempt WHERE graph_id = ?1 AND node_id = ?2)`，
+> 以免同一节点的第二次尝试覆盖第一次的记录。`attempt` 自 1 起计，与 `execution_profile`
+> 共用同一套编号，见设计第 15 节。
 
 
 **Files:**
