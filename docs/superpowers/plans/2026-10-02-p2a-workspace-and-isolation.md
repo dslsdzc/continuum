@@ -795,14 +795,7 @@ fn view_diff_reports_the_task_changes() {
     // 在 task 内改一个文件、删一个文件、加一个文件，断言 Diff 三类都列出
 }
 
-#[test]
-fn view_diff_does_not_modify_the_base() { }
-
-#[test]
-fn discard_removes_the_task_and_leaves_the_base_unchanged() { }
-```
-
-另两条用例的断言内容：
+另两条用例（以下为断言内容，函数体由实现者写出）：
 
 - `view_diff_does_not_modify_the_base`：调用 `view_diff` 前后各取一次 Base 目录的递归快照
   （路径加内容哈希的集合），断言两次相等。
@@ -858,12 +851,8 @@ fn cherry_pick_brings_only_the_named_commits() {
     // task 上两个提交，只摘第一个，断言 base 上只有第一个的改动
 }
 
-#[test]
-fn merge_brings_the_whole_task_branch() { }
-```
-
-`merge_brings_the_whole_task_branch` 的断言内容：Task 上有两个提交，`merge` 之后断言
-Base 的当前分支包含这两个提交的改动。
+另一条用例的断言内容：`merge_brings_the_whole_task_branch`——Task 上有两个提交，
+`merge` 之后断言 Base 的当前分支包含这两个提交的改动。
 
 ```rust
 
