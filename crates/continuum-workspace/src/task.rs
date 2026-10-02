@@ -33,8 +33,9 @@ impl TaskWorkspace {
     ///
     /// **判定先于落盘**：被拒绝的 root 不得在磁盘上留下任何目录。
     /// root 可能尚不存在，故判定用 [`canonical_candidate`]——它不产生副作用。
-    /// 判定通过后才 `create_dir_all`，再规范化一次作为句柄持有的最终路径，
-    /// 后续 `join` 与写操作都从它出发。
+    /// 判定通过后建的也是**该候选**（而非字面 root），再规范化一次作为句柄持有的
+    /// 最终路径，后续 `join` 与写操作都从它出发。判定、创建、句柄三者因此是同一个
+    /// 路径，本层不会动到候选之外的东西。
     pub fn new_outside(
         base: &BaseWorkspace,
         root: impl Into<PathBuf>,
@@ -52,10 +53,13 @@ impl TaskWorkspace {
         if root.exists() && !root.is_dir() {
             return Err(WorkspaceError::NotADirectory { path: root });
         }
-        std::fs::create_dir_all(&root).map_err(|e| WorkspaceError::BackendUnavailable {
-            reason: format!("无法建立 Task Workspace 目录 {}：{e}", root.display()),
+        // 建的是**候选**而非字面 root：两者只在「不存在的尾部含 `..`」时分岔
+        // （root=`<base>/zzz/../task` 而 `zzz` 不存在），此时按字面建会连带建出
+        // `zzz`——创建了什么与句柄持有什么必须一致，也与判定所依据的那个路径一致。
+        std::fs::create_dir_all(&candidate).map_err(|e| WorkspaceError::BackendUnavailable {
+            reason: format!("无法建立 Task Workspace 目录 {}：{e}", candidate.display()),
         })?;
-        let root = canonicalize(&root)?;
+        let root = canonicalize(&candidate)?;
         Ok(Self { root, intent_id })
     }
 

@@ -101,6 +101,27 @@ fn rejected_root_leaves_no_directory_behind() {
     );
 }
 
+/// 被接受的 root 若在「不存在的尾部」含 `..`，只应建出候选路径本身。
+///
+/// `<tmp>/zzz/../task` 的候选是 `<tmp>/task`；按字面建会连带建出 `<tmp>/zzz`，
+/// 即创建了什么与句柄持有什么不一致。
+#[test]
+fn accepted_root_creates_only_the_candidate_path() {
+    let dir = tempfile::tempdir().unwrap();
+    let base_dir = dir.path().join("base");
+    std::fs::create_dir(&base_dir).unwrap();
+    let base = BaseWorkspace::new(&base_dir).unwrap();
+    let root = dir.path().join("zzz").join("..").join("task");
+    let task = TaskWorkspace::new_outside(&base, &root, IntentId::new("i1")).unwrap();
+    let expected = std::fs::canonicalize(dir.path()).unwrap().join("task");
+    assert_eq!(task.root(), expected, "句柄根应为候选路径");
+    assert!(
+        !dir.path().join("zzz").exists(),
+        "候选路径之外被建了出来：{}",
+        dir.path().join("zzz").display()
+    );
+}
+
 /// 指向 Base 的 symlink：逐字符比较必然漏掉，只有规范化后才判得出重叠。
 #[cfg(unix)]
 #[test]
