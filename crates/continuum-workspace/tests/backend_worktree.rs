@@ -311,7 +311,70 @@ fn a_failed_creation_leaves_no_dangling_branch() {
         vec!["ai/i9".to_owned(), "main".to_owned()],
         "失败的创建留下了游离分支"
     );
+    // 失败没有动到别人：i9 的 worktree 还在原地（清理只删自己建出来的空目录，
+    // 不会误删住在 `.ai/worktrees` 里的别的 Intent）
+    assert!(
+        base_path.join(".ai/worktrees/i9").exists(),
+        "误删了别的 Intent 的 worktree"
+    );
     assert!(!base_path.join(".ai/worktrees/@").exists());
+}
+
+#[test]
+fn a_failed_creation_does_not_touch_the_exclude_file() {
+    let (_d, base_path) = git_repo();
+    let exclude_path = base_path.join(".git/info/exclude");
+    let before = std::fs::read_to_string(&exclude_path).unwrap();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+
+    // `@` 能过 `check_intent`，却被 git 拒绝——创建失败时 `.ai/` 根本没被建出来，
+    // 也就没有要排除的东西，排除文件不该被追加一行
+    let err = create_task_workspace(&base, &IntentId::new("@")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::GitFailed { .. }),
+        "期望 GitFailed，得到 {err:?}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&exclude_path).unwrap(),
+        before,
+        "失败的创建改动了 info/exclude"
+    );
+    assert!(!base_path.join(".ai").exists());
+}
+
+#[test]
+fn a_failure_while_excluding_rolls_the_worktree_back() {
+    let (_d, base_path) = git_repo();
+    // 注入排除文件的故障：把它换成一个目录，读它必失败
+    let exclude_path = base_path.join(".git/info/exclude");
+    std::fs::remove_file(&exclude_path).unwrap();
+    std::fs::create_dir(&exclude_path).unwrap();
+
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let err = create_task_workspace(&base, &IntentId::new("i10")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::IoFailed { .. }),
+        "期望 IoFailed，得到 {err:?}"
+    );
+
+    // 排除这一步失败时，已经建出来的 worktree 与分支同样要回收：
+    // 否则同一 intent 的重试会因分支已存在而永久失败
+    assert!(
+        !base_path.join(".ai/worktrees/i10").exists(),
+        "失败后 worktree 未回收"
+    );
+    assert_eq!(
+        local_branches(&base_path),
+        vec!["main".to_owned()],
+        "失败后分支未回收"
+    );
+    assert!(!base_path.join(".ai").exists(), "失败后留下了 .ai/");
+
+    // 修好排除文件后，同一 intent 必须能创建成功
+    std::fs::remove_dir(&exclude_path).unwrap();
+    std::fs::write(&exclude_path, "").unwrap();
+    let (task, _) = create_task_workspace(&base, &IntentId::new("i10")).unwrap();
+    assert_eq!(current_branch(task.root()), "ai/i10");
 }
 
 #[test]

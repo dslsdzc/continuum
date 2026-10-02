@@ -60,25 +60,78 @@ pub(crate) fn create(
     intent: &IntentId,
 ) -> Result<TaskWorkspace, WorkspaceError> {
     check_intent(intent)?;
-    ensure_ai_excluded(base.root())?;
     let path = worktree_path(base, intent);
     let path_arg = path_str(&path)?;
     let branch = branch_name(intent);
+    // `.ai/` 在本次之前是否已存在。失败时只清自己建出来的那一份目录，
+    // 别的 Intent 的 worktree 可能就住在里面。
+    let ai_dir_preexisting = base.root().join(WORKTREE_DIR).exists();
 
     git(base.root(), &["branch", &branch])?;
 
     // 不带 `-b`：分支已经建好，这里只把工作树检出到它上面。
     if let Err(err) = git(base.root(), &["worktree", "add", path_arg, &branch]) {
-        return Err(match git(base.root(), &["branch", "-D", &branch]) {
+        // `git worktree add` 会先把中间目录建出来再失败（intent 为 `@` 时实测
+        // 留下空的 `.ai/worktrees/`），故这一步的失败也要把目录清掉
+        if !ai_dir_preexisting {
+            remove_empty_ai_dirs(base.root());
+        }
+        let rollback = git(base.root(), &["branch", "-D", &branch]);
+        return Err(match rollback {
             Ok(_) => err,
-            Err(rollback) => with_context(err, &format!("回收分支 {branch} 亦失败：{rollback}")),
+            Err(rb) => with_context(err, &format!("回收分支 {branch} 亦失败：{rb}")),
         });
     }
 
     // worktree 已落盘，此处 `new_outside` 只做重叠判定与规范化。
     // 路径位于 Base 之内，重叠判定必然放行；保留该调用是为了让句柄的产出
     // 走唯一的公开入口，`TaskWorkspace` 的构造路径不因后端而分岔。
-    TaskWorkspace::new_outside(base, &path, intent.clone())
+    let task = TaskWorkspace::new_outside(base, &path, intent.clone())?;
+
+    // 排除放在**创建成功之后**。`.ai/` 这时才存在，之前没有要排除的东西；
+    // 而失败路径上（`git branch` 或 `git worktree add` 任一步失败）连 `.ai/`
+    // 都没有。提前做只会让「一次失败的创建留下了什么」多出一个答案——
+    // `info/exclude` 里凭空多一行。被 `check_intent` 放行却被 git 拒绝的
+    // intent（`@`、`a b` 等）正是这种情况。
+    //
+    // **次序不可调回「先排除后创建」。** 唯一的约束是排除必须在任何外部观察者
+    // 可能看到 `.ai/` 之前完成。本层是单线程调用，`git` 与 `TaskWorkspace::new_outside`
+    // 之间没有让出点（无 await、无线程、无回调把控制权交回调用方），故「先创建后排除」
+    // 不构成窗口。将来若有人在这两步之间插入让出点，这条约束才需要重新审。
+    if let Err(err) = ensure_ai_excluded(base.root()) {
+        // 排除失败同样要回收：否则留下一个没人认得的 worktree 与分支，
+        // 且同一 intent 的重试会因分支已存在而永久失败——与建分支那一步同理。
+        let rollback = discard(base, &task);
+        if !ai_dir_preexisting {
+            remove_empty_ai_dirs(base.root());
+        }
+        return Err(match rollback {
+            Ok(()) => err,
+            Err(rb) => with_context(
+                err,
+                &format!("回收 worktree {path_arg}（分支 {branch}）亦失败：{rb}"),
+            ),
+        });
+    }
+
+    Ok(task)
+}
+
+/// 清掉本次尝试建出来的、现在已空的两个目录：`<base>/.ai/worktrees` 与 `<base>/.ai`。
+///
+/// `git worktree add` 与 `git worktree remove` 都会留下空的中间目录（前者失败前
+/// 已把目录建好，后者只删叶子）。空目录对 git 不可见（`git status` 不报空目录），
+/// 但它仍是磁盘上的残留，与本层「失败不留痕」的语义相悖，故一并清掉。
+///
+/// 只删**空**目录：`std::fs::remove_dir` 不递归，目录里还有别的东西（别的 Intent
+/// 的 worktree）时必然失败，故不会误删。调用方须先确认这两个目录在本次之前不存在，
+/// 否则删的是别人本来就有的东西。
+fn remove_empty_ai_dirs(base: &Path) {
+    let worktrees = base.join(WORKTREE_DIR);
+    let _ = std::fs::remove_dir(&worktrees);
+    if let Some(ai) = worktrees.parent() {
+        let _ = std::fs::remove_dir(ai);
+    }
 }
 
 /// 放弃一个 Task Workspace：移除 worktree 目录，再删除其分支。
