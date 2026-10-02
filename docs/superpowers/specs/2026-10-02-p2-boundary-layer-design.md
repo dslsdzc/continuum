@@ -244,6 +244,12 @@ WorkspaceBackend   Worktree | Overlay
 `.git/info/exclude` 属仓库元数据而非用户的工作文件，故 `§256` 在「Base 的工作文件只读」
 这一意义上仍然成立。
 
+该文件的路径**须经 `git rev-parse --git-path info/exclude` 定位**，不能硬拼
+`<base>/.git/info/exclude`：Base 本身可以是 linked worktree，此时 `.git` 是一个文件而非目录，
+硬拼会以 `Not a directory` 失败。该命令在普通仓库下返回的正是 `<base>/.git/info/exclude`，
+在 linked worktree 下返回公共仓库的那一份——而 git 在那种形态下也只读公共那份，
+故行为一致。
+
 **Overlay 后端**：以 unprivileged user namespace 加 OverlayFS 建立可写覆盖层，
 lowerdir 为 Base，upperdir 为该 Intent 的私有目录。放弃即丢弃 upper 层。
 

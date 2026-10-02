@@ -388,6 +388,10 @@ pub fn discard_task_workspace(
 所做的未提交修改，与 `§256` 的 Base 只读冲突。`.git/info/exclude` 是仓库本地的忽略清单，
 不进工作树、不是跟踪文件、不影响其他 clone。
 
+排除文件的路径**须经 `git rev-parse --git-path info/exclude` 定位**，不要硬拼
+`<base>/.git/info/exclude`：Base 本身可以是 linked worktree，此时 `.git` 是文件而非目录，
+硬拼会以 `Not a directory` 失败。
+
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
