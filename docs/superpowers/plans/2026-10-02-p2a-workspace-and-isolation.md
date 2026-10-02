@@ -464,6 +464,7 @@ fn overlay_backend_round_trips() {
     // 读一个只在 base 里的文件：overlay 透传 lower
     assert_eq!(std::fs::read(task.root().join("f.txt")).unwrap(), b"upper");
 }
+```
 
 `overlay_does_not_leak_a_sibling_intent` 的断言内容：在同一 Base 上为 Intent `i1` 与 `i2`
 各建一个 overlay 工作区，在 `i2` 的工作区内写一个文件，然后断言 `i1` 的工作区里
