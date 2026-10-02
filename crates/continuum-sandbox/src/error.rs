@@ -4,8 +4,9 @@
 ///
 /// 变体按失败发生的位置划分：
 ///
-/// - [`SandboxError::MechanismUnavailable`]：机制在本机不可用（例如 bubblewrap 需要的
-///   `bwrap` 可执行文件不在 PATH 中）。判定发生在启动子进程之前。
+/// - [`SandboxError::MechanismUnavailable`]：机制在本机不存在或不可用——例如 bubblewrap
+///   需要的 `bwrap` 可执行文件不在 PATH 中，或内核的 Landlock ABI 为 0（Landlock 整个
+///   不存在）。判定发生在启动子进程之前。
 /// - [`SandboxError::IsolationFailed`]：本层在**父进程侧**为施加隔离而失败
 ///   （例如构建规则集）。
 /// - [`SandboxError::SpawnFailed`]：子进程启动失败。
@@ -31,8 +32,13 @@ pub enum SandboxError {
     /// `mechanism` 是机制名（与 [`crate::SandboxCapabilities::mechanism`] 同源），
     /// `reason` 给出不可用的原因，供调用方与报告使用。
     ///
-    /// Landlock 的内核 ABI 不足**不属本变体**：那走降级路径，由
-    /// [`crate::SandboxCapabilities`] 如实反映（设计第 4.3 节），不使启动失败。
+    /// **内核 ABI 的两种「不足」在这里分界，处置相反**（设计第 4.3 节）：
+    ///
+    /// - **ABI < 1（Landlock 整个不可用）属本变体**：该机制在本机不存在，须拒绝启动。
+    ///   放行等于让子进程在零文件系统隔离下运行，而「[`crate::SandboxCapabilities`]
+    ///   会报假」不足以弥补——调用方可以不查那个报告。
+    /// - **ABI ≥ 1 但某个访问类别不被支持不属本变体**：降级该类别、启动照常，
+    ///   实际隔离面由 [`crate::SandboxCapabilities`] 如实反映。
     #[error("沙箱机制 {mechanism} 不可用：{reason}")]
     MechanismUnavailable {
         mechanism: &'static str,

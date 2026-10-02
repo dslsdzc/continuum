@@ -117,10 +117,18 @@ impl Sandbox {
     /// 闭包在 **fork 之后**的子进程里运行，而 fork 出的子进程只有一条线程，
     /// 故不需要 `LANDLOCK_RESTRICT_SELF_TSYNC`（那是给多线程进程用的）。
     ///
-    /// **内核 ABI 不足不走 [`SandboxError`]**：那走降级路径——不施加规则集、照常启动，
-    /// 由 [`Sandbox::capabilities`] 如实反映（设计第 4.3 节），**不使启动失败**。
-    /// 这条分支在内核未启用 Landlock 时会真的走到，读本函数时不要把它当作死代码。
-    /// 反之，父进程侧构造规则集失败（例如 Task 根打不开）返回
+    /// **两种「内核 ABI 不足」处置相反**（设计第 4.3 节）：
+    ///
+    /// - **ABI < 1（Landlock 整个不存在）→ [`SandboxError::MechanismUnavailable`]，拒绝启动。**
+    ///   此时照常启动等于让子进程在零文件系统隔离下运行，违反 `§256`；
+    ///   「`capabilities()` 会报假」不足以弥补——调用方可以不查。这条分支在内核未启用
+    ///   Landlock 时会真的走到，读本函数时不要把它当作死代码。该内核上仍有 bubblewrap
+    ///   可用（它要的是用户命名空间而非 Landlock），故运行时装不会被卡死。
+    /// - **ABI ≥ 1 但某个访问类别不被支持 → 降级该类别、启动照常**，由
+    ///   [`Sandbox::capabilities`] 如实反映。这条不经过本函数，由 `landlock` crate 的
+    ///   BestEffort 在处理访问类别时消化。
+    ///
+    /// 其余失败的分界：父进程侧构造规则集失败（例如 Task 根打不开）返回
     /// [`SandboxError::IsolationFailed`]；`pre_exec` 内的失败则被 std 报成普通的
     /// spawn `io::Error`，与 exec 失败同形，只能落进 [`SandboxError::SpawnFailed`]
     /// ——两者的分界见 [`SandboxError`] 的文档。
@@ -132,33 +140,38 @@ impl Sandbox {
         cmd.current_dir(task.root());
         match self {
             Sandbox::Landlock(sandbox) => {
-                let ruleset =
-                    sandbox
-                        .build_ruleset(task.root())
-                        .map_err(|reason| SandboxError::IsolationFailed {
-                            mechanism: "landlock",
-                            reason: format!("无法构建 Landlock 规则集：{reason}"),
-                        })?;
-                // `None` 是降级路径：内核 ABI 为 0，本次不施加隔离，照常启动。
-                // 不静默——`Sandbox::capabilities` 对此内核各项报假。
-                if let Some(ruleset) = ruleset {
-                    // `restrict_self` 消费规则集，而闭包必须可多次调用（`FnMut`），
-                    // 故经 `Option::take` 交出唯一的一份。
-                    let mut slot = Some(ruleset);
-                    // SAFETY: `pre_exec` 的契约是闭包内只允许 async-signal-safe 操作。
-                    // 本闭包只做 `take`（无分配）、`restrict_self`（`prctl` 与
-                    // `landlock_restrict_self` 两个 syscall，成功路径无堆分配），以及
-                    // 失败时把 errno 转成 `io::Error`——用的是 `from_raw_os_error`，
-                    // 同样不分配。规则集已在 fork 之前构造好。
-                    unsafe {
-                        cmd.pre_exec(move || match slot.take() {
-                            Some(ruleset) => {
-                                ruleset.restrict_self().map(|_| ()).map_err(into_io_error)
-                            }
-                            // 到不了：fork 出的子进程只有一条线程，`pre_exec` 只被调用一次。
-                            None => Err(std::io::Error::from_raw_os_error(libc::EINVAL)),
-                        });
-                    }
+                // ABI < 1：Landlock 整个不存在，拒绝启动（设计第 4.3 节）。
+                let Some(abi) = landlock::effective_abi(sandbox.abi()) else {
+                    return Err(SandboxError::MechanismUnavailable {
+                        mechanism: "landlock",
+                        reason: format!(
+                            "内核 Landlock ABI 为 {}（< 1），该机制在本机不存在",
+                            sandbox.abi()
+                        ),
+                    });
+                };
+                let ruleset = sandbox.build_ruleset(
+                    abi,
+                    task.root(),
+                )
+                .map_err(|reason| SandboxError::IsolationFailed {
+                    mechanism: "landlock",
+                    reason: format!("无法构建 Landlock 规则集：{reason}"),
+                })?;
+                // `restrict_self` 消费规则集，而闭包必须可多次调用（`FnMut`），
+                // 故经 `Option::take` 交出唯一的一份。
+                let mut slot = Some(ruleset);
+                // SAFETY: `pre_exec` 的契约是闭包内只允许 async-signal-safe 操作。
+                // 本闭包只做 `take`（无分配）、`restrict_self`（`prctl` 与
+                // `landlock_restrict_self` 两个 syscall，成功路径无堆分配），以及
+                // 失败时把 errno 转成 `io::Error`——用的是 `from_raw_os_error`，
+                // 同样不分配。规则集已在 fork 之前构造好。
+                unsafe {
+                    cmd.pre_exec(move || match slot.take() {
+                        Some(ruleset) => ruleset.restrict_self().map(|_| ()).map_err(into_io_error),
+                        // 到不了：fork 出的子进程只有一条线程，`pre_exec` 只被调用一次。
+                        None => Err(std::io::Error::from_raw_os_error(libc::EINVAL)),
+                    });
                 }
                 cmd.spawn()
                     .map_err(|e| SandboxError::SpawnFailed { reason: e.to_string() })
@@ -206,4 +219,47 @@ fn into_io_error(e: ::landlock::RulesetError) -> std::io::Error {
         _ => libc::EPERM,
     };
     std::io::Error::from_raw_os_error(code)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use continuum_workspace::{BaseWorkspace, IntentId};
+
+    /// ABI < 1 时 `spawn` 拒绝启动，而不是照常启动一个零隔离的子进程。
+    ///
+    /// 本机内核支持 Landlock，探测结果永远 >= 1，故这条守卫只能靠直接构造一个
+    /// `abi: 0` 的句柄来验——字段是 `pub(crate)`，crate 内的测试够得着。
+    #[test]
+    fn spawn_refuses_when_landlock_is_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_path = dir.path().join("base");
+        std::fs::create_dir_all(&base_path).unwrap();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let task =
+            TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1"))
+                .unwrap();
+
+        let sandbox = Sandbox::Landlock(LandlockSandbox {
+            abi: 0,
+            read_only_paths: vec![],
+            read_write_paths: vec![],
+        });
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg("echo bad > inside.txt");
+        let result = sandbox.spawn(&task, cmd);
+
+        // 断言到具体的错误变体：只断言「返回了 Err」不足以把这条守卫与
+        // 「规则集构造失败」之类的形态分开。
+        assert!(
+            matches!(
+                result,
+                Err(SandboxError::MechanismUnavailable { mechanism: "landlock", .. })
+            ),
+            "ABI=0 时 spawn 应以 MechanismUnavailable 拒绝，实际 {result:?}"
+        );
+        // 拒绝发生在启动之前：Task 内不得留下任何由子进程写出的文件。
+        assert!(!task.root().join("inside.txt").exists());
+    }
 }

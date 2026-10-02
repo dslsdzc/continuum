@@ -89,14 +89,16 @@ pub(crate) fn capabilities_for_abi(abi: i32) -> SandboxCapabilities {
     }
 }
 
-/// ABI 探测结果到「要限制的访问类别」的映射；内核不支持 Landlock 时为 `None`。
+/// ABI 探测结果到「要限制的访问类别」的映射；Landlock 整个不可用时为 `None`。
 ///
-/// `None` 是**降级路径**（设计第 4.3 节）：不构造规则集、不施加隔离，也**不使启动失败**
-/// ——本条按 [`crate::SandboxError`] 中「Landlock 的内核 ABI 不足不属 MechanismUnavailable，
-/// 那走降级路径，由 SandboxCapabilities 如实反映」的既定口径实现。
+/// `None`（ABI < 1）意味着**该机制在本机不存在**，调用方须拒绝启动（设计第 4.3 节）：
+/// 照常启动等于让子进程在零文件系统隔离下运行，违反 `§256`；而「`capabilities()` 会报假」
+/// 不足以弥补——调用方可以不查，返回类型也不强制它查。
 ///
-/// 抽成纯函数是为了可单测：本机内核支持 Landlock，这条路径在行为用例里不可达，
-/// 而「不使启动失败」是个绝对措辞，必须有对应用例。
+/// 这与「ABI ≥ 1 但某个访问类别不被支持」是两回事，后者由 `landlock` crate 的
+/// BestEffort 降级该类别、启动照常。设计第 4.3 节把这两种「不足」分列，处置相反。
+///
+/// 抽成纯函数是为了可单测：本机内核支持 Landlock，该分支在行为用例里不可达。
 ///
 /// 高于本 crate 已知上限的 ABI（例如内核算出 v10）由 `ABI::from` 钳到最高已知版本
 /// ——本 crate 表达不出的访问类别也就无从 handle。
@@ -143,21 +145,17 @@ impl LandlockSandbox {
     /// 必须在 `pre_exec` **之前**调用——闭包里不得分配内存，而 `handle_access`、
     /// `PathFd::new`、`add_rules` 都会分配。
     ///
-    /// 返回 `Ok(None)` 表示降级：内核 ABI 为 0，本次不施加任何隔离（见 [`effective_abi`]）。
-    /// 返回 `Err` 才是本层在父进程侧的失败。
+    /// `abi` 由调用方经 [`effective_abi`] 校验后传入，故本函数**不接受** ABI < 1：
+    /// 那种内核下根本不构造规则集，调用方直接拒绝启动（见 [`effective_abi`]）。
+    /// 把已校验的 ABI 作为参数而不是在这里重新读 `self.abi`，是为了让「机制不可用」
+    /// 只有一条判定路径。
     ///
     /// 失败以说明文字返回而非 `RulesetError`：`PathFdError` 到 `RulesetError` 的转换
     /// 在本 crate 里不存在（`path_beneath_rules` 干脆以 `filter_map` 吞掉打不开的路径，
     /// 从不产生 `Err`），逐段折成文字反而能把「哪一步失败」带出去。唯一消费方
     /// [`crate::Sandbox::spawn`] 本就要把它包进
     /// [`crate::SandboxError::IsolationFailed`] 的 `reason`。
-    pub(crate) fn build_ruleset(
-        &self,
-        task_root: &Path,
-    ) -> Result<Option<RulesetCreated>, String> {
-        let Some(abi) = effective_abi(self.abi) else {
-            return Ok(None);
-        };
+    pub(crate) fn build_ruleset(&self, abi: ABI, task_root: &Path) -> Result<RulesetCreated, String> {
         let all = AccessFs::from_all(abi);
         let read = AccessFs::from_read(abi);
 
@@ -180,7 +178,6 @@ impl LandlockSandbox {
             .map_err(|e| format!("打开 Task 根 {} 失败：{e}", task_root.display()))?;
         ruleset
             .add_rules([Ok::<_, RulesetError>(PathBeneath::new(task_fd, all))])
-            .map(Some)
             .map_err(|e| format!("放行 Task 根失败：{e}"))
     }
 }
@@ -213,19 +210,20 @@ mod tests {
         }
     }
 
-    /// 降级路径：内核 ABI 为 0 时不构造规则集（因而不施加隔离），也不报错。
+    /// ABI < 1 判定为「机制不存在」，与「某类别不支持」分开。
     ///
     /// 与 [`capabilities_for_abi`] 必须一致：报「不限制写入」的那个 ABI，
-    /// 正是这里返回 `None`（不构造规则集）的那个 ABI。
+    /// 正是这里返回 `None`（调用方据此拒绝启动）的那个 ABI。
     #[test]
-    fn unsupported_abi_degrades_instead_of_failing() {
+    fn abi_below_one_means_the_mechanism_does_not_exist() {
         assert_eq!(effective_abi(ABI::Unsupported as i32), None);
         assert_eq!(effective_abi(-1), None);
         assert!(!capabilities_for_abi(0).restricts_filesystem_writes);
 
         assert_eq!(effective_abi(ABI::V1 as i32), Some(ABI::V1));
         assert_eq!(effective_abi(ABI::V9 as i32), Some(ABI::V9));
-        // 高于本 crate 已知上限的 ABI 钳到最高已知版本，而非视作不可用。
+        // 高于本 crate 已知上限的 ABI 钳到最高已知版本，而非视作不可用——
+        // 「钳」与「不可用」是两回事，只有 ABI < 1 才落入后者。
         assert_eq!(effective_abi(99), Some(ABI::V9));
     }
 
