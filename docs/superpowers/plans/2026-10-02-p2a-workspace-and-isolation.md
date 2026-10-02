@@ -14,7 +14,8 @@
 
 - 工具链固定 rustc 1.95.0 / cargo 1.95.0，edition 2024。
 - **依赖方向禁止反向。** 本计划新增的边：
-  `continuum-workspace → continuum-core, continuum-persist, continuum-events`；
+  `continuum-workspace → continuum-persist, continuum-events`（不含 `continuum-core`：本层不使用其类型，
+  且 `ALLOWED` 的比对是双向的，声明了就必须真实存在）；
   `continuum-sandbox → continuum-core, continuum-workspace`。
   `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALL_CRATES` 已改为从 workspace 成员派生，
   故**新增 crate 后该测试会立即失败**，必须在 `ALLOWED` 表中登记后才能通过。
