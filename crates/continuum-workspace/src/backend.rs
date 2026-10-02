@@ -40,6 +40,13 @@ pub enum WorkspaceBackend {
 ///
 /// `.` 与空串会让路径退化成私有目录自身（`.ai/worktrees`、overlay 的 Intent 目录），
 /// 同样拒绝。含 `\` 的标识在 Windows 上是分隔符，一并拒绝以免两端行为分岔。
+///
+/// **本函数的职责边界是「路径逃逸」**，不覆盖 git 的全部 refname 规则（空格、`@{`、
+/// 结尾 `.lock` 等）。分工是：这里管路径，refname 合法性由 git 在创建的第一步兜底，
+/// 而那一步失败时仓库里不会多出任何东西（见 [`crate::worktree::create`] 的两步次序）。
+/// 实测 `@` 一类标识能过 git 的 `branch` 却在检出 worktree 时失败——那条路径由
+/// `create` 的回滚负责，同样不留痕迹。故这里不必再列一份 refname 黑名单：
+/// 黑名单会与 git 的实际规则漂移，而漂移的后果是漏放或误拒。
 pub(crate) fn check_intent(intent: &IntentId) -> Result<(), WorkspaceError> {
     let raw = intent.as_str();
     let is_single_component = !raw.is_empty()

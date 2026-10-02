@@ -40,6 +40,11 @@ pub enum WorkspaceError {
     #[error("命令不在本 Workspace 的命名空间内")]
     NotInNamespace,
     /// `git` 命令执行失败。
+    ///
+    /// `stderr` 通常是 git 原样输出的内容，但后端在「失败之后用户仓库里可能仍有
+    /// 残留」的路径（分支回收失败、`discard` 的任一步失败）会在其前面追加一行
+    /// `（continuum-workspace：…）`，把分支名与路径一并给出——那两种情形下调用方
+    /// 只能手工收拾，错误里必须给得出收拾所需的信息。`code` 始终是 git 的退出码。
     #[error("git 命令失败（退出码 {code}）：{stderr}")]
     GitFailed { code: i32, stderr: String },
     /// Intent 标识不能用作 Task Workspace 的路径分量与分支名。

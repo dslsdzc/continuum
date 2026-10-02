@@ -140,6 +140,16 @@ fn discarding_a_worktree_leaves_the_base_untouched() {
     // 用户的分支与提交都没有被改动
     assert_eq!(current_branch(&base_path), "main");
     assert_eq!(run_git(&base_path, &["rev-parse", "HEAD"]), base_head_before);
+
+    // 再放弃一次会失败（工作树已不在），该中间态无法经本函数自救，
+    // 故错误里必须给得出人工收拾所需的分支名与路径
+    let err = discard_task_workspace(&base, &task, backend).unwrap_err();
+    let text = err.to_string();
+    assert!(text.contains("ai/i2"), "错误未给出分支名：{text}");
+    assert!(
+        text.contains(&task_root.to_string_lossy().to_string()),
+        "错误未给出 Task 根路径：{text}"
+    );
     assert_eq!(
         std::fs::read_to_string(base_path.join("README.md")).unwrap(),
         "初始内容\n"
@@ -256,9 +266,52 @@ fn a_failing_git_command_is_reported_with_code_and_stderr() {
         }
         other => panic!("期望 GitFailed，得到 {other:?}"),
     }
-    // 失败的创建不留下半成品
+    // 第一步（建分支）就失败：没有目录，也没有多出任何分支
     assert!(!base_path.join(".ai/worktrees/i7").exists());
+    assert_eq!(local_branches(&base_path), vec!["ai/i7".to_owned(), "main".to_owned()]);
     assert_eq!(current_branch(&base_path), "main");
+}
+
+#[test]
+fn a_failed_creation_leaves_no_dangling_branch() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+
+    // 情形一：目标目录已存在且非空。`git worktree add` 会**先建分支**再在此失败，
+    // 若不分两步，留下的 `ai/i9` 会让同一 intent 永远无法再创建。
+    let blocker = base_path.join(".ai/worktrees/i9");
+    std::fs::create_dir_all(&blocker).unwrap();
+    std::fs::write(blocker.join("挡路.txt"), "占用\n").unwrap();
+
+    let err = create_task_workspace(&base, &IntentId::new("i9")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::GitFailed { .. }),
+        "期望 GitFailed，得到 {err:?}"
+    );
+    assert_eq!(
+        local_branches(&base_path),
+        vec!["main".to_owned()],
+        "失败的创建留下了游离分支"
+    );
+
+    // 清掉挡路的目录后，同一 intent 必须能创建成功——游离分支会让它永远失败
+    std::fs::remove_dir_all(&blocker).unwrap();
+    let (task, _) = create_task_workspace(&base, &IntentId::new("i9")).unwrap();
+    assert_eq!(current_branch(task.root()), "ai/i9");
+
+    // 情形二：intent 为 `@`。git 能建出 `ai/@`，却在检出工作树时报
+    // `could not find created worktree '@'`（退出码 255）——同样留下游离分支
+    let err = create_task_workspace(&base, &IntentId::new("@")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::GitFailed { .. }),
+        "期望 GitFailed，得到 {err:?}"
+    );
+    assert_eq!(
+        local_branches(&base_path),
+        vec!["ai/i9".to_owned(), "main".to_owned()],
+        "失败的创建留下了游离分支"
+    );
+    assert!(!base_path.join(".ai/worktrees/@").exists());
 }
 
 #[test]

@@ -40,12 +40,21 @@ pub(crate) fn branch_name(intent: &IntentId) -> String {
 
 /// 创建一个 Task Workspace。
 ///
-/// 次序：校验 intent → 确保 `.ai/` 被排除 → `git worktree add` →
+/// 次序：校验 intent → 确保 `.ai/` 被排除 → 建分支 → 检出 worktree →
 /// 由 [`TaskWorkspace::new_outside`] 产出句柄。
 ///
-/// **不做「先建目录再建 worktree」**：`git worktree add` 在目标目录已存在且非空时
-/// 会失败（退出码 128），而在目录不存在时自行建出全部中间目录。让 git 建目录，
-/// 失败路径上就没有需要回收的半成品。
+/// **建分支与检出 worktree 分作两步，不写成单条 `git worktree add -b`。**
+/// 那条命令实际是「先建分支 ref，再建 worktree」两个动作，第二阶段失败时
+/// 分支会留在用户仓库里：实测目标目录已存在且非空时报 `already exists`（退出码
+/// 128），intent 为 `@` 时报 `could not find created worktree '@'`（退出码 255），
+/// 两种情形都留下一条 `ai/<intent>` ref。留下的 ref 有两个后果：它是本 task
+/// 唯一一处「失败后在用户仓库里留下痕迹」的路径（痕迹是仓库元数据的写入），
+/// 且会让**同一 intent 永远无法再创建**（重试报 `a branch named … already exists`）。
+/// 拆开之后，第一阶段失败时仓库里什么都没多出来——`git branch` 是单个动作。
+///
+/// 第二阶段失败时回收刚建的分支再返回 git 的原始错误。不预建目标目录：
+/// `git worktree add` 在目录不存在时自建全部中间目录，让 git 建目录，
+/// 失败路径上就没有需要回收的目录。
 pub(crate) fn create(
     base: &BaseWorkspace,
     intent: &IntentId,
@@ -55,7 +64,17 @@ pub(crate) fn create(
     let path = worktree_path(base, intent);
     let path_arg = path_str(&path)?;
     let branch = branch_name(intent);
-    git(base.root(), &["worktree", "add", "-b", &branch, path_arg])?;
+
+    git(base.root(), &["branch", &branch])?;
+
+    // 不带 `-b`：分支已经建好，这里只把工作树检出到它上面。
+    if let Err(err) = git(base.root(), &["worktree", "add", path_arg, &branch]) {
+        return Err(match git(base.root(), &["branch", "-D", &branch]) {
+            Ok(_) => err,
+            Err(rollback) => with_context(err, &format!("回收分支 {branch} 亦失败：{rollback}")),
+        });
+    }
+
     // worktree 已落盘，此处 `new_outside` 只做重叠判定与规范化。
     // 路径位于 Base 之内，重叠判定必然放行；保留该调用是为了让句柄的产出
     // 走唯一的公开入口，`TaskWorkspace` 的构造路径不因后端而分岔。
@@ -67,10 +86,17 @@ pub(crate) fn create(
 /// 先移除 worktree 再删分支：分支被 worktree 检出时 `git branch -D` 会拒绝，
 /// 反序会把「worktree 已移除但分支还在」变成常态。反过来的中间态（目录已移除、
 /// 分支尚存）只在第二步失败时出现，此时返回 `Err` 而非静默。
+///
+/// 两步的错误都带上分支名与路径：该中间态**无法经本函数回收**——重试会在第一步
+/// 就失败（工作树已不在），故调用方只能手工收拾，错误里必须给得出收拾所需的两样。
 pub(crate) fn discard(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<(), WorkspaceError> {
     let path_arg = path_str(task.root())?;
-    git(base.root(), &["worktree", "remove", "--force", path_arg])?;
-    git(base.root(), &["branch", "-D", &branch_name(task.intent_id())])?;
+    let branch = branch_name(task.intent_id());
+    let root = task.root().display();
+    git(base.root(), &["worktree", "remove", "--force", path_arg])
+        .map_err(|e| with_context(e, &format!("移除 worktree {root}（分支 {branch}）")))?;
+    git(base.root(), &["branch", "-D", &branch])
+        .map_err(|e| with_context(e, &format!("删除分支 {branch}（Task 根 {root}）")))?;
     Ok(())
 }
 
@@ -161,6 +187,25 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
         });
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
+/// 给 `GitFailed` 的 `stderr` 前面添一行本层写的上下文，其余变体原样返回。
+///
+/// 用在「失败之后用户仓库里可能仍有残留」的两处：`create` 的分支回收失败，
+/// 与 `discard` 的任一步失败。这两处的调用方拿到的不能只是 git 的报文——
+/// `discard` 的残留分支无法再经 `discard` 回收（重试会在第一步就失败），
+/// 分支名与路径必须出现在错误里，人工才有办法收拾。
+///
+/// 只动 `stderr` 字段的文本，`code` 仍是 git 的退出码：`WorkspaceError` 的
+/// 公开形状不变。追加的那行以固定前缀标出，见该变体的文档注释。
+fn with_context(err: WorkspaceError, context: &str) -> WorkspaceError {
+    match err {
+        WorkspaceError::GitFailed { code, stderr } => WorkspaceError::GitFailed {
+            code,
+            stderr: format!("（continuum-workspace：{context}）\n{stderr}"),
+        },
+        other => other,
+    }
 }
 
 fn io_error(path: &Path, e: std::io::Error) -> WorkspaceError {
