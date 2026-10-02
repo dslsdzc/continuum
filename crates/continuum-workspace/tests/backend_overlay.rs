@@ -11,7 +11,7 @@
 //! 规范路径，两侧不规范化会让失败点指向断言而不是实现。
 
 use continuum_workspace::{
-    BaseWorkspace, IntentId, WorkspaceBackend, WorkspaceError, create_task_workspace,
+    BaseWorkspace, IntentId, TaskWorkspace, WorkspaceBackend, WorkspaceError, create_task_workspace,
     discard_task_workspace, in_user_namespace,
 };
 use std::ffi::{OsStr, OsString};
@@ -468,6 +468,132 @@ fn overlay_refuses_an_overlay_root_that_lies_inside_the_base() {
     assert!(
         !base_path.join(".ai").exists(),
         "被拒的配置在 Base 里建出了 .ai/"
+    );
+}
+
+#[test]
+fn a_failed_umount_leaves_the_workspace_in_place() {
+    // 注入卸载失败：PATH 前置一个必败的假 `umount`。手法与 `a_failed_mount_leaves_no_workspace_behind`
+    // 相同。要钉的是 `discard` 的次序承诺——**umount 未成功就绝不往下走**。
+    let fake = tempfile::tempdir().unwrap();
+    let fake_umount = fake.path().join("umount");
+    std::fs::write(
+        &fake_umount,
+        "#!/bin/sh\necho '注入的 umount 失败' >&2\nexit 1\n",
+    )
+    .unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&fake_umount, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path_env = format!(
+        "{}:{}",
+        fake.path().display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    if !enter_namespace(
+        "a_failed_umount_leaves_the_workspace_in_place",
+        &[("PATH", OsStr::new(&path_env))],
+    ) {
+        return;
+    }
+
+    let (_d, base_path) = base_with_lower();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    task.writable_root().write("f.txt", b"upper").unwrap();
+    let intent_dir = task.root().parent().unwrap().to_path_buf();
+
+    let err = discard_task_workspace(&base, &task, backend).unwrap_err();
+    // 断言错误就是 **umount 的**失败。这一条是会咬人的：若 umount 的失败被忽略而继续
+    // `remove_dir_all`，挂载点仍在，删会以 `EBUSY` 失败，报出来的是 `IoFailed` 而非
+    // `CommandFailed`——「次序承诺被打破」正是从这个变体差异上读出来的，不是无关的其它错误。
+    match &err {
+        WorkspaceError::CommandFailed { code, stderr, .. } => {
+            assert_eq!(*code, 1, "退出码应原样带回：{err}");
+            assert!(
+                stderr.contains("注入的 umount 失败"),
+                "stderr 应原样带回，实际 {stderr:?}"
+            );
+        }
+        other => panic!("期望 umount 的 CommandFailed，得到 {other:?}"),
+    }
+
+    // 卸载未成功，工作区必须原样留着：目录仍在，覆盖层仍挂着且可用
+    assert!(intent_dir.exists(), "umount 失败却把 Intent 目录删了");
+    assert_eq!(
+        std::fs::read(task.root().join("f.txt")).unwrap(),
+        b"upper",
+        "覆盖层已被拆掉"
+    );
+    assert!(!base_path.join(".ai").exists(), "Base 内出现了 .ai/");
+}
+
+#[test]
+fn overlay_discard_keeps_a_sibling_intents_directory() {
+    if !enter_namespace("overlay_discard_keeps_a_sibling_intents_directory", &[]) {
+        return;
+    }
+    let (_d, base_path) = base_with_lower();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (t1, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+
+    // 同一 Base 下另一个 Intent 的目录。**故意用普通目录而非第二个真挂载的工作区**：
+    // 真挂载时 `<Base 标识>` 目录里会含一个挂载点，`remove_dir_all` 递归到它就以 `EBUSY`
+    // 提前退出，变异未必变红（取决于 readdir 顺序）。本用例要钉的是「非空的 `<Base 标识>`
+    // 目录不被递归删除」，普通目录才能确定性地命中。
+    let base_dir = t1.root().parent().unwrap().parent().unwrap().to_path_buf();
+    let sibling = base_dir.join("i2");
+    std::fs::create_dir_all(sibling.join("upper")).unwrap();
+    std::fs::write(sibling.join("upper/证据.txt"), "别的 Intent 的未提交工作".as_bytes())
+        .unwrap();
+
+    discard_task_workspace(&base, &t1, backend).unwrap();
+
+    assert!(!t1.root().exists(), "被放弃的 Intent 目录仍在");
+    assert!(
+        sibling.join("upper/证据.txt").is_file(),
+        "别的 Intent 的目录被连带删除了"
+    );
+    assert_eq!(
+        dir_entries(&overlay_root()).len(),
+        1,
+        "<Base 标识> 目录仍有别的 Intent，不该被移除"
+    );
+}
+
+#[test]
+fn overlay_discard_refuses_a_root_that_is_not_an_overlay_layout() {
+    // 调用方把别的后端（worktree）建出的 Task 根、或自建的路径，配上 Overlay 后端交给
+    // `discard` 时，必须在 umount **之前**报「不是本后端的布局」。少了这一步就会走到
+    // umount：那里的答复是「umount 失败」，把误用说成外部命令故障；而若该路径下当真挂了
+    // 别的东西，umount 会成功，随后整删一个不属于本后端的目录。
+    //
+    // 本用例不需要命名空间：形态校验排在 umount 之前，故在无挂载能力的环境里也走得到。
+    let holder = tempfile::tempdir().unwrap();
+    let base_path = holder.path().join("base");
+    std::fs::create_dir(&base_path).unwrap();
+    let task_root = holder.path().join("task");
+    std::fs::create_dir_all(&task_root).unwrap();
+    std::fs::write(task_root.join("用户的文件.txt"), "别动".as_bytes()).unwrap();
+
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let task = TaskWorkspace::new_outside(&base, &task_root, IntentId::new("i1")).unwrap();
+
+    let err = discard_task_workspace(&base, &task, WorkspaceBackend::Overlay).unwrap_err();
+    assert!(
+        matches!(err, WorkspaceError::BackendUnavailable { .. }),
+        "期望 BackendUnavailable，得到 {err:?}"
+    );
+    assert!(
+        err.to_string().contains("overlay 布局"),
+        "错误未说明这不是本后端的布局：{err}"
+    );
+    // 误用的路径一字未动
+    assert!(
+        task_root.join("用户的文件.txt").is_file(),
+        "误用的路径被删了：{}",
+        task_root.display()
     );
 }
 

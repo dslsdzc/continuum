@@ -64,6 +64,13 @@ pub struct OverlayBackend;
 /// **读不到时返回 `false`**：非 Linux 或受限环境无从判定，一律按「不在」处理，
 /// 于是 [`create`] 报 [`WorkspaceError::NotInNamespace`] 而非在无保证的情况下挂载。
 /// 这是 fail-closed 的方向，与「不静默建出不可见的工作区」一致。
+///
+/// **只判用户命名空间，不判挂载命名空间。** `unshare -U`（不带 `-m`）之后本函数返回真，
+/// 而该进程并没有自己的挂载命名空间，`mount` 未必成功。这个范围是刻意的：判据只回答
+/// 「`uid_map` 是否非恒等映射」这一个问题，overlay 挂不挂得上由 `mount` 自己回答。误判的
+/// 方向是**响的**——挂载失败会经 [`WorkspaceError::CommandFailed`] 带 stderr 报出，不会
+/// 静默建出一个坏掉的工作区。要一个真能用的工作区，调用方应 re-exec 进 `unshare -Urm`
+/// （用户与挂载命名空间一并建立），见 [`OverlayBackend`] 的文档。
 pub fn in_user_namespace() -> bool {
     match std::fs::read_to_string("/proc/self/uid_map") {
         Ok(text) => !is_initial_uid_map(&text),
@@ -199,6 +206,10 @@ fn hex(bytes: &[u8]) -> String {
 /// 三个路径含 `,` 或 `:` 时拒绝：选项串以 `,` 分隔各选项，`,` 会让内核的解析错位；
 /// `lowerdir` 内以 `:` 分隔多层，Base 路径里的 `:` 会被当作分层。两者都只会得到一个
 /// 与真实原因对不上的挂载错误，故在进入外部命令之前挡下，给出能对照的说明。
+///
+/// `upperdir` 与 `workdir` 是单层路径，`:` 在其中并无特殊含义，仍一并拒绝是刻意的：
+/// 三处用同一条规则，省得日后有人按「只有 `lowerdir` 需要」放宽而连带漏掉 `,`，
+/// 也让错误信息不必按选项分岔。
 fn mount_options(lower: &Path, upper: &Path, work: &Path) -> Result<String, WorkspaceError> {
     let mut parts = Vec::with_capacity(3);
     for (name, path) in [("lowerdir", lower), ("upperdir", upper), ("workdir", work)] {
@@ -298,9 +309,26 @@ pub(crate) fn create(
 ///
 /// 先卸载再删除：挂载点被挂载时 `remove_dir_all` 会以 `EBUSY` 失败，反序一步也做不成。
 ///
+/// **`umount` 未成功就绝不往下走。** 卸载失败仍继续删目录，只会有两种结局：路径确实仍被
+/// 挂载时，删以 `EBUSY` 失败，错误里 umount 给出的具体原因被后一个失败盖掉；路径并非挂载
+/// 点时（误用或中间态），删会**成功**，把一个不属于本次放弃的目录整删掉。故 `umount` 的
+/// 错误原样返回（带退出码与 stderr），不尝试继续。
+///
+/// **形态校验排在 `umount` 之前。** 本后端的布局由 [`Layout::new`] 固定为
+/// `<Base 标识>/<intent>/{upper,work,mnt}`，三者互为兄弟。确认 `upper` 与 `work` 是 `mnt`
+/// 的同级目录，是为了把「调用方把别的后端（worktree）建出的 Task 根交到这里」报成「不是
+/// 本后端的布局」。少了这一步，误用会走到 `umount`，那里的答复是「umount 失败」——把调用
+/// 方的误用说成外部命令故障；而若该路径下当真挂了别的东西，`umount` 会成功，随后
+/// `remove_dir_all` 整删一个不属于本后端的目录（例如 `<base>/.ai/worktrees/<intent>`）。
+///
 /// `<overlay 根>/<Base 标识>` 只在其**已空**时移除（`remove_dir` 不递归），故住在同一
 /// Base 下的别的 Intent 不受影响；移除失败不报错——非空正是「还有别的 Intent」这一正常
 /// 情形的表现。overlay 根自身不动：它是 Runtime 的公共目录，可由多个 Base 共用。
+///
+/// **中间态没有重试路径。** `umount` 成功而 `remove_dir_all` 失败时，该 Intent 会卡死：
+/// 再调 `discard` 会在 `umount` 处失败（那时已不是挂载点），而 `create` 又因 `intent_dir`
+/// 已存在（见该函数里对既有目录的拒绝）不肯重建。返回的 [`WorkspaceError::IoFailed`]
+/// 带 `path`，人工据此删除该目录即可；除手工收拾外没有自动回收的路子。
 pub(crate) fn discard(task: &TaskWorkspace) -> Result<(), WorkspaceError> {
     let mnt = task.root();
     let Some(intent_dir) = mnt.parent() else {
@@ -311,6 +339,18 @@ pub(crate) fn discard(task: &TaskWorkspace) -> Result<(), WorkspaceError> {
             ),
         });
     };
+    // 形态校验（见本函数的文档）：在 umount 之前确认这确实是本后端的布局。
+    for sibling in ["upper", "work"] {
+        if !intent_dir.join(sibling).is_dir() {
+            return Err(WorkspaceError::BackendUnavailable {
+                reason: format!(
+                    "Task 根 {} 不是本后端建出的 overlay 布局：其同级目录中没有 {sibling} \
+                     （布局为 <Base 标识>/<intent>/{{upper,work,mnt}}）",
+                    mnt.display()
+                ),
+            });
+        }
+    }
     umount(mnt)?;
     std::fs::remove_dir_all(intent_dir).map_err(|e| io_error(intent_dir, e))?;
     if let Some(base_dir) = intent_dir.parent() {
