@@ -214,7 +214,14 @@ WorkspaceBackend   Worktree | Overlay
 
 **Overlay 后端**：以 unprivileged user namespace 加 OverlayFS 建立可写覆盖层，
 lowerdir 为 Base，upperdir 为该 Intent 的私有目录。放弃即丢弃 upper 层。
-本机内核 7.2.7、用户命名空间已启用，该后端可测。
+
+该后端有一条约束，由无特权 OverlayFS 的性质决定：**挂载只在其所在的用户与挂载命名空间内可见**，
+命名空间退出即消失。因此该后端要求调用进程已处在一个用户与挂载命名空间内，且该命名空间须存活
+至子进程用完工作区为止。驱动的处置是：需要该后端时，把自身 re-exec 进 `unshare -Urm`，
+此后其子进程继承同一命名空间，挂载全程有效。
+
+该约束须写入 `OverlayBackend` 的文档注释与驱动的启动逻辑。调用方若不在命名空间内而直接调用，
+`create` 返回错误而非静默建出一个对子进程不可见的工作区。
 
 **两种后端共用同一抽象**，选择一个后端的判据（是否 Git 仓库）在创建时确定并记录，
 使后续操作不必重新探测。
