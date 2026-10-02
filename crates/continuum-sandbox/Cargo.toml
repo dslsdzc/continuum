@@ -1,0 +1,20 @@
+[package]
+name = "continuum-sandbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 设计第 3 节规定的两条边（本 crate 只依赖 workspace 抽象，不拉进 P2 其余 crate：
+# 沙箱不知道 Effect Journal 与 Policy 的存在）。
+#
+# `continuum-core` 在 Task 5 尚无使用点，但 `dependency_direction` 的 `ALLOWED`
+# 比对是双向的（出现与否必须与表一致），故这条边在 Cargo.toml 中必须真实存在。
+continuum-core = { path = "../continuum-core" }
+continuum-workspace = { path = "../continuum-workspace" }
+thiserror = { workspace = true }
+# Task 6 用它施加文件系统规则集。Task 5 只登记依赖，尚无使用点。
+landlock = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

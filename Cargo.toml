@@ -11,6 +11,7 @@ members = [
     "crates/continuum-graph",
     "crates/continuum-runtime",
     "crates/continuum-workspace",
+    "crates/continuum-sandbox",
 ]
 
 [workspace.package]
@@ -29,3 +30,4 @@ futures-core = "0.3"
 thiserror = "2"
 tempfile = "3"
 trybuild = "1"
+landlock = "0.4"
