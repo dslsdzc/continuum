@@ -105,7 +105,7 @@ Integration Gate 与两种 Workspace 同 crate：三者共用同一批路径类�
 
 ```
 continuum-workspace  → continuum-persist, continuum-events
-continuum-sandbox    → continuum-core, continuum-workspace
+continuum-sandbox    → continuum-workspace
 continuum-effect     → continuum-core, continuum-persist, continuum-events
 continuum-policy     → continuum-core, continuum-persist, continuum-artifact,
                        continuum-effect
@@ -116,7 +116,7 @@ continuum-runtime    → continuum-workspace, continuum-sandbox, continuum-polic
 `continuum-workspace → continuum-events` 由第 6.4 节要求：Gate 的审计记录经
 `Tx::append_audit` 写入，该函数的 `kind` 参数类型 `AuditKind` 定义在 `continuum-events`。
 
-`continuum-workspace` 不依赖 `continuum-core`。本层不使用其类型；且依赖方向测试对
+`continuum-sandbox` 与 `continuum-workspace` 都不依赖 `continuum-core`。本层不使用其类型；且依赖方向测试对
 `ALLOWED` 的比对是**双向**的（声明了就必须真实存在），留一条无使用点的边等于让该表
 不再反映实际依赖。
 
