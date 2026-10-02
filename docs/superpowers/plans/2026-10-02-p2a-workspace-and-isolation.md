@@ -702,6 +702,7 @@ git commit -m "feat(sandbox): Sandbox 抽象与能力报告"
 
 **Files:**
 - Create: `crates/continuum-sandbox/src/landlock.rs`
+- Modify: `crates/continuum-sandbox/src/sandbox.rs`（`LandlockSandbox` 定义在此，本 task 给它加状态字段与访问器）
 - Modify: `crates/continuum-sandbox/src/lib.rs`
 - Create: `crates/continuum-sandbox/tests/isolation.rs`
 
@@ -802,6 +803,7 @@ git commit -m "feat(sandbox): Landlock 隔离"
 
 **Files:**
 - Create: `crates/continuum-sandbox/src/bubblewrap.rs`
+- Modify: `crates/continuum-sandbox/src/sandbox.rs`（`BubblewrapSandbox` 定义在此）
 - Modify: `crates/continuum-sandbox/src/lib.rs`
 - Modify: `crates/continuum-sandbox/tests/isolation.rs`
 
