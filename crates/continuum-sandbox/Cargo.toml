@@ -9,8 +9,10 @@ rust-version.workspace = true
 # 沙箱不知道 Effect Journal 与 Policy 的存在）。
 continuum-workspace = { path = "../continuum-workspace" }
 thiserror = { workspace = true }
-# Task 6 用它施加文件系统规则集。Task 5 只登记依赖，尚无使用点。
+# Task 6 起用它施加文件系统规则集，并借其后台探测的内核 ABI 推导能力报告。
 landlock = { workspace = true }
+# Task 6 起用于 Landlock 的 ABI 探测（见 workspace 依赖处的说明）。
+libc = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

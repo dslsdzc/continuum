@@ -1,7 +1,10 @@
 //! Sandbox 抽象：两种内核层隔离机制的统一入口。
 
 use crate::error::SandboxError;
+use crate::landlock;
 use continuum_workspace::TaskWorkspace;
+use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::{Child, Command};
 
 /// 隔离项报告。
@@ -31,12 +34,19 @@ pub struct SandboxCapabilities {
 
 /// Landlock 机制。
 ///
-/// 本 task 中它不携带状态；**设计上**句柄经 [`Sandbox::landlock`] 取得。
-/// 「唯一来源」这层保证要到 Task 6 起加上私有字段后才成立——此刻它没有字段可作阻挡，
-/// `LandlockSandbox {}` 在 crate 外仍可构造。Task 6 起承载内核 ABI 探测结果与只读
-/// 放行路径集合。
+/// 字段私有且无公开构造函数，故**唯一来源是 [`Sandbox::landlock`]**——crate 外拿不到
+/// 句柄，也就无从绕过 [`Sandbox::capabilities`] 的判定另行断言一组能力。
+///
+/// 承载两项状态：内核 ABI 探测结果，与放行路径集合。**规则集本身不在此处**：
+/// `RulesetCreated::restrict_self(mut self)` 消费规则集，它按构造即用，不可能存下来；
+/// 且它的构造要分配内存，只能发生在 `pre_exec` 之前（见 [`Sandbox::spawn`]）。
 pub struct LandlockSandbox {
-    // Task 6 起承载该机制的状态：内核 ABI 探测结果与只读放行路径集合。
+    /// 构造期探测到的内核 ABI 版本；`0` 表示不可用（见 `landlock` 模块）。
+    pub(crate) abi: i32,
+    /// 只读放行的路径，构造时已滤除不存在的项。
+    pub(crate) read_only_paths: Vec<PathBuf>,
+    /// 放行全部访问权限的设备文件，构造时已滤除不存在的项。
+    pub(crate) read_write_paths: Vec<PathBuf>,
 }
 
 /// bubblewrap 机制。
@@ -65,8 +75,11 @@ pub enum Sandbox {
 
 impl Sandbox {
     /// Landlock 机制句柄。
+    ///
+    /// 构造期探测一次内核 ABI 并固定放行路径集合，故 [`Sandbox::capabilities`] 与
+    /// [`Sandbox::spawn`] 依据的是同一个判定。
     pub fn landlock() -> Self {
-        Sandbox::Landlock(LandlockSandbox {})
+        Sandbox::Landlock(LandlockSandbox::new())
     }
 
     /// bubblewrap 机制句柄。
@@ -92,16 +105,64 @@ impl Sandbox {
     ///
     /// 设计第 4.2 节要求子进程的工作目录是 Task 根，该设置已在本函数内完成。
     ///
+    /// # 隔离在何处施加
+    ///
+    /// Landlock 分支在 `cmd` 上挂 `pre_exec`：闭包运行在 fork 之后、exec 之前，
+    /// 在其中 `restrict_self`。**规则集本身在本函数内（即父进程侧）构造**——闭包里
+    /// 不得分配内存，而 `handle_access` / `PathFd::new` / `add_rules` 都会分配；
+    /// 闭包里只剩 `restrict_self`（其内是 `prctl(PR_SET_NO_NEW_PRIVS)` 与
+    /// `landlock_restrict_self` 两个 syscall，成功路径无堆分配）。
+    ///
+    /// 施加于闭包所在的那条线程即覆盖整个子进程：按 `CommandExt::pre_exec` 的契约，
+    /// 闭包在 **fork 之后**的子进程里运行，而 fork 出的子进程只有一条线程，
+    /// 故不需要 `LANDLOCK_RESTRICT_SELF_TSYNC`（那是给多线程进程用的）。
+    ///
+    /// **内核 ABI 不足不走 [`SandboxError`]**：那走降级路径——不施加规则集、照常启动，
+    /// 由 [`Sandbox::capabilities`] 如实反映（设计第 4.3 节），**不使启动失败**。
+    /// 这条分支在内核未启用 Landlock 时会真的走到，读本函数时不要把它当作死代码。
+    /// 反之，父进程侧构造规则集失败（例如 Task 根打不开）返回
+    /// [`SandboxError::IsolationFailed`]；`pre_exec` 内的失败则被 std 报成普通的
+    /// spawn `io::Error`，与 exec 失败同形，只能落进 [`SandboxError::SpawnFailed`]
+    /// ——两者的分界见 [`SandboxError`] 的文档。
+    ///
     /// # 当前状态
     ///
-    /// 两种机制均未实现（Task 6、Task 7），故本函数在设好工作目录后即 panic，
-    /// **不提供任何隔离**。这是刻意的：一个「照常启动但不施加隔离」的实现会让调用方
-    /// 以为子进程已被约束，与 [`SandboxCapabilities`]「如实报告隔离项」这一约定
-    /// 无法同时成立。
+    /// Landlock 分支已实现。bubblewrap 分支未实现（Task 7），命中即 panic。
     pub fn spawn(&self, task: &TaskWorkspace, mut cmd: Command) -> Result<Child, SandboxError> {
         cmd.current_dir(task.root());
         match self {
-            Sandbox::Landlock(_) => todo!("Task 6：在 pre_exec 中施加 Landlock 规则集"),
+            Sandbox::Landlock(sandbox) => {
+                let ruleset =
+                    sandbox
+                        .build_ruleset(task.root())
+                        .map_err(|reason| SandboxError::IsolationFailed {
+                            mechanism: "landlock",
+                            reason: format!("无法构建 Landlock 规则集：{reason}"),
+                        })?;
+                // `None` 是降级路径：内核 ABI 为 0，本次不施加隔离，照常启动。
+                // 不静默——`Sandbox::capabilities` 对此内核各项报假。
+                if let Some(ruleset) = ruleset {
+                    // `restrict_self` 消费规则集，而闭包必须可多次调用（`FnMut`），
+                    // 故经 `Option::take` 交出唯一的一份。
+                    let mut slot = Some(ruleset);
+                    // SAFETY: `pre_exec` 的契约是闭包内只允许 async-signal-safe 操作。
+                    // 本闭包只做 `take`（无分配）、`restrict_self`（`prctl` 与
+                    // `landlock_restrict_self` 两个 syscall，成功路径无堆分配），以及
+                    // 失败时把 errno 转成 `io::Error`——用的是 `from_raw_os_error`，
+                    // 同样不分配。规则集已在 fork 之前构造好。
+                    unsafe {
+                        cmd.pre_exec(move || match slot.take() {
+                            Some(ruleset) => {
+                                ruleset.restrict_self().map(|_| ()).map_err(into_io_error)
+                            }
+                            // 到不了：fork 出的子进程只有一条线程，`pre_exec` 只被调用一次。
+                            None => Err(std::io::Error::from_raw_os_error(libc::EINVAL)),
+                        });
+                    }
+                }
+                cmd.spawn()
+                    .map_err(|e| SandboxError::SpawnFailed { reason: e.to_string() })
+            }
             Sandbox::Bubblewrap(_) => todo!("Task 7：据此重建 bwrap 命令后启动"),
         }
     }
@@ -113,17 +174,12 @@ impl Sandbox {
     ///
     /// # 当前状态
     ///
-    /// 两种机制都尚未实现（Task 6、Task 7），探测入口亦未建立，故各项为 `false`：
-    /// 此刻没有任何机制会生效，这是唯一正确的报告。Task 6 与 Task 7 落地后由各自的
-    /// 实现据实返回。
+    /// Landlock 分支据构造期探测到的 ABI 如实返回，推导见 `landlock::capabilities_for_abi`。
+    /// bubblewrap 分支尚未实现（Task 7），各项为 `false`：此刻它确实不会生效，
+    /// 这是唯一正确的报告。
     pub fn capabilities(&self) -> SandboxCapabilities {
         match self {
-            Sandbox::Landlock(_) => SandboxCapabilities {
-                restricts_filesystem_writes: false,
-                isolates_network: false,
-                isolates_pid: false,
-                mechanism: "landlock",
-            },
+            Sandbox::Landlock(sandbox) => landlock::capabilities_for_abi(sandbox.abi()),
             Sandbox::Bubblewrap(_) => SandboxCapabilities {
                 restricts_filesystem_writes: false,
                 isolates_network: false,
@@ -132,4 +188,22 @@ impl Sandbox {
             },
         }
     }
+}
+
+/// 把施加规则集的失败折成 `io::Error`，且**不分配内存**。
+///
+/// 本函数在 `pre_exec` 闭包内被调用——fork 之后、exec 之前不得分配。故只取 syscall 的
+/// `errno` 走 [`std::io::Error::from_raw_os_error`]，而不是格式化一条消息
+/// （`io::Error::other` 会把消息装箱）。`restrict_self` 的失败只可能来自两个 syscall
+/// （`prctl` 与 `landlock_restrict_self`），两者的 `source` 都是原样的 OS 错误，
+/// 其析构不涉及堆；其余形态在本路径上不可达，真出现则折成 `EPERM`。
+fn into_io_error(e: ::landlock::RulesetError) -> std::io::Error {
+    let code = match &e {
+        ::landlock::RulesetError::RestrictSelf(
+            ::landlock::RestrictSelfError::RestrictSelfCall { source, .. }
+            | ::landlock::RestrictSelfError::SetNoNewPrivsCall { source, .. },
+        ) => source.raw_os_error().unwrap_or(libc::EPERM),
+        _ => libc::EPERM,
+    };
+    std::io::Error::from_raw_os_error(code)
 }

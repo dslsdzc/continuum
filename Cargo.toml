@@ -31,3 +31,8 @@ thiserror = "2"
 tempfile = "3"
 trybuild = "1"
 landlock = "0.4"
+# Task 6 起由 continuum-sandbox 用于 Landlock 的 ABI 探测：`landlock` crate 不公开
+# `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` 这个入口
+# （其 compat 模块是 `pub(crate)`），故须自行发该 syscall。libc 已作为 landlock 的
+# 传递依赖在锁文件里（0.2.189），直接登记不引入新 crate。
+libc = "0.2"
