@@ -51,13 +51,15 @@ pub struct BubblewrapSandbox {
 /// 内核层隔离的统一入口。
 ///
 /// 两种机制在这一层不可区分：调用方只经 [`Sandbox::spawn`] 启动子进程、
-/// 经 [`Sandbox::capabilities`] 读取实际生效的隔离项，不感知机制差异。
+/// 经 [`Sandbox::capabilities`] 读取「按当前内核的 ABI 探测结果，该机制将生效」的
+/// 隔离项，不感知机制差异。
 pub enum Sandbox {
     /// Landlock：进程级规则集，经 `restrict_self` 生效，并随 `exec` 被子孙继承。
     Landlock(LandlockSandbox),
     /// bubblewrap：以挂载命名空间限制文件系统。其网络与 PID 命名空间能力本子项目不使用
     /// （Task 7 的参数集不含 `--unshare-net` / `--unshare-pid`），故届时
-    /// [`Sandbox::capabilities`] 对这两项报告为假——该报告的口径是「实际生效」。
+    /// [`Sandbox::capabilities`] 对这两项报告为假——该报告的口径是「按当前内核的 ABI
+    /// 探测结果，该机制将生效」，不含机制「本来能做什么」。
     Bubblewrap(BubblewrapSandbox),
 }
 
