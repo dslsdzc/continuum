@@ -57,11 +57,8 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // P2 边界层的进程与内核层：子进程隔离。
     // 只依赖 workspace 抽象（spawn 的参数是 `&TaskWorkspace`，见设计第 4.2 节），
     // 不依赖 P2 其余 crate——沙箱不知道 Effect Journal 与 Policy 的存在。
-    // `continuum-core` 目前无使用点，但本表与 Cargo.toml 必须精确一致，故该边真实存在。
-    (
-        "continuum-sandbox",
-        &["continuum-core", "continuum-workspace"],
-    ),
+    // 不含 continuum-core：本 crate 至今没有用到它，而本表与 Cargo.toml 必须精确一致。
+    ("continuum-sandbox", &["continuum-workspace"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     (
