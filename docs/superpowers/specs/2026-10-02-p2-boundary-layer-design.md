@@ -573,6 +573,7 @@ EventType              本子项目不新增事件类型；复用既有九类中
 | Base 只经 Gate 写入 | 编译失败用例（Gate 之外无可调用的写路径） |
 | Base 路径不进入子进程参数 | 检查实际 spawn 的 argv / env / cwd |
 | 子进程写 Base 被内核拒绝 | 起真子进程写 Base（断言 EACCES），**加**写 Task 成功的对照臂 |
+| 经 Task 内符号链接写 Base 被内核拒绝 | 类型层只做路径分量检查，检出不了符号链接；该逃逸由内核层承担，须有对应用例 |
 | 两种沙箱机制 | Landlock 与 bubblewrap 各跑同一套两臂用例 |
 | 两种 Workspace 后端 | worktree 与 overlay 各跑创建、放弃、往返用例 |
 | 五种 Gate 操作 | 真实 worktree 与 overlay 上各跑一遍 |

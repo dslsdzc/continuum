@@ -724,10 +724,34 @@ fn landlock_denies_writes_to_base_and_allows_writes_to_task() {
     assert!(!base_path.join("in_base.txt").exists(), "Base 中不得出现该文件");
 }
 
+`landlock_confines_descendants_too` 的断言内容：子进程再 fork 一个孙进程去写 Base，
+同样被拒——隔离随进程继承。
+
+**第三条守卫（必做）：符号链接逃逸。** 类型层只做路径分量检查（设计 §4.1），检出不了
+「Task 根内有一个指向根外的符号链接」，故该逃逸由本层承担，须有对应用例：
+
+```rust
 #[test]
-fn landlock_confines_descendants_too() {
-    // 子进程再 fork 一个孙进程去写 Base，同样被拒——隔离随进程继承
+fn writing_through_a_symlink_inside_the_task_is_denied() {
+    let dir = tempfile::tempdir().unwrap();
+    let base_path = dir.path().join("base");
+    std::fs::create_dir_all(&base_path).unwrap();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let task = TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1")).unwrap();
+
+    // 在 Task 根内建一个指向 Base 的符号链接，再经它写文件
+    let link = task.root().join("link");
+    std::os::unix::fs::symlink(&base_path, &link).unwrap();
+
+    let sandbox = Sandbox::landlock();
+    let status = spawn_sh(&sandbox, &task, &format!("echo bad > {}/evil.txt", link.display()));
+    assert!(!status.success(), "经 Task 内符号链接写 Base 应被拒");
+    assert!(!base_path.join("evil.txt").exists(), "Base 中不得出现该文件");
 }
+```
+
+Task 7 里须对 bubblewrap 再跑一遍。**若某个沙箱机制挡不住它，不得跳过或放宽断言**——
+据实报告，由我裁定是换机制还是把该缺口写进设计的遗留。
 ```
 
 `spawn_sh` 是本文件内的辅助函数：用 `Sandbox::spawn` 起 `sh -c <脚本>`，`wait` 后返回 `ExitStatus`。
