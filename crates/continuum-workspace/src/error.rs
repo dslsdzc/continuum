@@ -4,15 +4,22 @@ use std::path::PathBuf;
 
 /// Workspace 操作失败的原因。
 ///
-/// 变体集合横跨只读强制的三层：类型层（[`WorkspaceError::EscapesRoot`]、
-/// [`WorkspaceError::Overlaps`]）、
+/// 多数变体按只读强制的三层归属：类型层（[`WorkspaceError::EscapesRoot`]、
+/// [`WorkspaceError::Overlaps`]、
+/// [`WorkspaceError::InvalidIntent`]）、
 /// 后端层（[`WorkspaceError::BackendUnavailable`]、[`WorkspaceError::IoFailed`]、
 /// [`WorkspaceError::GitFailed`]）与 Gate 层（[`WorkspaceError::NotInNamespace`]、
 /// [`WorkspaceError::GateRefused`]）。
-/// `GitFailed` 由 worktree 后端使用；`NotInNamespace`、`GateRefused` 尚无调用点，
-/// 由后续 task 的沙箱与 Integration Gate 使用；
-/// 在此一次定型是为了让错误面稳定，避免各 task 各自增改变体。
+///
+/// [`WorkspaceError::Context`] 是例外：它不属任何一层，而是横切各层的包装——
+/// 在「失败之后用户仓库里可能仍有残留」的路径上给任意变体附加一层上下文
+/// （哪一步、哪个分支、哪个路径），使调用方拿得到收拾残留所需的信息。
+///
+/// 本枚举不是「一次定型」：`InvalidIntent` 与 `Context` 分别是 worktree 后端的
+/// 边界校验与回收路径引入的。故标 `#[non_exhaustive]`——后续同类增补不再要求
+/// 外部消费者改 `match`。新增变体时仍应优先考虑既有变体能否表达。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum WorkspaceError {
     /// Base 路径不存在。
     #[error("Base Workspace 路径不存在：{}", path.display())]

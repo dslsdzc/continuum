@@ -61,22 +61,30 @@ pub(crate) fn branch_name(intent: &IntentId) -> String {
 /// [`TaskWorkspace::new_outside`] 产出句柄 → 确保 `.ai/` 被排除。
 ///
 /// **排除排在最后**（见文件末尾那段注释）：`.ai/` 这时才存在，之前没有要排除的
-/// 东西；创建失败时 `info/exclude` 因此一字不动。「一次失败的创建留下了什么」
-/// 只有一个答案：什么都没有。
+/// 东西；创建失败时 `info/exclude` 因此一字不动。
 ///
 /// **建分支与检出 worktree 分作两步，不写成单条 `git worktree add -b`。**
 /// 那条命令实际是「先建分支 ref，再建 worktree」两个动作，第二阶段失败时
 /// 分支会留在用户仓库里：实测目标目录已存在且非空时报 `already exists`（退出码
 /// 128），intent 为 `@` 时报 `could not find created worktree '@'`（退出码 255），
-/// 两种情形都留下一条 `ai/<intent>` ref。留下的 ref 有两个后果：它是本 task
-/// 唯一一处「失败后在用户仓库里留下痕迹」的路径（痕迹是仓库元数据的写入），
-/// 且会让**同一 intent 永远无法再创建**（重试报 `a branch named … already exists`）。
-/// 拆开之后，第一阶段失败时仓库里什么都没多出来——`git branch` 是单个动作。
+/// 两种情形都留下一条 `ai/<intent>` ref。留下的 ref 有两个后果：它是失败路径上
+/// 对用户仓库元数据的写入，且会让**同一 intent 永远无法再创建**（重试报
+/// `a branch named … already exists`）。拆开之后，第一阶段失败时仓库里什么都没
+/// 多出来——`git branch` 是单个动作。
+///
+/// 拆开还挡住另一种误伤：单条命令下，**已存在的同名分支**会让第二阶段失败，
+/// 而回收会顺手 `git branch -D` 把那条**不是本次创建**的分支删掉。真实代码里
+/// 第一步 `git branch` 已在该情形失败并裸 `?` 返回，根本走不到回收。
 ///
 /// **每一个可能留下东西的步骤失败时都走同一个 [`Reclaim`]**，故「任何一步失败
-/// 都不留痕」由结构保证，而不是靠逐个论证「那一步不可达」。第一步（`git branch`）
-/// 是例外：它是单个动作，失败时仓库里什么都没多出来，没有可回收的东西。
-/// 不预建目标目录：`git worktree add` 在目录不存在时自建全部中间目录。
+/// 都不留工作树与分支的痕迹」由结构保证，而不是靠逐个论证「那一步不可达」。
+/// 第一步（`git branch`）是例外：它是单个动作，失败时仓库里什么都没多出来，
+/// 没有可回收的东西。
+///
+/// 失败路径上唯一不由本函数清掉的是 `git worktree add` 可能写了一半的
+/// `.git/worktrees/<name>` 登记条目——它没有对应目录，只有 `git worktree prune`
+/// 够得着，由 [`Reclaim::run`] 负责。不预建目标目录：`git worktree add` 在目录
+/// 不存在时自建全部中间目录。
 pub(crate) fn create(
     base: &BaseWorkspace,
     intent: &IntentId,
@@ -183,6 +191,25 @@ impl Reclaim<'_> {
         }
 
         remove_empty_ai_dirs(base, self.worktrees_preexisting, self.ai_preexisting);
+
+        // `git worktree add` 未登记成功也能留下东西：它在失败前已往
+        // `.git/worktrees/` 写过 admin 目录（intent 为 `@` 时实测留下
+        // `.git/worktrees/-`）。这类条目没有对应的目录，`git worktree remove`
+        // 够不着——它以路径为参数，而那个路径并不存在——只有 `prune` 清得掉。
+        //
+        // 只在 worktree 未登记时做：那时才可能有写了一半的条目；已登记的情形
+        // 由上面的 `worktree remove` 收尾，无事可 prune。
+        //
+        // `prune` 只删「登记还在、目录已不存在」的条目，故别的 Intent 的有效
+        // worktree 不受影响——它们的目录真实存在。代价是它也可能顺手清掉用户
+        // 自己遗留的同类僵尸条目；那正是 git 对这类无目录登记的定义与处置，
+        // 不涉及任何存活的工作树，故不触碰有效数据。
+        if !self.worktree_registered
+            && let Err(e) = git(base, &["worktree", "prune"])
+        {
+            failure.get_or_insert(with_context(e, "清理 worktree 登记（git worktree prune）"));
+        }
+
         failure.map_or(Ok(()), Err)
     }
 }

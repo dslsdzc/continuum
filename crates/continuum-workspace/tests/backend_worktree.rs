@@ -55,9 +55,12 @@ fn current_branch(dir: &Path) -> String {
 }
 
 /// `dir` 下的一级条目名（排序后），用于断言「没有多出任何东西」。
+/// 目录不存在时返回空——调用方要断言的是条目集合，不是该目录本身的存在性。
 fn dir_entries(dir: &Path) -> Vec<String> {
-    let mut names: Vec<String> = std::fs::read_dir(dir)
-        .unwrap()
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = entries
         .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
         .collect();
     names.sort();
@@ -318,6 +321,54 @@ fn a_failed_creation_leaves_no_dangling_branch() {
         "误删了别的 Intent 的 worktree"
     );
     assert!(!base_path.join(".ai/worktrees/@").exists());
+
+    // 情形三：同名分支已存在。第一步 `git branch` 就此失败，回收根本不会启动，
+    // 故那条**不是本次创建**的分支必须原样还在。合回单条 `worktree add -b` 时，
+    // 第二阶段会失败并触发回收，回收会顺手 `branch -D` 把别人的分支删掉。
+    run_git(&base_path, &["branch", "ai/i11"]);
+    let err = create_task_workspace(&base, &IntentId::new("i11")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::GitFailed { .. }),
+        "期望 GitFailed，得到 {err:?}"
+    );
+    assert!(
+        local_branches(&base_path).contains(&"ai/i11".to_owned()),
+        "失败的创建删掉了不是它建的分支：{:?}",
+        local_branches(&base_path)
+    );
+    assert!(!base_path.join(".ai/worktrees/i11").exists());
+}
+
+#[test]
+fn a_failed_creation_leaves_no_worktree_admin_entry() {
+    let (_d, base_path) = git_repo();
+    // `git worktree add` 在报错前会先往 `.git/worktrees/` 写一个 admin 条目
+    // （intent 为 `@` 时实测留下 `.git/worktrees/-`）。它没有对应目录，
+    // `git worktree remove` 够不着，只有 `git worktree prune` 清得掉。
+    let admin = base_path.join(".git/worktrees");
+    let before = dir_entries(&admin);
+    let base = BaseWorkspace::new(&base_path).unwrap();
+
+    let err = create_task_workspace(&base, &IntentId::new("@")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::GitFailed { .. }),
+        "期望 GitFailed，得到 {err:?}"
+    );
+
+    assert_eq!(
+        dir_entries(&admin),
+        before,
+        "`.git/worktrees` 下留下了条目"
+    );
+    // 该残留对 git 自身不可见，故只查目录不够——一并确认 git 也不认它
+    assert_eq!(
+        run_git(&base_path, &["worktree", "list"])
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count(),
+        1,
+        "git 仍认得一个多余的 worktree"
+    );
 }
 
 #[test]
