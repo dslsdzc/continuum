@@ -287,7 +287,7 @@ fn base_workspace_rejects_a_missing_directory() {
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(workspace): 类型层只读保证与 WritablePath"
 ```
 
@@ -396,7 +396,7 @@ pub fn discard_task_workspace(
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(workspace): Git worktree 后端"
 ```
 
@@ -532,7 +532,7 @@ worktree 后端无此问题（`.ai/` 被 gitignore，不进 worktree），故两
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(workspace): OverlayFS 后端与命名空间约束"
 ```
 
@@ -603,7 +603,7 @@ pub fn p2_workspace_migrations() -> Vec<Migration> {
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(workspace): workspace 表与后端记录"
 ```
 
@@ -692,7 +692,7 @@ impl Sandbox {
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(sandbox): Sandbox 抽象与能力报告"
 ```
 
@@ -812,7 +812,7 @@ cargo test -p continuum-sandbox --test isolation
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(sandbox): Landlock 隔离"
 ```
 
@@ -871,7 +871,7 @@ cargo test -p continuum-sandbox --test isolation
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(sandbox): bubblewrap 隔离"
 ```
 
@@ -894,6 +894,7 @@ git commit -m "feat(sandbox): bubblewrap 隔离"
 fn view_diff_reports_the_task_changes() {
     // 在 task 内改一个文件、删一个文件、加一个文件，断言 Diff 三类都列出
 }
+```
 
 另两条用例（以下为断言内容，函数体由实现者写出）：
 
@@ -920,7 +921,7 @@ cargo test -p continuum-workspace --test gate
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(workspace): Integration Gate 的只读操作"
 ```
 
@@ -934,13 +935,9 @@ git commit -m "feat(workspace): Integration Gate 的只读操作"
 
 - [ ] **Step 1: 写测试**
 
-```rust
-#[test]
-fn apply_patch_requires_an_approval_value_to_exist() {
-    // GateApproval 无公开构造函数：本用例以「编译失败样例」覆盖，
-    // 见 tests/compile_fail/gate_approval_construction.rs
-}
+`crates/continuum-workspace/tests/gate.rs`：
 
+```rust
 #[test]
 fn apply_patch_integrates_the_task_changes_into_the_base() {
     // 改一个文件后 apply，断言 base 中出现该改动，且 task 仍在
@@ -951,25 +948,42 @@ fn cherry_pick_brings_only_the_named_commits() {
     // task 上两个提交，只摘第一个，断言 base 上只有第一个的改动
 }
 
-另一条用例的断言内容：`merge_brings_the_whole_task_branch`——Task 上有两个提交，
-`merge` 之后断言 Base 的当前分支包含这两个提交的改动。
-
-```rust
-
 #[test]
 fn gate_operations_write_an_audit_record() {
     // 应用前后 audit_log 行数加一，且 kind 与操作对应
 }
 ```
 
-编译失败样例 `tests/compile_fail/gate_approval_construction.rs`：
+另两条的断言内容（函数体由实现者写出）：
+
+- `merge_brings_the_whole_task_branch`：Task 上有两个提交，`merge` 之后断言 Base 的当前分支
+  包含这两个提交的改动。
+- `apply_patch_requires_an_approval_value`：**不是运行期用例**——「`GateApproval` 无公开构造
+  函数」运行期测不出来，由下面的编译失败样例覆盖。不要把它写成 `#[test]`。
+
+编译失败样例（两条都要，放进 `crates/continuum-workspace/tests/compile_fail/`，
+被 `type_level.rs` 的 glob 收走）：
+
+`gate_approval_field_is_private.rs`：
 
 ```rust
-// 应编译失败：GateApproval 无公开构造函数
+// 应编译失败：GateApproval 的字段私有，crate 外无法直接构造
+fn main() {
+    let _ = continuum_workspace::GateApproval(());
+}
+```
+
+`gate_approval_has_no_constructor.rs`：
+
+```rust
+// 应编译失败：GateApproval 没有 new
 fn main() {
     let _ = continuum_workspace::GateApproval::new();
 }
 ```
+
+**两条缺一不可**：只测 `::new()` 只能证明没有那个方法，不证明字段私有——而「无公开构造函数」
+这条保证的实质是后者（P1 的 `WritablePath` 有同样的两条）。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -991,6 +1005,20 @@ pub struct GateApproval(());
 三种写入操作分别实现：Git 后端用 `git -C <base> apply` / `cherry-pick` / `merge`；
 Overlay 后端把 upper 层的内容合并进 Base。
 
+**三个写入操作都收 `tx: &Tx<'_>`**，与 `continuum-graph` 的 `apply_transition`、
+`continuum-artifact` 的 `save_artifact` 同形：
+
+```rust
+fn apply_patch(&self, tx: &Tx<'_>, task: &TaskWorkspace, approval: &GateApproval)
+    -> Result<(), GateError>;
+```
+
+理由：审计记录经 `Tx::append_audit` 写入，而事务由调用方持有——本层不自行开事务。
+契约同 P1：**返回 `Err` 之后调用方必须回滚，不得提交**。
+
+**注意「同一事务」在这里的边界**：git 命令改动的是工作树而不是数据库，
+它不在事务内、也无法回滚。「同一事务」只覆盖审计行本身。不要让注释暗示更强的保证。
+
 审计经 `Tx::append_audit(kind, occurred_at, payload)`。`kind` 取 `AuditKind` 的哪个变体，
 以 `continuum-events/src/audit.rs` 的实际定义为准——若既有变体不覆盖「集成」这一语义，
 **报回来再决定**是新增变体还是复用，不要自行扩枚举。
@@ -999,7 +1027,7 @@ Overlay 后端把 upper 层的内容合并进 Base。
 
 ```bash
 cargo test --workspace
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(workspace): Integration Gate 的写入操作与批准"
 ```
 
@@ -1057,7 +1085,7 @@ cargo build --workspace --all-targets
 - [ ] **Step 5: 提交**
 
 ```bash
-git add -A
+git add <本 task 改动的显式路径>
 git commit -m "feat(runtime): 装配 P2 上篇的 crate 与迁移；订正 P1 文档的执行器归属"
 ```
 
