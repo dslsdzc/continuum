@@ -380,9 +380,13 @@ pub fn discard_task_workspace(
 放弃用 `git -C <base> worktree remove --force <path>` 加 `git -C <base> branch -D ai/<intent>`。
 外部命令的失败要带 `code` 与 `stderr` 返回，不吞。
 
-**注意**：`.ai/` 会被 git 视为未跟踪目录，故创建前须确保 `.ai/` 已加入 `.gitignore`——
-否则用户在 Base 的 `git status` 会看到它。本函数在创建前检查并在缺失时**追加**一行
-`.ai/` 到 `.gitignore`（该文件属于用户，追加前先读、保留原有内容与结尾换行）。
+**注意**：`.ai/` 会被 git 视为未跟踪目录，故创建前须确保它已被忽略——否则用户在 Base 的
+`git status` 里会看到它。本函数在创建前检查 `<base>/.git/info/exclude` 是否含 `.ai/`，
+缺失时**追加**一行（先读、保留原有内容与结尾换行）。
+
+**不要改 `<base>/.gitignore`。** 那是用户的跟踪文件，改它会让用户的工作树出现一个非用户
+所做的未提交修改，与 `§256` 的 Base 只读冲突。`.git/info/exclude` 是仓库本地的忽略清单，
+不进工作树、不是跟踪文件、不影响其他 clone。
 
 - [ ] **Step 4: 运行全部测试并提交**
 

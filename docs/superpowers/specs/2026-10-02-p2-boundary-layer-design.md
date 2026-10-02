@@ -237,6 +237,13 @@ WorkspaceBackend   Worktree | Overlay
 （`§16`）。创建、放弃、列出均经 `git worktree` 与 `git branch` 命令。Agent 在该分支内可自由
 修改与提交，不触及用户的当前分支。
 
+该目录位于 Base 之内，若不忽略会出现在用户的 `git status` 中。处置是把它写入
+`<base>/.git/info/exclude`——该文件是 git 为此提供的**仓库本地**忽略清单：不进工作树、
+不是跟踪文件、不影响其他 clone。**不修改 `<base>/.gitignore`**：那是用户的跟踪文件，
+改它会让用户的工作树出现一个非用户所做的未提交修改，与 `§256` 冲突。
+`.git/info/exclude` 属仓库元数据而非用户的工作文件，故 `§256` 在「Base 的工作文件只读」
+这一意义上仍然成立。
+
 **Overlay 后端**：以 unprivileged user namespace 加 OverlayFS 建立可写覆盖层，
 lowerdir 为 Base，upperdir 为该 Intent 的私有目录。放弃即丢弃 upper 层。
 
