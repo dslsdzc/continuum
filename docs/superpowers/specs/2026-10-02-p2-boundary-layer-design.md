@@ -695,8 +695,11 @@ UNKNOWN 的收敛        需要外部对账或人工决策，两者均不在本�
 Landlock ABI 降级     内核不支持的文件系统类别降级处理，降级须显式记录。
                        降级后的实际隔离面由 SandboxCapabilities 如实反映。
 bubblewrap 依赖       非 Rust 的运行时依赖。本子项目不使用其网络与 PID 隔离能力。
-bubblewrap 的跳过窗口 不可用则跳过的设计都有同一性质：**若可用性探测本身出错（例如
-                      `locate_bwrap` 恒返回 None），整套 bubblewrap 用例会静默跳过而全绿**。
+bubblewrap 的跳过窗口 不可用则跳过的设计都有同一性质：**若可用性探测本身出错，整套 bubblewrap
+                      用例会静默跳过而全绿**。触发形态是 `BubblewrapSandbox::new()` 恒给出
+                      `bwrap: None`（实测：全量 265 passed，而 bubblewrap 臂运行 0 条、跳过 7 条）。
+                      注意**不是** `locate_bwrap` 恒 None——那条会让它自己的单测
+                      `locate_bwrap_takes_the_first_hit_in_path_order` 变红，不会静默。
                       本子项目不加「断言 bwrap 必须存在」的硬断言——那会让套件依赖本机环境，
                       而本项目没有 CI，env 门控会成为无人使用的机关。
                       处置是**读数时可见**：实现者报告须给出实际执行与跳过的条数计数，
