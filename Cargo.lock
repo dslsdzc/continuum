@@ -161,7 +161,6 @@ dependencies = [
 name = "continuum-workspace"
 version = "0.1.0"
 dependencies = [
- "continuum-core",
  "continuum-events",
  "continuum-persist",
  "serde",

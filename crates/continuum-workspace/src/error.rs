@@ -4,7 +4,8 @@ use std::path::PathBuf;
 
 /// Workspace 操作失败的原因。
 ///
-/// 变体集合横跨只读强制的三层：类型层（[`WorkspaceError::EscapesRoot`]）、
+/// 变体集合横跨只读强制的三层：类型层（[`WorkspaceError::EscapesRoot`]、
+/// [`WorkspaceError::Overlaps`]）、
 /// 后端层（[`WorkspaceError::BackendUnavailable`]、[`WorkspaceError::IoFailed`]、
 /// [`WorkspaceError::GitFailed`]）与 Gate 层（[`WorkspaceError::NotInNamespace`]、
 /// [`WorkspaceError::GateRefused`]）。
