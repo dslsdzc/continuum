@@ -39,6 +39,12 @@ const READ_WRITE_DEVICE_PATHS: &[&str] = &[
 /// 固定值重复一次。
 const LANDLOCK_CREATE_RULESET_VERSION: libc::c_uint = 1;
 
+/// Landlock 可用的最低内核 ABI：v1 是第一个版本。
+///
+/// `capabilities_for_abi` 与 `effective_abi` 共用这一个常量——两处判的是同一条线，
+/// 各写一遍 `ABI::V1` 会让它们有各自漂移的余地。
+const MIN_ABI: i32 = ABI::V1 as i32;
+
 /// 查询本机内核的 Landlock ABI 版本；不可用时返回 `0`。
 ///
 /// 这是设计第 4.3 节规定的父进程侧探测入口，也是本 crate 唯一能判定 Landlock 能力的
@@ -82,7 +88,7 @@ fn probe_abi() -> i32 {
 ///   版本能隔离 PID。
 pub(crate) fn capabilities_for_abi(abi: i32) -> SandboxCapabilities {
     SandboxCapabilities {
-        restricts_filesystem_writes: abi >= ABI::V1 as i32,
+        restricts_filesystem_writes: abi >= MIN_ABI,
         isolates_network: false,
         isolates_pid: false,
         mechanism: "landlock",
@@ -103,7 +109,7 @@ pub(crate) fn capabilities_for_abi(abi: i32) -> SandboxCapabilities {
 /// 高于本 crate 已知上限的 ABI（例如内核算出 v10）由 `ABI::from` 钳到最高已知版本
 /// ——本 crate 表达不出的访问类别也就无从 handle。
 pub(crate) fn effective_abi(abi: i32) -> Option<ABI> {
-    if abi >= ABI::V1 as i32 {
+    if abi >= MIN_ABI {
         Some(ABI::from(abi))
     } else {
         None

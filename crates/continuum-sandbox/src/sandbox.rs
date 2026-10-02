@@ -262,4 +262,80 @@ mod tests {
         // 拒绝发生在启动之前：Task 内不得留下任何由子进程写出的文件。
         assert!(!task.root().join("inside.txt").exists());
     }
+
+    /// 只读放行路径**真的是只读**：读得通、写不进。
+    ///
+    /// 为什么必须单独有用例：`isolation.rs` 的实验臂（「写 Base 被拒」）是**过量决定**的
+    /// ——Base 落在任何被授予的子树之外，Landlock 对它是**读写皆不可达**，故那条断言
+    /// 既可能因为「写被拒」成立，也可能因为「Base 整个不可达」成立，两者分不开。
+    /// 本条把只读路径换成一个**在被授予范围内**的目录，就能把两者拆开：
+    /// 读成功证明它可达，写被拒证明「只读」二字名副其实。
+    ///
+    /// 少了它，把只读放行从 `from_read` 改成 `from_all`（等于给 `/usr`、`/etc` 开写权限）
+    /// 整套测试仍全绿——本 crate 已实测过这一点（变异 X1）。
+    #[test]
+    fn read_only_paths_are_readable_but_not_writable() {
+        let dir = tempfile::tempdir().unwrap();
+        let ro = dir.path().join("ro");
+        std::fs::create_dir_all(&ro).unwrap();
+        std::fs::write(ro.join("r.txt"), b"seed").unwrap();
+
+        let base_path = dir.path().join("base");
+        std::fs::create_dir_all(&base_path).unwrap();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let task =
+            TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1"))
+                .unwrap();
+
+        // 在 `LandlockSandbox::new()` 的放行集合上追加 `ro`——**不能**把它整个换掉：
+        // 只读集合也是子进程能加载动态库的原因，换掉后 `sh` 根本起不来，
+        // 三条断言会以「夹具坏了」的形式一起失败。
+        let mut sandbox = LandlockSandbox::new();
+        sandbox.read_only_paths.push(ro.clone());
+        let sandbox = Sandbox::Landlock(sandbox);
+
+        // 1. 读得通：`ro` 确实在放行范围内，不是整体不可达。
+        let status = spawn_sh(&sandbox, &task, &format!("cat {}/r.txt", ro.display()));
+        assert!(
+            status.success(),
+            "只读路径内的文件应可读，实际 {status:?}——读不通说明本用例没测到「只读」"
+        );
+
+        // 2. 写不进：这就是 X1 的杀手，也是「只读放行路径真的是只读」的直接证据。
+        //    取 `from_read` 换成 `from_all` 时变红的正是这一条。
+        let status = spawn_sh(&sandbox, &task, &format!("echo bad > {}/w.txt", ro.display()));
+        assert!(
+            !status.success(),
+            "只读路径内不得可写，实际 {status:?}"
+        );
+        assert!(
+            !ro.join("w.txt").exists(),
+            "只读路径内不得出现该文件"
+        );
+
+        // 3. 对照臂：写权限仍然只开在 Task 根上，前两条不是因为沙箱一律拒写。
+        let status = spawn_sh(
+            &sandbox,
+            &task,
+            &format!("echo ok > {}/t.txt", task.root().display()),
+        );
+        assert!(
+            status.success(),
+            "对照臂：Task 内写入应成功，实际 {status:?}"
+        );
+    }
+
+    /// 用 `Sandbox::spawn` 起 `sh -c <脚本>`，等待结束后返回退出状态。
+    ///
+    /// 与 `tests/isolation.rs` 里的同名辅助函数是两份：那是集成测试、这是 crate 内单测，
+    /// 两者不能互相引用。刻意都留着而不是抽到公共模块——它是测试夹具，不是产品代码。
+    fn spawn_sh(sandbox: &Sandbox, task: &TaskWorkspace, script: &str) -> std::process::ExitStatus {
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg(script);
+        sandbox
+            .spawn(task, cmd)
+            .unwrap_or_else(|e| panic!("sandbox.spawn 失败：{e}"))
+            .wait()
+            .expect("等待子进程失败")
+    }
 }

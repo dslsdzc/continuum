@@ -9,7 +9,9 @@ rust-version.workspace = true
 # 沙箱不知道 Effect Journal 与 Policy 的存在）。
 continuum-workspace = { path = "../continuum-workspace" }
 thiserror = { workspace = true }
-# Task 6 起用它施加文件系统规则集，并借其后台探测的内核 ABI 推导能力报告。
+# Task 6 起用它施加文件系统规则集。**ABI 探测不由它提供**：它的 compat 模块是
+# `pub(crate)`，只在内部结论里用，不能用来判定能力——探测由本 crate 自行发
+# `landlock_create_ruleset(NULL, 0, VERSION)`（见 landlock.rs 的 probe_abi）。
 landlock = { workspace = true }
 # Task 6 起用于 Landlock 的 ABI 探测（见 workspace 依赖处的说明）。
 libc = { workspace = true }

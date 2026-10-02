@@ -9,6 +9,12 @@
 //!
 //! 符号链接用例另担一条：类型层只做路径分量检查（设计第 4.1 节），
 //! 「Task 根内有一个指向根外的符号链接」这一逃逸由本层承担（设计第 4.3 节末）。
+//!
+//! **Base 不在任何被授予的子树内，故它读写皆不可达**（Landlock 是「默认拒绝 + 白名单
+//! 子树」）。这使本文件的实验臂是**过量决定**的：「写 Base 被拒」既可能因为「写被拒」
+//! 成立，也可能因为「Base 整个不可达」成立，本文件分不开这两者。只读放行路径那一侧
+//! 由 `src/sandbox.rs` 的 `read_only_paths_are_readable_but_not_writable` 单测覆盖
+//! ——它把探针放进**被授予范围内**，读成功 + 写被拒，两者就分开了。
 
 use continuum_sandbox::Sandbox;
 use continuum_workspace::{BaseWorkspace, IntentId, TaskWorkspace};
