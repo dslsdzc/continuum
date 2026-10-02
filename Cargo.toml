@@ -10,6 +10,7 @@ members = [
     "crates/continuum-operator",
     "crates/continuum-graph",
     "crates/continuum-runtime",
+    "crates/continuum-workspace",
 ]
 
 [workspace.package]
@@ -27,3 +28,4 @@ async-trait = "0.1"
 futures-core = "0.3"
 thiserror = "2"
 tempfile = "3"
+trybuild = "1"

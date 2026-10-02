@@ -47,6 +47,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P2 边界层：Workspace 抽象与只读强制。events 与 persist 由设计第 4 节要求——
+    // Gate 的审计记录与 Task Workspace 的元数据都要落库。
+    (
+        "continuum-workspace",
+        &["continuum-core", "continuum-events", "continuum-persist"],
+    ),
     // Task 12 起 runtime 直接依赖这六个：后两者用于在启动流程里
     // 注册 P1 迁移。
     (

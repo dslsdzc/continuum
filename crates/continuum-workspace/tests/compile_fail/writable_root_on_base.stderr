@@ -1,0 +1,5 @@
+error[E0599]: no method named `writable_root` found for struct `BaseWorkspace` in the current scope
+ --> tests/compile_fail/writable_root_on_base.rs:4:18
+  |
+4 |     let _ = base.writable_root();
+  |                  ^^^^^^^^^^^^^ method not found in `BaseWorkspace`
