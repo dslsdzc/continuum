@@ -824,6 +824,7 @@ bwrap 分支的 `isolates_network` 与 `isolates_pid` **为假**——本子项�
 保留 bubblewrap 后端的理由是**它在文件系统这一项上是独立于 Landlock 的第二种机制**
 ——内核没有 Landlock 时它仍可用（走挂载命名空间）。不是因为它的网络/PID 能力。
 
+```rust
 #[test]
 fn bubblewrap_refuses_to_start_when_the_binary_is_missing() {
     // PATH 中无 bwrap 时 spawn 返回 SandboxError，不静默退化
