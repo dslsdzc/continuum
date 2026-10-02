@@ -9,8 +9,8 @@ use std::path::PathBuf;
 /// 后端层（[`WorkspaceError::BackendUnavailable`]、[`WorkspaceError::IoFailed`]、
 /// [`WorkspaceError::GitFailed`]）与 Gate 层（[`WorkspaceError::NotInNamespace`]、
 /// [`WorkspaceError::GateRefused`]）。
-/// 其中 `GitFailed`、`NotInNamespace`、`GateRefused` 在本 task 中尚无调用点，
-/// 由后续 task 的 worktree 后端与 Integration Gate 使用；
+/// `GitFailed` 由 worktree 后端使用；`NotInNamespace`、`GateRefused` 尚无调用点，
+/// 由后续 task 的沙箱与 Integration Gate 使用；
 /// 在此一次定型是为了让错误面稳定，避免各 task 各自增改变体。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WorkspaceError {
@@ -42,6 +42,9 @@ pub enum WorkspaceError {
     /// `git` 命令执行失败。
     #[error("git 命令失败（退出码 {code}）：{stderr}")]
     GitFailed { code: i32, stderr: String },
+    /// Intent 标识不能用作 Task Workspace 的路径分量与分支名。
+    #[error("Intent 标识不能用作 Task Workspace 路径分量：{intent}")]
+    InvalidIntent { intent: String },
     /// Integration Gate 拒绝本次写入。
     #[error("Integration Gate 拒绝：{reason}")]
     GateRefused { reason: String },
