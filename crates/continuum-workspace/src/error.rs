@@ -50,6 +50,17 @@ pub enum WorkspaceError {
     /// Intent 标识不能用作 Task Workspace 的路径分量与分支名。
     #[error("Intent 标识不能用作 Task Workspace 路径分量：{intent}")]
     InvalidIntent { intent: String },
+    /// 在既有错误之上附加的一层上下文（哪一步、哪个分支、哪个路径）。
+    ///
+    /// 用在「失败之后用户仓库里可能仍有残留」的路径上：此时调用方既要看
+    /// 创建为什么失败，也要拿到收拾残留所需的分支名与路径。`GitFailed` 自身
+    /// 有 `stderr` 这个自由文本字段可承载上下文，故不套本变体；没有这种字段的
+    /// 变体（`IoFailed`、`Overlaps` 等）由本变体承载。
+    #[error("{context}：{source}")]
+    Context {
+        context: String,
+        source: Box<WorkspaceError>,
+    },
     /// Integration Gate 拒绝本次写入。
     #[error("Integration Gate 拒绝：{reason}")]
     GateRefused { reason: String },

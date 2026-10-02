@@ -343,6 +343,42 @@ fn a_failed_creation_does_not_touch_the_exclude_file() {
 }
 
 #[test]
+fn a_prebuilt_empty_ai_directory_survives_a_failed_creation() {
+    let (_d, base_path) = git_repo();
+    // 用户自己预建的空 `.ai/`：不是本次尝试的产物，失败时不该被删
+    std::fs::create_dir(base_path.join(".ai")).unwrap();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+
+    let err = create_task_workspace(&base, &IntentId::new("@")).unwrap_err();
+    assert!(
+        matches!(err, continuum_workspace::WorkspaceError::GitFailed { .. }),
+        "期望 GitFailed，得到 {err:?}"
+    );
+    assert!(
+        base_path.join(".ai").is_dir(),
+        "用户预建的空 .ai/ 被删了"
+    );
+    // 而本次尝试建出来的 `.ai/worktrees` 要清掉
+    assert!(
+        !base_path.join(".ai/worktrees").exists(),
+        "本次建出的 .ai/worktrees 未清理"
+    );
+}
+
+#[test]
+fn an_ai_directory_created_by_the_attempt_is_removed_on_failure() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+
+    // 对照上一条：`.ai/` 本不存在，是本次尝试建出来的，失败时必须清掉
+    create_task_workspace(&base, &IntentId::new("@")).unwrap_err();
+    assert!(
+        !base_path.join(".ai").exists(),
+        "本次建出的 .ai/ 未清理"
+    );
+}
+
+#[test]
 fn a_failure_while_excluding_rolls_the_worktree_back() {
     let (_d, base_path) = git_repo();
     // 注入排除文件的故障：把它换成一个目录，读它必失败
