@@ -215,6 +215,15 @@ WorkspaceBackend   Worktree | Overlay
 **Overlay 后端**：以 unprivileged user namespace 加 OverlayFS 建立可写覆盖层，
 lowerdir 为 Base，upperdir 为该 Intent 的私有目录。放弃即丢弃 upper 层。
 
+**overlay 的工作目录放在 Base 之外**，路径为 `<overlay 根>/<Base 标识>/<intent>/{upper,work,mnt}`，
+其中 overlay 根由 Runtime 管理（默认 `~/.local/share/continuum/overlays`），Base 标识取其
+规范路径的哈希。理由：若把 upper 放在 `<base>/.ai/` 下，则 lower 为整个 Base 时，
+Intent A 的工作区能读到 `<base>/.ai/overlays/B/upper` 里 Intent B 的未提交工作——
+这是跨 Intent 的读取泄漏，而规范只约束了写入。移到 Base 之外后 lower 中不再有 `.ai`。
+
+worktree 后端无此问题：`.ai/` 被 gitignore，而 gitignore 的目录不会出现在 git worktree 中。
+两个后端的工作区存储位置因此不同，此差异是本条要求的直接结果。
+
 该后端有一条约束，由无特权 OverlayFS 的性质决定：**挂载只在其所在的用户与挂载命名空间内可见**，
 命名空间退出即消失。因此该后端要求调用进程已处在一个用户与挂载命名空间内，且该命名空间须存活
 至子进程用完工作区为止。驱动的处置是：需要该后端时，把自身 re-exec 进 `unshare -Urm`，

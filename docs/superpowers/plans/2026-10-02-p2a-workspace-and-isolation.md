@@ -379,6 +379,7 @@ git commit -m "feat(workspace): Git worktree 后端"
 
 **Files:**
 - Create: `crates/continuum-workspace/src/overlay.rs`
+- Modify: `crates/continuum-workspace/Cargo.toml`（加 `sha2`）
 - Modify: `crates/continuum-workspace/src/backend.rs`
 - Modify: `crates/continuum-workspace/src/lib.rs`
 - Create: `crates/continuum-workspace/tests/backend_overlay.rs`
@@ -424,6 +425,10 @@ fn overlay_backend_round_trips() {
 
     let task = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
 
+    // 工作目录在 Base 之外：Base 内不得出现 .ai/overlays
+    assert!(!task.root().starts_with(&base_path), "overlay 工作区不得位于 Base 内");
+    assert!(!base_path.join(".ai").exists(), "Base 内不得出现 .ai");
+
     // 写 task 中的同一文件：覆盖 lower，base 不受影响
     task.writable_root().write("f.txt", b"upper").unwrap();
     assert_eq!(std::fs::read(task.root().join("f.txt")).unwrap(), b"upper");
@@ -433,6 +438,11 @@ fn overlay_backend_round_trips() {
     assert_eq!(std::fs::read(task.root().join("f.txt")).unwrap(), b"upper");
 }
 
+`overlay_does_not_leak_a_sibling_intent` 的断言内容：在同一 Base 上为 Intent `i1` 与 `i2`
+各建一个 overlay 工作区，在 `i2` 的工作区内写一个文件，然后断言 `i1` 的工作区里
+既看不到该文件、也看不到 `.ai/` 目录。这条用例是「overlay 目录移出 Base」的直接守卫。
+
+```rust
 #[test]
 fn overlay_create_outside_a_namespace_reports_it() {
     // 不在命名空间且非 root 时，create 返回 NotInNamespace 而不是静默建出不可见的工作区
@@ -465,9 +475,21 @@ pub struct OverlayBackend;
 pub fn in_user_namespace() -> bool;
 ```
 
-`create` 的动作：建 `<base>/.ai/overlays/<intent>/{upper,work,mnt}`，以
+`create` 的动作：建 `<overlay 根>/<Base 标识>/<intent>/{upper,work,mnt}`，以
 `mount -t overlay overlay -o lowerdir=<base>,upperdir=…,workdir=… <mnt>` 挂载，
 返回以 `<mnt>` 为根的 `TaskWorkspace`。`discard` 先 `umount <mnt>` 再删目录。
+
+**工作目录必须在 Base 之外。** 若放在 `<base>/.ai/` 下，lower 为整个 Base 时，
+Intent A 的工作区能读到 `<base>/.ai/overlays/B/upper` 里 Intent B 的未提交工作——
+这是跨 Intent 的读取泄漏，而规范只约束了写入。故 overlay 根默认取
+`~/.local/share/continuum/overlays`（可由环境变量 `CONTINUUM_OVERLAY_ROOT` 覆盖，测试用），
+Base 标识取其规范路径的 sha256 前 16 位十六进制。
+
+该哈希需要 `sha2`，故 `continuum-workspace` 的 `[dependencies]` 加 `sha2 = { workspace = true }`，
+并在 `ALLOWED` 之外无需改动——`sha2` 是外部 crate，不在依赖方向的检查范围内。
+
+worktree 后端无此问题（`.ai/` 被 gitignore，不进 worktree），故两端的存储位置不同，
+这是本条要求的直接结果，须写入 `OverlayBackend` 的文档注释。
 
 `umount` 与 `mount` 同样经外部命令。两次命令的失败都须带 stderr 返回。
 
