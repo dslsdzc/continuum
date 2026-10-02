@@ -2,17 +2,23 @@
 
 /// 沙箱操作失败的原因。
 ///
-/// 变体按失败发生的位置划分，这是调用方的分派依据：
+/// 变体按失败发生的位置划分：
 ///
-/// - [`SandboxError::MechanismUnavailable`]：机制本身不可用（可执行文件不在 PATH 中、
-///   内核缺少该机制所需的支持）。判定发生在启动任何进程之前。
-/// - [`SandboxError::IsolationFailed`]：隔离规则集的构建或施加失败。此时子进程尚未
-///   被启动，调用方可以改用别的机制重试。
-/// - [`SandboxError::SpawnFailed`]：隔离之外的原因使进程未能启动（可执行文件不存在、
-///   权限不足等）。
+/// - [`SandboxError::MechanismUnavailable`]：机制在本机不可用（例如 bubblewrap 需要的
+///   `bwrap` 可执行文件不在 PATH 中）。判定发生在启动子进程之前。
+/// - [`SandboxError::IsolationFailed`]：本层在**父进程侧**为施加隔离而失败
+///   （例如构建规则集）。
+/// - [`SandboxError::SpawnFailed`]：子进程启动失败。
 ///
-/// 三者的分界意图是：「机制不可用」与「隔离失败」都发生在子进程存在之前，
-/// 调用方据此决定改用另一机制还是拒绝运行。
+/// **`IsolationFailed` 与 `SpawnFailed` 的分界在调用方一侧不总是可判。** 设计第 4.3 节
+/// 要求 Landlock 在 `pre_exec`（fork 之后、exec 之前）内施加，那里失败时 std 把它报成
+/// 普通的 spawn `io::Error`，与 exec 失败同形，本层无从分辨。故调用方：
+///
+/// - 不得据「拿到了 [`SandboxError::IsolationFailed`]」推断「子进程未存在」；
+/// - 不得据「拿到了 [`SandboxError::SpawnFailed`]」推断「隔离已施加」。
+///
+/// 两个变体都发生在子进程**交付给调用方之前**，故调用方在任何一种情形下都拿不到
+/// 可用的 `Child`——这是可以依赖的那一半。
 ///
 /// 本枚举标 `#[non_exhaustive]`——两种机制（Task 6、Task 7）落地时各自会暴露新的
 /// 失败形态，外部消费者不应因增补变体而改动 `match`。新增变体时仍应优先考虑既有的
@@ -20,22 +26,28 @@
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SandboxError {
-    /// 机制不可用。
+    /// 机制在本机不可用。
     ///
     /// `mechanism` 是机制名（与 [`crate::SandboxCapabilities::mechanism`] 同源），
     /// `reason` 给出不可用的原因，供调用方与报告使用。
+    ///
+    /// Landlock 的内核 ABI 不足**不属本变体**：那走降级路径，由
+    /// [`crate::SandboxCapabilities`] 如实反映（设计第 4.3 节），不使启动失败。
     #[error("沙箱机制 {mechanism} 不可用：{reason}")]
     MechanismUnavailable {
         mechanism: &'static str,
         reason: String,
     },
-    /// 隔离规则集未能建立或施加。
+    /// 本层在父进程侧为施加隔离而失败（构建规则集等）。
     #[error("沙箱机制 {mechanism} 施加隔离失败：{reason}")]
     IsolationFailed {
         mechanism: &'static str,
         reason: String,
     },
     /// 子进程启动失败。
+    ///
+    /// exec 失败与 `pre_exec` 内施加隔离失败在此合流，调用方据本变体区分不出是哪一条
+    /// （见枚举文档）。
     #[error("子进程启动失败：{reason}")]
     SpawnFailed { reason: String },
 }

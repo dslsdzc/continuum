@@ -4,12 +4,19 @@ use crate::error::SandboxError;
 use continuum_workspace::TaskWorkspace;
 use std::process::{Child, Command};
 
-/// 实际生效的隔离项。
+/// 隔离项报告。
 ///
-/// **每一项都是「已生效」而非「机制声称支持」。** 这是本类型唯一的取值约定：
-/// 机制因内核 ABI 不足、可执行文件缺失或参数构造失败而未能施加某类隔离时，
-/// 对应字段必须是 `false`。调用方与测试据此判断隔离的实际强度，
-/// 一个如实报告 `false` 的沙箱是可用状态，一个谎报 `true` 的沙箱不是。
+/// **每一项都是「按当前内核，该机制将生效」的隔离项，而非机制自称的能力。** 这是本类型
+/// 唯一的取值约定：Landlock 的 ABI 不支持某类访问时，对应字段必须是 `false`。
+/// 调用方与测试据此判断隔离的实际强度——一个如实报告 `false` 的报告是可用状态，
+/// 一个谎报 `true` 的不是。
+///
+/// 该值来自**父进程侧**的内核 ABI 探测（设计第 4.3 节），不是子进程内的实际施加结果：
+/// `restrict_self` 只能在被限制的进程内调用，而子进程是调用方给定的任意命令，无法回传。
+/// 「本次确实生效」由设计第 13 节的两臂用例在行为上验证。
+///
+/// 残余缺口：`restrict_self` 因 ABI 之外的原因失败时，子进程直接以 spawn 错误终止，
+/// 本报告不会因此为假——方向是响的。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SandboxCapabilities {
     /// 文件系统写入被限制在 Task Workspace 内。
@@ -18,7 +25,7 @@ pub struct SandboxCapabilities {
     pub isolates_network: bool,
     /// PID 命名空间被隔离。
     pub isolates_pid: bool,
-    /// 本能力报告所属的机制名，用于报告与断言。
+    /// 本报告所属的机制名，用于报告与断言。
     pub mechanism: &'static str,
 }
 
@@ -45,7 +52,9 @@ pub struct BubblewrapSandbox {
 pub enum Sandbox {
     /// Landlock：进程级规则集，随 `exec` 生效并被子孙继承。
     Landlock(LandlockSandbox),
-    /// bubblewrap：挂载、网络与 PID 命名空间。
+    /// bubblewrap：以挂载命名空间限制文件系统。其网络与 PID 命名空间能力本子项目不使用
+    /// （Task 7 的参数集不含 `--unshare-net` / `--unshare-pid`），故届时
+    /// [`Sandbox::capabilities`] 对这两项报告为假——该报告的口径是「实际生效」。
     Bubblewrap(BubblewrapSandbox),
 }
 
@@ -62,34 +71,46 @@ impl Sandbox {
 
     /// 在 Task Workspace 内启动命令。
     ///
-    /// **签名是刻意的**：参数是 `&TaskWorkspace` 而非 `&Path`，故「把 Base Workspace
-    /// 交给子进程」在类型上不可表达——调用方手里没有可写根之外的东西可传。
+    /// **签名是刻意的**：workspace 参数是 `&TaskWorkspace` 而非 `&Path`，故「把 Base
+    /// Workspace 当作 workspace 传进来」在类型上不可表达。**不要把这条读成「Base 路径
+    /// 不可能进入子进程参数」**——`cmd` 的 argv 与环境变量完全由调用方给定，
+    /// `cmd.arg(format!("…{}", base.root().display()))` 一行即是反例。设计第 4.2 节要求
+    /// 「argv 与环境变量由调用方给定且不包含 Base 路径」，那是**调用方义务**，
+    /// 由第 13 节的用例（检查实际 spawn 的 argv / env / cwd）验证；即便参数里真出现
+    /// Base 路径，写入仍被内核层拒绝。
+    ///
+    /// `cmd` **按值**收：所有权交给本层，因为本层未必照原样启动它。Landlock 只需在同一
+    /// 条命令上挂 `pre_exec`，bubblewrap 则要据此重建一条 `bwrap …` 命令。后者附带一条
+    /// 必须写明的限制：`std::process::Command` 不提供 stdin / stdout / stderr 的读取接口
+    /// （rustc 1.95.0 实测无 `get_stdout`），故重建命令时**无法保留**调用方设置的 stdio。
+    /// 需要管道的调用方不要依赖 bubblewrap 分支保留它。
+    ///
     /// 设计第 4.2 节要求子进程的工作目录是 Task 根，该设置已在本函数内完成。
     ///
     /// # 当前状态
     ///
     /// 两种机制均未实现（Task 6、Task 7），故本函数在设好工作目录后即 panic，
     /// **不提供任何隔离**。这是刻意的：一个「照常启动但不施加隔离」的实现会让调用方
-    /// 以为子进程已被约束，与 [`SandboxCapabilities`]「如实报告实际生效的隔离项」
-    /// 这一约定无法同时成立。
-    pub fn spawn(&self, task: &TaskWorkspace, cmd: &mut Command) -> Result<Child, SandboxError> {
+    /// 以为子进程已被约束，与 [`SandboxCapabilities`]「如实报告隔离项」这一约定
+    /// 无法同时成立。
+    pub fn spawn(&self, task: &TaskWorkspace, mut cmd: Command) -> Result<Child, SandboxError> {
         cmd.current_dir(task.root());
         match self {
-            Sandbox::Landlock(_) => todo!("Task 6：在 pre_exec 中构建并施加 Landlock 规则集"),
-            Sandbox::Bubblewrap(_) => todo!("Task 7：改写为 bwrap 调用后启动"),
+            Sandbox::Landlock(_) => todo!("Task 6：在 pre_exec 中施加 Landlock 规则集"),
+            Sandbox::Bubblewrap(_) => todo!("Task 7：据此重建 bwrap 命令后启动"),
         }
     }
 
-    /// 实际生效的隔离项。
+    /// 按当前内核的 ABI 探测结果，本机制将生效的隔离项。
     ///
-    /// 返回值反映的是**已经施加**的隔离，不是机制的设计能力。因内核 ABI 不足而降级、
-    /// 或因可执行文件缺失而未能施加时，对应字段为 `false`。
+    /// 取值约定见 [`SandboxCapabilities`]：返回的是「按这个内核，该机制**将**生效」的
+    /// 隔离项，不是机制自称的能力，也不是子进程内的实际施加结果。
     ///
     /// # 当前状态
     ///
-    /// 两种机制都尚未施加任何隔离（见 [`Sandbox::spawn`]），故各项为 `false`。
-    /// 这不是占位值：在「实际生效」的取值约定下，它正是当前唯一正确的答案。
-    /// Task 6 与 Task 7 落地后由各自的实现据实返回。
+    /// 两种机制都尚未实现（Task 6、Task 7），探测入口亦未建立，故各项为 `false`：
+    /// 此刻没有任何机制会生效，这是唯一正确的报告。Task 6 与 Task 7 落地后由各自的
+    /// 实现据实返回。
     pub fn capabilities(&self) -> SandboxCapabilities {
         match self {
             Sandbox::Landlock(_) => SandboxCapabilities {
