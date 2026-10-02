@@ -785,9 +785,28 @@ cargo test -p continuum-sandbox --test isolation
 `landlock` crate 的接口若涉及分配，须在 `pre_exec` 之前把规则集构造好，`pre_exec` 内只做
 `restrict_self`。
 
-**ABI 降级**：`landlock` crate 会在内核 ABI 低于所需版本时报错。实现须捕获该情形，
-降级为「不施加该文件系统类别」并**记录**，`capabilities()` 如实反映。
-降级的判定与报告须有用例覆盖（可由环境变量强制模拟 ABI 不足，见 Task 7 的做法）。
+**ABI 与 `capabilities()`（设计 §4.3、§9，已订正）**
+
+`landlock` crate **不能**用来判定能力：`Ruleset::create()` 在不支持的内核上返回**假的 `Ok`**
+而非错误，`RulesetStatus` 只能在被限制的进程内取得（即子进程内，而子进程是调用方给定的任意
+命令、无法回传），compat 模块又全是 `pub(crate)`。
+
+故能力由**父进程侧的 ABI 探测**导出：
+
+- 用 `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` 查询 ABI 版本。
+  `landlock` crate 未公开该入口，需自行发该 syscall（`libc::syscall` 或裸 syscall，
+  二者都要新增依赖或 `unsafe`，由实现者权衡后说明理由）。
+- **把「由 ABI 推导能力」抽成一个纯函数**（例如 `capabilities_for_abi(abi: i32) -> SandboxCapabilities`），
+  它可被直接单测：低 ABI 与高 ABI 各断言一次。**这是降级路径唯一可靠的测试缝隙**——
+  不要用环境变量模拟 ABI 不足：crate 自己的那个开关是 `#[cfg(test)]`，自建 env 开关只会
+  得到一条「测环境变量」而非测降级的用例。
+- `capabilities()` 报告的是「按这个内核，该机制**将**生效」的隔离项。
+  该口径与残余缺口都写在类型与方法文档里（Task 5 已落），实现须与之一致。
+
+**规则集的构造与施加分开**：`pre_exec` 闭包在 fork 之后、exec 之前运行，其中**不得分配内存**
+（只允许 async-signal-safe 操作）。故规则集须在 `pre_exec` **之前**构造好，闭包里只做
+`restrict_self`。注意 `restrict_self` 消费规则集（`RulesetCreated::restrict_self(mut self)`），
+所以规则集不可能存进 `LandlockSandbox`——该类型存的是 ABI 探测结果与放行路径集合。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
