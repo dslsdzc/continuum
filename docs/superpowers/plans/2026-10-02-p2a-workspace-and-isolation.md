@@ -814,11 +814,15 @@ git commit -m "feat(sandbox): Landlock 隔离"
 
 另加：
 
-```rust
-#[test]
-fn bubblewrap_reports_the_stronger_capabilities() {
-    // bwrap 的 capabilities 中 isolates_network 与 isolates_pid 为真；Landlock 为假
-}
+`bubblewrap_reports_only_the_capabilities_it_actually_exercises` 的断言内容：
+bwrap 分支的 `isolates_network` 与 `isolates_pid` **为假**——本子项目不给它传
+`--unshare-net` / `--unshare-pid`，故它并不隔离这两项；`capabilities()` 的契约是
+「实际生效」而非「机制本来能做什么」。评审在本机 bwrap 0.13.0 上实测：用下面的参数集
+启动的子进程，其 `/proc/self/ns/net` 与 `/proc/self/ns/pid` 与宿主完全相同
+（`net:[4026531833]`、`pid:[4026531836]`）。
+
+保留 bubblewrap 后端的理由是**它在文件系统这一项上是独立于 Landlock 的第二种机制**
+——内核没有 Landlock 时它仍可用（走挂载命名空间）。不是因为它的网络/PID 能力。
 
 #[test]
 fn bubblewrap_refuses_to_start_when_the_binary_is_missing() {
