@@ -13,13 +13,47 @@ use crate::worktree;
 use serde::{Deserialize, Serialize};
 
 /// Task Workspace 的实现形态。
+///
+/// 两个后端对 Intent 标识的合法性要求是同一条：**单个路径分量**。判定在
+/// `check_intent` 一处实现，两个后端共用，不在各自的创建路径里另立一套。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceBackend {
     /// Base 是 Git 仓库：每个 Intent 一个 worktree 与一条独立分支（§255、§16）。
+    ///
+    /// 合法 Intent 标识：**单个路径分量**——非空、不为 `.` 或 `..`、不含 `/` 与 `\`。
     Worktree,
     /// Base 不是 Git 仓库：可写覆盖层（§255）。
+    ///
+    /// 合法 Intent 标识：**单个路径分量**——非空、不为 `.` 或 `..`、不含 `/` 与 `\`。
+    /// 与 [`WorkspaceBackend::Worktree`] 同一条规则，由同一处判定。
     Overlay,
+}
+
+/// Intent 标识必须能作为**单个**路径分量。
+///
+/// 两个后端都把 Intent 嵌进路径，故这条规则是它们共用的（见 [`WorkspaceBackend`]）。
+/// 缺了这一步，`IntentId::new("../../x")` 会让后端算出的路径越出各自的私有目录
+/// ——worktree 后端下它与分支名一并越出 `.ai/worktrees`，而
+/// `TaskWorkspace::new_outside` 拦不住：折叠之后它落在 Base 之内，反而通过重叠判定。
+/// 本层是边界层，边界由本层的判定给出，不靠 git 的 refname 校验兜底。
+///
+/// `.` 与空串会让路径退化成私有目录自身（`.ai/worktrees`、overlay 的 Intent 目录），
+/// 同样拒绝。含 `\` 的标识在 Windows 上是分隔符，一并拒绝以免两端行为分岔。
+pub(crate) fn check_intent(intent: &IntentId) -> Result<(), WorkspaceError> {
+    let raw = intent.as_str();
+    let is_single_component = !raw.is_empty()
+        && raw != "."
+        && raw != ".."
+        && !raw.contains('/')
+        && !raw.contains('\\')
+        && std::path::Path::new(raw).components().count() == 1;
+    if is_single_component {
+        return Ok(());
+    }
+    Err(WorkspaceError::InvalidIntent {
+        intent: raw.to_owned(),
+    })
 }
 
 /// Base 是否为 Git 仓库决定后端。

@@ -23,8 +23,8 @@ fn git_repo() -> (tempfile::TempDir, PathBuf) {
     // 缺这两项 `git commit` 会直接失败，失败点会指向夹具而不是实现。
     run_git(&root, &["config", "user.email", "test@example.invalid"]);
     run_git(&root, &["config", "user.name", "Continuum 测试"]);
-    // 预置一份非空 `.gitignore`：用例要验证「追加」而非「覆盖」，
-    // 空文件或缺失文件都测不出覆盖。
+    // 预置一份非空 `.gitignore`：它是用户的跟踪文件，用例要验证它**不被动**，
+    // 空文件或缺失文件都测不出「被改写」。
     std::fs::write(root.join(".gitignore"), "target/\n").unwrap();
     std::fs::write(root.join("README.md"), "初始内容\n").unwrap();
     run_git(&root, &["add", "-A"]);
@@ -52,6 +52,16 @@ fn run_git(dir: &Path, args: &[&str]) -> String {
 /// `dir` 当前检出的分支名。
 fn current_branch(dir: &Path) -> String {
     run_git(dir, &["rev-parse", "--abbrev-ref", "HEAD"])
+}
+
+/// `dir` 下的一级条目名（排序后），用于断言「没有多出任何东西」。
+fn dir_entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
 }
 
 /// `dir` 的全部本地分支名。
@@ -152,60 +162,70 @@ fn worktree_writes_do_not_reach_the_base() {
 
     assert!(!base_path.join("src/新模块.rs").exists());
     assert!(!base_path.join("src").exists(), "Base 下多出了 src/");
-    // Base 的 git status 只因 .gitignore 的追加而变（`.ai/` 已被忽略），
-    // 写入 Task 的文件不在其中（run_git 已裁掉 porcelain 的前导状态位空格）
+    // Base 的工作树里什么都看不出来：Task 侧写的文件不在其中，
+    // `.ai/` 也被仓库本地排除挡住
     assert_eq!(
         run_git(&base_path, &["status", "--porcelain"]),
-        "M .gitignore",
+        "",
         "Base 的 git status 与预期不符"
     );
 }
 
 #[test]
-fn creating_a_task_workspace_gitignores_the_ai_directory() {
+fn creating_a_task_workspace_excludes_ai_without_touching_the_users_files() {
     let (_d, base_path) = git_repo();
+    // 记下排除文件的原文：git init 会预置一段注释，验证「追加」必须对着它来
+    let exclude_path = base_path.join(".git/info/exclude");
+    let exclude_before = std::fs::read_to_string(&exclude_path).unwrap();
     let base = BaseWorkspace::new(&base_path).unwrap();
     create_task_workspace(&base, &IntentId::new("i4")).unwrap();
 
-    let ignore = std::fs::read_to_string(base_path.join(".gitignore")).unwrap();
-    // 原有内容保留（追加而非覆盖）
-    assert!(ignore.contains("target/"), "原有条目丢失：{ignore:?}");
-    assert!(
-        ignore.lines().any(|l| l.trim() == ".ai/"),
-        "未追加 .ai/：{ignore:?}"
+    // 用户的跟踪文件一字未动——§256 要求 Base 只读，改 `.gitignore` 会凭空
+    // 造出一处并非用户所做的未提交修改
+    assert_eq!(
+        std::fs::read_to_string(base_path.join(".gitignore")).unwrap(),
+        "target/\n",
+        "用户的 .gitignore 被改动了"
     );
-    // `.ai/` 不出现在 Base 的 git status 中
-    let status = run_git(&base_path, &["status", "--porcelain"]);
-    assert!(!status.contains(".ai"), "git status 里出现了 .ai：{status:?}");
+    // 排除项落在仓库本地的 info/exclude 上：不进工作树、不是跟踪文件
+    let exclude_after = std::fs::read_to_string(&exclude_path).unwrap();
+    assert!(
+        exclude_after.starts_with(&exclude_before),
+        "info/exclude 的原有内容丢失：{exclude_after:?}"
+    );
+    assert!(
+        exclude_after.lines().any(|l| l.trim() == ".ai/"),
+        "info/exclude 未追加 .ai/：{exclude_after:?}"
+    );
+    // 因此用户在 Base 里看不到任何变化
+    assert_eq!(run_git(&base_path, &["status", "--porcelain"]), "");
 }
 
 #[test]
-fn a_gitignore_is_appended_verbatim_when_it_lacks_a_trailing_newline() {
+fn the_exclude_file_is_appended_verbatim_when_it_lacks_a_trailing_newline() {
     let (_d, base_path) = git_repo();
-    std::fs::write(base_path.join(".gitignore"), "/build").unwrap();
-    run_git(&base_path, &["add", "-A"]);
-    run_git(&base_path, &["commit", "-m", "改写 .gitignore"]);
+    std::fs::write(base_path.join(".git/info/exclude"), "/build").unwrap();
 
     let base = BaseWorkspace::new(&base_path).unwrap();
     create_task_workspace(&base, &IntentId::new("i5")).unwrap();
 
     // 缺结尾换行时须先补一个，否则原末行与 `.ai/` 会粘成 `/build.ai/`
     assert_eq!(
-        std::fs::read_to_string(base_path.join(".gitignore")).unwrap(),
+        std::fs::read_to_string(base_path.join(".git/info/exclude")).unwrap(),
         "/build\n.ai/\n"
     );
 }
 
 #[test]
-fn a_gitignore_already_listing_ai_is_left_alone() {
+fn an_exclude_file_already_listing_ai_is_left_alone() {
     let (_d, base_path) = git_repo();
-    std::fs::write(base_path.join(".gitignore"), ".ai\ntarget/\n").unwrap();
+    std::fs::write(base_path.join(".git/info/exclude"), ".ai\ntarget/\n").unwrap();
 
     let base = BaseWorkspace::new(&base_path).unwrap();
     create_task_workspace(&base, &IntentId::new("i6")).unwrap();
 
     assert_eq!(
-        std::fs::read_to_string(base_path.join(".gitignore")).unwrap(),
+        std::fs::read_to_string(base_path.join(".git/info/exclude")).unwrap(),
         ".ai\ntarget/\n",
         "已列出 .ai 时不应重复追加"
     );
@@ -245,8 +265,11 @@ fn a_failing_git_command_is_reported_with_code_and_stderr() {
 fn an_intent_id_that_is_not_a_single_path_component_is_rejected() {
     let (_d, base_path) = git_repo();
     let base = BaseWorkspace::new(&base_path).unwrap();
+    let entries_before = dir_entries(&base_path);
 
-    for bad in ["../逃逸", "a/b", "", ".", ".."] {
+    // `../../x` 是这条判定的由来：不挡它，worktree 路径与分支名会一并越出
+    // `.ai/worktrees`，而 `new_outside` 拦不住（折叠后落在 Base 之内，反而通过）
+    for bad in ["../../x", "a/b", "../逃逸", "", ".", ".."] {
         let err = create_task_workspace(&base, &IntentId::new(bad)).unwrap_err();
         assert!(
             matches!(
@@ -256,7 +279,40 @@ fn an_intent_id_that_is_not_a_single_path_component_is_rejected() {
             "Intent 标识 {bad:?} 未被拒绝：{err:?}"
         );
     }
-    // 拒绝发生在 git 之前：没有分支、没有目录被建出来
+    // 拒绝发生在 git 之前：没有分支、Base 下没有任何新目录
     assert_eq!(local_branches(&base_path), vec!["main".to_owned()]);
-    assert!(!base_path.join(".ai").exists());
+    assert!(!base_path.join(".ai").exists(), "`.ai/` 被建出来了");
+    assert_eq!(
+        dir_entries(&base_path),
+        entries_before,
+        "Base 下多出了东西"
+    );
+}
+
+#[test]
+fn a_base_that_is_itself_a_linked_worktree_works() {
+    let (_d, main_path) = git_repo();
+    // Base 本身是一个 linked worktree：此时 `<base>/.git` 是**文件**而非目录，
+    // 排除文件在公共仓库那边。这正是本仓库自己跑起来时的形态。
+    let linked = main_path.join("linked");
+    run_git(
+        &main_path,
+        &["worktree", "add", "-b", "w1", linked.to_str().unwrap()],
+    );
+    let linked = linked.canonicalize().unwrap();
+    let base = BaseWorkspace::new(&linked).unwrap();
+    assert_eq!(detect_backend(&base), WorkspaceBackend::Worktree);
+
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i8")).unwrap();
+    assert_eq!(backend, WorkspaceBackend::Worktree);
+    assert_eq!(current_branch(task.root()), "ai/i8");
+
+    // 排除项落在公共仓库的 info/exclude 上——linked worktree 下 git 只读那一份
+    let exclude = std::fs::read_to_string(main_path.join(".git/info/exclude")).unwrap();
+    assert!(
+        exclude.lines().any(|l| l.trim() == ".ai/"),
+        "公共仓库的 info/exclude 未追加 .ai/：{exclude:?}"
+    );
+    // linked worktree 自身的工作树里看不到变化
+    assert_eq!(run_git(&linked, &["status", "--porcelain"]), "");
 }
