@@ -17,7 +17,7 @@ pub use base::BaseWorkspace;
 pub use error::WorkspaceError;
 pub use ids::IntentId;
 pub use persist::{
-    WorkspaceRecord, load_workspace, p2_workspace_migrations, save_workspace,
+    WorkspaceRecord, load_workspace, p2_workspace_migrations, remove_workspace, save_workspace,
 };
 // overlay 后端另有两项出口：驱动要据 `in_user_namespace` 判断是否需要把自身 re-exec 进
 // 用户与挂载命名空间，而 `OverlayBackend` 承载该后端的命名空间约束与 `.ai/` 可见性说明。

@@ -101,6 +101,15 @@ pub fn create_task_workspace(
 ///
 /// 后端由调用方传入而非重新探测：重新探测会在 Base 形态已变时按**另一个**后端
 /// 去回收，留下原后端的残留（worktree 目录或分支）而不报错。
+///
+/// # 与落库记录的关系
+///
+/// 若该工作区曾由 `save_workspace` 落库，**放弃之后必须一并删除其记录**
+/// （`continuum_workspace::remove_workspace`），且两件事应放进**同一个事务**。
+/// 本函数不收 `Tx`、也不碰数据库——它只动文件系统与 git，故这件事由调用方
+/// 促成。只放弃工作区而不删记录，库里就留下一条指向已删工作区的记录：
+/// 此后 `load_workspace` 给出的后端与路径都不再对应任何实物，按它去回收只会
+/// 失败（worktree 目录或分支已不在），而那条记录本身看不出已经作废。
 pub fn discard_task_workspace(
     base: &BaseWorkspace,
     task: &TaskWorkspace,

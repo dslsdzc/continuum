@@ -6,7 +6,9 @@
 //! 磁盘上实际存在的那个工作区对不上。
 
 use crate::backend::WorkspaceBackend;
+use crate::base::BaseWorkspace;
 use crate::ids::IntentId;
+use crate::task::TaskWorkspace;
 use continuum_persist::{Migration, PersistError, Tx, Value};
 use std::path::{Path, PathBuf};
 
@@ -44,12 +46,46 @@ pub struct WorkspaceRecord {
     pub created_at: i64,
 }
 
+impl WorkspaceRecord {
+    /// 从两个句柄与创建时返回的后端组一条记录。
+    ///
+    /// 各字段的出处是确定的，调用方不得自行拼装：
+    /// - `intent_id` 取 `task.intent_id()`；
+    /// - `path` 取 `task.root()`——**已规范化**的那个根，即句柄实际持有的路径，
+    ///   而非创建时传入的字面 `root`（两者在不存在的尾部含 `..` 时分岔）；
+    /// - `base_path` 取 `base.root()`——`BaseWorkspace` 持有的原文，它不经规范化，
+    ///   放弃时经 `-C <base>` 交给 git，取规范化后的值反而可能指向另一处；
+    /// - `backend` 由调用方给出：它由 `create_task_workspace` 随句柄一同返回，
+    ///   句柄本身不携带，事后也**不可重新探测**（判据可能已变）。
+    ///
+    /// `created_at` 由调用方给出，本层不取时钟——落库时刻与业务时刻是两件事，
+    /// 由本层隐式取时间会让调用方无从控制，也无从在测试里固定。
+    pub fn from_workspaces(
+        base: &BaseWorkspace,
+        task: &TaskWorkspace,
+        backend: WorkspaceBackend,
+        created_at: i64,
+    ) -> Self {
+        Self {
+            intent_id: task.intent_id().clone(),
+            backend,
+            path: task.root().to_path_buf(),
+            base_path: base.root().to_path_buf(),
+            created_at,
+        }
+    }
+}
+
 /// 写入一条 Workspace 记录。
 ///
 /// 同 `intent_id` 已存在时返回数据库错误，**不覆盖**（与 `save_artifact` 的
 /// §241 同一条规矩）：记录描述的是磁盘上实际存在的那个工作区，静默改写会让
-/// 「记录」与「实物」分叉而无从察觉。同一 Intent 重新创建工作区须先删掉旧记录
-/// ——本函数不提供该能力，删除不是本层的职责。
+/// 「记录」与「实物」分叉而无从察觉，而「同一 Intent 被创建两次」这一真正的
+/// 调用方错误也就再也报不出来。
+///
+/// 因而本函数**不做覆盖写**：同一 Intent 放弃后再创建，须先经
+/// [`remove_workspace`] 删掉旧记录，本次写入才会成功。这一读一删一写应由调用方
+/// 放进**同一个事务**（见 [`remove_workspace`] 的事务要求）。
 pub fn save_workspace(tx: &Tx<'_>, record: &WorkspaceRecord) -> Result<(), PersistError> {
     tx.execute(
         "INSERT INTO workspace (intent_id, backend, path, base_path, created_at)
@@ -61,6 +97,23 @@ pub fn save_workspace(tx: &Tx<'_>, record: &WorkspaceRecord) -> Result<(), Persi
             Value::text(path_str(&record.base_path)?),
             Value::Int(record.created_at),
         ],
+    )?;
+    Ok(())
+}
+
+/// 删掉一个 Intent 的 Workspace 记录。
+///
+/// **与 [`crate::discard_task_workspace`] 成对使用，且必须在同一个事务内**：
+/// 工作区被放弃之后，记录就该一并消失。两者分开提交时，中间那一段里库里躺着
+/// 一条指向已删工作区的记录——此后 `load_workspace` 给出的 `backend` 与路径
+/// 都不再对应任何实物，而按它去回收只会失败。
+///
+/// 删除一条不存在的记录**不是错误**：放弃路径上「记录本就不存在」不该让清理
+/// 失败，故本函数是幂等的（重复删除亦为 `Ok`）。
+pub fn remove_workspace(tx: &Tx<'_>, intent_id: &IntentId) -> Result<(), PersistError> {
+    tx.execute(
+        "DELETE FROM workspace WHERE intent_id = ?1",
+        &[Value::text(intent_id.as_str())],
     )?;
     Ok(())
 }

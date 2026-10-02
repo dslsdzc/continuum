@@ -5,8 +5,8 @@
 
 use continuum_persist::{builtin_migrations, Db, Migration, PersistError, Value};
 use continuum_workspace::{
-    IntentId, WorkspaceBackend, WorkspaceRecord, load_workspace, p2_workspace_migrations,
-    save_workspace,
+    BaseWorkspace, IntentId, TaskWorkspace, WorkspaceBackend, WorkspaceRecord, load_workspace,
+    p2_workspace_migrations, remove_workspace, save_workspace,
 };
 use std::path::PathBuf;
 
@@ -150,6 +150,93 @@ fn saving_the_same_intent_twice_is_rejected_without_overwriting() {
     let tx = db.begin().unwrap();
     let got = load_workspace(&tx, &IntentId::new("i1")).unwrap();
     assert_eq!(got, Some(first), "重复写入改动了既有的记录");
+}
+
+#[test]
+fn a_record_built_from_the_handles_carries_their_paths() {
+    let base_dir = tempfile::tempdir().unwrap();
+    let base = BaseWorkspace::new(base_dir.path()).unwrap();
+    let task =
+        TaskWorkspace::new_outside(&base, base_dir.path().join("task"), IntentId::new("i1"))
+            .unwrap();
+
+    let rec = WorkspaceRecord::from_workspaces(&base, &task, WorkspaceBackend::Overlay, 42);
+
+    assert_eq!(rec.intent_id, IntentId::new("i1"));
+    assert_eq!(rec.backend, WorkspaceBackend::Overlay);
+    assert_eq!(rec.created_at, 42);
+    // path 取 Task 句柄持有的**规范化**根；base_path 取 Base 句柄持有的原文。
+    // 两者都比对各自 accessor 的返回值：若实现改从别处取值（例如把创建时传入的
+    // 字面 root 存进去），此处会与句柄不一致。
+    assert_eq!(rec.path, task.root());
+    assert_eq!(rec.base_path, base.root());
+
+    // 经落库往返一次，确认这套字段在库里也自洽
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    save_workspace(&tx, &rec).unwrap();
+    tx.commit().unwrap();
+    let tx = db.begin().unwrap();
+    assert_eq!(load_workspace(&tx, &IntentId::new("i1")).unwrap(), Some(rec));
+}
+
+#[test]
+fn removing_a_record_makes_it_load_as_none() {
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    save_workspace(&tx, &record("i1", WorkspaceBackend::Worktree)).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    remove_workspace(&tx, &IntentId::new("i1")).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    assert_eq!(
+        load_workspace(&tx, &IntentId::new("i1")).unwrap(),
+        None,
+        "删除之后仍能读回记录"
+    );
+}
+
+/// 「记录的生命周期与工作区一致」这条裁定的直接守卫：放弃后删记录，同一 Intent
+/// 重建时 `save_workspace` 必须成功。`remove_workspace` 变成空操作时，这一条会
+/// 撞上主键而变红。
+#[test]
+fn a_workspace_can_be_recorded_again_after_its_record_is_removed() {
+    let (_d, db) = db();
+    let first = record("i1", WorkspaceBackend::Overlay);
+    let tx = db.begin().unwrap();
+    save_workspace(&tx, &first).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    remove_workspace(&tx, &IntentId::new("i1")).unwrap();
+    tx.commit().unwrap();
+
+    let mut second = record("i1", WorkspaceBackend::Overlay);
+    second.path = PathBuf::from("/tmp/重建");
+    let tx = db.begin().unwrap();
+    save_workspace(&tx, &second).unwrap();
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    assert_eq!(
+        load_workspace(&tx, &IntentId::new("i1")).unwrap(),
+        Some(second),
+        "重建后的记录不是新写的那条"
+    );
+}
+
+/// 删除不存在的记录不是错误——放弃路径上「记录本就不存在」不该让清理失败。
+#[test]
+fn removing_an_unrecorded_intent_is_not_an_error() {
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+    remove_workspace(&tx, &IntentId::new("未曾记录")).unwrap();
+    // 幂等：再删一次也还是 Ok
+    remove_workspace(&tx, &IntentId::new("未曾记录")).unwrap();
+    tx.commit().unwrap();
 }
 
 /// 非 UTF-8 的路径分量在落库时被替换字符悄悄改写，读回就指向另一个路径，
