@@ -145,7 +145,19 @@ WritablePath     独立类型，唯一构造入口是 TaskWorkspace::writable_ro
 ```
 
 本 crate 内所有写操作（建目录、写文件、改权限、执行会写盘的命令）一律收 `&WritablePath`。
-Base 路径无法构造出 `WritablePath`，故「对 Base 写」在类型上不可表达。
+该类型无公开构造函数，唯一来源是 `TaskWorkspace::writable_root()`。
+
+该保证由两半构成，缺一即不成立：
+
+1. **`BaseWorkspace` 不暴露任何可写句柄**——没有 `writable_root`，也没有通向 `WritablePath`
+   的方法。故持有 Base 句柄的代码取不到可写路径。
+2. **`TaskWorkspace` 的构造拒绝与 Base 重叠的根**——既不能等于 Base，也不能是 Base 的祖先。
+   缺了这一半时，`TaskWorkspace::new_outside(&base, base.root(), id)` 会产出一个指向 Base 的
+   可写根，而 `Sandbox::spawn` 收的正是 `&TaskWorkspace`，于是内核层的隔离会反过来给 Base
+   开写权限——三层保证里最外一层被从内部绕过。
+
+第 2 条允许 Task 根位于 Base **之内**（worktree 后端即此形态：Task 根在
+`<base>/.ai/worktrees/<intent>`），因为此时可写范围是 Base 的一个子目录而非 Base 本身。
 
 「Base 只经 Integration Gate 写入」由同一条机制给出：`BaseWorkspace` 不暴露可写句柄，
 写 Base 的私有路径只被 Gate 的三种写入操作调用。

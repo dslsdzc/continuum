@@ -195,14 +195,19 @@ impl BaseWorkspace {
 pub struct TaskWorkspace { root: PathBuf, intent_id: IntentId }
 
 impl TaskWorkspace {
-    /// 在给定路径建立 Task Workspace 句柄，并在该路径下建目录。
+    /// 唯一的公开构造入口。三种后端与测试夹具都经它产出句柄。
     ///
-    /// **这是公开构造函数，不是测试专用。** 三种后端（worktree、overlay、以及测试夹具）
-    /// 都要经它产出句柄，故不能置于 `#[cfg(test)]`。它只接受一个已经由后端决定好的路径，
-    /// 因此不构成对类型层保证的绕过——`WritablePath` 仍只能由此产出。
+    /// `root` 不得与 `base` 重叠：既不能等于 Base，也不能是 Base 的祖先。
+    /// 前者使「Task 就是 Base」，后者使「Task 是包含 Base 的一层」——两者都会让
+    /// `Sandbox::spawn` 把 Base 当作可写根，内核层隔离反过来给 Base 开写权限。
     ///
-    /// 注意它**不**接受 `BaseWorkspace`：把 Base 变成 Task 必须显式给出一个不同的路径。
-    pub fn new_at(root: impl Into<PathBuf>, intent_id: IntentId) -> Result<Self, WorkspaceError>;
+    /// **允许 `root` 位于 `base` 之内**（worktree 后端即此形态：Task 根在
+    /// `<base>/.ai/worktrees/<intent>`），因为此时可写范围是 Base 的一个子目录，而非 Base 本身。
+    pub fn new_outside(
+        base: &BaseWorkspace,
+        root: impl Into<PathBuf>,
+        intent_id: IntentId,
+    ) -> Result<Self, WorkspaceError>;
     pub fn root(&self) -> &Path;
     pub fn intent_id(&self) -> &IntentId;
     /// 本 crate 内唯一能产出 `WritablePath` 的入口。
@@ -235,8 +240,8 @@ impl WritablePath {
 ```rust
 #[test]
 fn writable_path_writes_inside_the_task_root() {
-    let dir = tempfile::tempdir().unwrap();
-    let task = TaskWorkspace::new_at(dir.path(), IntentId::new("i1")).unwrap();
+    let (dir, base) = base_and_task_dirs();
+    let task = TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1")).unwrap();
     let w = task.writable_root();
     w.write("a/b.txt", b"hello").unwrap();
     assert_eq!(w.read("a/b.txt").unwrap(), b"hello");
@@ -244,8 +249,8 @@ fn writable_path_writes_inside_the_task_root() {
 
 #[test]
 fn writable_path_rejects_parent_traversal() {
-    let dir = tempfile::tempdir().unwrap();
-    let task = TaskWorkspace::new_at(dir.path(), IntentId::new("i1")).unwrap();
+    let (dir, base) = base_and_task_dirs();
+    let task = TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1")).unwrap();
     let w = task.writable_root();
     let err = w.join("../escape").unwrap_err();
     assert!(matches!(err, WorkspaceError::EscapesRoot { .. }), "实际 {err:?}");
@@ -254,6 +259,21 @@ fn writable_path_rejects_parent_traversal() {
 #[test]
 fn writable_path_rejects_absolute_paths() {
     // 同上，join("/etc/passwd") 亦须被拒
+}
+
+#[test]
+fn task_root_may_not_be_the_base() {
+    let (dir, base) = base_and_task_dirs();
+    let err = TaskWorkspace::new_outside(&base, base.root(), IntentId::new("i1")).unwrap_err();
+    assert!(matches!(err, WorkspaceError::Overlaps { .. }), "实际 {err:?}");
+}
+
+#[test]
+fn task_root_may_not_be_an_ancestor_of_the_base() {
+    // 以 Base 的父目录为 root：可写范围会包含 Base 本身
+    let (dir, base) = base_and_task_dirs();
+    let err = TaskWorkspace::new_outside(&base, dir.path(), IntentId::new("i1")).unwrap_err();
+    assert!(matches!(err, WorkspaceError::Overlaps { .. }), "实际 {err:?}");
 }
 
 #[test]
@@ -690,7 +710,7 @@ fn landlock_denies_writes_to_base_and_allows_writes_to_task() {
     let base_path = dir.path().join("base");
     std::fs::create_dir_all(&base_path).unwrap();
     let base = BaseWorkspace::new(&base_path).unwrap();
-    let task = TaskWorkspace::new_at(dir.path().join("task"), IntentId::new("i1")).unwrap();
+    let task = TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1")).unwrap();
     std::fs::create_dir_all(task.root()).unwrap();
 
     let sandbox = Sandbox::landlock();
