@@ -136,3 +136,13 @@ impl WritablePath {
         }
     }
 }
+
+/// 规范化路径：解析 symlink 并折叠 `..`。
+///
+/// 只有经此规范化的路径才可用于重叠判定——逐字符比较会让
+/// `base/../base`、指向 Base 的 symlink 这类写法绕过 `new_outside` 的守卫。
+fn canonicalize(path: &Path) -> Result<PathBuf, WorkspaceError> {
+    std::fs::canonicalize(path).map_err(|e| WorkspaceError::BackendUnavailable {
+        reason: format!("无法规范化路径 {}：{e}", path.display()),
+    })
+}

@@ -256,10 +256,8 @@ fn writable_path_rejects_parent_traversal() {
     assert!(matches!(err, WorkspaceError::EscapesRoot { .. }), "实际 {err:?}");
 }
 
-#[test]
-fn writable_path_rejects_absolute_paths() {
-    // 同上，join("/etc/passwd") 亦须被拒
-}
+`writable_path_rejects_absolute_paths` 的断言内容：同一夹具下 `w.join("/etc/passwd")`
+返回 `EscapesRoot`，错误信息里带该路径。
 
 #[test]
 fn task_root_may_not_be_the_base() {

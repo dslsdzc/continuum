@@ -22,6 +22,13 @@ pub enum WorkspaceError {
     /// 目标路径越出 Task Workspace 根。
     #[error("路径越出 Task Workspace 根：{}", path.display())]
     EscapesRoot { path: PathBuf },
+    /// Task Workspace 的根与 Base 重叠：Task 根是 Base 或 Base 的祖先。
+    #[error(
+        "Task Workspace 的根 {} 与 Base {} 重叠：Task 根不能是 Base 或 Base 的祖先",
+        root.display(),
+        base.display()
+    )]
+    Overlaps { root: PathBuf, base: PathBuf },
     /// 后端不可用：目录无法建立、覆盖层无法挂载等。
     #[error("Workspace 后端不可用：{reason}")]
     BackendUnavailable { reason: String },
