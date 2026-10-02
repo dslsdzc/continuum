@@ -8,6 +8,7 @@
 use crate::base::BaseWorkspace;
 use crate::error::WorkspaceError;
 use crate::ids::IntentId;
+use crate::overlay;
 use crate::task::TaskWorkspace;
 use crate::worktree;
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,9 @@ pub fn detect_backend(base: &BaseWorkspace) -> WorkspaceBackend {
 ///
 /// 返回后端是让调用方在放弃时有据可依：判据只在创建时成立，事后 Base 的形态
 /// 可能已变（例如用户在建好之后才 `git init`）。
+///
+/// 两个后端都在各自的创建路径的开头调用 [`check_intent`]，故 `IntentId` 的路径逃逸
+/// 判定与后端无关，且**先于**后端自身的环境判定（overlay 的命名空间要求）报出。
 pub fn create_task_workspace(
     base: &BaseWorkspace,
     intent: &IntentId,
@@ -88,7 +92,7 @@ pub fn create_task_workspace(
     let backend = detect_backend(base);
     let task = match backend {
         WorkspaceBackend::Worktree => worktree::create(base, intent)?,
-        WorkspaceBackend::Overlay => return Err(overlay_unavailable("创建")),
+        WorkspaceBackend::Overlay => overlay::create(base, intent)?,
     };
     Ok((task, backend))
 }
@@ -104,16 +108,8 @@ pub fn discard_task_workspace(
 ) -> Result<(), WorkspaceError> {
     match backend {
         WorkspaceBackend::Worktree => worktree::discard(base, task),
-        WorkspaceBackend::Overlay => Err(overlay_unavailable("放弃")),
-    }
-}
-
-/// overlay 后端尚未接入时的统一答复。
-///
-/// 返回 `Err` 而非静默跳过：调用方以为工作区已按 overlay 语义建好/清掉，
-/// 实际什么都没发生，是比报错更坏的结局。
-fn overlay_unavailable(action: &str) -> WorkspaceError {
-    WorkspaceError::BackendUnavailable {
-        reason: format!("Base 不是 Git 仓库，需 overlay 后端{action} Task Workspace；该后端尚未接入"),
+        // overlay 的布局全部由 Task 根推出（上层 `upper`/`work` 是它的兄弟），
+        // 故不需要 Base——这一点与 worktree 后端不同，后者要经 `-C <base>` 调 git。
+        WorkspaceBackend::Overlay => overlay::discard(task),
     }
 }

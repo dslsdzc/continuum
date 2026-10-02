@@ -178,7 +178,10 @@ fn canonicalize(path: &Path) -> Result<PathBuf, WorkspaceError> {
 ///
 /// `absolute` 之后的路径是绝对的，故向上走必然终止于已存在的根，
 /// 不存在「每级都不存在」的输入。
-fn canonical_candidate(path: &Path) -> Result<PathBuf, WorkspaceError> {
+///
+/// `pub(crate)` 而非私有：overlay 后端要在**落盘之前**判定自己的工作目录是否落在
+/// Base 之内，被判定的路径同样可能尚不存在，需要同一份「无副作用的规范化」。
+pub(crate) fn canonical_candidate(path: &Path) -> Result<PathBuf, WorkspaceError> {
     let absolute = std::path::absolute(path).map_err(|e| WorkspaceError::BackendUnavailable {
         reason: format!("无法绝对化路径 {}：{e}", path.display()),
     })?;
