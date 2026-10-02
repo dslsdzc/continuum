@@ -6,7 +6,7 @@ use std::path::PathBuf;
 ///
 /// 多数变体按只读强制的三层归属：类型层（[`WorkspaceError::EscapesRoot`]、
 /// [`WorkspaceError::Overlaps`]、
-/// [`WorkspaceError::InvalidIntent`]）、
+/// [`WorkspaceError::InvalidIntent`]、[`WorkspaceError::NotAbsolute`]）、
 /// 后端层（[`WorkspaceError::BackendUnavailable`]、[`WorkspaceError::IoFailed`]、
 /// [`WorkspaceError::GitFailed`]、[`WorkspaceError::CommandFailed`]）与 Gate 层
 /// （[`WorkspaceError::NotInNamespace`]、[`WorkspaceError::GateRefused`]）。
@@ -26,6 +26,13 @@ pub enum WorkspaceError {
     /// Base 路径不存在。
     #[error("Base Workspace 路径不存在：{}", path.display())]
     MissingBase { path: PathBuf },
+    /// Base 路径不是绝对路径。
+    ///
+    /// [`crate::BaseWorkspace::root`] 是 Base 的稳定标识：worktree 后端拿它当
+    /// `git -C` 的工作目录，overlay 后端拿它算存储标识，落库后跨 cwd 读回还会再
+    /// 解析一次。相对路径的含义随调用方的当前目录而变，这三种用法都会因而分岔。
+    #[error("Base Workspace 路径必须是绝对路径：{}", path.display())]
+    NotAbsolute { path: PathBuf },
     /// Base 路径存在但不是目录。
     #[error("Base Workspace 路径不是目录：{}", path.display())]
     NotADirectory { path: PathBuf },

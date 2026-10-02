@@ -62,8 +62,9 @@ fn workspace_record_round_trips() {
 
 #[test]
 fn loading_an_unrecorded_intent_yields_none() {
-    // 「没有记录」与「记录为空值」必须分开：前者是 `Ok(None)`，后者是错误。
-    // 少了这条，`load_workspace` 的 `None` 分支无人过问。
+    // 「没有记录」是 `Ok(None)`；「记录在、但某列类型错」是错误，由
+    // `a_column_of_the_wrong_type_is_reported` 守住。本用例只管前者，
+    // 少了它 `load_workspace` 的 `None` 分支无人过问。
     let (_d, db) = db();
     let tx = db.begin().unwrap();
     let got = load_workspace(&tx, &IntentId::new("未记录")).unwrap();
@@ -141,10 +142,14 @@ fn saving_the_same_intent_twice_is_rejected_without_overwriting() {
     second.path = PathBuf::from("/tmp/别处");
     let tx = db.begin().unwrap();
     let err = save_workspace(&tx, &second).unwrap_err();
-    assert!(
-        matches!(err, PersistError::Database(_)),
-        "期望 Database，得到 {err:?}"
-    );
+    // 不只断言「返回了 Err」：任意数据库错误（连接坏了、表不见了）都会满足那样
+    // 一条断言。要的是**唯一键冲突**这一条。
+    match err {
+        PersistError::Database(msg) => {
+            assert!(msg.contains("UNIQUE"), "应为唯一键冲突，实际：{msg}")
+        }
+        other => panic!("期望 Database，得到 {other:?}"),
+    }
     drop(tx);
 
     let tx = db.begin().unwrap();
@@ -241,24 +246,76 @@ fn removing_an_unrecorded_intent_is_not_an_error() {
 
 /// 非 UTF-8 的路径分量在落库时被替换字符悄悄改写，读回就指向另一个路径，
 /// 而记录与磁盘实物分叉后无从察觉。故此处是失败路径，不是静默降级。
+///
+/// `path` 与 `base_path` **两列都经 `path_str`**，故两处都要过一遍：只测一处时，
+/// 另一处漏掉 `path_str`（例如直接 `Value::text(x.display().to_string())`）
+/// 不会被任何用例发现。
 #[cfg(unix)]
 #[test]
 fn a_non_utf8_path_is_rejected_instead_of_silently_replaced() {
     use std::ffi::OsString;
     use std::os::unix::ffi::OsStringExt;
 
-    let (_d, db) = db();
-    let mut rec = record("i1", WorkspaceBackend::Overlay);
     // 0x80 不是合法 UTF-8 起始字节
-    rec.path = PathBuf::from(OsString::from_vec(b"/tmp/\x80".to_vec()));
+    let non_utf8 = || PathBuf::from(OsString::from_vec(b"/tmp/\x80".to_vec()));
 
+    let (_d, db) = db();
+    let mut via_path = record("i1", WorkspaceBackend::Overlay);
+    via_path.path = non_utf8();
+    let mut via_base = record("i2", WorkspaceBackend::Overlay);
+    via_base.base_path = non_utf8();
+
+    for (rec, field) in [(&via_path, "path"), (&via_base, "base_path")] {
+        let tx = db.begin().unwrap();
+        let err = save_workspace(&tx, rec).unwrap_err();
+        match err {
+            PersistError::Database(msg) => assert!(
+                msg.contains("UTF-8"),
+                "{field} 列的错误未说明原因：{msg}"
+            ),
+            other => panic!("{field} 列：期望 Database，得到 {other:?}"),
+        }
+    }
+}
+
+/// `text()` 与 `int()` 的类型错分支：列里存了非预期类型时必须报出**是哪一列**，
+/// 而不是回退成某个值。两个分支各由一条记录守住。
+#[test]
+fn a_column_of_the_wrong_type_is_reported() {
+    let (_d, db) = db();
     let tx = db.begin().unwrap();
-    let err = save_workspace(&tx, &rec).unwrap_err();
-    match err {
-        PersistError::Database(msg) => assert!(
-            msg.contains("UTF-8"),
-            "错误未说明原因：{msg}"
-        ),
-        other => panic!("期望 Database，得到 {other:?}"),
+    save_workspace(&tx, &record("i1", WorkspaceBackend::Overlay)).unwrap();
+    save_workspace(&tx, &record("i2", WorkspaceBackend::Overlay)).unwrap();
+    // i1 的 path（文本列）写成 blob → `text()` 的类型错分支。
+    //
+    // 写整数**测不到**这一支：SQLite 的 TEXT 亲和性会把数值静默转成文本，
+    // `Value::from_ref` 拿回的是 `Text("7")`，`text()` 反而成功。BLOB 不受亲和性
+    // 转换（TEXT 亲和性只存 NULL/TEXT/BLOB 三类），是这一支可达的取值。
+    tx.execute(
+        "UPDATE workspace SET path = ?2 WHERE intent_id = ?1",
+        &[Value::text("i1"), Value::Blob(vec![0x80])],
+    )
+    .unwrap();
+    // i2 的 created_at（整数列）写成**非数值**的文本 → `int()` 的类型错分支。
+    // 写成 `"7"` 同样测不到：INTEGER 亲和性会把它转成整数。
+    // 两者分两条记录：`load_workspace` 按列序读到第一个错就返回，同一行上只能
+    // 观察到一处。
+    tx.execute(
+        "UPDATE workspace SET created_at = ?2 WHERE intent_id = ?1",
+        &[Value::text("i2"), Value::text("不是整数")],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+
+    for (intent, expected) in [("i1", "文本"), ("i2", "整数")] {
+        let tx = db.begin().unwrap();
+        let err = load_workspace(&tx, &IntentId::new(intent)).unwrap_err();
+        match err {
+            PersistError::Database(msg) => assert!(
+                msg.contains(expected),
+                "{intent} 的错误未指出期望的类型（应含「{expected}」）：{msg}"
+            ),
+            other => panic!("{intent}：期望 Database，得到 {other:?}"),
+        }
     }
 }

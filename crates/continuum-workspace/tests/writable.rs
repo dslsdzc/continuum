@@ -56,6 +56,21 @@ fn base_workspace_rejects_a_missing_directory() {
 }
 
 #[test]
+fn base_workspace_rejects_a_relative_path() {
+    // 相对路径的含义随调用方的当前目录而变：worktree 后端拿 Base 当 `git -C` 的
+    // 工作目录、overlay 后端拿它算存储标识，而 `WorkspaceRecord` 落库后跨 cwd
+    // 读回还会再解析一次。故它是无效输入，无论该路径在当前目录下是否存在。
+    //
+    // 用「存在但非绝对」的路径：`.` 在当前目录下必然存在，若判定顺序反了
+    // （先查存在性、后查绝对性），这里会得到 `NotADirectory` 而非 `NotAbsolute`。
+    let err = BaseWorkspace::new(".").unwrap_err();
+    assert!(
+        matches!(err, WorkspaceError::NotAbsolute { .. }),
+        "实际 {err:?}"
+    );
+}
+
+#[test]
 fn task_root_may_not_be_the_base_itself() {
     let dir = tempfile::tempdir().unwrap();
     let base = BaseWorkspace::new(dir.path()).unwrap();

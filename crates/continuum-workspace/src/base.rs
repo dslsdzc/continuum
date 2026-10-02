@@ -17,9 +17,23 @@ pub struct BaseWorkspace {
 }
 
 impl BaseWorkspace {
-    /// `root` 必须存在且为目录。
+    /// `root` 必须是**绝对路径**，且存在、为目录。
+    ///
+    /// 绝对路径是硬要求，不是规范化的前置。`root()` 是 Base 的稳定标识：worktree
+    /// 后端拿它当 `git -C` 的工作目录，overlay 后端拿它算存储标识，而 `WorkspaceRecord`
+    /// 落库后再跨 cwd 读回还会解析一次。相对路径的含义随调用方的当前目录而变，
+    /// 这三种用法都会因而指向别处。
+    ///
+    /// 本函数**不代为 `canonicalize`**：那会改变路径标识（本机 `TMPDIR` 经符号链接
+    /// 时尤甚），而 Base 的标识应当就是调用方给出的那个路径——worktree 后端据此调
+    /// git，overlay 后端另行规范化后再算标识（见 `overlay::canonical_base`）。
+    ///
+    /// 判定先于存在性判定：相对路径无论是否存在都是无效输入。
     pub fn new(root: impl Into<PathBuf>) -> Result<Self, WorkspaceError> {
         let root = root.into();
+        if !root.is_absolute() {
+            return Err(WorkspaceError::NotAbsolute { path: root });
+        }
         let meta = std::fs::metadata(&root).map_err(|_| WorkspaceError::MissingBase {
             path: root.clone(),
         })?;
