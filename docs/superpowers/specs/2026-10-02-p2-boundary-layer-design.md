@@ -208,8 +208,32 @@ fn spawn(&self, task: &TaskWorkspace, cmd: &Command) -> Result<Child, SandboxErr
   放行更宽的读面与本节 §49 的隐私原则相冲突，该取舍属执行器的范围。
 
 **bubblewrap**：以 `--ro-bind / /` 加 `--bind <task> <task>` 建立挂载命名空间，工作目录设为
-Task Workspace。它额外提供网络与 PID 命名空间的隔离能力，本子项目不使用这些能力，
-但保留该后端。
+Task Workspace。
+
+它**能**提供网络与 PID 命名空间的隔离，但本子项目不传 `--unshare-net` / `--unshare-pid`，
+故这两项并未生效——`capabilities()` 对它们报 `false`（见第 9 节的口径）。保留该后端的理由
+不是这些能力，而是**它在文件系统这一项上是独立于 Landlock 的实现**：内核没有 Landlock 时
+它走挂载命名空间仍可用。
+
+**两条机制在写这一侧语义相同，在读这一侧不同。** 写：两者都由同一套两臂用例覆盖
+（写 Base 被拒 + 写 Task 成功）。读：
+
+```
+Landlock   「默认拒绝 + 白名单子树」——白名单之外（含 Base）一概不可达，读写皆然
+bubblewrap 「ro-bind 整个根 + 可写 bind Task」——文件系统整体可读（含 Base），写只开 Task
+```
+
+故**不得写「子进程读不到 Base」这类通用断言**——它在 bubblewrap 分支必红。第 13 节的
+两臂用例是写导向的，不受影响。
+
+**两条机制都关不住的逃逸：宿主预置的硬链接。** 沙箱内无法制造该链接（跨目录 link 需源目录的
+`REFER`，Base 未授予；bwrap 下跨 vfsmount 得 `EXDEV`），但**宿主**若先在 Task 根内建一个指向
+Base 内 inode 的硬链接，两种机制都挡不住后续写入——bwrap 的 ro-bind 只限制「经 Base 那条路径」
+的访问，同一 inode 经可写 bind 仍可达；Landlock 按路径判定，该路径落在被授予 all 的 Task 子树里。
+
+该残余的威胁模型边界：**能制造它的只有可信的宿主进程**（本运行时自身）。故本层不作防护，
+但须有一条特征化用例把它钉住（断言写入确实到达 Base），使日后若有人往 Task 根里放硬链接时
+会被测试提示，而不是靠一句注释。
 
 两处实现约束：
 
@@ -525,8 +549,8 @@ Landlock 的 ABI 不支持某类访问时，对应字段如实为假。
 该值来自父进程侧的 ABI 探测（见第 4.3 节），不是子进程内的实际施加结果——后者无法回传。
 「本次确实生效」由两臂用例在行为上验证。
 
-引入 bubblewrap 的代价是一个非 Rust 的运行时依赖；其收益是网络与 PID 命名空间的隔离能力，
-本子项目不使用，保留给后续阶段的网络策略与提示注入防护。
+引入 bubblewrap 的代价是一个非 Rust 的运行时依赖。它的收益是**文件系统隔离上的第二种独立实现**
+（内核没有 Landlock 时仍可用）；其网络与 PID 隔离能力本子项目不使用，保留给后续阶段。
 
 ---
 
@@ -623,7 +647,8 @@ EventType              本子项目不新增事件类型；复用既有九类中
 | Base 路径不进入子进程参数 | 检查实际 spawn 的 argv / env / cwd |
 | 子进程写 Base 被内核拒绝 | 起真子进程写 Base（断言 EACCES），**加**写 Task 成功的对照臂 |
 | 经 Task 内符号链接写 Base 被内核拒绝 | 类型层只做路径分量检查，检出不了符号链接；该逃逸由内核层承担，须有对应用例 |
-| 两种沙箱机制 | Landlock 与 bubblewrap 各跑同一套两臂用例 |
+| 两种沙箱机制 | Landlock 与 bubblewrap 各跑同一套两臂用例（**写导向**；两者在读侧语义不同，见第 4.3 节） |
+| 宿主预置硬链接的残余 | 特征化用例：断言该逃逸确实到达 Base，钉住已知边界而非声称防护 |
 | 两种 Workspace 后端 | worktree 与 overlay 各跑创建、放弃、往返用例 |
 | 五种 Gate 操作 | 真实 worktree 与 overlay 上各跑一遍 |
 | Effect 执行前入 Journal | 注入「执行时崩溃」的假效应器，断言崩溃点之前已有 `EXECUTING` 记录 |
