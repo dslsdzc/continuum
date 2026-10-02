@@ -1,5 +1,6 @@
 //! Sandbox 抽象：两种内核层隔离机制的统一入口。
 
+use crate::bubblewrap;
 use crate::error::SandboxError;
 use crate::landlock;
 use continuum_workspace::TaskWorkspace;
@@ -51,11 +52,20 @@ pub struct LandlockSandbox {
 
 /// bubblewrap 机制。
 ///
-/// 本 task 中它不携带状态；**设计上**句柄经 [`Sandbox::bubblewrap`] 取得，该唯一性
-/// 同 [`LandlockSandbox`] 一样要到 Task 7 加上私有字段后才成立。Task 7 起承载
-/// bwrap 可执行文件的定位结果与固定的加固参数。
+/// 字段私有且无公开构造函数，故**唯一来源是 [`Sandbox::bubblewrap`]**——与
+/// [`LandlockSandbox`] 同一条唯一性。该唯一性有可观察的后果：`BubblewrapSandbox {}`
+/// 在这个字段加上之前是能被 crate 外写出来的（空结构体无私有字段），加上之后不能。
+///
+/// 承载一项状态：**`bwrap` 可执行文件的定位结果**，构造期探测一次。`None` 表示本机
+/// 不存在该机制，[`Sandbox::spawn`] 据此拒绝启动。
+///
+/// 加固参数表**不在此处**：它是常量表且每项取值依赖 Task 根，由
+/// `bubblewrap::bwrap_argv` 在 spawn 时构造。把「定位结果」与「参数表」分开，
+/// 是为了让前者可在构造期固定（`capabilities()` 与 `spawn()` 必须依据同一个判定），
+/// 而后者只依赖本次调用的参数。
 pub struct BubblewrapSandbox {
-    // Task 7 起承载该机制的状态：bwrap 可执行文件的定位结果与固定的加固参数。
+    /// `PATH` 中定位到的 `bwrap`；`None` 表示本机不存在该机制。
+    pub(crate) bwrap: Option<PathBuf>,
 }
 
 /// 内核层隔离的统一入口。
@@ -67,9 +77,13 @@ pub enum Sandbox {
     /// Landlock：进程级规则集，经 `restrict_self` 生效，并随 `exec` 被子孙继承。
     Landlock(LandlockSandbox),
     /// bubblewrap：以挂载命名空间限制文件系统。其网络与 PID 命名空间能力本子项目不使用
-    /// （Task 7 的参数集不含 `--unshare-net` / `--unshare-pid`），故届时
-    /// [`Sandbox::capabilities`] 对这两项报告为假——该报告的口径是「按当前内核的 ABI
-    /// 探测结果，该机制将生效」，不含机制「本来能做什么」。
+    /// （参数集不含 `--unshare-net` / `--unshare-pid`），故 [`Sandbox::capabilities`]
+    /// 对这两项报告为假——该报告的口径是「该机制将生效的隔离项」，不含机制「本来能做什么」。
+    ///
+    /// 两种机制在**读**这一侧语义不同，调用方不得假定二者等价：Landlock 是「默认拒绝 +
+    /// 白名单子树」，Base 不在任何被授予子树内，故读写皆不可达；bubblewrap 的
+    /// `--ro-bind / /` 把宿主根整个**可读**地挂进来，Base 因此**读得到**（写仍被拒）。
+    /// 设计第 4.3 节只要求「写 Base 被拒」，该差异落在本节之外。
     Bubblewrap(BubblewrapSandbox),
 }
 
@@ -83,8 +97,12 @@ impl Sandbox {
     }
 
     /// bubblewrap 机制句柄。
+    ///
+    /// 构造期在 `PATH` 中定位一次 `bwrap` 并固定结果，故 [`Sandbox::capabilities`] 与
+    /// [`Sandbox::spawn`] 依据的是同一个判定——与 [`Sandbox::landlock`] 的 ABI 探测同理。
+    /// 本机没有 `bwrap` 时不报错（构造总是成功），由 `spawn` 拒绝启动。
     pub fn bubblewrap() -> Self {
-        Sandbox::Bubblewrap(BubblewrapSandbox {})
+        Sandbox::Bubblewrap(BubblewrapSandbox::new())
     }
 
     /// 在 Task Workspace 内启动命令。
@@ -133,9 +151,34 @@ impl Sandbox {
     /// spawn `io::Error`，与 exec 失败同形，只能落进 [`SandboxError::SpawnFailed`]
     /// ——两者的分界见 [`SandboxError`] 的文档。
     ///
-    /// # 当前状态
+    /// # bubblewrap 分支
     ///
-    /// Landlock 分支已实现。bubblewrap 分支未实现（Task 7），命中即 panic。
+    /// 隔离不在这里施加，而是**交给 `bwrap` 进程**：本函数把调用方的命令改写成
+    /// `bwrap <加固参数> -- <原命令>` 再启动，bwrap 自建挂载命名空间后 exec 原命令。
+    /// 参数表由 `bubblewrap::bwrap_argv` 构造，逐项理由见该函数的文档。
+    ///
+    /// 定位结果在**构造期**就已固定（[`Sandbox::bubblewrap`]），故本函数在启动任何进程
+    /// **之前**即可判定机制是否可用：`bwrap` 不在 `PATH` 中时以
+    /// [`SandboxError::MechanismUnavailable`] 拒绝，且此时一个进程都没有起过。
+    ///
+    /// **重建命令的两条后果，调用方需要知道：**
+    ///
+    /// - `stdio` 不保留。`std::process::Command` 不提供 stdin / stdout / stderr 的读取接口
+    ///   （rustc 1.95.0 实测无 `get_stdout`），取不出调用方设过什么，也就无从重放。
+    ///   需要管道的调用方不要依赖 bubblewrap 分支保留它；想拿子进程的输出，让子进程
+    ///   自己写文件。这**只影响 bubblewrap 分支**——Landlock 分支在同一条命令上挂
+    ///   `pre_exec`，stdio 原样保留。
+    /// - `env` **重放**。`Command::get_envs` 与 `get_program` / `get_args` 一样有读取接口，
+    ///   故照原样搬过去。注意被重放的是**显式设置过**的那些；未显式设置的仍按继承处理，
+    ///   与不重建时同义。
+    ///
+    /// **工作目录不在上一条里**：子进程的 cwd 由参数表里的 `--chdir <task>` 承担
+    /// （设计第 4.2 节），bwrap 进程自身的 cwd 不参与，故重建的命令上**不设** `current_dir`
+    /// ——设了会让 `--chdir` 变成无用例可钉的冗余项（见实现处的注释）。上面那行
+    /// `cmd.current_dir(task.root())` 只对 Landlock 分支有意义。
+    ///
+    /// 重放不了的还有调用方挂的 `pre_exec` 闭包（`Command` 同样没有读取接口）。本层自己
+    /// 不在 bubblewrap 分支上挂闭包——隔离由 bwrap 完成。
     pub fn spawn(&self, task: &TaskWorkspace, mut cmd: Command) -> Result<Child, SandboxError> {
         cmd.current_dir(task.root());
         match self {
@@ -176,7 +219,39 @@ impl Sandbox {
                 cmd.spawn()
                     .map_err(|e| SandboxError::SpawnFailed { reason: e.to_string() })
             }
-            Sandbox::Bubblewrap(_) => todo!("Task 7：据此重建 bwrap 命令后启动"),
+            Sandbox::Bubblewrap(sandbox) => {
+                // 机制不可用的唯一已知来源：PATH 中找不到 bwrap。判定在**启动任何进程之前**
+                // （见本函数文档）。`Sandbox::bubblewrap()` 已在构造期定位过，这里读的是
+                // 同一个结果，不重新探测。
+                let Some(bwrap) = sandbox.bwrap() else {
+                    return Err(SandboxError::MechanismUnavailable {
+                        mechanism: "bubblewrap",
+                        reason: "PATH 中找不到 bwrap 可执行文件，该机制在本机不存在".to_string(),
+                    });
+                };
+
+                let mut rebuilt = Command::new(bwrap);
+                // 工作目录**不**在这里设：子进程的 cwd 由参数表里的 `--chdir <task>` 决定
+                // （bwrap 建完命名空间后 chdir 过去再 exec），bwrap 进程自身的 cwd 不参与。
+                // 这里再设一次 `current_dir` 会让 `--chdir` 变成冗余项——实测：那样做时
+                // 把 `--chdir` 从参数表里删掉，工作目录用例照样通过，该项就没有用例可钉了。
+                rebuilt.args(bubblewrap::bwrap_argv(task, &cmd));
+                // env 重放；stdio 重放不了（见本函数文档）。
+                for (key, value) in cmd.get_envs() {
+                    match value {
+                        Some(value) => {
+                            rebuilt.env(key, value);
+                        }
+                        None => {
+                            rebuilt.env_remove(key);
+                        }
+                    }
+                }
+
+                rebuilt
+                    .spawn()
+                    .map_err(|e| SandboxError::SpawnFailed { reason: e.to_string() })
+            }
         }
     }
 
@@ -185,16 +260,30 @@ impl Sandbox {
     /// 取值约定见 [`SandboxCapabilities`]：返回的是「按这个内核，该机制**将**生效」的
     /// 隔离项，不是机制自称的能力，也不是子进程内的实际施加结果。
     ///
-    /// # 当前状态
+    /// **本报告只描述「写」这一侧。** 两项都报 `restricts_filesystem_writes` 为真时，
+    /// 两条机制在写上语义相同，但**在读上不同**：Landlock 是「默认拒绝 + 白名单子树」，
+    /// Base 不在任何被授予子树内，故读写皆不可达；bubblewrap 的 `--ro-bind / /` 把宿主根
+    /// 整个可读地挂进来，**Base 读得到**、只有写被拒。该差异是两者的形状决定的，不是配置
+    /// 错误，本类型**没有**表达它的字段——调用方不得据本报告推断读面，也不得写任何
+    /// 「子进程读不到 Base」的断言（它在 bubblewrap 分支必红）。
     ///
-    /// Landlock 分支据构造期探测到的 ABI 如实返回，推导见 `landlock::capabilities_for_abi`。
-    /// bubblewrap 分支尚未实现（Task 7），各项为 `false`：此刻它确实不会生效，
-    /// 这是唯一正确的报告。
+    /// # 两条分支的取值依据
+    ///
+    /// - Landlock 据构造期探测到的 ABI 如实返回，推导见 `landlock::capabilities_for_abi`。
+    /// - bubblewrap 的 `restricts_filesystem_writes` 取「构造期是否定位到 `bwrap`」——
+    ///   定位不到时 `spawn` 会拒绝启动，此时报告为真就是谎报。
+    ///   `isolates_network` 与 `isolates_pid` **恒为假**：本子项目的参数集不含
+    ///   `--unshare-net` / `--unshare-pid`，实测该参数集下子进程的
+    ///   `/proc/self/ns/net`、`/proc/self/ns/pid` 与宿主逐字相同
+    ///   （`net:[4026531833]`、`pid:[4026531836]`，本机 bwrap 0.13.0）。
+    ///   机制「本来能」隔离这两项不构成报告为真的理由——本函数的契约是「将生效」。
+    ///   `bubblewrap::tests::argv_does_not_unshare_network_or_pid_namespaces` 钉住
+    ///   参数表那一侧，本函数钉住报告这一侧，两者必须一致。
     pub fn capabilities(&self) -> SandboxCapabilities {
         match self {
             Sandbox::Landlock(sandbox) => landlock::capabilities_for_abi(sandbox.abi()),
-            Sandbox::Bubblewrap(_) => SandboxCapabilities {
-                restricts_filesystem_writes: false,
+            Sandbox::Bubblewrap(sandbox) => SandboxCapabilities {
+                restricts_filesystem_writes: sandbox.bwrap().is_some(),
                 isolates_network: false,
                 isolates_pid: false,
                 mechanism: "bubblewrap",
@@ -260,6 +349,47 @@ mod tests {
             "ABI=0 时 spawn 应以 MechanismUnavailable 拒绝，实际 {result:?}"
         );
         // 拒绝发生在启动之前：Task 内不得留下任何由子进程写出的文件。
+        assert!(!task.root().join("inside.txt").exists());
+    }
+
+    /// `PATH` 中无 `bwrap` 时 `spawn` 拒绝启动，而不是静默退化成一个没有隔离的子进程。
+    ///
+    /// 本机有 `bwrap`，`Sandbox::bubblewrap()` 永远定位得到，故这条守卫只能靠直接构造一个
+    /// `bwrap: None` 的句柄来验——字段是 `pub(crate)`，crate 内的测试够得着。这也是本用例
+    /// 待在 crate 内而非 `tests/isolation.rs` 的原因：那个字段私有正是 [`BubblewrapSandbox`]
+    /// 的唯一性所在，crate 外**不该**能构造出这个句柄。
+    #[test]
+    fn bubblewrap_refuses_to_start_when_the_binary_is_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let base_path = dir.path().join("base");
+        std::fs::create_dir_all(&base_path).unwrap();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let task =
+            TaskWorkspace::new_outside(&base, dir.path().join("task"), IntentId::new("i1"))
+                .unwrap();
+
+        let sandbox = Sandbox::Bubblewrap(BubblewrapSandbox { bwrap: None });
+
+        // 报告与行为必须一致：报告说文件系统写入不受限，正是这里拒绝启动的那个句柄。
+        assert!(
+            !sandbox.capabilities().restricts_filesystem_writes,
+            "定位不到 bwrap 时能力报告必须为假，否则就是谎报"
+        );
+
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c").arg("echo bad > inside.txt");
+        let result = sandbox.spawn(&task, cmd);
+
+        // 断言到具体的错误变体：只断言「返回了 Err」不足以把这条守卫与
+        // 「bwrap 起来了但 exec 失败」（SpawnFailed）之类的形态分开。
+        assert!(
+            matches!(
+                result,
+                Err(SandboxError::MechanismUnavailable { mechanism: "bubblewrap", .. })
+            ),
+            "bwrap 缺失时 spawn 应以 MechanismUnavailable 拒绝，实际 {result:?}"
+        );
+        // 拒绝发生在启动任何进程之前：Task 内不得留下任何由子进程写出的文件。
         assert!(!task.root().join("inside.txt").exists());
     }
 

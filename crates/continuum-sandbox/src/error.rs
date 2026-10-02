@@ -21,9 +21,10 @@
 /// 两个变体都发生在子进程**交付给调用方之前**，故调用方在任何一种情形下都拿不到
 /// 可用的 `Child`——这是可以依赖的那一半。
 ///
-/// 本枚举标 `#[non_exhaustive]`——两种机制（Task 6、Task 7）落地时各自会暴露新的
-/// 失败形态，外部消费者不应因增补变体而改动 `match`。新增变体时仍应优先考虑既有的
-/// 三个能否表达。
+/// 本枚举标 `#[non_exhaustive]`——设计上为新增失败形态留口，外部消费者不应因增补变体而
+/// 改动 `match`。**两条机制（Landlock 与 bubblewrap）都已落地，三个变体一个没增**：
+/// 两种机制的「整个不可用」都落进 [`SandboxError::MechanismUnavailable`]，其余两类形状相同。
+/// 新增变体时仍应优先考虑既有的三个能否表达。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SandboxError {
