@@ -9,7 +9,7 @@
 //! - 什么都写不进去（隔离过强或沙箱根本没起来）——每条用例都配了对照臂；
 //! - 隔离不随后代继承（只在父进程内施加）——由孙进程用例覆盖。
 //!
-//! 另有三条补在三处：
+//! 另有四条补在四处：
 //! - 符号链接逃逸：类型层只做路径分量检查（设计第 4.1 节），「Task 根内有一个指向根外的
 //!   符号链接」这一逃逸由本层承担（设计第 4.3 节末）。
 //! - 硬链接，两条，钉的是互补的两半：
@@ -18,6 +18,8 @@
 //!   钉「宿主预置的硬链接两种机制都关不上」这一已知边界（它断言逃逸成功，见该用例文档）。
 //! - 子进程的工作目录：设计第 4.2 节要求它是 Task 根，而 bubblewrap 分支重建命令会丢掉
 //!   `Command::current_dir`，靠 `--chdir` 补回来。少了这一条，参数表删掉 `--chdir` 无人发现。
+//! - 环境变量：`spawn` 的文档承诺 bubblewrap 分支**重放**调用方经 `Command::env` 显式设置
+//!   的变量（`get_envs` 有读取接口，而 stdio 没有）。少了这一条，那一段承诺没有任何落点。
 //!
 //! **「两种机制各跑同一套用例」这句话只在「写」这一侧成立。** 两条机制在写上语义相同
 //! （都由本文件的两臂用例覆盖），在读上**不同**，本文件不假定二者可互换：
@@ -248,11 +250,20 @@ fn writing_through_a_symlink_inside_the_task_is_denied() {
 ///
 /// # 这条用例钉的是什么，不钉什么
 ///
-/// 钉的是：逃逸不能从沙箱内部制造。两种机制下都真被拒，但**原因不同**——
-/// Landlock 下 Base 整个不可达，`ln` 读不到源；bubblewrap 下源与目标落在不同的
-/// vfsmount（`--ro-bind / /` 与 `--bind <task> <task>` 是两次挂载），内核以
-/// `EXDEV`/`Invalid cross-device link` 拒绝。故本用例只断言失败与「Base 未变」，
-/// 不断言 errno 或 stderr 文本。
+/// 钉的是：逃逸不能从沙箱内部制造。两条机制都真被拒，**呈现形式也相同**——`ln` 都以
+/// `EXDEV`（`Invalid cross-device link`）失败，本机实测两条臂的 stderr 文本一致。
+/// 区别在**内核侧的原因**，不在呈现形式：
+///
+/// - Landlock：跨目录 link 需**源目录**的 `REFER` 授权，而 Base 不在任何被授予子树内，
+///   该授权缺失；内核把这类拒绝也以 `EXDEV` 呈现（与真正的跨设备同形）。
+/// - bubblewrap：源与目标落在不同的 vfsmount（`--ro-bind / /` 与
+///   `--bind <task> <task>` 是两次挂载），是真正的跨设备。
+///
+/// **不得写成「Landlock 下 Base 整个不可达、`ln` 读不到源」。** 本机实测（Landlock
+/// ABI=10）：Landlock 下 `stat <base>/secret.txt` **成功**（返回 size 6）——Landlock
+/// 只拦 `handle_access` 声明过的访问类别，`stat` 不在其中，Base 的**路径**走得通；真正
+/// 被拒的是 `link` 所需的 `REFER`。无沙箱对照下同一条 `ln` **成功**，证明拒绝确由沙箱
+/// 造成。故本用例只断言失败与「Base 未变」，不断言 errno 或 stderr 文本。
 ///
 /// **不钉的是**：宿主（沙箱外、可信方）事先在 Task 根内建好一个指向 Base inode 的硬链接
 /// 之后，子进程写它的**后果**。那一半两种机制都拦不住，实测如下（本机 bwrap 0.13.0，
@@ -355,6 +366,43 @@ fn the_child_working_directory_is_the_task_root() {
             cwd.trim_end(),
             task.root().to_str().unwrap(),
             "[{mechanism}] 子进程的工作目录应是 Task 根"
+        );
+    });
+}
+
+/// 调用方经 `Command::env` 显式设置的环境变量随沙箱全程到达子进程。
+///
+/// 这一条主要钉 bubblewrap 分支：它**重建**命令（`bwrap <加固参数> -- <原命令>`），
+/// 而重建会丢掉调用方在 `Command` 上设过的**一部分**东西——stdio 丢掉（`Command` 没有
+/// `get_stdout` 之类的读取接口），`env` 保得住（`get_envs` 有）。`spawn` 的文档承诺了
+/// env 重放，本用例是该承诺唯一的落点：删掉重放那一段，bubblewrap 臂变红。
+/// Landlock 分支原样传递同一个 `Command`，env 天然保留，本用例在它上面是顺带覆盖。
+///
+/// 变量名取一个**父进程未设**的：若它恰好在父环境里，「未重放」与「继承」两种情形在
+/// 子进程看来相同，用例就没有判别力。子进程把值写进 Task 内的文件再读回来——bubblewrap
+/// 分支的 stdio 已在重建时丢掉，不能靠 stdout。
+#[test]
+fn explicitly_set_environment_variables_reach_the_child() {
+    for_each_mechanism(|mechanism, sandbox, task, _base_path| {
+        let out = task.root().join("env.txt");
+        let mut cmd = Command::new("sh");
+        cmd.arg("-c")
+            .arg(format!("printf %s \"$CONTINUUM_SANDBOX_ENV_PROBE\" > {}", out.display()));
+        cmd.env("CONTINUUM_SANDBOX_ENV_PROBE", "value-from-caller-7f3a");
+
+        let status = sandbox
+            .spawn(task, cmd)
+            .unwrap_or_else(|e| panic!("[{mechanism}] sandbox.spawn 失败：{e}"))
+            .wait()
+            .expect("等待子进程失败");
+        assert!(
+            status.success(),
+            "[{mechanism}] 环境变量探针脚本应成功，实际 {status:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            "value-from-caller-7f3a",
+            "[{mechanism}] 调用方显式设置的环境变量必须原样到达子进程"
         );
     });
 }
