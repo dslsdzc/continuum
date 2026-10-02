@@ -12,5 +12,9 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
+# `tests/persist.rs` 是独立 crate，直接引用 `continuum_persist::{Db, Value, ...}`。
+# 该包已在 [dependencies] 中（落库本身用它），此处是显式声明，
+# 使测试对它的使用不依赖「实现恰好也依赖它」这一巧合。
+continuum-persist = { path = "../continuum-persist" }
 tempfile = { workspace = true }
 trybuild = { workspace = true }

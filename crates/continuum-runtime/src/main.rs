@@ -1,6 +1,6 @@
 //! Runtime 入口：打开数据库、应用迁移、执行 §319 恢复五阶段。
 //!
-//! 迁移集合为 P0 内置迁移加 P1 各层迁移；恢复钩子由各层注册。
+//! 迁移集合为 P0 内置迁移加 P1、P2 各层迁移；恢复钩子由各层注册。
 
 use continuum_persist::{run_recovery, Db, PersistError, RecoveryRegistry};
 use std::path::Path;
@@ -25,6 +25,7 @@ fn startup(path: &Path) -> Result<(), PersistError> {
     let mut migrations = continuum_persist::builtin_migrations();
     migrations.extend(continuum_artifact::p1_artifact_migrations());
     migrations.extend(continuum_graph::p1_graph_migrations());
+    migrations.extend(continuum_workspace::p2_workspace_migrations());
 
     let db = Db::open_with(path, migrations)?;
     let applied = db.migrate()?;

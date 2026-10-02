@@ -54,8 +54,8 @@ const ALLOWED: &[(&str, &[&str])] = &[
         "continuum-workspace",
         &["continuum-events", "continuum-persist"],
     ),
-    // Task 12 起 runtime 直接依赖这六个：后两者用于在启动流程里
-    // 注册 P1 迁移。
+    // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
+    // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     (
         "continuum-runtime",
         &[
@@ -65,6 +65,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-graph",
             "continuum-persist",
             "continuum-provider",
+            "continuum-workspace",
         ],
     ),
 ];

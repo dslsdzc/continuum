@@ -4,6 +4,7 @@ pub mod backend;
 pub mod base;
 pub mod error;
 pub mod ids;
+pub mod persist;
 pub mod task;
 // 后端实现不对外暴露：上层经 `backend` 的三个函数取用 Task Workspace。
 mod overlay;
@@ -15,6 +16,9 @@ pub use backend::{
 pub use base::BaseWorkspace;
 pub use error::WorkspaceError;
 pub use ids::IntentId;
+pub use persist::{
+    WorkspaceRecord, load_workspace, p2_workspace_migrations, save_workspace,
+};
 // overlay 后端另有两项出口：驱动要据 `in_user_namespace` 判断是否需要把自身 re-exec 进
 // 用户与挂载命名空间，而 `OverlayBackend` 承载该后端的命名空间约束与 `.ai/` 可见性说明。
 // 创建与放弃仍只经 `backend` 的三个函数，调用方不直接引用具体后端。

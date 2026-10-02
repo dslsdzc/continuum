@@ -152,6 +152,7 @@ dependencies = [
  "continuum-graph",
  "continuum-persist",
  "continuum-provider",
+ "continuum-workspace",
  "tempfile",
  "thiserror",
  "tokio",
