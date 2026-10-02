@@ -163,12 +163,18 @@ WritablePath     独立类型，唯一构造入口是 TaskWorkspace::writable_ro
 第 2 条允许 Task 根位于 Base **之内**（worktree 后端即此形态：Task 根在
 `<base>/.ai/worktrees/<intent>`），因为此时可写范围是 Base 的一个子目录而非 Base 本身。
 
+**本层的适用范围：路径分量层面，不含符号链接。** `WritablePath` 的越界检查是对路径字符串的
+纯运算（拒绝 `..` 与绝对路径），不触碰文件系统，因此**结构上不可能**检出「Task 根内有一个
+指向根外的符号链接」这一类逃逸：在 Task 内建 `link -> <根外>`，`write("link/x")` 会落在根外。
+该逃逸由第 4.3 节的内核层承担，且第 13 节的测试须显式覆盖它——否则三层之间会出现无人认领的缺口。
+
 「Base 只经 Integration Gate 写入」由同一条机制给出：`BaseWorkspace` 不暴露可写句柄，
 写 Base 的私有路径只被 Gate 的三种写入操作调用。
 
-验证方式是 `trybuild` 的编译失败用例：`WritablePath::new(base_path)` 与
-`Gate` 之外对 Base 的写入均须**编译失败**。运行期测试无法证明「不可构造」，编译失败用例是
-这条保证的唯一直接证据。代价是引入一个 dev-dependency。
+验证方式是 `trybuild` 的编译失败用例：从 Base 的路径构造 `WritablePath`（例如
+`WritablePath::from(base.root())`），以及 `Gate` 之外对 Base 的写入，均须**编译失败**。
+运行期测试无法证明「不可构造」，编译失败用例是这条保证的唯一直接证据。
+代价是引入一个 dev-dependency。
 
 ## 4.2 进程层
 
@@ -199,6 +205,9 @@ Task Workspace。它额外提供网络与 PID 命名空间的隔离能力，本�
   且降级必须显式记录——否则会静默退化成「没有隔离」。
 - **bubblewrap 的参数表须与 Landlock 走同一套测试。** 加固参数少写一项即等于未隔离，
   不能因为它「是现成工具」而假定配置正确。
+- **必须显式覆盖符号链接逃逸。** 类型层只做路径分量检查（见 4.1），故「Task 根内有一个
+  指向根外的符号链接」这一逃逸由本层承担，且须有对应用例：在 Task 内建 `link -> <根外目录>`，
+  在沙箱内 `write("link/x")`，断言被拒。缺此用例时该缺口在三层之间无人认领。
 
 ## 4.4 对照臂
 
