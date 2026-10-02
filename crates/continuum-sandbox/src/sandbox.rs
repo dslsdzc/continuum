@@ -31,15 +31,18 @@ pub struct SandboxCapabilities {
 
 /// Landlock 机制。
 ///
-/// 本 task 中它不携带状态，句柄经 [`Sandbox::landlock`] 取得；Task 6 起承载内核
-/// ABI 探测结果与只读放行路径集合。
+/// 本 task 中它不携带状态；**设计上**句柄经 [`Sandbox::landlock`] 取得。
+/// 「唯一来源」这层保证要到 Task 6 起加上私有字段后才成立——此刻它没有字段可作阻挡，
+/// `LandlockSandbox {}` 在 crate 外仍可构造。Task 6 起承载内核 ABI 探测结果与只读
+/// 放行路径集合。
 pub struct LandlockSandbox {
     // Task 6 起承载该机制的状态：内核 ABI 探测结果与只读放行路径集合。
 }
 
 /// bubblewrap 机制。
 ///
-/// 本 task 中它不携带状态，句柄经 [`Sandbox::bubblewrap`] 取得；Task 7 起承载
+/// 本 task 中它不携带状态；**设计上**句柄经 [`Sandbox::bubblewrap`] 取得，该唯一性
+/// 同 [`LandlockSandbox`] 一样要到 Task 7 加上私有字段后才成立。Task 7 起承载
 /// bwrap 可执行文件的定位结果与固定的加固参数。
 pub struct BubblewrapSandbox {
     // Task 7 起承载该机制的状态：bwrap 可执行文件的定位结果与固定的加固参数。
@@ -50,7 +53,7 @@ pub struct BubblewrapSandbox {
 /// 两种机制在这一层不可区分：调用方只经 [`Sandbox::spawn`] 启动子进程、
 /// 经 [`Sandbox::capabilities`] 读取实际生效的隔离项，不感知机制差异。
 pub enum Sandbox {
-    /// Landlock：进程级规则集，随 `exec` 生效并被子孙继承。
+    /// Landlock：进程级规则集，经 `restrict_self` 生效，并随 `exec` 被子孙继承。
     Landlock(LandlockSandbox),
     /// bubblewrap：以挂载命名空间限制文件系统。其网络与 PID 命名空间能力本子项目不使用
     /// （Task 7 的参数集不含 `--unshare-net` / `--unshare-pid`），故届时
