@@ -164,7 +164,6 @@ dependencies = [
  "continuum-events",
  "continuum-persist",
  "serde",
- "serde_json",
  "tempfile",
  "thiserror",
  "trybuild",

@@ -8,7 +8,6 @@ rust-version.workspace = true
 continuum-events = { path = "../continuum-events" }
 continuum-persist = { path = "../continuum-persist" }
 serde = { workspace = true }
-serde_json = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

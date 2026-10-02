@@ -28,16 +28,27 @@ impl TaskWorkspace {
     /// `<base>/.ai/worktrees/<intent>`），因为此时可写范围是 Base 的一个子目录，
     /// 而非 Base 本身。
     ///
-    /// 判据是 `base_canonical.starts_with(root_canonical)`——为真即拒绝。
+    /// 判据是 `base_canonical.starts_with(root_candidate)`——为真即拒绝，
     /// 两侧都取 `std::fs::canonicalize` 的结果，故 symlink 与 `..` 均无法绕过。
-    /// root 可能尚不存在，故**先 `create_dir_all` 再规范化**；句柄持有的也是规范化后的
-    /// 路径，后续 `join` 与写操作都从它出发。
+    ///
+    /// **判定先于落盘**：被拒绝的 root 不得在磁盘上留下任何目录。
+    /// root 可能尚不存在，故判定用 [`canonical_candidate`]——它不产生副作用。
+    /// 判定通过后才 `create_dir_all`，再规范化一次作为句柄持有的最终路径，
+    /// 后续 `join` 与写操作都从它出发。
     pub fn new_outside(
         base: &BaseWorkspace,
         root: impl Into<PathBuf>,
         intent_id: IntentId,
     ) -> Result<Self, WorkspaceError> {
         let root = root.into();
+        let candidate = canonical_candidate(&root)?;
+        let base_root = canonicalize(base.root())?;
+        if base_root.starts_with(&candidate) {
+            return Err(WorkspaceError::Overlaps {
+                root: candidate,
+                base: base_root,
+            });
+        }
         if root.exists() && !root.is_dir() {
             return Err(WorkspaceError::NotADirectory { path: root });
         }
@@ -45,13 +56,6 @@ impl TaskWorkspace {
             reason: format!("无法建立 Task Workspace 目录 {}：{e}", root.display()),
         })?;
         let root = canonicalize(&root)?;
-        let base_root = canonicalize(base.root())?;
-        if base_root.starts_with(&root) {
-            return Err(WorkspaceError::Overlaps {
-                root,
-                base: base_root,
-            });
-        }
         Ok(Self { root, intent_id })
     }
 
@@ -141,8 +145,58 @@ impl WritablePath {
 ///
 /// 只有经此规范化的路径才可用于重叠判定——逐字符比较会让
 /// `base/../base`、指向 Base 的 symlink 这类写法绕过 `new_outside` 的守卫。
+///
+/// 要求路径**已存在**（`std::fs::canonicalize` 的固有要求）。可能尚不存在的
+/// 路径走 [`canonical_candidate`]。
 fn canonicalize(path: &Path) -> Result<PathBuf, WorkspaceError> {
     std::fs::canonicalize(path).map_err(|e| WorkspaceError::BackendUnavailable {
         reason: format!("无法规范化路径 {}：{e}", path.display()),
     })
+}
+
+/// 规范化一个**可能尚不存在**的路径，且不产生任何副作用。
+///
+/// 重叠判定必须在落盘之前完成：先 `create_dir_all` 再判定，会让被拒绝的 root
+/// 在磁盘上留下目录（例如 base=`/tmp/a/b`、root=`/tmp/a/zzz/..` 会先建出
+/// `/tmp/a/zzz` 再拒绝），与本层「不该动的东西一律不动」的语义相悖。
+///
+/// 做法三步：
+/// 1. `std::path::absolute` 取绝对路径（只补当前目录，不解析 symlink）；
+/// 2. 沿 `parent()` 向上找到最深的**已存在**祖先，`canonicalize` 它——
+///    这一段是真实路径，symlink 与 `..` 都已解析；
+/// 3. 把剩下的分量按 `components()` 拼回：`Normal` 压入，`ParentDir` 就地弹出
+///    （`/` 处弹出无效果），`CurDir` 跳过。
+///
+/// 第 3 步用词法折叠而非再次 `canonicalize` 是充分的：剩余分量位于最深已存在
+/// 祖先之下，按定义都不存在，其中不可能藏 symlink，故没有需要解析的东西。
+/// 反过来，若剩余分量里出现 `..` 而只做字面拼接，`Path::starts_with` 的逐分量
+/// 比较会给错答案（`/tmp/a/zzz/..` 不以 `/tmp/a` 为前缀分量序列）。
+///
+/// `absolute` 之后的路径是绝对的，故向上走必然终止于已存在的根，
+/// 不存在「每级都不存在」的输入。
+fn canonical_candidate(path: &Path) -> Result<PathBuf, WorkspaceError> {
+    let absolute = std::path::absolute(path).map_err(|e| WorkspaceError::BackendUnavailable {
+        reason: format!("无法绝对化路径 {}：{e}", path.display()),
+    })?;
+    let mut existing = absolute.as_path();
+    while !existing.exists() {
+        match existing.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => existing = parent,
+            _ => break,
+        }
+    }
+    let rest = absolute.strip_prefix(existing).unwrap_or(Path::new(""));
+    let mut out = canonicalize(existing)?;
+    for comp in rest.components() {
+        match comp {
+            Component::Normal(part) => out.push(part),
+            Component::ParentDir => {
+                out.pop();
+            }
+            Component::CurDir => {}
+            // absolute 之后不应出现根前缀；真出现也无从拼接，留给最终 canonicalize 兜底。
+            Component::RootDir | Component::Prefix(_) => {}
+        }
+    }
+    Ok(out)
 }
