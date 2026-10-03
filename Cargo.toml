@@ -12,6 +12,7 @@ members = [
     "crates/continuum-runtime",
     "crates/continuum-workspace",
     "crates/continuum-sandbox",
+    "crates/continuum-effect",
 ]
 
 [workspace.package]

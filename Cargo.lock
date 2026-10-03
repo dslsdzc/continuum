@@ -75,6 +75,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-effect"
+version = "0.1.0"
+dependencies = [
+ "continuum-core",
+ "continuum-events",
+ "continuum-persist",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "continuum-events"
 version = "0.1.0"
 dependencies = [
