@@ -2107,13 +2107,25 @@ mod tests {
     /// 环境不具备本用例所需条件时的**显式**跳过标记。
     ///
     /// 不静默通过：跳过原因打到 stderr（cargo 在用例通过时不回显，`--nocapture` 可见）。
+    /// **并给出本条用例的执行/跳过条数**——按 Task 7 的教训（`continuum-sandbox` 的
+    /// `tests/isolation.rs`：逐条打标记、`ran > 0` 兜底），标记要能让人一眼看出
+    /// 「这条路径这次到底验没验」，而不是只留一句「跳过了」。
     fn skip(test: &str, reason: &str) {
-        eprintln!("【跳过】{test}：{reason}。本用例未执行断言。");
+        eprintln!(
+            "【跳过】{test}：{reason}。本条：执行 0、跳过 1——**本次运行没有在挂载态的覆盖层上\
+             验证集成**。用 `--nocapture` 可见本行。"
+        );
     }
 
     /// 把本用例重新执行进 `unshare -Urm` 的子进程，并核对子进程的退出码。
     ///
     /// 返回 `true` 表示「当前就是子进程，继续执行断言」；`false` 表示父进程已跑完或已跳过。
+    ///
+    /// **本模块只有这一条用例需要命名空间**（其余 overlay 用例都在普通目录上跑
+    /// [`integrate_overlay`]），故没有 `isolation.rs` 那种「全部不可用」的处境：命名空间取不到
+    /// 时，覆盖层在本机根本建不出来（`create_task_workspace` 会以 `NotInNamespace` 拒绝），
+    /// 整个 overlay 后端都无从验证——那与 `tests/gate.rs`、`tests/backend_overlay.rs` 的处置
+    /// 一致，都是跳过并打标记，而不是把本机能力不足报成实现缺陷。
     fn enter_namespace(test_name: &str) -> bool {
         if is_child() {
             return true;
@@ -2157,6 +2169,11 @@ mod tests {
             stdout.contains("1 passed"),
             "子进程没有执行 {test_name}（过滤器对不上时 libtest 以 0 tests 退出 0，本用例\
              会静默变绿）。子进程输出：\n{stdout}"
+        );
+        // 与 `【跳过】` 那条对称：本条真的在挂载态上跑过了。两行合起来是本模块挂载态
+        // 覆盖的**条数**凭据（执行 1、跳过 0；环境不具备时反过来），`--nocapture` 可见。
+        eprintln!(
+            "【运行】{test_name}：本条：执行 1、跳过 0——集成在真挂载的覆盖层上验过了。"
         );
         drop(holder);
         false
