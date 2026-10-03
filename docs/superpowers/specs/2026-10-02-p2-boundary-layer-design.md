@@ -695,6 +695,11 @@ UNKNOWN 的收敛        需要外部对账或人工决策，两者均不在本�
 Landlock ABI 降级     内核不支持的文件系统类别降级处理，降级须显式记录。
                        降级后的实际隔离面由 SandboxCapabilities 如实反映。
 bubblewrap 依赖       非 Rust 的运行时依赖。本子项目不使用其网络与 PID 隔离能力。
+view_diff 的索引副本   `view_diff` 每次整份复制 Base 的索引（`GIT_INDEX_FILE` 指向副本）——
+                      **正确性要求这份副本**：`git diff` 在 stat 缓存过期而内容未变时会把索引
+                      写回，而 §256 要求 Base 只读。代价是大仓库（索引可达数十 MB）每次只读比较
+                      付一次全量拷贝，且新增一个对可写临时目录的依赖。
+                      P3 若引入缓存存储，此处可改为按需。
 bubblewrap 的跳过窗口 不可用则跳过的设计都有同一性质：**若可用性探测本身出错，整套 bubblewrap
                       用例会静默跳过而全绿**。触发形态是 `BubblewrapSandbox::new()` 恒给出
                       `bwrap: None`（实测：全量 265 passed，而 bubblewrap 臂运行 0 条、跳过 7 条）。
