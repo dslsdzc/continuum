@@ -52,6 +52,21 @@ fn count_effects(tx: &continuum_persist::Tx<'_>) -> i64 {
     }
 }
 
+/// 审计表里的 (kind, payload) 各一行，按 seq 排序。
+fn audit_rows(tx: &continuum_persist::Tx<'_>) -> Vec<(String, serde_json::Value)> {
+    tx.query("SELECT kind, payload FROM audit_log ORDER BY seq", &[])
+        .unwrap()
+        .iter()
+        .map(|row| {
+            let kind = text_of(&row[0]);
+            let raw = text_of(&row[1]);
+            let payload = serde_json::from_str(&raw)
+                .unwrap_or_else(|e| panic!("审计 payload 应为 JSON，实际 {raw}: {e}"));
+            (kind, payload)
+        })
+        .collect()
+}
+
 #[test]
 fn record_planned_then_load_round_trips() {
     let (_dir, db) = db();
@@ -115,10 +130,13 @@ fn the_same_idempotency_key_is_rejected() {
     }
 
     assert_eq!(count_effects(&tx), 1, "同键被拒后库里应仍只有一条记录");
+    // 被拒的写入不落审计：否则审计里会有一条「登记过」而 effect 表里没有的效应
+    assert_eq!(audit_rows(&tx).len(), 1, "被拒的登记不应写审计");
 
     // 挡住的是键，不是全部写入：换个键仍能写
     record_planned(&tx, &sample("e3", "k2")).unwrap();
     assert_eq!(count_effects(&tx), 2);
+    assert_eq!(audit_rows(&tx).len(), 2);
 
     tx.commit().unwrap();
 }
@@ -190,7 +208,67 @@ fn advance_follows_the_state_machine() {
     let back = load_effect(&tx, &id).unwrap().unwrap();
     assert_eq!(back.state, EffectState::Committed, "被拒的迁移不得改动库里的状态");
     assert_eq!(back.updated_at, 1_002, "被拒的迁移不得改动时间戳");
+    // 被拒的迁移也不入审计：4 = 1 次登记 + 3 次成功的推进
+    assert_eq!(audit_rows(&tx).len(), 4, "被拒的迁移不应写审计");
 
+    tx.commit().unwrap();
+}
+
+#[test]
+fn every_state_change_appends_one_audit_record() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    record_planned(&tx, &sample("e1", "k1")).unwrap();
+    assert_eq!(audit_rows(&tx).len(), 1, "登记一条效应应写一条审计");
+
+    let id = EffectId::new("e1");
+    for (i, to) in [EffectState::Authorized, EffectState::Executing, EffectState::Committed]
+        .into_iter()
+        .enumerate()
+    {
+        let before = audit_rows(&tx).len();
+        advance(&tx, &id, to, 1_000 + i as i64).unwrap();
+        assert_eq!(audit_rows(&tx).len(), before + 1, "每次推进应各加一条审计");
+    }
+
+    let rows = audit_rows(&tx);
+    assert_eq!(rows.len(), 4);
+    // 归类取 ExternalEffects：上篇把不可回滚的外部操作归它
+    for (kind, _) in &rows {
+        assert_eq!(kind, "external effects", "审计归类应为 external effects");
+    }
+    // 登记那条记的是被登记的效应本身
+    assert_eq!(rows[0].1["effect_id"], "e1");
+    assert_eq!(rows[0].1["effect_type"], "push_branch");
+    assert_eq!(rows[0].1["idempotency_key"], "k1");
+    assert_eq!(rows[0].1["state"], "planned");
+    // 推进那条记的是两端状态，取值与 effect 表的列编码同源
+    assert_eq!(rows[3].1["effect_id"], "e1");
+    assert_eq!(rows[3].1["from"], "executing");
+    assert_eq!(rows[3].1["to"], "committed");
+
+    tx.commit().unwrap();
+}
+
+#[test]
+fn the_audit_and_the_state_change_are_rolled_back_together() {
+    let (_dir, db) = db();
+    {
+        // 只开事务不提交：`Tx` 被丢弃时整笔回滚
+        let tx = db.begin().unwrap();
+        record_planned(&tx, &sample("e1", "k1")).unwrap();
+        advance(&tx, &EffectId::new("e1"), EffectState::Authorized, 11).unwrap();
+        assert_eq!(count_effects(&tx), 1);
+        assert_eq!(audit_rows(&tx).len(), 2);
+    }
+
+    let tx = db.begin().unwrap();
+    assert_eq!(count_effects(&tx), 0, "回滚后 effect 表不应留下行");
+    assert_eq!(
+        audit_rows(&tx).len(),
+        0,
+        "回滚后审计不应留下行——留下即说明它没和状态变更走同一个事务"
+    );
     tx.commit().unwrap();
 }
 
@@ -271,6 +349,7 @@ fn advance_on_a_missing_effect_is_rejected() {
         other => panic!("应为 PersistError::Database 变体，实际 {other:?}"),
     }
     assert_eq!(count_effects(&tx), 0, "报错后不得留下任何行");
+    assert_eq!(audit_rows(&tx).len(), 0, "报错后不得留下审计");
 
     tx.commit().unwrap();
 }

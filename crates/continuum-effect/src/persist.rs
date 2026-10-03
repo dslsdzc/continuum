@@ -41,7 +41,10 @@ pub fn p2_effect_migrations() -> Vec<Migration> {
 /// 枚举是封闭的且本 match 穷尽无通配臂：给 `EffectType` 加变体时本函数编译不过，
 /// 编码不会漏掉分支。**解码侧没有这层保护**——[`parse_effect_type`] 是同一个枚举
 /// 的逆，加变体时它照旧编译，须由作者一并补上；漏补的后果是该变体写得进、读不回。
-fn effect_type_str(t: EffectType) -> &'static str {
+///
+/// `pub(crate)`：`crate::journal` 的审计 payload 要写同一个串，故它必须取用本函数
+/// 而非另抄一份字面量。crate 外不可见。
+pub(crate) fn effect_type_str(t: EffectType) -> &'static str {
     match t {
         EffectType::SendEmail => "send_email",
         EffectType::PushBranch => "push_branch",
@@ -71,8 +74,9 @@ fn parse_effect_type(s: &str) -> Result<EffectType, PersistError> {
     })
 }
 
-/// `effect.state` 列的唯一编码来源。穷尽无通配臂，理由同 [`effect_type_str`]。
-fn state_str(s: EffectState) -> &'static str {
+/// `effect.state` 列的唯一编码来源。穷尽无通配臂，理由同 [`effect_type_str`]；
+/// `pub(crate)` 的理由也同（审计 payload 与本列取同一个串）。
+pub(crate) fn state_str(s: EffectState) -> &'static str {
     match s {
         EffectState::Planned => "planned",
         EffectState::Authorized => "authorized",
