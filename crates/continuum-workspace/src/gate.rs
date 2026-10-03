@@ -545,8 +545,9 @@ fn apply_patch_worktree(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<()
         &["diff", "--binary", "--no-renames", &divergence],
         &envs,
     )?;
-    // 空补丁不送给 git：`git apply` 在空输入下以「unrecognized input」失败，而
-    // 「Task 只改了未跟踪文件」是正常情形，不是错误。
+    // 空补丁不送给 git：实测（git 2.56）`git apply` 在空输入下以退出码 128 与
+    // 「No valid patches in input (allow with "--allow-empty")」失败，而「Task 只改了
+    // 未跟踪文件」是正常情形，不是错误。
     if !patch.is_empty() {
         worktree::git_with_stdin(base.root(), &["apply"], &patch)?;
     }
@@ -1755,6 +1756,40 @@ mod tests {
             std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
             "Task 改过\n",
             "审计失败时改动没有落到 Base：本层的次序变了（应当是先变更、后记录）"
+        );
+    }
+
+    /// Task 只改了未跟踪文件时，`apply_patch` 照样把它带进 Base（空补丁不送给 git）。
+    ///
+    /// `git apply` 在空输入下以退出码 128 失败（实测 git 2.56：
+    /// 「No valid patches in input (allow with "--allow-empty")」），故本层必须先判空。
+    /// 少了这一步，「Task 只加了一个新文件」这种最常见的集成会被报成 git 故障。
+    #[test]
+    fn apply_patch_with_only_untracked_files_still_integrates_them() {
+        let (_d, base_path) = git_repo();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) =
+            crate::backend::create_task_workspace(&base, &crate::ids::IntentId::new("i1")).unwrap();
+        // 一个新文件，且**不**提交、不 git add：补丁里因此什么也没有
+        std::fs::write(task.root().join("只有一个新文件.txt"), "内容\n").unwrap();
+        let head_before = run_git(&base_path, &["rev-parse", "HEAD"]);
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        IntegrationGate::new(&base)
+            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .unwrap();
+        tx.commit().unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(base_path.join("只有一个新文件.txt")).unwrap(),
+            "内容\n",
+            "只改未跟踪文件时那处改动没有进 Base"
+        );
+        assert_eq!(
+            run_git(&base_path, &["rev-parse", "HEAD"]),
+            head_before,
+            "apply_patch 不该替用户提交"
         );
     }
 
