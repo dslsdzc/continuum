@@ -195,7 +195,13 @@ impl<'a> IntegrationGate<'a> {
         let _ = approval;
         match backend {
             WorkspaceBackend::Worktree => apply_patch_worktree(self.base, task)?,
-            WorkspaceBackend::Overlay => integrate_overlay(self.base.root(), task.root())?,
+            WorkspaceBackend::Overlay => {
+                // 形态校验排在集成之前，理由见 `overlay::require_layout` 与
+                // `integrate_overlay` 的文档：`backend` 由调用方给出，与 Task 的实际
+                // 形态不符时 overlay 路径会拿 Base 与一棵**不是它的合并视图**的树对差。
+                crate::overlay::require_layout(task.root())?;
+                integrate_overlay(self.base.root(), task.root())?;
+            }
         }
         self.audit(
             tx,
@@ -310,7 +316,11 @@ impl<'a> IntegrationGate<'a> {
         let _ = approval;
         match backend {
             WorkspaceBackend::Worktree => merge_worktree(self.base, task)?,
-            WorkspaceBackend::Overlay => integrate_overlay(self.base.root(), task.root())?,
+            WorkspaceBackend::Overlay => {
+                // 同 `apply_patch`：形态校验排在集成之前。
+                crate::overlay::require_layout(task.root())?;
+                integrate_overlay(self.base.root(), task.root())?;
+            }
         }
         self.audit(
             tx,
@@ -656,15 +666,80 @@ fn merge_worktree(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<(), Gate
 /// 存在」分三类），故次序只影响中途失败时留下了什么。先删的话，中途失败留下的是一棵
 /// 「少了一些东西」的 Base；先增的话，是一个「多了一些东西」的 Base——后者更容易让
 /// 用户误以为改动已经全部生效，故先删。
+///
+/// **两阶段：先算计划并全量校验，再执行。** 见 [`plan_overlay_integration`]——本函数
+/// 不做任何判定，只按计划走。执行阶段仍可能失败（I/O 错误、两侧树在计划之后被并发
+/// 改动），那部分不在计划能判定的范围内，也没有事务可回滚；计划覆盖的是**能从计划本身
+/// 判定**的那一类失败，而早先的实现正是在这一类上先动刀再报错。
 fn integrate_overlay(base_root: &Path, task_root: &Path) -> Result<(), GateError> {
-    let diff = diff_trees(base_root, task_root)?;
-    for rel in diff.deleted() {
-        remove_entry(&base_root.join(rel))?;
-    }
-    for rel in diff.added().iter().chain(diff.modified()) {
-        copy_entry(task_root, base_root, rel)?;
+    for step in plan_overlay_integration(base_root, task_root)? {
+        match step {
+            IntegrationStep::Remove(rel) => remove_entry(&base_root.join(&rel))?,
+            IntegrationStep::Copy(rel) => copy_entry(task_root, base_root, &rel)?,
+        }
     }
     Ok(())
+}
+
+/// 集成计划的一步。删除一律排在复制之前（次序的理由见 [`integrate_overlay`] 的文档）。
+#[derive(Debug)]
+enum IntegrationStep {
+    /// 删掉 Base 里 `rel` 处的条目。
+    Remove(PathBuf),
+    /// 把 Task 里 `rel` 处的条目复制进 Base。
+    Copy(PathBuf),
+}
+
+/// 算出一次 overlay 集成要做的事，并**在动第一个字节之前**把能从计划本身判定的失败
+/// 全部报出。返回 `Err` 时 Base 一字未动。
+///
+/// **这是本函数存在的全部理由。** 早先的写法是「边删边发现」：删除那一趟先把
+/// `base - task` 的每个文件移掉，复制那一趟才可能在某一级撞上「目标是目录」而拒绝——
+/// 于是**返回 `Err` 之前 Base 已经被删掉一部分**。这个窗口很容易撞上，因为两个既有
+/// 判据合起来正好把它敞开：`collect_files` 只收文件与符号链接（目录根本不进 Diff），
+/// 而 `remove_entry` 只对**目录**拒绝。最要紧的一例：Task 是 worktree 形态（根里
+/// `.git` 是**文件**）而 Base 是仓库（`.git` 是**目录**）时，删除那一趟会把
+/// `base/.git/**` 整个移掉，复制那一趟才拒——用户的仓库在报错之前就没了。
+///
+/// 故凡是「只看计划就能判定」的条件都在这里定：源是不是条目、目标是不是目录。任何一项
+/// 不成立就整体拒绝，Base 上不留半个字节。这与 [`IntegrationGate::cherry_pick`] 在
+/// overlay 分支上的处置同一条道理——**拒绝排在任何改动之前**。
+fn plan_overlay_integration(
+    base_root: &Path,
+    task_root: &Path,
+) -> Result<Vec<IntegrationStep>, GateError> {
+    let diff = diff_trees(base_root, task_root)?;
+    let mut plan = Vec::with_capacity(diff.added().len() + diff.modified().len() + diff.deleted().len());
+    for rel in diff.deleted() {
+        ensure_not_a_directory(&base_root.join(rel))?;
+        plan.push(IntegrationStep::Remove(rel.clone()));
+    }
+    for rel in diff.added().iter().chain(diff.modified()) {
+        ensure_copyable(task_root, base_root, rel)?;
+        plan.push(IntegrationStep::Copy(rel.clone()));
+    }
+    Ok(plan)
+}
+
+/// 一步复制能否成功，取只看计划就能判定的那部分：源必须是条目（常规文件或符号链接，
+/// [`collect_files`] 收的正是这两类），目标若已存在则不得是目录（[`remove_entry`]
+/// 只对目录拒绝）。
+///
+/// 目录级的父路径不在此列：[`create_parent_dirs`] 遇到链接或普通文件会删掉它改建目录，
+/// 那正是「Task 侧的目录遮蔽 Base 的同名条目」应有的结果，不是失败条件。
+fn ensure_copyable(from_root: &Path, to_root: &Path, rel: &Path) -> Result<(), GateError> {
+    let src = from_root.join(rel);
+    let meta = std::fs::symlink_metadata(&src).map_err(|e| io_error(&src, e))?;
+    if !(meta.is_file() || meta.file_type().is_symlink()) {
+        return Err(WorkspaceError::GateRefused {
+            reason: format!(
+                "{} 既不是常规文件也不是符号链接，本层不复制目录",
+                src.display()
+            ),
+        }
+        .into());
+    }
+    ensure_not_a_directory(&to_root.join(rel))
 }
 
 /// 把 `rel` 处的条目从 `from_root` 复制到 `to_root`：常规文件按字节，符号链接按目标
@@ -731,6 +806,21 @@ fn create_parent_dirs(to_root: &Path, rel: &Path) -> Result<(), GateError> {
 /// 一个目录出现在这里说明 Base 与 Task 在那一级的**种类**不同（Task 侧是文件、Base 侧
 /// 是目录）。递归删掉这个目录会连带删掉里面本层没看过的东西；报出来让调用方处置。
 fn remove_entry(path: &Path) -> Result<(), GateError> {
+    ensure_not_a_directory(path)?;
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(io_error(path, e)),
+    }
+}
+
+/// `path` 处的条目不得是目录。
+///
+/// 抽出来是因为它有两个调用时机：集成前算计划时（[`plan_overlay_integration`]，为了在
+/// 动第一个字节之前拒绝）与执行时（[`remove_entry`] 自己，`copy_entry` 与
+/// [`create_parent_dirs`] 也经它）。判定必须一致——计划说能删、执行时却拒绝，两阶段就
+/// 白拆了。
+fn ensure_not_a_directory(path: &Path) -> Result<(), GateError> {
     match std::fs::symlink_metadata(path) {
         Ok(meta) if meta.is_dir() => Err(WorkspaceError::GateRefused {
             reason: format!(
@@ -740,7 +830,7 @@ fn remove_entry(path: &Path) -> Result<(), GateError> {
             ),
         }
         .into()),
-        Ok(_) => std::fs::remove_file(path).map_err(|e| io_error(path, e)),
+        Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(io_error(path, e)),
     }
@@ -780,6 +870,9 @@ fn diff_trees(base_root: &Path, task_root: &Path) -> Result<Diff, GateError> {
 /// `root` 之下全部条目的相对路径 → 内容。内容按条目种类取：常规文件是它的字节，
 /// 符号链接是它的目标路径（见下）。
 ///
+/// **`.git` 不进结果**（任何层级上名为 `.git` 的条目，连同它的子树）：仓库的内部状态
+/// 不是内容。理由与后果见函数体内那处注释。
+///
 /// **不收目录**：三类改动以文件为单位。目录在两端会平白分岔——`git` 根本不跟踪目录
 /// （`mkdir` 出来的空目录在 `git diff` 里不出现），把目录计入会让 worktree 与 overlay
 /// 两个后端对同一件事给出不同答案。
@@ -807,6 +900,18 @@ fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, GateError> {
         for entry in entries {
             let entry = entry.map_err(|e| io_error(root, e))?;
             let path = entry.path();
+            // **`.git` 不进差异集，也不递归进去。** 仓库的内部状态不是「内容」：它是
+            // git 自己的账本（HEAD、config、objects、refs……），集成它没有意义，而把
+            // 两侧的 `.git` 当内容比较是有害的——Task 根是 worktree 时 `.git` 是**文件**、
+            // Base 的 `.git` 是**目录**，两者按内容一比就是「Base 侧一整棵 .git 被删」
+            // 加「多了一个 .git」。`.git` 这个名字在 git 仓库里不可能是有意义的被跟踪
+            // 内容（git 自己拒绝跟踪它），故按名字排除不会丢掉任何真实改动。
+            //
+            // 排除在这里而不是在调用方：本函数是 Diff 的唯一来源（[`diff_trees`]），
+            // view_diff 报出的与集成落进 Base 的必须是同一个集合，两边各排一次早晚分叉。
+            if entry.file_name() == ".git" {
+                continue;
+            }
             // 相对路径由父级的相对路径拼出，不靠事后 strip_prefix：遍历的起点就是
             // 相对路径的基准，拼比减少一层「前缀对不上怎么办」。
             let rel = rel.join(entry.file_name());
@@ -2043,6 +2148,213 @@ mod tests {
             std::fs::read_link(base.join("新链接.txt")).unwrap(),
             PathBuf::from("要改的.txt"),
             "新增的符号链接没有按目标重建"
+        );
+    }
+
+    /// Base 全树的递归快照：每个条目的相对路径 →（种类, 内容）。
+    ///
+    /// **含 `.git/`，且按整棵树取。** 守卫用例要钉的是「返回 `Err` 之前 Base 有没有被
+    /// 动过」，只查几个已知文件名不够——被删掉的恰恰是那些不在预期清单里的东西。目录也
+    /// 记一条（空目录同样是一处改动），符号链接记目标而非目标的内容。
+    fn tree_snapshot(root: &Path) -> BTreeMap<PathBuf, (char, Vec<u8>)> {
+        fn walk(root: &Path, rel: &Path, out: &mut BTreeMap<PathBuf, (char, Vec<u8>)>) {
+            let entries = std::fs::read_dir(root.join(rel)).expect("快照：读目录失败");
+            for entry in entries {
+                let entry = entry.expect("快照：读条目失败");
+                let rel = rel.join(entry.file_name());
+                let full = root.join(&rel);
+                let file_type = entry.file_type().expect("快照：取条目种类失败");
+                if file_type.is_dir() {
+                    out.insert(rel.clone(), ('d', Vec::new()));
+                    walk(root, &rel, out);
+                } else if file_type.is_symlink() {
+                    let target = std::fs::read_link(&full).expect("快照：读链接失败");
+                    out.insert(rel, ('l', target.into_os_string().into_vec()));
+                } else {
+                    out.insert(rel, ('f', std::fs::read(&full).expect("快照：读文件失败")));
+                }
+            }
+        }
+        let mut out = BTreeMap::new();
+        walk(root, Path::new(""), &mut out);
+        out
+    }
+
+    /// 守卫用例的夹具：一个真的 Git 仓库作 Base，外加一个由 **worktree 后端**建出的
+    /// 真 worktree 作 Task（根里 `.git` 是**文件**，且根落在 `<base>/.ai/worktrees/<intent>`）。
+    ///
+    /// 返回保活用的 `TempDir`、Base 路径与 Task。用真的后端建 Task 而不手工摆目录：
+    /// 要拦的正是「调用方把一个 worktree 建出的 Task 交给 overlay 路径」，
+    /// 手工摆出来的形状可能漏掉真实现里的某一处。
+    fn worktree_task_fixture() -> (tempfile::TempDir, PathBuf, TaskWorkspace) {
+        let (dir, base_path) = git_repo();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) =
+            crate::backend::create_task_workspace(&base, &crate::ids::IntentId::new("i1")).unwrap();
+        assert_eq!(
+            backend,
+            WorkspaceBackend::Worktree,
+            "夹具本身不是 worktree 后端建的"
+        );
+        // 让 Task 有一处**真实的**改动：被拒绝时它是「本来会落进 Base 的改动」，
+        // 用例才好把「拒绝」与「无事可做」分开。
+        std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+        (dir, base_path, task)
+    }
+
+    /// **Critical 的守卫：`apply_patch` 在形态不匹配时必须于动手之前拒绝。**
+    ///
+    /// 处境：Base 是真的 Git 仓库（`.git` 是**目录**，里头有 HEAD、config、objects、
+    /// refs），Task 是 worktree 后端建出的真 worktree（根里 `.git` 是**文件**），而
+    /// `backend` 被给成 `Overlay`。
+    ///
+    /// 早先的 `integrate_overlay` 是「边删边发现」：删除那一趟按 `base - task` 把
+    /// `base/.git/**` 逐个 `remove_file`（`collect_files` 只收文件，而 `remove_entry`
+    /// 只对**目录**拒绝，故这些文件一路放行），直到复制那一趟走到 `task/.git` 才因目标是
+    /// 目录而拒绝——**返回 `Err` 之前，用户的仓库已经被删掉一大片**。
+    ///
+    /// 现须在集成之前整体拒绝，且**Base 全树逐字节未变**（含 `.git/`，按整棵树比对）。
+    #[test]
+    fn a_worktree_task_with_the_overlay_backend_is_refused_before_any_change() {
+        let (_d, base_path, task) = worktree_task_fixture();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        assert!(base_path.join(".git/HEAD").exists(), "夹具的 .git 不成形");
+        let before = tree_snapshot(&base_path);
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        let err = IntegrationGate::new(&base)
+            .apply_patch(&tx, &task, WorkspaceBackend::Overlay, 1_000, &GateApproval(()))
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                &err,
+                GateError::Workspace(WorkspaceError::BackendUnavailable { .. })
+            ),
+            "期望按「不是本后端的布局」拒绝，实际 {err:?}"
+        );
+        assert_eq!(
+            tree_snapshot(&base_path),
+            before,
+            "被拒绝的集成改动了 Base（含 .git/）"
+        );
+        assert!(
+            audit_rows(&tx).is_empty(),
+            "被拒绝的操作写了审计记录（拒绝应当排在任何变更之前）"
+        );
+    }
+
+    /// 同上，走 `merge`。两个操作在 overlay 分支上是同一个动作（设计 6.3），
+    /// 故守卫必须两条路都在——只钉一条的话，另一条漏掉这道校验不会被发现。
+    #[test]
+    fn a_worktree_task_with_the_overlay_backend_is_refused_by_merge_too() {
+        let (_d, base_path, task) = worktree_task_fixture();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let before = tree_snapshot(&base_path);
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        let err = IntegrationGate::new(&base)
+            .merge(&tx, &task, WorkspaceBackend::Overlay, 1_000, &GateApproval(()))
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                &err,
+                GateError::Workspace(WorkspaceError::BackendUnavailable { .. })
+            ),
+            "期望按「不是本后端的布局」拒绝，实际 {err:?}"
+        );
+        assert_eq!(
+            tree_snapshot(&base_path),
+            before,
+            "被拒绝的集成改动了 Base（含 .git/）"
+        );
+    }
+
+    /// **两阶段的守卫：能从计划本身判定的失败，必须在动第一个字节之前报出。**
+    ///
+    /// 本条**绕过** [`IntegrationGate`] 直接调 `integrate_overlay`：形态校验在 Gate 那一层
+    /// （见上面两条），而本条要钉的是两阶段本身，故不能让它先把误用拦掉。
+    ///
+    /// 处境取 `.git` 那一例的形状而不含 git：Base 在 `sub` 那一级是**目录**、Task 在那一级
+    /// 是**文件**。一步式实现会把 `sub/x.txt` 先移掉，复制那一趟才因目标是目录而拒绝——
+    /// 于是 Base 少了一个文件。两阶段则整体拒绝，Base 一字不动。
+    #[test]
+    fn a_refused_overlay_plan_leaves_the_base_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let task = dir.path().join("task");
+        std::fs::create_dir_all(base.join("sub")).unwrap();
+        std::fs::write(base.join("sub/x.txt"), "只在 Base\n").unwrap();
+        std::fs::write(base.join("留着.txt"), "也是 Base 的\n").unwrap();
+        std::fs::create_dir_all(&task).unwrap();
+        std::fs::write(task.join("sub"), "Task 侧这一级是文件\n").unwrap();
+
+        let before = tree_snapshot(&base);
+        let err = integrate_overlay(&base, &task).unwrap_err();
+
+        assert!(
+            matches!(&err, GateError::Workspace(WorkspaceError::GateRefused { .. })),
+            "期望「目标是目录」被拒，实际 {err:?}"
+        );
+        assert_eq!(tree_snapshot(&base), before, "被拒绝的计划改动了 Base");
+    }
+
+    /// **`.git` 不进差异集，真正的改动照旧落进 Base。**
+    ///
+    /// 两侧的 `.git` 取**不同形态**（Base 是目录、Task 是文件）——这正是 worktree 那一例的
+    /// 形状。若把 `.git` 当内容，Diff 会报出「Base 侧一整棵 `.git` 被删」加上「多了一个
+    /// `.git`」，而后者正是把整棵删除合法化的那一步。
+    ///
+    /// 这条同时钉住排除的**边界**：排除只对 `.git` 生效，`.gitignore`、`.gitmodules`
+    /// 一类同前缀的名字仍是内容，该报的要报。
+    #[test]
+    fn dot_git_is_never_part_of_the_diff_and_the_real_changes_still_land() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let task = dir.path().join("task");
+        std::fs::create_dir_all(base.join(".git/objects/ab")).unwrap();
+        std::fs::write(base.join(".git/HEAD"), "ref: refs/heads/main\n").unwrap();
+        std::fs::write(base.join(".git/objects/ab/cdef"), b"\x00\x01").unwrap();
+        std::fs::write(base.join("要改的.txt"), "base\n").unwrap();
+        std::fs::write(base.join("要删的.txt"), "只在 Base\n").unwrap();
+        std::fs::write(base.join(".gitignore"), "target/\n").unwrap();
+        std::fs::create_dir_all(&task).unwrap();
+        std::fs::write(task.join(".git"), "gitdir: /x/.git/worktrees/i1\n").unwrap();
+        std::fs::write(task.join("要改的.txt"), "task\n").unwrap();
+        std::fs::write(task.join(".gitignore"), "target/\n").unwrap();
+
+        let diff = diff_trees(&base, &task).unwrap();
+        for group in [diff.added(), diff.modified(), diff.deleted()] {
+            assert!(
+                !group.iter().any(|p| p.starts_with(".git")),
+                ".git 进了差异集：{group:?}"
+            );
+        }
+        assert_eq!(
+            diff.modified(),
+            &[PathBuf::from("要改的.txt")][..],
+            "真正的改动没有报出：{diff:?}"
+        );
+        assert_eq!(
+            diff.deleted(),
+            &[PathBuf::from("要删的.txt")][..],
+            "真正的删除没有报出：{diff:?}"
+        );
+        assert!(diff.added().is_empty(), "多出了不该有的新增：{diff:?}");
+
+        integrate_overlay(&base, &task).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(base.join("要改的.txt")).unwrap(),
+            "task\n"
+        );
+        assert!(!base.join("要删的.txt").exists(), "删除没有落进 Base");
+        assert!(base.join(".git/HEAD").exists(), "集成动了 .git/HEAD");
+        assert!(
+            base.join(".git/objects/ab/cdef").exists(),
+            "集成动了 .git/objects"
         );
     }
 

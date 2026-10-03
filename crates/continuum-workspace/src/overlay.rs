@@ -305,32 +305,17 @@ pub(crate) fn create(
     Ok(task)
 }
 
-/// 放弃一个 Task Workspace：卸载覆盖层，再删除其工作目录。
+/// 确认 `mnt` 确实是本后端建出的 overlay 布局：它是 `<intent>` 目录下的 `mnt`，
+/// 且同级目录里有 `upper` 与 `work`。
 ///
-/// 先卸载再删除：挂载点被挂载时 `remove_dir_all` 会以 `EBUSY` 失败，反序一步也做不成。
+/// 判定的用途是**把「别的后端建出的 Task 根」报成「不是本后端的布局」**，而不是让它
+/// 走到后面某一步以别的名义失败（`discard` 那边会变成「umount 失败」，把调用方的误用
+/// 说成外部命令故障）。故本函数**必须排在调用方动第一个字节之前**：`discard` 排在
+/// `umount` 之前，Gate 的写入操作排在集成之前。
 ///
-/// **`umount` 未成功就绝不往下走。** 卸载失败仍继续删目录，只会有两种结局：路径确实仍被
-/// 挂载时，删以 `EBUSY` 失败，错误里 umount 给出的具体原因被后一个失败盖掉；路径并非挂载
-/// 点时（误用或中间态），删会**成功**，把一个不属于本次放弃的目录整删掉。故 `umount` 的
-/// 错误原样返回（带退出码与 stderr），不尝试继续。
-///
-/// **形态校验排在 `umount` 之前。** 本后端的布局由 [`Layout::new`] 固定为
-/// `<Base 标识>/<intent>/{upper,work,mnt}`，三者互为兄弟。确认 `upper` 与 `work` 是 `mnt`
-/// 的同级目录，是为了把「调用方把别的后端（worktree）建出的 Task 根交到这里」报成「不是
-/// 本后端的布局」。少了这一步，误用会走到 `umount`，那里的答复是「umount 失败」——把调用
-/// 方的误用说成外部命令故障；而若该路径下当真挂了别的东西，`umount` 会成功，随后
-/// `remove_dir_all` 整删一个不属于本后端的目录（例如 `<base>/.ai/worktrees/<intent>`）。
-///
-/// `<overlay 根>/<Base 标识>` 只在其**已空**时移除（`remove_dir` 不递归），故住在同一
-/// Base 下的别的 Intent 不受影响；移除失败不报错——非空正是「还有别的 Intent」这一正常
-/// 情形的表现。overlay 根自身不动：它是 Runtime 的公共目录，可由多个 Base 共用。
-///
-/// **中间态没有重试路径。** `umount` 成功而 `remove_dir_all` 失败时，该 Intent 会卡死：
-/// 再调 `discard` 会在 `umount` 处失败（那时已不是挂载点），而 `create` 又因 `intent_dir`
-/// 已存在（见该函数里对既有目录的拒绝）不肯重建。返回的 [`WorkspaceError::IoFailed`]
-/// 带 `path`，人工据此删除该目录即可；除手工收拾外没有自动回收的路子。
-pub(crate) fn discard(task: &TaskWorkspace) -> Result<(), WorkspaceError> {
-    let mnt = task.root();
+/// worktree 后端建出的 Task 根（`<base>/.ai/worktrees/<intent>`）在这里必然失败——它的
+/// 同级目录是别的 Intent，没有 `upper` / `work`。这正是本判定要拦住的那一类误用。
+pub(crate) fn require_layout(mnt: &Path) -> Result<(), WorkspaceError> {
     let Some(intent_dir) = mnt.parent() else {
         return Err(WorkspaceError::BackendUnavailable {
             reason: format!(
@@ -339,7 +324,6 @@ pub(crate) fn discard(task: &TaskWorkspace) -> Result<(), WorkspaceError> {
             ),
         });
     };
-    // 形态校验（见本函数的文档）：在 umount 之前确认这确实是本后端的布局。
     for sibling in ["upper", "work"] {
         if !intent_dir.join(sibling).is_dir() {
             return Err(WorkspaceError::BackendUnavailable {
@@ -351,6 +335,40 @@ pub(crate) fn discard(task: &TaskWorkspace) -> Result<(), WorkspaceError> {
             });
         }
     }
+    Ok(())
+}
+
+/// 放弃一个 Task Workspace：卸载覆盖层，再删除其工作目录。
+///
+/// 先卸载再删除：挂载点被挂载时 `remove_dir_all` 会以 `EBUSY` 失败，反序一步也做不成。
+///
+/// **`umount` 未成功就绝不往下走。** 卸载失败仍继续删目录，只会有两种结局：路径确实仍被
+/// 挂载时，删以 `EBUSY` 失败，错误里 umount 给出的具体原因被后一个失败盖掉；路径并非挂载
+/// 点时（误用或中间态），删会**成功**，把一个不属于本次放弃的目录整删掉。故 `umount` 的
+/// 错误原样返回（带退出码与 stderr），不尝试继续。
+///
+/// **形态校验排在 `umount` 之前**，判定见 [`require_layout`]。少了这一步，误用会走到
+/// `umount`，那里的答复是「umount 失败」——把调用方的误用说成外部命令故障；而若该路径下
+/// 当真挂了别的东西，`umount` 会成功，随后 `remove_dir_all` 整删一个不属于本后端的目录
+/// （例如 `<base>/.ai/worktrees/<intent>`）。
+///
+/// 该判定不止此处要：Gate 的写入操作**同样**收一个由调用方给出的 `backend`，误用在那里
+/// 的后果是删改 Base（见 [`crate::gate`]），故它排在任何改动之前，共用本函数。
+///
+/// `<overlay 根>/<Base 标识>` 只在其**已空**时移除（`remove_dir` 不递归），故住在同一
+/// Base 下的别的 Intent 不受影响；移除失败不报错——非空正是「还有别的 Intent」这一正常
+/// 情形的表现。overlay 根自身不动：它是 Runtime 的公共目录，可由多个 Base 共用。
+///
+/// **中间态没有重试路径。** `umount` 成功而 `remove_dir_all` 失败时，该 Intent 会卡死：
+/// 再调 `discard` 会在 `umount` 处失败（那时已不是挂载点），而 `create` 又因 `intent_dir`
+/// 已存在（见该函数里对既有目录的拒绝）不肯重建。返回的 [`WorkspaceError::IoFailed`]
+/// 带 `path`，人工据此删除该目录即可；除手工收拾外没有自动回收的路子。
+pub(crate) fn discard(task: &TaskWorkspace) -> Result<(), WorkspaceError> {
+    // 形态校验（见本函数的文档）：在 umount 之前确认这确实是本后端的布局。
+    // 经它之后 `parent()` 必定是 `Some`（`require_layout` 已判过）。
+    require_layout(task.root())?;
+    let mnt = task.root();
+    let intent_dir = mnt.parent().expect("require_layout 已确认有父目录");
     umount(mnt)?;
     std::fs::remove_dir_all(intent_dir).map_err(|e| io_error(intent_dir, e))?;
     if let Some(base_dir) = intent_dir.parent() {

@@ -10,31 +10,46 @@ Sandbox 抽象与两种实现）的交付状态见主仓库的提交历史与设
 
 ---
 
-## 一、`backend` 与 Task 形态不匹配时，overlay 的**写**路径比读路径危险得多
+## 一、`backend` 与 Task 形态不匹配：本层已封住，但下篇要保证 `backend` 的来源
 
-`apply_patch` 与 `merge` 在 `WorkspaceBackend::Overlay` 分支上调 `integrate_overlay(base_root,
-task_root)`（`crates/continuum-workspace/src/gate.rs`），它把两棵树**整棵**对差：先删掉
-`base - task` 的每个文件，再复制 `task - base` 与内容不同的。把一个 **worktree 形态**的 Task
-（Task 根里 `.git` 是**文件**）配成 `Overlay` 后端时，Base 的 `.git/` 是个**目录**：
+**曾经是一条能毁掉用户仓库的路径。** `apply_patch` 与 `merge` 在 `WorkspaceBackend::Overlay`
+分支上调 `integrate_overlay(base_root, task_root)`，把两棵树**整棵**对差。把一个 **worktree
+形态**的 Task（根里 `.git` 是**文件**）配成 `Overlay` 后端时，Base 的 `.git/` 是个**目录**，
+而旧实现是「边删边发现」：删除那一趟把 `base - task` 的每个文件移掉，而 `collect_files` 只收
+文件与符号链接、`remove_entry` 只对**目录**拒绝——`base/.git/**` 全是文件，一路放行；等复制那
+一趟走到 Task 侧的 `.git` 才拒绝。实测（Task 10 的临时探针，`integrate_overlay` 直接调）：
 
-- 删除那一趟先把 `base/.git/` 下的每个文件当「Task 侧已删」逐个移掉——`HEAD`、`config`、
-  `objects/`、`refs/`…… 在 `collect_files` 眼里都与普通文件无异，而 `remove_entry` 对文件
-  一律放行；
-- 复制那一趟走到 Task 侧的 `.git` 时，目标 `base/.git` 是目录，`remove_entry` 这才拒绝，
-  报 `GateRefused`（reason 里带「…… 是目录，而 Task 侧对应的是文件」）。
+```
+旧：Err(GateRefused { …「base/.git 是目录，而 Task 侧对应的是文件」… })
+    base/.git/HEAD          exists = false
+    base/.git/config        exists = false
+    base/.git/objects/ab/cdef exists = false
+新：Ok(())
+    base/.git/HEAD          exists = true
+    base/.git/config        exists = true
+    base/.git/objects/ab/cdef exists = true
+    base/要改的.txt          = "task\n"      ← 真正的改动照旧落进 Base
+```
 
-**拒绝确实会发生，但它发生在 Base 的 `.git` 已被掏空之后。** 这不是「先撞上拒绝、爆炸半径有限」：
-Task 10 用一次临时探针实测过——Base 侧 `.git/HEAD` 与 `.git/config` 在 `integrate_overlay`
-返回 `Err` 时都已不存在。「先变更、后审计」的次序在这里也帮不上忙：被删掉的文件既不在事务里，
-也没有副本。
+**本层的处置是三层的**，都在 `crates/continuum-workspace/src/`：
 
-`cherry_pick` 不受影响（它在该分支上直接拒绝，不退化）。`view_diff` 与 `discard` 走的是别的
-分支，也不受影响。
+1. **形态校验排在最前**：`overlay::require_layout(task.root())`——overlay 后端要求 Task 根是
+   本后端的布局（`<intent>/{upper,work,mnt}`，见 `overlay.rs`）。worktree 建出的 Task 根
+   （`<base>/.ai/worktrees/<intent>`）必然不合格。判定与 `discard` 共用同一个函数，误用报的
+   是同一个 `BackendUnavailable`。`apply_patch` 与 `merge` 两条路都有守卫用例。
+2. **集成拆成两阶段**：`integrate_overlay` = `plan_overlay_integration`（算计划 + **全量校验**）
+   → 按计划执行。凡是能从计划本身判定的失败（源不是条目、目标是目录）都在动第一个字节之前
+   报出，`Err` 时 Base 一字未动。执行阶段仍可能因 I/O 错误或两侧树被并发改动而失败，那部分
+   不在计划能判定的范围内，也没有事务可回滚。
+3. **`.git` 不进差异集**：`collect_files` 按名字排除任何层级上的 `.git`（连同子树）。仓库的
+   内部状态不是内容；两侧 `.git` 形态不同（目录 vs 文件）时按内容一比就是「Base 侧一整棵
+   `.git` 被删」，而那正是让整棵删除合法化的那一步。排除后**合法的 overlay 集成路径不受影响**
+   ——已在真挂载的覆盖层上跑过（`applying_a_patch_on_a_mounted_overlay_reaches_the_base`，
+   执行 1、跳过 0）。
 
-**下篇接驱动时**：`backend` 不要从命令行参数或请求里取，要从建 Task 时落库的那条记录取
-（`workspace` 表的 `backend` 列），并让**唯一**的取用点在那里。若要更硬，可在
-`apply_patch` / `merge` 进入 overlay 分支前加一道形态校验——worktree 形态的 Task 根含
-`.git` 文件，overlay 形态的不含；两者与 `backend` 参数对不上时先拒，别让整棵对差跑起来。
+**下篇仍要做的一件事**：`backend` 不要从命令行参数或请求里现取，要从**建 Task 时落库的那条
+记录**取（`workspace` 表的 `backend` 列），并让取用点唯一。上面三层挡住的是「拿着错的 backend
+调进来」，它们挡不住「上层记错了后端、又照错的记法去回收别的资源」。
 
 ---
 
