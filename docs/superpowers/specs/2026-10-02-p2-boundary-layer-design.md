@@ -154,8 +154,14 @@ WritablePath     独立类型，唯一构造入口是 TaskWorkspace::writable_ro
 该保证由两半构成，缺一即不成立：
 
 1. **`BaseWorkspace` 不暴露任何可写句柄**——没有 `writable_root`，也没有通向 `WritablePath`
-   的方法。故持有 Base 句柄的代码取不到可写路径。
-2. **`TaskWorkspace` 的构造拒绝与 Base 重叠的根**——既不能等于 Base，也不能是 Base 的祖先。
+   的方法。故持有 Base 句柄的代码取不到**本 crate 的可写类型与写 API**。
+
+   **这一半的边界要说准**：`BaseWorkspace::root()` 交出的是 `&Path`，任何拿到它的代码都能
+   直接 `std::fs::write(base.root().join("x"), …)`——**类型层管不到绕过本 crate 直接调
+   `std::fs` 的代码**。这是任何交出 `&Path` 的 API 都有的固有边界，不是缺陷；但它使
+   「取不到可写路径」这种说法字面为假，准确的表述是「取不到本 crate 的可写类型与写 API」。
+2. **`TaskWorkspace` 的构造拒绝与 Base 重叠的根**——既不能等于 Base，也不能是 Base 的祖先，
+   **也不能是 Base 的后代**（唯一例外见下）。
    缺了这一半时，`TaskWorkspace::new_outside(&base, base.root(), id)` 会产出一个指向 Base 的
    可写根，而 `Sandbox::spawn` 收的正是 `&TaskWorkspace`，于是内核层的隔离会反过来给 Base
    开写权限——三层保证里最外一层被从内部绕过。
