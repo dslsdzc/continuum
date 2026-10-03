@@ -370,6 +370,24 @@ Git 后端下五个操作各自成立。Overlay 后端下 `cherry_pick` 与 `mer
 「外部副作用」类推）。审计记录与 Base 的变更在同一事务内提交（`§318` 的事务边界要求，
 契约同 P1：写入函数返回 `Err` 后调用方必须回滚）。
 
+**变体映射（实现时定的，记此以免重问）**：`§313` 的八项里没有「集成」或「丢弃」，
+故按上句的「类推」复用：
+
+```
+apply_patch / cherry_pick / merge  →  AuditKind::UserApprovals
+discard                            →  AuditKind::ExternalEffects
+```
+
+三个写入操作恰是收 `&GateApproval` 的那些，`§16` 的 L3 授权落点即在其中；`discard` 不收
+批准值，但确实在用户仓库里留下持久改动（worktree 删除 `ai/<intent>` 分支、overlay 卸载并删目录）。
+
+**不扩枚举**：`AuditKind::ALL` 是长度写死的 `[AuditKind; 8]`，扩它会牵动 P0 的黄金向量与
+serde rename 一致性用例——为一个语义类比去动 P0 既有的断言，代价不对等。
+
+**已知的刻意落差**：`§313` 的「外部副作用」在《总纲》中对应 L4，而 Gate 的三种写入是 L3、
+`discard` 更是 L0。八项里没有一项是 L3 或 L0 的语义，换任何变体同样不齐，故保留该映射
+并在代码注释里写明——**落差要可见，不要被消掉**。
+
 ## 6.5 与 Effect Journal 的分界
 
 `apply_patch` / `cherry_pick` / `merge` 虽为 L3，但**可回滚**（Git 历史在），故不进 Effect Journal。
