@@ -9,6 +9,7 @@ continuum-artifact = { path = "../continuum-artifact" }
 continuum-core = { path = "../continuum-core" }
 continuum-effect = { path = "../continuum-effect" }
 continuum-persist = { path = "../continuum-persist" }
+# Task 4 尚无使用点（条件解析只用 `serde_json::Value`）；消费方是 Task 6 的 Policy 落库。
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

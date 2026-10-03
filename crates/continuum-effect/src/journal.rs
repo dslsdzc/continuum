@@ -64,6 +64,8 @@ pub fn record_planned(tx: &Tx<'_>, effect: &Effect) -> Result<(), PersistError> 
         effect.planned_at,
         json!({
             "effect_id": effect.id.as_str(),
+            // 类型与状态取枚举自己的编码（`EffectType::as_str` / `state_str`），
+            // 与 `effect` 表的列同一个串：此处手写字面量会让同一事实有了第二份表示。
             "effect_type": effect.effect_type.as_str(),
             "target": effect.target,
             "idempotency_key": effect.idempotency_key,
