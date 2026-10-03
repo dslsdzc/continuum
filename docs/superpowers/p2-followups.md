@@ -5,7 +5,7 @@ Sandbox 抽象与两种实现）的交付状态见主仓库的提交历史与设
 `docs/superpowers/specs/2026-10-02-p2-boundary-layer-design.md`。
 
 放在这里而不放进 `p1-followups.md`：那一份是 **P1 交给执行器**的交接，收件人是执行器（阶段未定），
-本文件的两条是 **P2 上篇交给下篇**的内部交接，收件人明确。两份文件的收件人不同，混在一起会让
+本文件各条是 **P2 上篇交给下篇**的内部交接，收件人明确。两份文件的收件人不同，混在一起会让
 两份都不再知道自己对谁说话——`p1-followups.md` 的收件人此前正是被记错成了 P2。
 
 ---
@@ -53,7 +53,26 @@ Sandbox 抽象与两种实现）的交付状态见主仓库的提交历史与设
 
 ---
 
-## 二、`GateApproval` 是「不绑定」的 token
+## 二、`discard` 与 `remove_workspace` 的次序由调用方促成，本层不收 `Tx`
+
+`discard_task_workspace` 只动文件系统与 git，**不收 `Tx`、也不碰数据库**。若该工作区曾由
+`save_workspace` 落库，**放弃成功之后要一并调用 `remove_workspace` 删除其记录**——这件事由
+调用方促成，本层做不了。要求的实质是**次序**：`discard_task_workspace` 成功返回之后再删记录，
+返回 `Err` 时不删。
+
+下篇接驱动时会写「放弃一个 Intent」这条路径，**漏掉这一步不会在当期报警**，两个方向都要避免：
+
+- **有记录无工作区**：`load_workspace` 给出的后端与路径不再对应任何实物，按它去回收只会失败
+  （worktree 目录或分支已不在），而那条记录本身看不出已经作废；
+- **有工作区无记录**：更隐蔽，要到同一 Intent 再次创建、撞上仍然存在的分支（worktree）或
+  Intent 目录（overlay）时才显形。
+
+包一层事务并不比这个次序多出原子性——本层的变更全在文件系统与 git 上，不可回滚。调用方的事务
+里若还有别的写（放弃事件、审计记录），与那些写放进同一事务才有意义。
+
+---
+
+## 三、`GateApproval` 是「不绑定」的 token
 
 `pub struct GateApproval(());`——字段私有、无公开构造函数（`crates/continuum-workspace/tests/
 compile_fail/gate_approval_*.rs` 钉的就是这两点）。它**不携带也不校验**任何 base / task / intent
@@ -66,7 +85,7 @@ compile_fail/gate_approval_*.rs` 钉的就是这两点）。它**不携带也不
 
 ---
 
-## 三、`ALLOWED` 表两条目的语义不同（记账，非缺陷）
+## 四、`ALLOWED` 表两条目的语义不同（记账，非缺陷）
 
 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表里，两条目记的东西不一样：
 
@@ -87,7 +106,7 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 
 ---
 
-## 四、`continuum-workspace` 的 `serde` 依赖只服务两个从未被消费的 derive
+## 五、`continuum-workspace` 的 `serde` 依赖只服务两个从未被消费的 derive
 
 `Cargo.toml` 的 `serde` 当前只被 `ids.rs:3`（`IntentId`）与 `backend.rs:14/21`
 （`WorkspaceBackend`）的 `Serialize`/`Deserialize` 用到，而这两个 derive 在**本 crate 内外

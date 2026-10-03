@@ -161,8 +161,10 @@ fn saving_the_same_intent_twice_is_rejected_without_overwriting() {
 fn a_record_built_from_the_handles_carries_their_paths() {
     let base_dir = tempfile::tempdir().unwrap();
     let base = BaseWorkspace::new(base_dir.path()).unwrap();
+    // 根取 `<base>/.ai/task` 而非 `<base>/task`：`new_outside` 只放行 Base 之内的
+    // Runtime 私有子树，其他子目录按 `Overlaps` 拒绝（见 `tests/writable.rs`）。
     let task =
-        TaskWorkspace::new_outside(&base, base_dir.path().join("task"), IntentId::new("i1"))
+        TaskWorkspace::new_outside(&base, base_dir.path().join(".ai/task"), IntentId::new("i1"))
             .unwrap();
 
     let rec = WorkspaceRecord::from_workspaces(&base, &task, WorkspaceBackend::Overlay, 42);

@@ -5,6 +5,13 @@ use crate::error::WorkspaceError;
 use crate::ids::IntentId;
 use std::path::{Component, Path, PathBuf};
 
+/// Runtime 在 Base 之内的私有子树（设计 §5）。
+///
+/// worktree 后端的 Task 根建在它下面（`<base>/.ai/worktrees/<intent>`，见 [`crate::worktree`]），
+/// 而 [`TaskWorkspace::new_outside`] **只**放行这一个位于 Base 之内的位置——理由见该函数的
+/// 文档。常量定在这里而不是后端：判定在 `new_outside`，而后端只是它的一个使用方。
+pub(crate) const AI_DIR: &str = ".ai";
+
 /// Task Workspace：本 Intent 的可写位置。
 #[derive(Debug, Clone)]
 pub struct TaskWorkspace {
@@ -24,12 +31,22 @@ impl TaskWorkspace {
     /// `&TaskWorkspace`，内核层隔离会照着这个根反过来给 Base 开写权限，
     /// 只读强制的三层里最外一层被从内部绕过。
     ///
-    /// **允许 root 位于 base 之内**（worktree 后端就是这种形态：Task 根在
-    /// `<base>/.ai/worktrees/<intent>`），因为此时可写范围是 Base 的一个子目录，
-    /// 而非 Base 本身。
+    /// **只有 Base 之内的 Runtime 私有子树（`<base>/.ai/`）放行。** worktree 后端就是
+    /// 这种形态：Task 根在 `<base>/.ai/worktrees/<intent>`，可写范围是 Base 的一个
+    /// **子目录**而非 Base 本身。
     ///
-    /// 判据是 `base_canonical.starts_with(root_candidate)`——为真即拒绝，
-    /// 两侧都取 `std::fs::canonicalize` 的结果，故 symlink 与 `..` 均无法绕过。
+    /// **Base 之内的其他位置一律拒绝**（[`WorkspaceError::Overlaps`]）。少了后半句，
+    /// `new_outside(&base, "<base>/src", …)` 会被放行，于是「Task 的可写范围」正落在 Base
+    /// 的用户文件上：类型层的 [`WritablePath`] 会忠实地允许写 `<base>/src/main.rs`，内核层的
+    /// 沙箱（`continuum-sandbox` 的 `Sandbox::spawn`）也照 `all` 权限把这个根开给子进程
+    /// ——三层里没有任何一层会拦。这是账本 Task 1 那处重叠的残余：等值与祖先当时堵上了，
+    /// **后代**没有；而放行后代的理由（worktree 后端的形态）只覆盖后端私有子树，
+    /// 不覆盖任意子目录。
+    ///
+    /// 判据是
+    /// `base_canonical.starts_with(candidate) || (candidate.starts_with(base_canonical)
+    /// && !candidate.starts_with(<base>/.ai))`——为真即拒绝，两侧都取
+    /// `std::fs::canonicalize` 的结果，故 symlink 与 `..` 均无法绕过。
     ///
     /// **判定先于落盘**：被拒绝的 root 不得在磁盘上留下任何目录。
     /// root 可能尚不存在，故判定用 [`canonical_candidate`]——它不产生副作用。
@@ -44,7 +61,10 @@ impl TaskWorkspace {
         let root = root.into();
         let candidate = canonical_candidate(&root)?;
         let base_root = canonicalize(base.root())?;
-        if base_root.starts_with(&candidate) {
+        let ai_root = base_root.join(AI_DIR);
+        let overlaps = base_root.starts_with(&candidate)
+            || (candidate.starts_with(&base_root) && !candidate.starts_with(&ai_root));
+        if overlaps {
             return Err(WorkspaceError::Overlaps {
                 root: candidate,
                 base: base_root,

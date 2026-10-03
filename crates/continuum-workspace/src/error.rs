@@ -39,9 +39,14 @@ pub enum WorkspaceError {
     /// 目标路径越出 Task Workspace 根。
     #[error("路径越出 Task Workspace 根：{}", path.display())]
     EscapesRoot { path: PathBuf },
-    /// Task Workspace 的根与 Base 重叠：Task 根是 Base 或 Base 的祖先。
+    /// Task Workspace 的根与 Base 重叠：Task 根是 Base、Base 的祖先，或 Base 之内
+    /// 除 Runtime 私有子树（`<base>/.ai/`）以外的位置。
+    ///
+    /// 第三种是后补的：只挡前两种时，`<base>/src` 一类**后代**会被放行，于是 Task 的
+    /// 可写范围正落在 Base 的用户文件上。判据与其理由见 [`crate::TaskWorkspace::new_outside`]。
     #[error(
-        "Task Workspace 的根 {} 与 Base {} 重叠：Task 根不能是 Base 或 Base 的祖先",
+        "Task Workspace 的根 {} 与 Base {} 重叠：Task 根不能是 Base、Base 的祖先，\
+         也不能是 Base 之内的其他位置（只有 Runtime 私有子树 <base>/.ai/ 除外）",
         root.display(),
         base.display()
     )]

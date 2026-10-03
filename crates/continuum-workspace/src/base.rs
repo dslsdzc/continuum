@@ -43,7 +43,18 @@ impl BaseWorkspace {
         Ok(Self { root })
     }
 
-    /// Base 的根路径。只读视图：调用方拿到 `&Path`，无法由此构造可写句柄。
+    /// Base 的根路径。**是只读句柄，不是「不可写路径」。**
+    ///
+    /// 本函数返回 `&Path`，任何拿到它的代码都能 `std::fs::write(base.root().join("x"))`。
+    /// 故本层在这条路径上的保证**只在更窄的意义上**成立：由此取不到本 crate 的可写**类型**
+    /// （[`crate::WritablePath`]）与本 crate 的写 API（`WritablePath::write` 等），于是
+    /// 「对 Base 写」在本 crate 的类型上不可表达。
+    ///
+    /// 这条更窄的命题由编译失败用例钉住（`tests/compile_fail/writable_root_on_base.rs`：
+    /// `BaseWorkspace` 没有 `writable_root`；`writable_path_from_base.rs`：不能由 Base
+    /// 路径构造出 `WritablePath`）。**它管不到绕过本 crate 直接调 `std::fs` 的代码**——
+    /// 「本 crate 之外没有写路径」靠的是调用方只经本 crate 的 API 使用 Base 这一约定；
+    /// 子进程那一侧则由内核层（`continuum-sandbox`）承担。
     pub fn root(&self) -> &Path {
         &self.root
     }

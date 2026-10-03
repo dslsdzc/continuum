@@ -3,8 +3,10 @@
 //! Base 是 Git 仓库时，Task Workspace 是建在 `<base>/.ai/worktrees/<intent>` 的
 //! worktree，分支名 `ai/<intent>`（§16）。创建、放弃都经 `git` 命令完成。
 //!
-//! 对 Base 的唯一写入是仓库本地的 `info/exclude`（追加一行 `.ai/`），
-//! 见 [`ensure_ai_excluded`]；Base 中的跟踪文件一字不动。
+//! **Base 中被跟踪的内容零改动。** 写进 Base 目录树的只有两处，都属仓库或 Runtime
+//! 自身：`.git/` 里的账本（仓库本地的 `info/exclude` 追加一行 `.ai/`，见
+//! [`ensure_ai_excluded`]；新建分支 `ai/<intent>`；worktree 登记
+//! `.git/worktrees/<intent>/**`），以及 `.ai/` 之下本次建出的 worktree 目录本身。
 //!
 //! 用户的当前分支全程不被触碰：`git worktree add` 只写新建分支与主仓库的
 //! worktree 登记（`.git/worktrees/`），`git worktree remove` 与 `git branch -D`
@@ -14,13 +16,10 @@ use crate::backend::check_intent;
 use crate::base::BaseWorkspace;
 use crate::error::WorkspaceError;
 use crate::ids::IntentId;
-use crate::task::TaskWorkspace;
+use crate::task::{AI_DIR, TaskWorkspace};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-
-/// Base 内 Runtime 私有目录的根，即 `.ai/`。
-const AI_DIR: &str = ".ai";
 
 /// 各 Intent 的 worktree 所在的子目录名，位于 [`AI_DIR`] 之下（§255）。
 const WORKTREE_SUBDIR: &str = "worktrees";

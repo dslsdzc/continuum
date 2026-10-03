@@ -5,9 +5,13 @@
 
 use continuum_workspace::{BaseWorkspace, IntentId, TaskWorkspace, WorkspaceError};
 
-/// 在 `base` 之内建一个 Task Workspace，根为 `<base>/task`。
+/// 在 `base` 之内建一个 Task Workspace，根为 `<base>/.ai/task`。
+///
+/// 落在 `.ai/` 之下是必需的：`new_outside` 只放行 Base 之内的 Runtime 私有子树，
+/// 其他位置（含 `<base>/task`、`<base>/src`）一律按 [`WorkspaceError::Overlaps`] 拒绝
+/// ——见 `task_root_may_not_be_an_arbitrary_subdirectory_of_the_base`。
 fn task_inside(base: &BaseWorkspace, dir: &std::path::Path) -> TaskWorkspace {
-    TaskWorkspace::new_outside(base, dir.join("task"), IntentId::new("i1")).unwrap()
+    TaskWorkspace::new_outside(base, dir.join(".ai").join("task"), IntentId::new("i1")).unwrap()
 }
 
 #[test]
@@ -91,6 +95,60 @@ fn task_root_may_not_be_an_ancestor_of_the_base() {
         matches!(err, WorkspaceError::Overlaps { .. }),
         "实际 {err:?}"
     );
+}
+
+/// **子目录守卫**：Task 根落在 Base 之内、但不在 Runtime 私有子树（`.ai/`）里的，
+/// 必须拒绝。
+///
+/// 放行的话，Task 的**可写范围**就正落在 Base 的用户文件上：`WritablePath` 会忠实
+/// 允许写 `<base>/src/main.rs`，内核层的沙箱也照 `all` 权限把这个根开给子进程——
+/// 三层里没有任何一层会拦。故这里除了断言返回 `Err`，还要断言那条路**真的走不通**，
+/// 即被拒绝的 root 下的文件逐字节未变。
+#[test]
+fn task_root_may_not_be_an_arbitrary_subdirectory_of_the_base() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = BaseWorkspace::new(dir.path()).unwrap();
+    let src = dir.path().join("src");
+    std::fs::create_dir(&src).unwrap();
+    std::fs::write(src.join("main.rs"), "用户的源码\n").unwrap();
+    let before = std::fs::read(src.join("main.rs")).unwrap();
+
+    let err = TaskWorkspace::new_outside(&base, &src, IntentId::new("i1")).unwrap_err();
+    assert!(
+        matches!(err, WorkspaceError::Overlaps { .. }),
+        "实际 {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(src.join("main.rs")).unwrap(),
+        before,
+        "被拒绝的根动到了 Base 的用户文件"
+    );
+
+    // 更深一层同样拒绝：判据是「在不在 `.ai/` 之内」，不是「差几级」。
+    let deeper = src.join("深层");
+    let err = TaskWorkspace::new_outside(&base, &deeper, IntentId::new("i1")).unwrap_err();
+    assert!(
+        matches!(err, WorkspaceError::Overlaps { .. }),
+        "实际 {err:?}"
+    );
+    assert!(
+        !deeper.exists(),
+        "被拒绝的根留下了目录：{}",
+        deeper.display()
+    );
+}
+
+/// 反面：后端私有子树 `.ai/` 之内仍放行——收紧不能收过头，worktree 后端就建在那里。
+#[test]
+fn task_root_may_live_in_the_runtime_private_subtree() {
+    let dir = tempfile::tempdir().unwrap();
+    let base = BaseWorkspace::new(dir.path()).unwrap();
+    let root = dir.path().join(".ai").join("worktrees").join("i1");
+
+    let task = TaskWorkspace::new_outside(&base, &root, IntentId::new("i1")).unwrap();
+    assert_eq!(task.root(), std::fs::canonicalize(&root).unwrap());
+    task.writable_root().write("x.txt", b"ok").unwrap();
+    assert_eq!(task.writable_root().read("x.txt").unwrap(), b"ok");
 }
 
 /// 被拒绝的 root 不得在磁盘上留下任何目录：判定先于落盘。
