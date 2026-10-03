@@ -5,10 +5,8 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-continuum-core = { path = "../continuum-core" }
 continuum-persist = { path = "../continuum-persist" }
 continuum-events = { path = "../continuum-events" }
-serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 

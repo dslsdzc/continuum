@@ -1,12 +1,14 @@
 //! Effect 的记录体（设计上篇第 7.1 节）与状态机（第 7.2 节）。
 
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// 设计上篇第 7.5 节的六个效应类型。封闭枚举：策略要按类型裁决，
 /// 开放类型会让策略表漏判。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+///
+/// 不派生 serde：落库编码由 Task 2 的显式辅助函数读写（设计下篇第 8 节：
+/// 「经显式辅助函数读写，不依赖 serde」），此外无消费方。派生会造出第二套
+/// 字符串表示，与落库编码并存。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectType {
     SendEmail,
     PushBranch,
@@ -17,8 +19,9 @@ pub enum EffectType {
 }
 
 /// 设计上篇第 7.2 节的七个状态。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+///
+/// 不派生 serde，理由同 [`EffectType`]。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectState {
     Planned,
     Authorized,
@@ -43,7 +46,9 @@ impl EffectState {
 }
 
 /// 效应记录的身份。稳定，不随状态变化。
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+///
+/// 不派生 serde，理由同 [`EffectType`]。
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EffectId(String);
 
 impl EffectId {
@@ -101,7 +106,9 @@ pub fn transition(from: EffectState, to: EffectState) -> Result<EffectState, Sta
 }
 
 /// 设计上篇第 7.1 节的记录体。字段与类型照该节。
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+///
+/// 不派生 serde：本记录没有 JSON 或网络的消费方，落库由 Task 2 的列级读写完成。
+#[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
     pub id: EffectId,
     pub effect_type: EffectType,

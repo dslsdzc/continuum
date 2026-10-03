@@ -60,12 +60,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 不含 continuum-core：本 crate 至今没有用到它，而本表与 Cargo.toml 必须精确一致。
     ("continuum-sandbox", &["continuum-workspace"]),
     // P2 边界层的效应记录层。persist 用于 Journal 落库、events 用于状态变更的审计
-    // 记录（设计上篇第 7.3 节：状态变更与对应审计记录在同一事务内提交），
-    // core 为 id 与时间的既有类型来源。本 task 只建记录体与状态机，
-    // 三个依赖的使用点分别在 Task 2 与驱动。
+    // 记录（设计上篇第 7.3 节：状态变更与对应审计记录在同一事务内提交）。
+    // 本 task 只建记录体与状态机，两个依赖的使用点分别在 Task 2 与驱动。
+    // 不含 continuum-core：本 crate 不使用它的任何类型（设计下篇第 3 节），
+    // 而叶子 crate 的条目记的是实际依赖。
     (
         "continuum-effect",
-        &["continuum-core", "continuum-events", "continuum-persist"],
+        &["continuum-events", "continuum-persist"],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
