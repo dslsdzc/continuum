@@ -1,0 +1,17 @@
+[package]
+name = "continuum-policy"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-core = { path = "../continuum-core" }
+continuum-effect = { path = "../continuum-effect" }
+continuum-persist = { path = "../continuum-persist" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

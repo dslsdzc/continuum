@@ -13,6 +13,7 @@ members = [
     "crates/continuum-workspace",
     "crates/continuum-sandbox",
     "crates/continuum-effect",
+    "crates/continuum-policy",
 ]
 
 [workspace.package]
