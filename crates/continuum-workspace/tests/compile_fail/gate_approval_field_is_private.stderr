@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+ --> tests/compile_fail/gate_approval_field_is_private.rs:3:13
+  |
+3 |     let _ = continuum_workspace::GateApproval(());
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+note: constructor is not visible here due to private fields
+ --> src/gate.rs
+  |
+  | pub struct GateApproval(());
+  |                         ^^ private field

@@ -171,7 +171,10 @@ fn path_str(path: &Path) -> Result<String, PersistError> {
 ///
 /// 与 `continuum_graph::persist` 的 `state_str` 同形：本 crate 内该列的读写
 /// 都经本函数与其逆 [`parse_backend`]。
-fn backend_str(backend: WorkspaceBackend) -> &'static str {
+///
+/// `pub(crate)` 而非私有：Gate 的审计记录（[`crate::gate`]）也要写这个后端的文本形
+/// ——那里若另写一份字面量，同一事实就有了两种写法，改一处忘一处时二者会静默分叉。
+pub(crate) fn backend_str(backend: WorkspaceBackend) -> &'static str {
     match backend {
         WorkspaceBackend::Worktree => "worktree",
         WorkspaceBackend::Overlay => "overlay",

@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `new` found for struct `GateApproval` in the current scope
+ --> tests/compile_fail/gate_approval_has_no_constructor.rs:3:48
+  |
+3 |     let _ = continuum_workspace::GateApproval::new();
+  |                                                ^^^ function or associated item not found in `GateApproval`

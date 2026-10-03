@@ -15,8 +15,9 @@ use crate::base::BaseWorkspace;
 use crate::error::WorkspaceError;
 use crate::ids::IntentId;
 use crate::task::TaskWorkspace;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 /// Base 内 Runtime 私有目录的根，即 `.ai/`。
 const AI_DIR: &str = ".ai";
@@ -372,6 +373,79 @@ pub(crate) fn git_raw(
             stderr: String::from_utf8_lossy(&output.stderr).trim_end().to_owned(),
         });
     }
+    Ok(output.stdout)
+}
+
+/// 在 `dir` 内执行一条 git 命令，把 `input` 从标准输入送入，返回原始 stdout。
+///
+/// 失败判定与错误内容与 [`git`] 同：只看退出码，失败时把 code 与 stderr 原样带回。
+///
+/// **用途是 `git apply`**（见 [`crate::gate`] 的 `apply_patch`）：补丁也可以经
+/// 命令行参数传，但那要先把用户代码写到磁盘上再让 git 去读（临时文件），
+/// stdin 不必落盘。
+///
+/// **输入在另一个线程里写。** 本进程若先把整份输入写完再收结果，输入大于管道缓冲区
+/// 且 git 同时往 stderr 写（例如补丁有问题时逐条报错）就会互相等待：本进程等 git 读，
+/// git 等本进程读它已经写满的 stderr。子线程写、主线程 `wait_with_output` 收，
+/// 两边的缓冲都在被消费，故不会互等。
+///
+/// 退出码为 0 时若输入**没写完**，返回 `IoFailed` 而不当作成功：那种情形下 git 读到
+/// 的是残缺输入（例如它在开头就判定无需处理而提前退出），本层无从判断它是否用上了
+/// 整份输入。
+pub(crate) fn git_with_stdin(
+    dir: &Path,
+    args: &[&str],
+    input: &[u8],
+) -> Result<Vec<u8>, WorkspaceError> {
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| WorkspaceError::BackendUnavailable {
+            reason: format!("无法执行 git：{e}"),
+        })?;
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| WorkspaceError::BackendUnavailable {
+            reason: "git 的标准输入未按请求建立".to_owned(),
+        })?;
+    // `scope` 而非 `thread::spawn`：要借 `input`（它是调用方的切片），不需要把它
+    // 复制成拥有所有权的数据。
+    let (output, written) = std::thread::scope(|scope| {
+        let writer = scope.spawn(move || {
+            let result = stdin.write_all(input);
+            // 关掉管道让 git 读到 EOF：不关的话 git 会一直等输入，双方都停在这里。
+            drop(stdin);
+            result
+        });
+        let output = child.wait_with_output().map_err(|e| {
+            WorkspaceError::BackendUnavailable {
+                reason: format!("无法执行 git：{e}"),
+            }
+        });
+        (output, writer.join())
+    });
+    let output = output?;
+    // 子线程只做一次 `write_all`，没有可 panic 之处；真出了 panic 也只说明输入没送完，
+    // 那是下面那条 `IoFailed` 要报的情形，故把 `join` 的失败折进同一个答复。
+    let written = written
+        .unwrap_or_else(|_| Err(std::io::Error::other("向 git 写入标准输入的子线程 panic")));
+    if !output.status.success() {
+        return Err(WorkspaceError::GitFailed {
+            // 被信号杀死时没有退出码；取 -1 仅作占位。
+            code: output.status.code().unwrap_or(-1),
+            stderr: String::from_utf8_lossy(&output.stderr).trim_end().to_owned(),
+        });
+    }
+    written.map_err(|e| WorkspaceError::IoFailed {
+        path: dir.to_path_buf(),
+        reason: format!("向 git 送出输入时失败：{e}"),
+    })?;
     Ok(output.stdout)
 }
 

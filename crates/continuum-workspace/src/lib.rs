@@ -16,8 +16,10 @@ pub use backend::{
 };
 pub use base::BaseWorkspace;
 pub use error::WorkspaceError;
-// Gate 是 Task 与 Base 之间的唯一通道（§257）。只读操作（view_diff、discard）在本
-// 子项目已实现；写入操作与其批准值（GateApproval）在 Task 9。
+// Gate 是 Task 与 Base 之间的唯一通道（§257）。五种操作都已实现：只读的 view_diff
+// 与 discard，以及写入的 apply_patch、cherry_pick、merge。后三者收 `&GateApproval`
+// ——该类型没有公开构造函数，故本子项目内还没有调用点：它的产生点在下篇交给驱动
+// （设计 6.2），在此之前三项写入操作在 crate 外调用不到。
 pub use gate::{Diff, GateApproval, GateError, IntegrationGate};
 pub use ids::IntentId;
 pub use persist::{

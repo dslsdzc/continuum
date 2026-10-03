@@ -26,12 +26,19 @@
 //! 通过（见 [`skip`]）。这一段与 `tests/backend_overlay.rs` 的写法同源——两个测试二进制
 //! 是两个 crate，取不到对方的东西。
 //!
+//! **写入操作（`apply_patch` / `cherry_pick` / `merge`）的用例不在这里**：它们收
+//! `&GateApproval`，而该值在 crate 之外没有构造路径（`tests/compile_fail/
+//! gate_approval_*.rs` 钉的就是这一点）——本文件是另一个 crate，拿不出批准值。
+//! 那三条用例在 `src/gate.rs` 的单测模块里。`discard` 不收批准值，故它连同它的审计
+//! 记录一条都留在本文件。
+//!
 //! 两个后端的夹具（[`git_repo`] 与 [`base_with_lower`]）把根取 `canonicalize` 之后的
 //! 值：临时目录可能落在符号链接之下，而 `TaskWorkspace` 持有的根是规范化结果，两侧
 //! 不规范化会让 `starts_with` 一类的比较指向别处。**其余用例不规范化**：它们自建路径
 //! 并把同一份路径同时交给夹具与断言（`discarding_a_foreign_root_through_the_gate_…`
 //! 就是如此），两侧同源，没有可比错的地方。
 
+use continuum_persist::{Db, Value};
 use continuum_workspace::{
     BaseWorkspace, GateError, IntentId, IntegrationGate, WorkspaceBackend, create_task_workspace,
     discard_task_workspace,
@@ -39,6 +46,32 @@ use continuum_workspace::{
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+
+/// 建一个带审计表的库，返回（保活用的 `TempDir`，库）。
+///
+/// `discard` 要写一条审计记录（设计 6.4），故它收 `tx`；本文件的用例据此开工。
+/// 审计表在 P0 的内建迁移里，无需再补本 crate 的迁移。
+fn db() -> (tempfile::TempDir, Db) {
+    let dir = tempfile::tempdir().unwrap();
+    let db = Db::open(&dir.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    (dir, db)
+}
+
+/// `audit_log` 的全部（kind, payload）。
+fn audit_rows(tx: &continuum_persist::Tx<'_>) -> Vec<(String, String)> {
+    tx.query("SELECT kind, payload FROM audit_log ORDER BY seq", &[])
+        .unwrap()
+        .into_iter()
+        .map(|row| {
+            let text = |v: &Value| match v {
+                Value::Text(s) => s.clone(),
+                other => panic!("审计列应为文本，实际 {other:?}"),
+            };
+            (text(&row[0]), text(&row[1]))
+        })
+        .collect()
+}
 
 // ===== 两种后端共用的夹具 =====
 
@@ -243,6 +276,56 @@ fn view_diff_does_not_write_the_base_when_the_stat_cache_is_stale() {
     );
 }
 
+/// 索引副本不得比真实索引**少报**改动：同样长度、同一时刻改写的文件也要报出来。
+///
+/// 这条盯的是 [`IndexCopy`] 的一个要害：git 先比 stat（mtime/ctime/大小…），比中了就用
+/// 索引里记的 blob，**不读文件**；挡住这条捷径的是它自己的 racy 规则——条目 mtime 不早于
+/// **索引文件自身**的 mtime 时 stat 不可信。副本是新建文件，mtime 是此刻，比条目都新，
+/// 于是全树都走了捷径。实测（git 2.56）漏报的条件是：**内容按同样长度改写**，且改写
+/// 落在与检出同一时刻（临时目录的时钟粒度约十几毫秒，实测约每几十次跑出一次）。
+///
+/// 本用例把那个条件**造出来**，而不是等它自己出现：
+/// 1. 把文件按同样长度改写，再把 mtime 拨回索引里记的那个值——stat 逐项与记录相同；
+/// 2. 关掉 `core.trustctime`——否则 ctime 一项就把改动暴露了，而这一项关掉之后，
+///    判定剩下的输入（mtime、大小）正是真实处境里那一套；
+/// 3. 睡过一秒再算差异——副本的 mtime 必然晚于条目，racy 规则若不生效就必然漏报。
+///
+/// 三条合起来是**确定性的**：修好之前每次都漏报，修好之后每次都报得出。
+#[test]
+fn the_index_copy_does_not_hide_a_same_size_rewrite() {
+    let (_d, base_path) = git_repo();
+    // 关掉 ctime 一项：本用例要钉的是 mtime 与副本时间戳的相互作用，ctime 会把
+    // 「同一时刻改写」这个条件盖过去。
+    run_git(&base_path, &["config", "core.trustctime", "false"]);
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    let task_root = task.root().to_path_buf();
+
+    // 同样长度（10 字节：`原内容\n` → `新内容\n`）的不同内容，写完把 mtime 拨回索引里
+    // 记的那个值。**长度必须相同**：大小也是 git 比的一项，差一个字节就必然报得出来。
+    let path = task_root.join("要改的.txt");
+    let recorded = std::fs::metadata(&path).unwrap().modified().unwrap();
+    std::fs::write(&path, "新内容\n").unwrap();
+    let file = std::fs::File::options().write(true).open(&path).unwrap();
+    file.set_modified(recorded).unwrap();
+    drop(file);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        recorded,
+        "夹具没把 mtime 拨回去，后面的断言就无从谈起"
+    );
+
+    // 睡过一秒：副本（此刻新建）的 mtime 必然晚于条目 mtime，racy 规则不生效就会漏报
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    let diff = IntegrationGate::new(&base).view_diff(&task, backend).unwrap();
+    assert_eq!(
+        diff.modified(),
+        &[PathBuf::from("要改的.txt")][..],
+        "索引副本漏报了这处改动（git 的 stat 缓存被当成可信的了）：{diff:?}"
+    );
+}
+
 /// Diff 的基准是**分歧点**，不是 Base 的当前 HEAD。
 ///
 /// 用户在建好工作区之后又提交时，那些提交里的新文件在 Task 侧并不存在。以 Base 的
@@ -387,7 +470,12 @@ fn discard_removes_the_task_and_leaves_the_base_unchanged() {
     run_git(&task_root, &["commit", "-m", "Task 内提交"]);
     let head_before = run_git(&base_path, &["rev-parse", "HEAD"]);
 
-    IntegrationGate::new(&base).discard(&task, backend).unwrap();
+    let (_db_dir, db) = db();
+    let tx = db.begin().unwrap();
+    IntegrationGate::new(&base)
+        .discard(&tx, &task, backend, 1_000)
+        .unwrap();
+    tx.commit().unwrap();
 
     assert!(!task_root.exists(), "Task 根仍在：{}", task_root.display());
     assert!(
@@ -410,6 +498,53 @@ fn discard_removes_the_task_and_leaves_the_base_unchanged() {
     assert_eq!(
         std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
         "原内容\n"
+    );
+}
+
+/// `discard` 也写一条审计记录（设计 6.4），记的是「外部副作用」。
+///
+/// 它与三项写入操作不同：不收批准值、不动 Base，但确实在库之外留下持久改动——worktree
+/// 后端删掉用户仓库里的 `ai/<intent>` 分支。设计 6.4 点名的那两个变体里，这一条对应
+/// 后者。
+///
+/// `occurred_at` 一并核对：它由调用方给出，本层不取时钟（与 `WorkspaceRecord` 的
+/// `created_at` 同一条理由）。隐式取时间的话，调用方既无从控制，也无从在测试里固定。
+#[test]
+fn discard_writes_an_audit_record() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+
+    let (_db_dir, db) = db();
+    let tx = db.begin().unwrap();
+    assert!(audit_rows(&tx).is_empty(), "操作之前审计链不是空的");
+
+    IntegrationGate::new(&base)
+        .discard(&tx, &task, backend, 1_700_000_000_000)
+        .unwrap();
+    let rows = audit_rows(&tx);
+    let occurred_at = tx
+        .query("SELECT occurred_at FROM audit_log", &[])
+        .unwrap()
+        .into_iter()
+        .map(|row| match row.into_iter().next() {
+            Some(Value::Int(i)) => i,
+            other => panic!("occurred_at 应为整数，实际 {other:?}"),
+        })
+        .collect::<Vec<i64>>();
+    tx.commit().unwrap();
+
+    assert_eq!(rows.len(), 1, "discard 应恰好多出一条审计记录");
+    assert_eq!(rows[0].0, "external effects", "审计记录的 kind 不对");
+    assert!(
+        rows[0].1.contains("discard") && rows[0].1.contains("intent=i1"),
+        "payload 里看不出是哪个操作、哪个 Intent：{}",
+        rows[0].1
+    );
+    assert_eq!(
+        occurred_at,
+        vec![1_700_000_000_000],
+        "occurred_at 不是调用方给出的那个"
     );
 }
 
@@ -624,7 +759,12 @@ fn discard_removes_the_task_and_leaves_the_base_unchanged_on_the_overlay_backend
         .write("Task 的东西.txt", "Task 侧内容\n".as_bytes())
         .unwrap();
 
-    IntegrationGate::new(&base).discard(&task, backend).unwrap();
+    let (_db_dir, db) = db();
+    let tx = db.begin().unwrap();
+    IntegrationGate::new(&base)
+        .discard(&tx, &task, backend, 1_000)
+        .unwrap();
+    tx.commit().unwrap();
 
     assert!(!task_root.exists(), "Task 根仍在：{}", task_root.display());
     assert!(
@@ -663,8 +803,10 @@ fn discarding_a_foreign_root_through_the_gate_reports_the_backend_error() {
 
     // overlay 后端：形态校验排在 umount 之前，故不需要命名空间也走得到（与
     // `tests/backend_overlay.rs` 里那条同源）。
+    let (_db_dir, db) = db();
+    let tx = db.begin().unwrap();
     let err = IntegrationGate::new(&base)
-        .discard(&task, WorkspaceBackend::Overlay)
+        .discard(&tx, &task, WorkspaceBackend::Overlay, 1_000)
         .unwrap_err();
     match &err {
         continuum_workspace::GateError::Workspace(
@@ -676,4 +818,7 @@ fn discarding_a_foreign_root_through_the_gate_reports_the_backend_error() {
         other => panic!("期望透出后端的 BackendUnavailable，得到 {other:?}"),
     }
     assert!(task_root.exists(), "误用的路径被删了");
+    // 失败时不写审计行：记录的是「发生了什么」，不是「打算做什么」。次序在这里也是
+    // 可验证的——底层先拒绝，本层的审计行在它之后。
+    assert!(audit_rows(&tx).is_empty(), "被拒绝的 discard 写了审计记录");
 }
