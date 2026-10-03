@@ -11,10 +11,15 @@ use std::process::Command;
 
 /// 期望的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace）。
 ///
-/// **这是 `main.rs` 装配的第二处转录**：`continuum-runtime` 只有 bin target，
-/// 集成测试 import 不到它。转录的风险由下面的比对抵掉——`the_runtime_applies_…`
-/// 拿**实际启动后**落在 `schema_migrations` 里的集合与本函数对照，故 `main.rs`
-/// 少注册或多注册一条都会变红，而不是自查自洽。
+/// **这是 `main.rs` 装配处的第二份转录**。转录的风险由下面的比对抵掉——
+/// `the_runtime_applies_…` 拿**实际启动后**落在 `schema_migrations` 里的集合与
+/// 本函数对照，故 `main.rs` 少注册或多注册一条都会变红，而不是自查自洽。
+///
+/// **下面是二进制而不是 import 那份清单**：本用例要观察的是**实际落库**的集合，
+/// 不是装配处写了什么——「注册了但没跑」（编号撞车被跳过、SQL 失败被吞）这一路
+/// 只有落库侧看得见。故即便那份清单被移进 lib、import 得到，本用例也照旧驱动
+/// 二进制。（`continuum-runtime` 现在确有 lib target，但只导出命令行解析，
+/// 见 `src/lib.rs`；装配清单不在其中。）
 fn expected_migrations() -> Vec<Migration> {
     let mut m = builtin_migrations();
     m.extend(continuum_artifact::p1_artifact_migrations());
@@ -58,6 +63,7 @@ fn the_runtime_applies_exactly_the_expected_migration_set() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("t.db");
     let out = Command::new(env!("CARGO_BIN_EXE_continuum-runtime"))
+        .args(["recover", "--db"])
         .arg(&path)
         .output()
         .expect("continuum-runtime 无法执行");

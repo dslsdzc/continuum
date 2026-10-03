@@ -86,6 +86,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
+    // Task 8 起加上 effect：驱动的 `--effect <类型>:<目标>` 要在**解析期**把类型
+    // 收窄到 `EffectType` 的封闭枚举（下篇第 6.8 节：开放类型会让策略表漏判，
+    // 未知类型不该到运行期才失败），故解析器取用该 crate 的 `EffectType::parse`。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
     // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇；
@@ -96,6 +100,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &[
             "continuum-artifact",
             "continuum-core",
+            "continuum-effect",
             "continuum-events",
             "continuum-graph",
             "continuum-persist",

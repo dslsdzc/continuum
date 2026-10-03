@@ -3,6 +3,7 @@ use std::process::Command;
 
 fn run(db: &Path) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_continuum-runtime"))
+        .args(["recover", "--db"])
         .arg(db)
         .output()
         .expect("continuum-runtime 无法执行");
