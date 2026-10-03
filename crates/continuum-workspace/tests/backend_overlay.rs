@@ -34,14 +34,8 @@ fn is_child() -> bool {
     std::env::var_os(CHILD_ENV).is_some()
 }
 
-/// 环境不具备本用例所需条件时的**显式**跳过标记。
-///
-/// 不静默通过：跳过原因打到 stderr。cargo 在用例通过时不回显这段输出，用 `--nocapture`
-/// 运行即可见——这是稳定工具链上既不与「全量全绿」冲突、又留下痕迹的处置。改判为
-/// `panic!` 会把「环境不具备」误报成「实现有缺陷」，反而掩盖真正的问题。
-fn skip(test: &str, reason: &str) {
-    eprintln!("【跳过】{test}：{reason}。本用例未执行断言。");
-}
+// 跳过标记（`common::skip`）与「子进程真跑过」的守卫（`common::assert_child_ran_one`）
+// 都在 `tests/common/mod.rs`，与 `tests/gate.rs` 共用同一份。
 
 /// 环境是否具备建立用户与挂载命名空间的能力。
 ///
@@ -73,7 +67,7 @@ fn reexec(test_name: &str, envs: &[(&str, &OsStr)], namespace: bool) -> bool {
 
     let mut command = if namespace {
         if !namespace_available(&exe) {
-            skip(test_name, "unshare -Urm 无法建立用户与挂载命名空间");
+            common::skip(test_name, "unshare -Urm 无法建立用户与挂载命名空间");
             return false;
         }
         let mut command = Command::new("unshare");
@@ -104,6 +98,12 @@ fn reexec(test_name: &str, envs: &[(&str, &OsStr)], namespace: bool) -> bool {
     // 用例名写错（本函数的调用方是按名字传参的）就会静默变绿。守卫在 common 里，
     // 与 `tests/gate.rs`、`src/gate.rs` 的单测模块同形。
     common::assert_child_ran_one(test_name, &stdout);
+    // 只给需要命名空间的那一类打运行标记：设计遗留里那条窗口说的是「11 条需要用户与挂载
+    // 命名空间的用例」，读数要能对上这个数。`namespace: false` 的那些（只借 re-exec 隔离
+    // 环境变量）不需要命名空间，窗口不涉及它们，多打一行只会让计数对不上。
+    if namespace {
+        common::ran(test_name);
+    }
     false
 }
 
@@ -396,7 +396,7 @@ fn overlay_create_outside_a_namespace_reports_it() {
     }
 
     if running_as_root() {
-        skip(
+        common::skip(
             "overlay_create_outside_a_namespace_reports_it",
             "本进程以 root 运行，无需用户命名空间即可挂载，故不会走到该分支",
         );

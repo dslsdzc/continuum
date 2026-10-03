@@ -562,14 +562,9 @@ fn is_child() -> bool {
     std::env::var_os(CHILD_ENV).is_some()
 }
 
-/// 环境不具备本用例所需条件时的**显式**跳过标记。
-///
-/// 不静默通过：跳过原因打到 stderr。cargo 在用例通过时不回显这段输出，用 `--nocapture`
-/// 运行即可见——这是稳定工具链上既不与「全量全绿」冲突、又留下痕迹的处置。改判为
-/// `panic!` 会把「环境不具备」误报成「实现有缺陷」，反而掩盖真正的问题。
-fn skip(test: &str, reason: &str) {
-    eprintln!("【跳过】{test}：{reason}。本用例未执行断言。");
-}
+// 跳过标记与「子进程真跑过」的守卫都在 `tests/common/mod.rs`（与
+// `tests/backend_overlay.rs` 共用同一份；`src/gate.rs` 的单测模块是另一个 target，
+// 那里有一条同形的）。
 
 /// 环境是否具备建立用户与挂载命名空间的能力。
 ///
@@ -598,7 +593,7 @@ fn enter_namespace(test_name: &str) -> bool {
         .expect("测试可执行文件的路径不是合法 UTF-8")
         .to_owned();
     if !namespace_available(&exe) {
-        skip(test_name, "unshare -Urm 无法建立用户与挂载命名空间");
+        common::skip(test_name, "unshare -Urm 无法建立用户与挂载命名空间");
         return false;
     }
     // overlay 根指到一个只属于本次用例的临时目录——绝不能落到默认的
@@ -622,6 +617,7 @@ fn enter_namespace(test_name: &str) -> bool {
     // 的调用方是**按名字**传参的——一个拼写错误就会让用例静默变绿。守卫在 `tests/common/`
     // 里，与 `tests/backend_overlay.rs`、`src/gate.rs` 的单测模块同形。
     common::assert_child_ran_one(test_name, &stdout);
+    common::ran(test_name);
     // 子进程已退出，本次用例的 overlay 存储随临时目录一并清掉
     drop(holder);
     false
