@@ -24,7 +24,7 @@ fn main() -> ExitCode {
         // 替换它的是 **Task 12** 的派发（`task_cmd`）。在那之前，一个「看起来在
         // 做事」的实现会让调用方以为命令跑过了。
         Ok(Command::Task(_)) => {
-            eprintln!("`task` 子命令尚未接线（由 Task 12 接入）");
+            eprintln!("「task」子命令尚未接线（由 Task 12 接入）");
             ExitCode::FAILURE
         }
         Err(e) => {

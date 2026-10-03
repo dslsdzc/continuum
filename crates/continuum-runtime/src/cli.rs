@@ -66,7 +66,8 @@ pub const USAGE: &str = "\
          故 --exec 之后的任何 token 都属于该命令，即使它看起来像本驱动的选项。
          想在命令里用 --apply，请把它写在 --exec 之前。
   --sandbox 取 landlock 或 bubblewrap；不给则由装配点按能力自动选。
-  --effect 形如 <类型>:<目标>，类型取 EffectType 的封闭枚举，目标按**第一个**冒号切开。";
+  --effect 形如 <类型>:<目标>，类型取 EffectType 的封闭枚举，目标按「第一个」冒号切开。
+  --base / --intent / --sandbox / --db 各只接受一次，第二次出现即报错。";
 
 /// 一次调用的子命令（设计下篇第 4.1 节）。
 #[derive(Debug, Clone, PartialEq)]

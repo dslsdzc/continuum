@@ -280,6 +280,55 @@ fn a_duplicate_value_option_is_rejected() {
     // （两条 `--effect` 都留下，且类型与目标各按出现次序对上）。
 }
 
+/// 带取值的选项在**参数末尾**缺取值时，各自报各自的 `MissingValue`。
+///
+/// 与 `a_duplicate_value_option_is_rejected` 是同一形态：四处都是各自手写的分支
+/// （`parse_task` 的四个臂 + `parse_recover` 的一个臂），都能各自漂移，故逐项钉住，
+/// 不只抽一个。`--exec` 那一处由 `task_requires_base_intent_and_exec` 覆盖——它缺的
+/// 是整条命令，走的是同一个变体。
+#[test]
+fn a_value_option_at_the_end_of_argv_is_rejected() {
+    let cases: [(Vec<&str>, &'static str); 5] = [
+        (vec!["task", "--base"], "--base"),
+        (vec!["task", "--base", "/b", "--intent"], "--intent"),
+        (
+            vec!["task", "--base", "/b", "--intent", "i1", "--sandbox"],
+            "--sandbox",
+        ),
+        (
+            vec!["task", "--base", "/b", "--intent", "i1", "--effect"],
+            "--effect",
+        ),
+        (vec!["recover", "--db"], "--db"),
+    ];
+    for (args, option) in cases {
+        let err = cli::parse(args).unwrap_err();
+        assert_eq!(err, CliError::MissingValue { option });
+        assert!(
+            err.to_string().contains(option),
+            "错误信息应点名 {option}，实际：{err}"
+        );
+    }
+}
+
+/// `USAGE` 是打到 stderr 给用户看的**纯文本**，不是 rustdoc，故不得带 markdown 标记。
+///
+/// 它曾写作 `目标按**第一个**冒号切开。`——用户看到的是带星号的那串字符。本用例挡住
+/// 这一类回归：星号强调与反引号在终端里都是原样显示的，不会变成任何样式。
+#[test]
+fn usage_is_plain_text_without_markdown_markers() {
+    assert!(
+        !cli::USAGE.contains("**"),
+        "USAGE 不得含 markdown 的星号强调：\n{}",
+        cli::USAGE
+    );
+    assert!(
+        !cli::USAGE.contains('`'),
+        "USAGE 不得含 markdown 的反引号：\n{}",
+        cli::USAGE
+    );
+}
+
 /// `CliError` 的文档写着「每个变体都点名**具体是哪一个**选项/取值出了错」——
 /// 这也是一项枚举上的绝对断言，故这里把**全部十个变体**过一遍。
 ///
