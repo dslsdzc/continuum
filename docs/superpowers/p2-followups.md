@@ -63,3 +63,24 @@ compile_fail/gate_approval_*.rs` 钉的就是这两点）。它**不携带也不
 **但下篇不要以为它已经绑定了某一次具体的集成。** 在产生点落地之前，它只表示「有调用方认为该批准」，
 不表示「这一枚批准的是这一次集成」。要让「批准的是哪一次」成立，需要把 base / task / 改动摘要
 摘要进 token 并在校验点比对——那是产生点那一侧的活，不是 Gate 这一侧的。
+
+---
+
+## 三、`ALLOWED` 表两条目的语义不同（记账，非缺陷）
+
+`crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表里，两条目记的东西不一样：
+
+```
+叶子 crate（如 continuum-workspace）  记的是**实际使用的**依赖——
+                                      Task 1 据此删掉了该条目里的 continuum-core
+continuum-runtime                     记的是**规范允许集合**，含尚未使用的——
+                                      core / events / provider 三条都零实际引用却早已登记
+```
+
+P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用，消费者是下篇的驱动），
+**依据是后者这一条既有的语义**，与其自身的先例一致。
+
+两条目语义不同、却共用同一张表与同一条双向断言，**是这张表的一处不齐**。本子项目未处置。
+若要统一，两种走法各有代价：一律按实际依赖记，则 runtime 要删三条既有的（牵动 P1 的决定）；
+一律按允许集合记，则 `Cargo.toml` 会声明用不到的东西（那不是对代码的忠实陈述）。
+留待后续阶段决定，**在改这张表之前先看清条目属于哪一类**。
