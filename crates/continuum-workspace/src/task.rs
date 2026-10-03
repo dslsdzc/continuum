@@ -25,15 +25,24 @@ impl TaskWorkspace {
     /// **不是测试专用。** 三种后端（worktree、overlay、以及测试夹具）都要经它产出句柄，
     /// 故不能置于 `#[cfg(test)]`。`root` 由后端决定，但必须与 `base` 无重叠。
     ///
-    /// `root` 不得与 `base` 重叠：既不能等于 Base，也不能是 Base 的祖先。
-    /// 前者使「Task 就是 Base」，后者使「Task 是包含 Base 的一层」——两者都会让
-    /// [`crate::WritablePath`] 指向 Base（或 Base 之外），而 `Sandbox::spawn` 收
-    /// `&TaskWorkspace`，内核层隔离会照着这个根反过来给 Base 开写权限，
-    /// 只读强制的三层里最外一层被从内部绕过。
+    /// `root` 不得与 `base` 重叠，**三种形态**都不行：等于 Base、是 Base 的祖先、
+    /// 以及落在 Base 之下却不是「本 Intent 的私有子树」的位置。三者的后果是同一个
+    /// ——Task 的可写范围不再落在本 Intent 的私有范围内。
     ///
-    /// **只有 Base 之内的 Runtime 私有子树（`<base>/.ai/`）放行。** worktree 后端就是
-    /// 这种形态：Task 根在 `<base>/.ai/worktrees/<intent>`，可写范围是 Base 的一个
-    /// **子目录**而非 Base 本身。
+    /// - **等于 Base** 使「Task 就是 Base」，**是 Base 的祖先**使「Task 是包含 Base 的
+    ///   一层」：两者都会让 [`crate::WritablePath`] 指向 Base（或 Base 之外），而
+    ///   `Sandbox::spawn` 收 `&TaskWorkspace`，内核层隔离会照着这个根反过来给 Base 开
+    ///   写权限，只读强制的三层里最外一层被从内部绕过。
+    /// - **Base 之下的其他位置**的后果见下两段。
+    ///
+    /// **只有 Base 之内的 Runtime 私有子树（`<base>/.ai/` 的<u>下方</u>）放行。**
+    /// worktree 后端就是这种形态：Task 根在 `<base>/.ai/worktrees/<intent>`，可写范围是
+    /// Base 的一个**子目录**而非 Base 本身。
+    ///
+    /// **`<base>/.ai` 自身也不行。** 它不是任何单个 Intent 的范围，而是**所有 Intent 的
+    /// 共同父目录**：以它为 Task 根，可写范围就覆盖了别的 Intent 的 worktree——跨 Intent
+    /// 篡改，正是设计 §5 当作真实危害的那件事（overlay 的存储当初移出 Base 就因为它）。
+    /// 设计 §4.1 写的是「落在 `<base>/.ai/` **之下**」，判据须与文本同宽。
     ///
     /// **Base 之内的其他位置一律拒绝**（[`WorkspaceError::Overlaps`]）。少了后半句，
     /// `new_outside(&base, "<base>/src", …)` 会被放行，于是「Task 的可写范围」正落在 Base
@@ -43,10 +52,11 @@ impl TaskWorkspace {
     /// **后代**没有；而放行后代的理由（worktree 后端的形态）只覆盖后端私有子树，
     /// 不覆盖任意子目录。
     ///
-    /// 判据是
-    /// `base_canonical.starts_with(candidate) || (candidate.starts_with(base_canonical)
-    /// && !candidate.starts_with(<base>/.ai))`——为真即拒绝，两侧都取
-    /// `std::fs::canonicalize` 的结果，故 symlink 与 `..` 均无法绕过。
+    /// 判据是 `base_canonical.starts_with(candidate)`，或者 `candidate` 落在
+    /// `base_canonical` 之内却不在 `<base>/.ai/` 的**下方**（`<base>/.ai` 自身也算不在
+    /// 下方——放行它等于放行所有 Intent 的共同父目录）。`candidate` 与 `base_canonical`
+    /// 都取 `std::fs::canonicalize` 的结果，故 symlink 与 `..` 均无法绕过；比较按路径
+    /// **分量**做，故 `.ai-evil` 不会被当成 `.ai` 的下方。
     ///
     /// **判定先于落盘**：被拒绝的 root 不得在磁盘上留下任何目录。
     /// root 可能尚不存在，故判定用 [`canonical_candidate`]——它不产生副作用。
@@ -62,8 +72,10 @@ impl TaskWorkspace {
         let candidate = canonical_candidate(&root)?;
         let base_root = canonicalize(base.root())?;
         let ai_root = base_root.join(AI_DIR);
-        let overlaps = base_root.starts_with(&candidate)
-            || (candidate.starts_with(&base_root) && !candidate.starts_with(&ai_root));
+        // `.ai` 的**下方**才算放行：等值那一支（`<base>/.ai` 自身）排除在外，见文档。
+        let inside_ai = candidate != ai_root && candidate.starts_with(&ai_root);
+        let overlaps =
+            base_root.starts_with(&candidate) || (candidate.starts_with(&base_root) && !inside_ai);
         if overlaps {
             return Err(WorkspaceError::Overlaps {
                 root: candidate,

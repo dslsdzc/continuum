@@ -138,6 +138,47 @@ fn task_root_may_not_be_an_arbitrary_subdirectory_of_the_base() {
     );
 }
 
+/// **`.ai` 自身也不行**：放行的是它**下方**的位置。
+///
+/// `<base>/.ai` 不是任何单个 Intent 的范围，而是**所有 Intent 的共同父目录**——以它为
+/// Task 根，可写范围就覆盖了别的 Intent 的 worktree。这正是设计 §5 当作真实危害的那件事
+/// （overlay 的存储当初移出 Base 就因为它），且设计 §4.1 写的就是「落在 `<base>/.ai/`
+/// **之下**」，判据须与文本同宽。
+#[test]
+fn task_root_may_not_be_the_runtime_private_subtree_itself() {
+    // 情形一：`.ai` 尚不存在——被拒绝之后不得被建出来。
+    let dir = tempfile::tempdir().unwrap();
+    let base = BaseWorkspace::new(dir.path()).unwrap();
+    let err =
+        TaskWorkspace::new_outside(&base, dir.path().join(".ai"), IntentId::new("i1")).unwrap_err();
+    assert!(
+        matches!(err, WorkspaceError::Overlaps { .. }),
+        "实际 {err:?}"
+    );
+    assert!(
+        !dir.path().join(".ai").exists(),
+        "被拒绝的根把 .ai 建了出来"
+    );
+
+    // 情形二：`.ai` 里已有**别的 Intent** 的工作内容——被拒绝之后逐字节未变。
+    let other = dir.path().join(".ai").join("worktrees").join("别的intent");
+    std::fs::create_dir_all(&other).unwrap();
+    std::fs::write(other.join("f.txt"), "别的 Intent 的工作\n").unwrap();
+    let before = std::fs::read(other.join("f.txt")).unwrap();
+
+    let err =
+        TaskWorkspace::new_outside(&base, dir.path().join(".ai"), IntentId::new("i1")).unwrap_err();
+    assert!(
+        matches!(err, WorkspaceError::Overlaps { .. }),
+        "实际 {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(other.join("f.txt")).unwrap(),
+        before,
+        "被拒绝的根动到了别的 Intent 的工作"
+    );
+}
+
 /// 反面：后端私有子树 `.ai/` 之内仍放行——收紧不能收过头，worktree 后端就建在那里。
 #[test]
 fn task_root_may_live_in_the_runtime_private_subtree() {

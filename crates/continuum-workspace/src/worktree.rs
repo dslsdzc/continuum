@@ -24,8 +24,17 @@ use std::process::{Command, Stdio};
 /// 各 Intent 的 worktree 所在的子目录名，位于 [`AI_DIR`] 之下（§255）。
 const WORKTREE_SUBDIR: &str = "worktrees";
 
-/// 仓库本地排除文件中标记 AI 私有目录的条目。
-const IGNORE_ENTRY: &str = ".ai/";
+/// 仓库本地排除文件中标记 AI 私有目录的条目是否为 `line`。
+///
+/// **`.ai` 这个名字只有 [`AI_DIR`] 一处写法**：本条与追加时写的那一行都由它派生，
+/// 改 `AI_DIR` 不会漏掉这里（`IGNORE_ENTRY = ".ai/"` 曾是与它并存的第二个字面量）。
+///
+/// 两种拼法都认（`.ai` 与 `.ai/`）：gitignore 对二者等价，用户可能自己写过任一种，
+/// 认出来就不必重复追加。故判定是「去掉一个尾斜杠之后等于 [`AI_DIR`]」。
+fn is_ignore_entry(line: &str) -> bool {
+    let line = line.trim();
+    line.strip_suffix('/').unwrap_or(line) == AI_DIR
+}
 
 /// worktree 分支名的前缀（§16）。
 const BRANCH_PREFIX: &str = "ai/";
@@ -315,10 +324,7 @@ fn ensure_ai_excluded(base: &Path) -> Result<(), WorkspaceError> {
     };
     if let Some(bytes) = &existing {
         let text = String::from_utf8_lossy(bytes);
-        if text
-            .lines()
-            .any(|line| matches!(line.trim(), ".ai" | ".ai/"))
-        {
+        if text.lines().any(is_ignore_entry) {
             return Ok(());
         }
     }
@@ -326,7 +332,10 @@ fn ensure_ai_excluded(base: &Path) -> Result<(), WorkspaceError> {
     if !out.is_empty() && !out.ends_with(b"\n") {
         out.push(b'\n');
     }
-    out.extend_from_slice(IGNORE_ENTRY.as_bytes());
+    // 追加 `AI_DIR` + `/`：gitignore 里带尾斜杠表示「目录」，不带会连同名的普通文件
+    // 一并忽略——本层要排除的是那个目录。
+    out.extend_from_slice(AI_DIR.as_bytes());
+    out.push(b'/');
     out.push(b'\n');
     std::fs::write(&path, out).map_err(|e| io_error(&path, e))
 }
