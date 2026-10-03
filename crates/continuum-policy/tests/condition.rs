@@ -422,6 +422,60 @@ fn explicit_current_is_an_always_observable_boolean_fact() {
     );
 }
 
+/// [`Condition::to_json`] 与 [`Condition::parse`] 严格互逆：对任何解析得出来的条件，
+/// `parse(&c.to_json()) == Ok(c)`。全形状遍历——五个事实、三个比较符、空 `in` 列表、
+/// 空合取、多项合取各占一行，漏掉任何一个形状都会让「严格互逆」成为说大了的说法。
+///
+/// **比的是 [`Condition`] 的相等，不是 JSON 字节**：库里的表示是归一化后的形状，
+/// 裸谓词写回会变成一元合取（`a_bare_predicate_equals_a_one_term_conjunction`
+/// 钉住这一等价）。写回的形状本身另由本用例末尾的三条断言钉住。
+#[test]
+fn every_condition_shape_round_trips_through_to_json() {
+    for raw in [
+        json!({"all": []}),
+        json!({"fact": "explicit_current", "eq": true}),
+        json!({"fact": "explicit_current", "eq": false}),
+        json!({"fact": "privacy_class", "eq": "personal"}),
+        json!({"fact": "privacy_class", "in": ["secret", "private"]}),
+        json!({"fact": "effect_type", "eq": "charge"}),
+        json!({"fact": "effect_type", "in": []}),
+        json!({"fact": "task_class", "eq": "build"}),
+        json!({"fact": "duration_ms", "eq": 0}),
+        json!({"fact": "duration_ms", "gte": 1000}),
+        json!({"all": [
+            {"fact": "effect_type", "eq": "charge"},
+            {"fact": "privacy_class", "in": ["secret", "private"]},
+            {"fact": "task_class", "eq": "build"},
+            {"fact": "duration_ms", "gte": 1},
+            {"fact": "explicit_current", "eq": true},
+        ]}),
+    ] {
+        let parsed = Condition::parse(&raw).unwrap_or_else(|e| panic!("{raw} 应可解析：{e}"));
+        let written = parsed.to_json();
+        let back = Condition::parse(&written)
+            .unwrap_or_else(|e| panic!("{written} 应可解析：{e}"));
+        assert_eq!(back, parsed, "写回的 {written} 应解回同一个条件");
+    }
+
+    // 写回的形状：一律是合取形式（设计下篇第 5.1 节），裸谓词被归一化成一元合取。
+    let bare = Condition::parse(&json!({"fact": "effect_type", "eq": "charge"})).unwrap();
+    assert_eq!(
+        bare.to_json(),
+        json!({"all": [{"fact": "effect_type", "eq": "charge"}]}),
+        "裸谓词写回应取一元合取的形式"
+    );
+    let empty = Condition::parse(&json!({"all": []})).unwrap();
+    assert_eq!(empty.to_json(), json!({"all": []}), "空合取写回仍是空合取");
+    // 枚举取值经枚举自己的 `as_str` 写出：与落库编码、解析取值同源，不自建第二张表。
+    let effect = Condition::parse(&json!({"fact": "effect_type", "in": ["charge", "delete_remote"]}))
+        .unwrap();
+    assert_eq!(
+        effect.to_json(),
+        json!({"all": [{"fact": "effect_type", "in": ["charge", "delete_remote"]}]}),
+        "枚举取值应按其落库编码写出"
+    );
+}
+
 /// 顶层的两种写法同义：裸谓词与 `{"all": [该谓词]}`。
 ///
 /// 两者都必须被接受，且行为一致；`Value` 用一个共同的构造函数取，避免两处

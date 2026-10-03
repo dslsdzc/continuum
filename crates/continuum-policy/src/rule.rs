@@ -24,6 +24,62 @@ pub enum Level {
     ModelSuggestion = 6,
 }
 
+impl Level {
+    /// 全部六个层级。供全量遍历的用例使用（与 `continuum_effect::EffectType::ALL` 同形，
+    /// 那里的说明同样适用，含它挡不住的那一种情形）。
+    ///
+    /// 完整性与数目由 `tests/persist.rs` 的
+    /// `every_level_round_trips_through_its_encoding` 把关。
+    pub const ALL: [Level; 6] = [
+        Level::SystemSafety,
+        Level::ExplicitCurrent,
+        Level::UserPersistent,
+        Level::Project,
+        Level::RuntimeDefault,
+        Level::ModelSuggestion,
+    ];
+
+    /// `level` 列的落库编码：小写、多词以 `_` 连接（设计下篇第 8 节）。
+    ///
+    /// **取名字而非判别值**，虽然本枚举的判别值恰好是 1–6 的序号：数字编码会让
+    /// 「加一级」变成破坏性变更——在中间插入一层时，既有行的数字全部要改写（而
+    /// 判别值本身也随之改变，两件事都得做对）；名字编码则不受插入影响。编码定义
+    /// 放在这几行判别值旁边，正是为了让这条理由与它约束的东西在同一处。
+    ///
+    /// match 穷尽且无通配臂：加层级时本函数编译不过，编码不会漏分支。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SystemSafety => "system_safety",
+            Self::ExplicitCurrent => "explicit_current",
+            Self::UserPersistent => "user_persistent",
+            Self::Project => "project",
+            Self::RuntimeDefault => "runtime_default",
+            Self::ModelSuggestion => "model_suggestion",
+        }
+    }
+
+    /// [`Level::as_str`] 的**严格逆**：对 [`Level::ALL`] 里的每个层级都有
+    /// `Level::parse(l.as_str()) == Some(l)`，表外字符串一律 `None`。
+    ///
+    /// `None` 而不是默认层级：层级是优先级的依据，取默认会让裁决判错
+    /// （与 `crate::persist` 的解码同一条理由）。
+    ///
+    /// 解码侧没有穷尽 match 的保护——来源是 `&str` 而非枚举，编译器点不出漏掉的变体，
+    /// 故由 `tests/persist.rs` 的 `every_level_round_trips_through_its_encoding`
+    /// 遍历 [`Level::ALL`] 兜住。
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "system_safety" => Self::SystemSafety,
+            "explicit_current" => Self::ExplicitCurrent,
+            "user_persistent" => Self::UserPersistent,
+            "project" => Self::Project,
+            "runtime_default" => Self::RuntimeDefault,
+            "model_suggestion" => Self::ModelSuggestion,
+            _ => return None,
+        })
+    }
+}
+
 /// 一条规则的裁决（设计下篇第 5.1 节）。
 ///
 /// 本类型不派生 `Ord`：同层内的严苛次序（`Deny` > `RequireApproval` > `Allow`）
@@ -35,11 +91,75 @@ pub enum Decision {
     RequireApproval,
 }
 
+impl Decision {
+    /// 全部三个决策。供全量遍历的用例使用（与 [`Level::ALL`] 同形）。
+    ///
+    /// 完整性与数目由 `tests/persist.rs` 的
+    /// `every_decision_round_trips_through_its_encoding` 把关。
+    pub const ALL: [Decision; 3] = [
+        Decision::Allow,
+        Decision::Deny,
+        Decision::RequireApproval,
+    ];
+
+    /// `decision` 列的落库编码：小写、多词以 `_` 连接（设计下篇第 8 节）。
+    ///
+    /// match 穷尽且无通配臂：加决策时本函数编译不过，编码不会漏分支。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Allow => "allow",
+            Self::Deny => "deny",
+            Self::RequireApproval => "require_approval",
+        }
+    }
+
+    /// [`Decision::as_str`] 的**严格逆**；表外字符串一律 `None`，不取默认决策
+    /// ——取默认会让裁决判错。解码侧的完整性由 `tests/persist.rs` 的
+    /// `every_decision_round_trips_through_its_encoding` 遍历 [`Decision::ALL`] 兜住。
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "allow" => Self::Allow,
+            "deny" => Self::Deny,
+            "require_approval" => Self::RequireApproval,
+            _ => return None,
+        })
+    }
+}
+
 /// 规则的来源层（设计下篇第 5.1 节）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Scope {
     User,
     Project,
+}
+
+impl Scope {
+    /// 全部两个作用域。供全量遍历的用例使用（与 [`Level::ALL`] 同形）。
+    ///
+    /// 完整性与数目由 `tests/persist.rs` 的
+    /// `every_scope_round_trips_through_its_encoding` 把关。
+    pub const ALL: [Scope; 2] = [Scope::User, Scope::Project];
+
+    /// `scope` 列的落库编码：小写、多词以 `_` 连接（设计下篇第 8 节）。
+    ///
+    /// match 穷尽且无通配臂：加作用域时本函数编译不过，编码不会漏分支。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Project => "project",
+        }
+    }
+
+    /// [`Scope::as_str`] 的**严格逆**；表外字符串一律 `None`。解码侧的完整性由
+    /// `tests/persist.rs` 的 `every_scope_round_trips_through_its_encoding`
+    /// 遍历 [`Scope::ALL`] 兜住。
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "user" => Self::User,
+            "project" => Self::Project,
+            _ => return None,
+        })
+    }
 }
 
 /// 一条策略规则（设计下篇第 5.1 节）。
@@ -101,6 +221,28 @@ impl Condition {
     /// 合取：每一项都成立才成立；空合取恒真。
     pub fn matches(&self, ctx: &PolicyContext) -> bool {
         self.0.iter().all(|p| p.matches(ctx))
+    }
+
+    /// 写回 [`Value`]，供落库（`crate::persist` 的 `condition` 列）。
+    ///
+    /// **与 [`Condition::parse`] 严格互逆**：对任何 `parse` 得出来的条件，
+    /// `Condition::parse(&c.to_json()) == Ok(c)`。由 `tests/condition.rs` 的
+    /// `every_condition_shape_round_trips_through_to_json` 遍历全部形状钉住。
+    ///
+    /// 形状一律取设计下篇第 5.1 节的合取形式（`{"all": [...]}`）。**故写回的是
+    /// 归一化后的形状**：裸谓词输入经 `parse` 已是一元合取，写回不会还原成裸谓词。
+    /// 这不是缺陷——两种写法本就同义（`a_bare_predicate_equals_a_one_term_conjunction`），
+    /// 故比较两处条件时要比 [`Condition`] 的相等，不比 JSON 字节。
+    ///
+    /// 枚举取值经枚举自己的 `as_str` 写出，与 [`Condition::parse`] 的取值解析同源
+    /// （见 `parse_fact_value` 的说明），本 crate 不自建第二张字符串表。
+    pub fn to_json(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "all".to_owned(),
+            Value::Array(self.0.iter().map(Predicate::to_json).collect()),
+        );
+        Value::Object(map)
     }
 }
 
@@ -177,6 +319,29 @@ impl Predicate {
             }
         };
         Ok(Self { fact, matcher })
+    }
+
+    /// [`Predicate::parse`] 的逆：写出 `fact` 与恰一个比较符的键值对。
+    ///
+    /// 比较符的键名取 [`Op::name`]，与解析侧的 [`Op::parse`] 同源。
+    fn to_json(&self) -> Value {
+        let mut map = serde_json::Map::new();
+        map.insert("fact".to_owned(), Value::String(self.fact.name().to_owned()));
+        match &self.matcher {
+            Matcher::Eq(value) => {
+                map.insert(Op::Eq.name().to_owned(), value.to_json());
+            }
+            Matcher::Gte(value) => {
+                map.insert(Op::Gte.name().to_owned(), value.to_json());
+            }
+            Matcher::In(values) => {
+                map.insert(
+                    Op::In.name().to_owned(),
+                    Value::Array(values.iter().map(FactValue::to_json).collect()),
+                );
+            }
+        }
+        Value::Object(map)
     }
 
     fn matches(&self, ctx: &PolicyContext) -> bool {
@@ -330,6 +495,20 @@ enum FactValue {
 }
 
 impl FactValue {
+    /// [`parse_fact_value`] 的逆：按事实的类型写出一个字面量。
+    ///
+    /// 两个枚举事实经枚举自己的 `as_str` 写出——与解析侧的 `parse` 是同一对函数，
+    /// 故往返成立的前提（编码互逆）由那些 crate 自己的用例给出，不在这里另立一份。
+    fn to_json(&self) -> Value {
+        match self {
+            Self::Bool(value) => Value::Bool(*value),
+            Self::Privacy(class) => Value::String(class.as_str().to_owned()),
+            Self::Effect(effect_type) => Value::String(effect_type.as_str().to_owned()),
+            Self::Text(text) => Value::String(text.clone()),
+            Self::Number(number) => Value::Number((*number).into()),
+        }
+    }
+
     /// 数值是否不小于 `bound`。任一侧不是数值即取 `false`：解析期已拒绝
     /// 「`gte` 用于非数值事实」，故该分支不出现；万一出现，判为不成立是更严的一侧。
     fn reaches(&self, bound: &Self) -> bool {
