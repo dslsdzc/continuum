@@ -215,16 +215,21 @@ impl<'a> IntegrationGate<'a> {
     /// 一类都行，`git rev-parse` 认得的写法即可）。它们必须能从 Base 的仓库解析出来
     /// ——Task 分支与 Base 在同一个仓库里，故 `ai/<intent>` 上的提交名都可用。
     ///
-    /// **空列表由本层拒绝**（[`WorkspaceError::GateRefused`]），不落到 git：git 在这种
-    /// 情形下打印用法并以 129 退出，调用方拿到的会是「git 命令失败」而不是「你没给
-    /// 提交」。要把 Task 的全部改动并入 Base，用 [`IntegrationGate::apply_patch`] 或
-    /// [`IntegrationGate::merge`]。
+    /// **worktree 后端上，空列表由本层拒绝**（[`WorkspaceError::GateRefused`]），不落到
+    /// git：git 在这种情形下打印用法并以 129 退出，调用方拿到的会是「git 命令失败」而不是
+    /// 「你没给提交」。要把 Task 的全部改动并入 Base，用
+    /// [`IntegrationGate::apply_patch`] 或 [`IntegrationGate::merge`]。
     ///
-    /// **overlay 后端上本操作不成立，一律拒绝**（[`WorkspaceError::GateRefused`]，设计
-    /// 6.3）：那个后端没有提交粒度，`commits` 无从兑现。**不退化**为「并入全部改动」
-    /// ——那会静默地集成得**比调用方要求的更多**（点名一个提交，得到整棵树的改动），
-    /// 方向是危险的，故宁可报错。调用方要按提交粒度集成只能用 worktree 后端；要并入
-    /// 全部改动，用 [`IntegrationGate::apply_patch`] 或 [`IntegrationGate::merge`]。
+    /// **overlay 后端上没有提交粒度，按提交摘取不成立**（设计 6.3）：
+    /// - **非空列表一律拒绝**（[`WorkspaceError::GateRefused`]）。**不退化**为「并入全部
+    ///   改动」——那会静默地集成得**比调用方要求的更多**（点名一个提交，得到整棵树的
+    ///   改动），方向是危险的，故宁可报错。调用方要按提交粒度集成只能用 worktree 后端。
+    /// - **空列表退化为 [`IntegrationGate::merge`]**：那时请求的内容本就是「全部」，退化成
+    ///   并入整棵 Task 没有多并任何东西。故这一支落到 [`integrate_overlay`]。
+    ///
+    /// 拒绝排在**任何改动之前**，故被拒绝的调用在磁盘与库上都不留痕迹（用例：
+    /// `cherry_pick_is_refused_on_the_overlay_backend`、
+    /// `cherry_pick_with_an_empty_list_merges_the_whole_task_on_the_overlay_backend`）。
     ///
     /// **摘取中途失败会留下 git 的未完成状态。** `cherry-pick` 冲突时 git 停在冲突处
     /// （`CHERRY_PICK_HEAD` 与工作树里的冲突标记都在），本层不代 git 收尾：自动
@@ -240,29 +245,32 @@ impl<'a> IntegrationGate<'a> {
         approval: &GateApproval,
     ) -> Result<(), GateError> {
         let _ = approval;
-        if commits.is_empty() {
-            return Err(WorkspaceError::GateRefused {
-                reason: "cherry_pick 未给出任何提交。要把 Task 的全部改动并入 Base，\
-                         用 apply_patch 或 merge"
-                    .to_owned(),
-            }
-            .into());
-        }
         match backend {
-            WorkspaceBackend::Worktree => cherry_pick_worktree(self.base, commits)?,
-            // 见本函数的文档：这一支不退化，直接拒绝。拒绝排在**任何改动之前**，故
-            // 被拒绝的调用在磁盘与库上都不留痕迹（用例：src/gate.rs 里的
-            // `cherry_pick_is_refused_on_the_overlay_backend`）。
-            WorkspaceBackend::Overlay => {
-                return Err(WorkspaceError::GateRefused {
-                    reason: format!(
-                        "overlay 后端没有提交粒度，无法按提交摘取（请求了 {} 个提交）；\
-                         退化并入全部改动会静默地集成得比要求的多。要按提交粒度集成只能用\
-                         worktree 后端，要并入全部改动用 apply_patch 或 merge",
-                        commits.len()
-                    ),
+            WorkspaceBackend::Worktree => {
+                if commits.is_empty() {
+                    return Err(WorkspaceError::GateRefused {
+                        reason: "cherry_pick 未给出任何提交。要把 Task 的全部改动并入 Base，\
+                                 用 apply_patch 或 merge"
+                            .to_owned(),
+                    }
+                    .into());
                 }
-                .into());
+                cherry_pick_worktree(self.base, commits)?;
+            }
+            WorkspaceBackend::Overlay => {
+                // 见本函数的文档：非空列表不退化，直接拒绝；空列表退化为 merge。
+                if !commits.is_empty() {
+                    return Err(WorkspaceError::GateRefused {
+                        reason: format!(
+                            "overlay 后端没有提交粒度，无法按提交摘取（请求了 {} 个提交）；\
+                             退化并入全部改动会静默地集成得比要求的多。要按提交粒度集成只能\
+                             用 worktree 后端，要并入全部改动用 apply_patch 或 merge",
+                            commits.len()
+                        ),
+                    }
+                    .into());
+                }
+                integrate_overlay(self.base.root(), task.root())?;
             }
         }
         self.audit(
@@ -633,8 +641,9 @@ fn merge_worktree(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<(), Gate
 /// Base」，而 `apply_patch` 也只能是同一件事——覆盖层里既没有提交，也没有补丁的基准点。
 /// 二者共用本函数。
 ///
-/// **第三项写入操作不在这里。** `cherry_pick` 按定义要提交粒度，而覆盖层没有——它不退化
-/// 到本函数，而是直接拒绝（见 [`IntegrationGate::cherry_pick`] 的文档与
+/// **`cherry_pick` 只在一种情形下到这里**：请求了**空**提交列表时（那时请求的内容本就是
+/// 「全部」，退化成并入整棵 Task 没有多并任何东西）。非空列表要求提交粒度，而覆盖层没有，
+/// 故那一支直接拒绝（见 [`IntegrationGate::cherry_pick`] 的文档与
 /// `cherry_pick_is_refused_on_the_overlay_backend` 用例）。
 ///
 /// **改动集合取自 [`diff_trees`]，而不是直接读 upper 层。** 两者在「内容」上等价
@@ -1776,6 +1785,61 @@ mod tests {
         assert!(audit_rows(&tx).is_empty(), "被拒绝的调用写了审计记录");
     }
 
+    /// overlay 后端上给**空**列表时，`cherry_pick` 退化为并入全部改动（设计 6.3）。
+    ///
+    /// 与非空列表那一支（拒绝）是一对：分界就是「请求里到底有没有点名提交」。空列表下
+    /// 请求的内容本就是「全部」，退化成并入整棵 Task 没有多并任何东西；一旦点名了提交，
+    /// 退化就会多并——那才是危险的，故那边拒绝。
+    #[test]
+    fn cherry_pick_with_an_empty_list_merges_the_whole_task_on_the_overlay_backend() {
+        let holder = tempfile::tempdir().unwrap();
+        let base_path = holder.path().join("base");
+        std::fs::create_dir(&base_path).unwrap();
+        std::fs::write(base_path.join("要改的.txt"), "lower\n").unwrap();
+        let task_root = holder.path().join("task");
+        std::fs::create_dir_all(&task_root).unwrap();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let task = crate::TaskWorkspace::new_outside(
+            &base,
+            &task_root,
+            crate::ids::IntentId::new("i1"),
+        )
+        .unwrap();
+        task.writable_root().write("要改的.txt", b"upper\n").unwrap();
+        task.writable_root().write("新增.txt", "新\n".as_bytes()).unwrap();
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        IntegrationGate::new(&base)
+            .cherry_pick(
+                &tx,
+                &task,
+                WorkspaceBackend::Overlay,
+                &[],
+                1_000,
+                &GateApproval(()),
+            )
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(base_path.join("要改的.txt")).unwrap(),
+            b"upper\n",
+            "空列表下没有并入 Task 的改动"
+        );
+        assert_eq!(
+            std::fs::read_to_string(base_path.join("新增.txt")).unwrap(),
+            "新\n"
+        );
+        let rows = audit_rows(&tx);
+        tx.commit().unwrap();
+        assert_eq!(rows.len(), 1, "空列表的退化也应记一条审计");
+        assert!(
+            rows[0].1.contains("cherry_pick"),
+            "审计 payload 里没有操作名：{}",
+            rows[0].1
+        );
+    }
+
     /// `cherry_pick` 不给提交即拒绝，报出的是 `GateRefused` 而不是 git 的用法报错。
     ///
     /// 两种错法的差别对调用方是实质的：`git cherry-pick` 在零参数下打印用法并以 129
@@ -2016,5 +2080,156 @@ mod tests {
             meta.is_dir() && !meta.file_type().is_symlink(),
             "Base 里那一级仍是链接，遮蔽没有生效"
         );
+    }
+
+    // ===== 真挂载的覆盖层上的集成（需要用户与挂载命名空间）=====
+    //
+    // 上面几条 overlay 用例都在**普通目录**上跑 [`integrate_overlay`]，验的是「比较两棵树
+    // + 把差别写过去」这一段。而它在设计里是 overlay 后端的**唯一通道**（§257），故还要在
+    // **真挂载**的覆盖层上走一次整条路：Task 根是覆盖层的挂载点，读它要经内核的合并视图，
+    // 写入要落回 Base。
+    //
+    // 脚手架与 `tests/gate.rs`、`tests/backend_overlay.rs` 同源（那两处也是各留一份：单测
+    // 与集成测试是两个 crate，取不到对方的东西）。要点有三：把自身重新执行进 `unshare -Urm`
+    // 由子进程断言；overlay 根指到只属于本次用例的临时目录（**绝不能**落到用户 home 下的
+    // 默认位置）；环境不具备时**显式跳过并打标记**，不静默通过。
+
+    /// 标识「本进程是被重新执行出来的子进程」，防止再次 re-exec 造成无限递归。
+    const CHILD_ENV: &str = "CONTINUUM_GATE_LIB_CHILD";
+
+    /// overlay 根：由父进程指到一个只属于本次用例的临时目录。
+    const OVERLAY_ROOT_ENV: &str = "CONTINUUM_OVERLAY_ROOT";
+
+    fn is_child() -> bool {
+        std::env::var_os(CHILD_ENV).is_some()
+    }
+
+    /// 环境不具备本用例所需条件时的**显式**跳过标记。
+    ///
+    /// 不静默通过：跳过原因打到 stderr（cargo 在用例通过时不回显，`--nocapture` 可见）。
+    fn skip(test: &str, reason: &str) {
+        eprintln!("【跳过】{test}：{reason}。本用例未执行断言。");
+    }
+
+    /// 把本用例重新执行进 `unshare -Urm` 的子进程，并核对子进程的退出码。
+    ///
+    /// 返回 `true` 表示「当前就是子进程，继续执行断言」；`false` 表示父进程已跑完或已跳过。
+    fn enter_namespace(test_name: &str) -> bool {
+        if is_child() {
+            return true;
+        }
+        let exe = std::env::current_exe().expect("无法取到测试可执行文件的路径");
+        let exe = exe
+            .to_str()
+            .expect("测试可执行文件的路径不是合法 UTF-8")
+            .to_owned();
+        // 探测方式是把**本测试二进制**以 `--list` 重新执行进 `unshare -Urm`：用自身而非
+        // `/bin/true` 一类的替身，因为要探的正是「本进程能否被这样执行」。
+        let available = std::process::Command::new("unshare")
+            .args(["-Urm", &exe, "--list"])
+            .output()
+            .map(|out| out.status.success())
+            .unwrap_or(false);
+        if !available {
+            skip(test_name, "unshare -Urm 无法建立用户与挂载命名空间");
+            return false;
+        }
+        let holder = tempfile::tempdir().unwrap();
+        let root: OsString = holder.path().join("overlays").into_os_string();
+        let out = std::process::Command::new("unshare")
+            .args(["-Urm", &exe, test_name, "--exact"])
+            .env(CHILD_ENV, "1")
+            .env(OVERLAY_ROOT_ENV, &root)
+            .output()
+            .unwrap_or_else(|e| panic!("无法重新执行 {exe}：{e}"));
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success(),
+            "子进程 {test_name} 失败（退出码 {:?}）：\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
+            out.status.code(),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        // **子进程必须真的跑过那一条用例。** libtest 的过滤器对不上任何名字时以「0 tests
+        // run」退出 0——只看退出码的话，这条用例会**静默变绿**：什么都没验，却报通过。
+        // （实测过一次：单测二进制里的用例全名带模块路径 `gate::tests::…`，只传函数名时
+        // `--exact` 匹配不上，于是断言一次也没执行。）
+        assert!(
+            stdout.contains("1 passed"),
+            "子进程没有执行 {test_name}（过滤器对不上时 libtest 以 0 tests 退出 0，本用例\
+             会静默变绿）。子进程输出：\n{stdout}"
+        );
+        drop(holder);
+        false
+    }
+
+    /// 建一个带 lower 内容的 Base，返回（保活用的 `TempDir`，规范化的 Base 根）。
+    ///
+    /// 只在子进程里调用。
+    fn base_with_lower() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::write(root.join("要改的.txt"), "lower\n").unwrap();
+        std::fs::write(root.join("要删的.txt"), "只在 lower\n").unwrap();
+        (dir, root)
+    }
+
+    /// 在**真挂载**的覆盖层上经 `apply_patch` 集成：改、删（白障）、增都要落进 Base。
+    ///
+    /// 与 `integrating_into_the_base_materializes_the_task_changes` 的分工：那条验的是
+    /// 集成这一段本身（普通目录），本条验的是**它在真覆盖层上跑得通**——Task 根是挂载点，
+    /// 读它经内核的合并视图、写它落进 upper 层，而集成要在这之上把差别正确读出并写回 Base。
+    /// 少了这一条，「唯一通道」在 overlay 后端上就只有合成测试。
+    #[test]
+    fn applying_a_patch_on_a_mounted_overlay_reaches_the_base() {
+        // 名字要带模块路径：单测二进制里的用例全名是 `gate::tests::<函数名>`，而
+        // `--exact` 是按全名匹配的（传函数名会让子进程跑 0 条用例并以 0 退出）。
+        if !enter_namespace(
+            "gate::tests::applying_a_patch_on_a_mounted_overlay_reaches_the_base",
+        ) {
+            return;
+        }
+        let (_d, base_path) = base_with_lower();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) =
+            crate::backend::create_task_workspace(&base, &crate::ids::IntentId::new("i1")).unwrap();
+        assert_eq!(backend, WorkspaceBackend::Overlay);
+
+        // Task 侧：改一个（落进 upper）、删一个（落成白障）、加一个（含深一层的路径）
+        task.writable_root().write("要改的.txt", b"upper\n").unwrap();
+        std::fs::remove_file(task.root().join("要删的.txt")).unwrap();
+        task.writable_root()
+            .write("新目录/深层.txt", "深层新增\n".as_bytes())
+            .unwrap();
+        // 集成之前 Base 一字未动：挂载点读到的是合并视图，而 Base 本身还是 lower 的内容
+        assert_eq!(
+            std::fs::read(base_path.join("要改的.txt")).unwrap(),
+            b"lower\n",
+            "集成之前 Base 就已被动过"
+        );
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        IntegrationGate::new(&base)
+            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .unwrap();
+        let rows = audit_rows(&tx);
+        tx.commit().unwrap();
+
+        assert_eq!(
+            std::fs::read(base_path.join("要改的.txt")).unwrap(),
+            b"upper\n",
+            "改动没有经挂载的覆盖层落进 Base"
+        );
+        assert!(
+            !base_path.join("要删的.txt").exists(),
+            "Task 在覆盖层里删掉的文件仍在 Base 里（白障没有被读成删除）"
+        );
+        assert_eq!(
+            std::fs::read_to_string(base_path.join("新目录/深层.txt")).unwrap(),
+            "深层新增\n",
+            "新增的深层文件没有进 Base"
+        );
+        assert_eq!(rows.len(), 1, "集成应记一条审计");
+        assert!(rows[0].1.contains("backend=overlay"), "{}", rows[0].1);
     }
 }
