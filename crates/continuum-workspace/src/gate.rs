@@ -180,11 +180,14 @@ pub enum GateError {
     /// 本层的一个字符串，会让「git 究竟因何失败」（退出码、stderr）无从读取。
     #[error(transparent)]
     Workspace(#[from] WorkspaceError),
-    /// 后端给出的结果无法解释。
+    /// 后端给出的结果无法解释，或后端以本层读不出的方式失败。
     ///
-    /// 目前只有一处来源：git 在 `--name-status` 里给出了本层不认识的状态码。
-    /// 这种情况下**不能丢弃那一条**——Diff 是三种写入操作的依据，少列一条意味着
-    /// 有一处改动调用方看不见，而它可能是要在 Base 上生效的那个。
+    /// 两处来源：
+    /// - git 在 `--name-status` 里给出了本层不认识的状态码。这种情况下**不能丢弃那
+    ///   一条**——Diff 是三种写入操作的依据，少列一条意味着一处改动调用方看不见，
+    ///   而它可能是要在 Base 上生效的那个；
+    /// - `git merge-base` 以退出码 1、空 stderr 失败（两棵树没有共同祖先）。那个失败
+    ///   经 [`WorkspaceError::GitFailed`] 原样透出时是一句没有内容的报文，看不出发生了什么。
     #[error("Integration Gate 无法解释后端给出的结果：{reason}")]
     Malformed { reason: String },
 }
@@ -207,12 +210,34 @@ pub enum GateError {
 ///
 /// **基准取分歧点而非 Base 的当前 HEAD。** 用户在建好工作区之后又提交过时，那些
 /// 提交里的新文件在 Task 侧并不存在；以 Base 当前 HEAD 为基准会把它们**反向**算进
-/// 本 Task（看起来像 Task 删了它们）。已知限制：用户把 Base 切到创建点**之前**的
-/// 提交或另一条分支上时，`merge-base` 会落到更早处，Diff 因而多算——本后端不记录
-/// 创建点（句柄与落库记录里都没有它），无从取到更准的那个提交。
+/// 本 Task（看起来像 Task 删了它们）。
+///
+/// 已知限制两种形态，都源于「本后端不记录创建点」（句柄与落库记录里都没有它）：
+/// - 用户把 Base 切到创建点**之前**的提交或另一条分支上时，`merge-base` 会落到更早处，
+///   Diff 因而多算；
+/// - Base 的当前 HEAD 与 Task 分支**没有共同祖先**时（用户另起了一条无关历史，
+///   `git checkout --orphan` 一类），`merge-base` 不是给出别的提交而是**直接失败**，
+///   本函数以 [`WorkspaceError::GitFailed`] 报出，Diff 取不到。
+///
+/// 两种都只能靠记下创建时的那个提交来根治，属落库记录的范围。
 fn diff_worktree(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<Diff, GateError> {
     let branch = worktree::branch_name(task.intent_id());
-    let divergence = worktree::git(base.root(), &["merge-base", &branch, "HEAD"])?;
+    let divergence = match worktree::git(base.root(), &["merge-base", &branch, "HEAD"]) {
+        Ok(hash) => hash,
+        // 两棵树没有共同祖先时，`git merge-base` 以退出码 1 且 **stderr 为空**失败
+        // （实测 git 2.56）；别的失败都带 stderr（分支不存在是 128 + "Not a valid
+        // object name"）。原样透出的话，调用方拿到的是一句
+        // 「git 命令失败（退出码 1）：」——后面什么都没有，看不出发生了什么。
+        Err(WorkspaceError::GitFailed { code: 1, stderr }) if stderr.is_empty() => {
+            return Err(GateError::Malformed {
+                reason: format!(
+                    "Task 分支 {branch} 与 Base 的当前 HEAD 没有共同祖先，取不到分歧点\
+                     （用户另起了一条无关历史？）"
+                ),
+            });
+        }
+        Err(e) => return Err(e.into()),
+    };
     if divergence.is_empty() {
         // 理论上不可达：`merge-base` 成功返回时必有输出（失败时是 `GitFailed`）。
         // 留着是因为空值传给 git 会以「未知的修订」失败，那个原因与本层的真实处境
@@ -284,16 +309,26 @@ fn diff_trees(base_root: &Path, task_root: &Path) -> Result<Diff, GateError> {
     Ok(Diff::from_sets(added, modified, deleted))
 }
 
-/// `root` 之下全部**普通文件**的相对路径 → 内容。
+/// `root` 之下全部条目的相对路径 → 内容。内容按条目种类取：常规文件是它的字节，
+/// 符号链接是它的目标路径（见下）。
 ///
-/// 只收文件，不收目录：三类改动以文件为单位。目录在两端会平白分岔——`git` 根本不
-/// 跟踪目录（`mkdir` 出来的空目录在 `git diff` 里不出现），把目录计入会让 worktree
-/// 与 overlay 两个后端对同一件事给出不同答案。
+/// **不收目录**：三类改动以文件为单位。目录在两端会平白分岔——`git` 根本不跟踪目录
+/// （`mkdir` 出来的空目录在 `git diff` 里不出现），把目录计入会让 worktree 与 overlay
+/// 两个后端对同一件事给出不同答案。
 ///
-/// 符号链接经 [`std::fs::metadata`] **跟随**：指向目录的按目录递归，指向文件的按其
-/// 目标内容比较。断链（`NotFound`）按「该路径上什么都没有」处理，不进结果。其余
-/// 读取失败（权限等）返回 `Err` 而不跳过：跳过会让 Diff 少列一条而调用方无从得知，
-/// 而 Diff 是写入操作的依据。
+/// **符号链接不跟随**，按目标路径本身比较（`read_link`）。这与 worktree 后端的 git
+/// 一致：git 把符号链接当作一个条目，内容即其目标，从不跟进目标里头。跟随会走进两个
+/// 坑：一是指向目录的链接被递归进去，链接指向树内某处时同一批文件在 Diff 里出现两次；
+/// 二是**自指或互指的链接构成环**，跟随会一路递归到内核的 `ELOOP`（Linux 上 40 层）
+/// 才停下——实测一个指向自己所在目录的链接正是如此，报出来的错误里带着几十段重复路径。
+/// 不跟随让环根本无从进入：环上的链接就是一个普通条目，读它的目标不触碰文件系统，
+/// 故这里不需要另设深度上限。
+///
+/// **非常规条目（FIFO、套接字、设备文件）不进结果**：git 也不跟踪它们，而读一个 FIFO
+/// 会阻塞。覆盖层 upper 层里的白障正是这类条目，故这一条同时让白障天然不成问题。
+///
+/// 读取失败返回 `Err` 而不跳过：跳过会让 Diff 少列一条而调用方无从得知，而 Diff 是
+/// 写入操作的依据。
 fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, GateError> {
     fn walk(
         root: &Path,
@@ -307,21 +342,19 @@ fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, GateError> {
             // 相对路径由父级的相对路径拼出，不靠事后 strip_prefix：遍历的起点就是
             // 相对路径的基准，拼比减少一层「前缀对不上怎么办」。
             let rel = rel.join(entry.file_name());
-            let meta = match std::fs::metadata(&path) {
-                Ok(meta) => meta,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(io_error(&path, e)),
-            };
-            if meta.is_dir() {
+            // `DirEntry::file_type` 取自 `read_dir` 本身且**不跟随**符号链接，
+            // 故「这是个链接」与「链接指向目录」在这里是两件事。
+            let file_type = entry.file_type().map_err(|e| io_error(&path, e))?;
+            if file_type.is_dir() {
                 walk(&path, &rel, out)?;
-                continue;
-            }
-            match std::fs::read(&path) {
-                Ok(bytes) => {
-                    out.insert(rel, bytes);
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => return Err(io_error(&path, e)),
+            } else if file_type.is_symlink() {
+                let target = std::fs::read_link(&path).map_err(|e| io_error(&path, e))?;
+                // 目标按原始字节存：非 UTF-8 的目标路径经 lossy 转换后，两个不同的
+                // 目标可能比成相同，Diff 会漏报一处改动。
+                out.insert(rel, target.into_os_string().into_vec());
+            } else if file_type.is_file() {
+                let bytes = std::fs::read(&path).map_err(|e| io_error(&path, e))?;
+                out.insert(rel, bytes);
             }
         }
         Ok(())
@@ -506,6 +539,22 @@ fn io_error(path: &Path, e: std::io::Error) -> GateError {
 mod tests {
     use super::*;
 
+    /// 本进程的有效 uid 是否为 0。root 无视文件权限位，故权限类用例要先问一句。
+    ///
+    /// 与 [`crate::overlay`] 里读 `/proc/self/status` 的写法同源（同一份判定在
+    /// `tests/backend_overlay.rs` 里还有一份，那是另一个 crate）。
+    fn running_as_root() -> bool {
+        std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|status| {
+                status.lines().find_map(|line| {
+                    let rest = line.strip_prefix("Uid:")?;
+                    rest.split_whitespace().nth(1)?.parse::<u32>().ok()
+                })
+            })
+            == Some(0)
+    }
+
     /// 拼一条 `--name-status -z` 的记录：`状态\0路径\0`。
     fn record(status: &str, path: &str) -> Vec<u8> {
         let mut out = status.as_bytes().to_vec();
@@ -650,6 +699,125 @@ mod tests {
 
         let diff = diff_trees(&base, &task).unwrap();
         assert!(diff.is_empty(), "空目录被算成了改动：{diff:?}");
+    }
+
+    /// 符号链接按**目标路径**比较，不跟随目标；非常规条目（FIFO）不进结果。
+    ///
+    /// 「不跟随」是 `collect_files` 文档里的一条：跟随的话，悬空的链接会以 `NotFound`
+    /// 被当成不存在，指向目录的链接会被递归进去（见另一条环的用例）。FIFO 那一半钉的是
+    /// 「只登记 `is_file()` 的条目」——若实现改成「不是目录就读内容」，读一个没有写者的
+    /// FIFO 会**阻塞**，本用例会挂住而不是失败。
+    #[test]
+    fn the_tree_diff_compares_symlinks_by_their_target_and_skips_odd_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let task = dir.path().join("task");
+        for root in [&base, &task] {
+            std::fs::create_dir_all(root).unwrap();
+            std::fs::write(root.join("目标.txt"), "内容").unwrap();
+            std::os::unix::fs::symlink("目标.txt", root.join("链接.txt")).unwrap();
+            std::os::unix::fs::symlink("并不存在", root.join("悬空链接.txt")).unwrap();
+        }
+        // Task 侧：一个链接改了目标，另有一个指向自身所在目录的**环**
+        std::fs::remove_file(task.join("链接.txt")).unwrap();
+        std::os::unix::fs::symlink("别处.txt", task.join("链接.txt")).unwrap();
+        std::os::unix::fs::symlink(".", task.join("环")).unwrap();
+        // Task 侧另有一个 FIFO（非常规条目）。`mkfifo` 是外部命令，取不到就跳过这一段，
+        // 不把「环境里没有 mkfifo」误报成实现缺陷。
+        let fifo = task.join("管道");
+        let made = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !made {
+            eprintln!(
+                "【跳过】the_tree_diff_compares_symlinks_by_their_target_and_skips_odd_entries\
+                 的 FIFO 一段：mkfifo 不可用。"
+            );
+        }
+
+        let diff = diff_trees(&base, &task).unwrap();
+        assert_eq!(
+            diff.modified(),
+            &[PathBuf::from("链接.txt")][..],
+            "改目标的链接没被算成修改：{diff:?}"
+        );
+        assert_eq!(
+            diff.added(),
+            &[PathBuf::from("环")][..],
+            "指向自身所在目录的链接应是一个普通条目（内容即其目标），而不是递归源头；\
+             两侧相同的东西与 FIFO 都不该出现：{diff:?}"
+        );
+        assert!(diff.deleted().is_empty(), "悬空链接被当成了不存在：{diff:?}");
+    }
+
+    /// 读不到的条目返回 `Err`（`IoFailed` 带该路径），**不**当作「不存在」跳过。
+    ///
+    /// 跳过会让 Diff 少列一条而调用方无从得知，而 Diff 是三种写入操作的依据。
+    /// 权限位对 root 不起作用，故 root 下显式跳过并打标记。
+    #[test]
+    fn the_tree_diff_reports_an_unreadable_file_as_an_error() {
+        if running_as_root() {
+            eprintln!(
+                "【跳过】the_tree_diff_reports_an_unreadable_file_as_an_error：\
+                 本进程以 root 运行，权限位挡不住读取。本用例未执行断言。"
+            );
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let task = dir.path().join("task");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::create_dir_all(&task).unwrap();
+        let unreadable = task.join("读不到.txt");
+        std::fs::write(&unreadable, "秘密").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let err = diff_trees(&base, &task).unwrap_err();
+        match &err {
+            GateError::Workspace(WorkspaceError::IoFailed { path, .. }) => {
+                assert_eq!(path, &unreadable, "错误里的路径不对：{err}");
+            }
+            other => panic!("期望读失败原样报出，得到 {other:?}"),
+        }
+
+        // 目录读不到同样是 Err（`read_dir` 失败），理由相同
+        let closed = task.join("关着的目录");
+        std::fs::create_dir_all(&closed).unwrap();
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o000)).unwrap();
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let err = diff_trees(&base, &task).unwrap_err();
+        assert!(
+            matches!(
+                &err,
+                GateError::Workspace(WorkspaceError::IoFailed { path, .. }) if path == &closed
+            ),
+            "目录读不到未原样报出：{err:?}"
+        );
+        std::fs::set_permissions(&closed, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+
+    /// 指向自身所在目录的链接不会让遍历陷进去：跟随的话会一路递归到内核的 `ELOOP`
+    /// （Linux 40 层），报出来的错误里带着几十段重复路径。
+    ///
+    /// 与上一条的区别是这里两侧都有环，故 Diff 为空——要钉的是「不报错、正常返回」，
+    /// 而错误形态（40 段路径）在 `Ok` 的前提下自然无从谈起。
+    #[test]
+    fn a_symlink_cycle_does_not_send_the_walk_into_the_kernel() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().join("base");
+        let task = dir.path().join("task");
+        for root in [&base, &task] {
+            std::fs::create_dir_all(root).unwrap();
+            std::fs::write(root.join("普通.txt"), "x").unwrap();
+            std::os::unix::fs::symlink(".", root.join("自指")).unwrap();
+            std::fs::create_dir_all(root.join("子")).unwrap();
+            std::os::unix::fs::symlink("..", root.join("子/回指")).unwrap();
+        }
+        let diff = diff_trees(&base, &task).unwrap();
+        assert!(diff.is_empty(), "两侧相同的环不该出现在 Diff 里：{diff:?}");
     }
 
     /// 索引副本：内容与真实索引逐字节相同，且随本值一并删除。

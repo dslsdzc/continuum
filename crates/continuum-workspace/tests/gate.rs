@@ -1,19 +1,39 @@
 //! Integration Gate 的只读操作在两种后端上的往返测试（§257）。
 //!
-//! 每个用例都在两个后端各跑一遍，后端写在用例名上：不带后缀的是 Git worktree 后端，
-//! 带 `_on_the_overlay_backend` 的是 OverlayFS 后端。两个后端的 `view_diff` 是两套
-//! 实现（走 git 与逐文件比较），只有真的各跑一遍才能说两边都成立。
+//! 两个后端的 `view_diff` 是两套实现（走 git 与逐文件比较），故**论题相同的用例在两边
+//! 各写一条**，用例名带 `_on_the_overlay_backend` 后缀的是 OverlayFS 那一条。现有四条
+//! 这样的对照，各自与不带后缀的同题用例并排：
+//!
+//! | 论题 | worktree | overlay |
+//! |---|---|---|
+//! | Task 的改动三类都列出 | `view_diff_reports_the_task_changes` | 同名 + 后缀 |
+//! | `view_diff` 不改动 Base | `view_diff_does_not_modify_the_base` | 同名 + 后缀 |
+//! | `discard` 移除工作区且不动 Base | `discard_removes_the_task_and_leaves_the_base_unchanged` | 同名 + 后缀 |
+//! | 符号链接按目标比较 | `a_file_replaced_by_a_symlink_is_reported_as_modified` | `symlinks_are_compared_by_their_target_on_the_overlay_backend` |
+//!
+//! **其余用例只跑在一边**，因为论题只属于那一边：
+//! - worktree 独有——分歧点基准（`view_diff_is_measured_from_the_point_the_task_branched_off`）、
+//!   Base 换成无关历史（`view_diff_reports_a_base_head_with_no_common_ancestor`）、
+//!   重命名拆分（`a_rename_is_reported_as_a_deletion_and_an_addition`）、被忽略的文件
+//!   （`ignored_files_are_not_reported_as_added`——`.gitignore` 是 git 的东西，覆盖层
+//!   没有这个概念）、stat 过期时的索引写回
+//!   （`view_diff_does_not_write_the_base_when_the_stat_cache_is_stale`）；
+//! - 两边都不依赖后端——`discarding_a_foreign_root_through_the_gate_reports_the_backend_error`
+//!   （配 overlay 后端但不需要挂载：形态校验排在 `umount` 之前）。
 //!
 //! OverlayFS 的挂载只在其所在的用户与挂载命名空间内可见，故那几条用例要把自身重新
 //! 执行进 `unshare -Urm`，由子进程完成断言；环境不具备时**显式跳过并打标记**，不静默
 //! 通过（见 [`skip`]）。这一段与 `tests/backend_overlay.rs` 的写法同源——两个测试二进制
 //! 是两个 crate，取不到对方的东西。
 //!
-//! 路径一律取 `canonicalize` 之后的值：临时目录可能落在符号链接之下，而两个后端的
-//! `TaskWorkspace` 持有的根是规范化结果，两侧不规范化会让断言指向别处。
+//! 两个后端的夹具（[`git_repo`] 与 [`base_with_lower`]）把根取 `canonicalize` 之后的
+//! 值：临时目录可能落在符号链接之下，而 `TaskWorkspace` 持有的根是规范化结果，两侧
+//! 不规范化会让 `starts_with` 一类的比较指向别处。**其余用例不规范化**：它们自建路径
+//! 并把同一份路径同时交给夹具与断言（`discarding_a_foreign_root_through_the_gate_…`
+//! 就是如此），两侧同源，没有可比错的地方。
 
 use continuum_workspace::{
-    BaseWorkspace, IntentId, IntegrationGate, WorkspaceBackend, create_task_workspace,
+    BaseWorkspace, GateError, IntentId, IntegrationGate, WorkspaceBackend, create_task_workspace,
     discard_task_workspace,
 };
 use std::ffi::OsString;
@@ -113,10 +133,13 @@ fn view_diff_reports_the_task_changes() {
     let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
     assert_eq!(backend, WorkspaceBackend::Worktree);
 
-    // 在 Task 内改一个、删一个、加一个
+    // 在 Task 内改一个、删一个、加一个。新增的这一条落在**子目录**里：Diff 的路径
+    // 是相对 Workspace 根的多段路径，只有真造一个深一层的条目才断言得到那一形态。
     std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
     std::fs::remove_file(task.root().join("要删的.txt")).unwrap();
     std::fs::write(task.root().join("新文件.txt"), "Task 新增\n").unwrap();
+    std::fs::create_dir_all(task.root().join("新目录")).unwrap();
+    std::fs::write(task.root().join("新目录/深层.txt"), "深层新增\n").unwrap();
 
     let diff = IntegrationGate::new(&base)
         .view_diff(&task, backend)
@@ -133,8 +156,11 @@ fn view_diff_reports_the_task_changes() {
     );
     assert_eq!(
         diff.added(),
-        &[PathBuf::from("新文件.txt")][..],
-        "新增类不对：{diff:?}"
+        &[
+            PathBuf::from("新文件.txt"),
+            PathBuf::from("新目录/深层.txt")
+        ][..],
+        "新增类不对（含深一层的路径）：{diff:?}"
     );
 }
 
@@ -321,6 +347,33 @@ fn ignored_files_are_not_reported_as_added() {
     );
 }
 
+/// Base 的 HEAD 与 Task 分支**没有共同祖先**时，报出的是能看懂的 `Malformed`。
+///
+/// 实测（git 2.56）`git merge-base` 在这种情形下以**退出码 1 且 stderr 为空**失败——
+/// 而分支不存在一类的失败是 128 加一句 `fatal: Not a valid object name ...`。原样透出
+/// 前者，调用方拿到的是一句「git 命令失败（退出码 1）：」后面什么都没有。
+#[test]
+fn view_diff_reports_a_base_head_with_no_common_ancestor() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+
+    // 用户把 Base 换成一条无关历史：`--orphan` 之后的提交是根提交，与 ai/i1 无共同祖先
+    run_git(&base_path, &["checkout", "-q", "--orphan", "无关"]);
+    run_git(&base_path, &["commit", "-qm", "另起一条历史"]);
+
+    let err = IntegrationGate::new(&base)
+        .view_diff(&task, backend)
+        .unwrap_err();
+    match &err {
+        GateError::Malformed { reason } => assert!(
+            reason.contains("共同祖先"),
+            "错误未说明取不到分歧点的原因：{reason}"
+        ),
+        other => panic!("期望 Malformed，得到 {other:?}"),
+    }
+}
+
 #[test]
 fn discard_removes_the_task_and_leaves_the_base_unchanged() {
     let (_d, base_path) = git_repo();
@@ -461,6 +514,9 @@ fn view_diff_reports_the_task_changes_on_the_overlay_backend() {
     task.writable_root()
         .write("新文件.txt", "Task 新增\n".as_bytes())
         .unwrap();
+    task.writable_root()
+        .write("新目录/深层.txt", "深层新增\n".as_bytes())
+        .unwrap();
 
     let diff = IntegrationGate::new(&base)
         .view_diff(&task, backend)
@@ -473,12 +529,15 @@ fn view_diff_reports_the_task_changes_on_the_overlay_backend() {
     assert_eq!(
         diff.deleted(),
         &[PathBuf::from("要删的.txt")][..],
-        "删除类不对：{diff:?}"
+        "删除类不对（覆盖层里的删除落成白障）：{diff:?}"
     );
     assert_eq!(
         diff.added(),
-        &[PathBuf::from("新文件.txt")][..],
-        "新增类不对：{diff:?}"
+        &[
+            PathBuf::from("新文件.txt"),
+            PathBuf::from("新目录/深层.txt")
+        ][..],
+        "新增类不对（含深一层的路径）：{diff:?}"
     );
 }
 
@@ -504,6 +563,49 @@ fn view_diff_does_not_modify_the_base_on_the_overlay_backend() {
         tree_snapshot(&base_path),
         before,
         "view_diff 改动了 Base 的目录树"
+    );
+}
+
+/// 符号链接按**目标路径**比较，不跟随目标（与 worktree 后端的 git 一致）。
+///
+/// Worktree 后端那条同题用例在 `a_file_replaced_by_a_symlink_is_reported_as_modified`：
+/// 那边是 git 自己给的答案，这边的实现是逐文件比较，两边必须对同一件事给同一个答案。
+/// 悬空的链接在这里一并覆盖——它是**正常条目**（内容即其目标），不是读取失败：
+/// 两侧一样就不进 Diff，也不报错（若跟随目标，它会以 `NotFound` 被当成「不存在」）。
+#[test]
+fn symlinks_are_compared_by_their_target_on_the_overlay_backend() {
+    if !enter_namespace("symlinks_are_compared_by_their_target_on_the_overlay_backend") {
+        return;
+    }
+    let (_d, base_path) = base_with_lower();
+    // Base 里一个指向不存在之物的链接：两侧相同则不该进 Diff
+    std::os::unix::fs::symlink("并不存在", base_path.join("基座悬空链接.txt")).unwrap();
+
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    // Task 里新增一个链接
+    std::os::unix::fs::symlink("要改的.txt", task.root().join("新链接.txt")).unwrap();
+    // 再把 lower 里那个链接改指别处：先删（覆盖层落一个白障）再建（upper 层的新条目）
+    let retargeted = task.root().join("基座悬空链接.txt");
+    std::fs::remove_file(&retargeted).unwrap();
+    std::os::unix::fs::symlink("第三处", &retargeted).unwrap();
+
+    let diff = IntegrationGate::new(&base)
+        .view_diff(&task, backend)
+        .unwrap();
+    assert_eq!(
+        diff.added(),
+        &[PathBuf::from("新链接.txt")][..],
+        "新增的链接不在新增类里：{diff:?}"
+    );
+    assert_eq!(
+        diff.modified(),
+        &[PathBuf::from("基座悬空链接.txt")][..],
+        "改了目标的链接不在修改类里：{diff:?}"
+    );
+    assert!(
+        diff.deleted().is_empty(),
+        "悬空链接被当成了不存在：{diff:?}"
     );
 }
 
