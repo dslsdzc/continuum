@@ -150,6 +150,28 @@ pub(crate) fn state_of(tx: &Tx<'_>, id: &EffectId) -> Result<Option<EffectState>
     Ok(Some(parse_state(&text_at(&row, 0)?)?))
 }
 
+/// 查出全部处于 `state` 的记录 id 及其 `updated_at`，按 id 升序。
+///
+/// 筛选条件经 [`state_str`] 取值，与写入侧的编码同源：在此手写字面量会让
+/// 「写进去的串」与「查得中的串」成为两个产生点，改一处不会让另一处失败。
+/// 列名与 SQL 也只出现在本文件（[`crate::journal`] 与 [`crate::recovery`]
+/// 都不含 SQL 字面量）。
+///
+/// `updated_at` 一并取出：调用方（[`crate::recovery`]）要拿它作为推进时的
+/// `now`，同一次查询取到可以少读一次。
+pub(crate) fn rows_in_state(
+    tx: &Tx<'_>,
+    state: EffectState,
+) -> Result<Vec<(EffectId, i64)>, PersistError> {
+    tx.query(
+        "SELECT id, updated_at FROM effect WHERE state = ?1 ORDER BY id",
+        &[Value::text(state_str(state))],
+    )?
+    .iter()
+    .map(|row| Ok((EffectId::new(text_at(row, 0)?), int_at(row, 1)?)))
+    .collect()
+}
+
 /// 改写状态列并把 `updated_at` 置为 `now`。其它列不动。
 ///
 /// 本函数只写，不判定迁移是否合法：判定是 [`crate::journal::advance`] 的职责，
