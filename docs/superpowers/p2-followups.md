@@ -169,10 +169,14 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 因为 `view_diff` 与 `apply_patch` 那一侧是 git 的规则，两者有两处差别：
 
 1. **只管目录。** `.git/info/exclude` 里写的是 `.ai/`（`worktree.rs` 的 `ensure_ai_excluded`），
-   带尾斜杠，故 gitignore 只与**目录**匹配。名为 `.ai` 的常规文件不被忽略，会被
-   `git ls-files --others --exclude-standard` 报成新增，而摘要按名字跳过它。**它在根层复制不过去**
-   （`<base>/.ai` 本是存储目录，撞上 `ensure_not_a_directory` 被拒），须取**嵌套**形态
-   （`sub/.ai` 是常规文件）才会既被报出又被复制——故根层那一处是偶然，不是保障。
+   带尾斜杠，故 gitignore 只与**目录**匹配：名为 `.ai` 的**常规文件或符号链接**都不被忽略，
+   会被 `git ls-files --others --exclude-standard` 报成新增（实测二者同形），而摘要按名字跳过它。
+   **根层那一个复制不过去**（`<base>/.ai` 本是存储目录，撞上 `ensure_not_a_directory` 被拒），
+   须取**嵌套**形态（`sub/.ai` 是常规文件或符号链接）才会既被报出又被复制——故根层那一处是
+   **偶然，不是保障**。符号链接形态下复制是**按目标重建**（`read_link` + `symlink`），不是复制
+   所指文件的内容：实测 Base 上落下的是一条指向**铸造之后**才改成的目标的链接。
+   对照：`sub/.ai/` 是目录时，`git ls-files --others --exclude-standard` 与 `view_diff` 都为空
+   ——既不报也不搬。
 2. **只管未跟踪路径。** gitignore 不压制已跟踪路径。故 Base 里**已提交**的 `sub/.ai/f.txt`
    在 Task 里被改动时，`git diff` 会报出、`git apply` 会应用，而它的内容**不在摘要里**。
 
