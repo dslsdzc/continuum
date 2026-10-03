@@ -88,10 +88,14 @@ crates/
 依赖方向：
 
 ```
-continuum-effect   → continuum-core, continuum-persist, continuum-events
+continuum-effect   → continuum-persist, continuum-events
 continuum-policy   → continuum-core, continuum-persist, continuum-artifact, continuum-effect
 continuum-runtime  → 全部
 ```
+
+`continuum-effect` 不依赖 `continuum-core`：该 crate 不使用其类型。叶子 crate 的 `ALLOWED`
+条目记的是**实际依赖**（与 `continuum-runtime` 那条记「规范允许集合」不同，见
+`docs/superpowers/p2-followups.md` 第三节），故无使用点的边即假边。
 
 `continuum-policy` 的两条既有阶段的边由第 5.6 节的 `PolicyContext` 要求：它装 `PrivacyClass`
 （属 `continuum-artifact`）与 `EffectType`（属 `continuum-effect`）。把这两个字段改成字符串可以
