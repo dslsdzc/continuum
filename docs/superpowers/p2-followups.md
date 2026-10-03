@@ -84,3 +84,18 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 若要统一，两种走法各有代价：一律按实际依赖记，则 runtime 要删三条既有的（牵动 P1 的决定）；
 一律按允许集合记，则 `Cargo.toml` 会声明用不到的东西（那不是对代码的忠实陈述）。
 留待后续阶段决定，**在改这张表之前先看清条目属于哪一类**。
+
+---
+
+## 四、`continuum-workspace` 的 `serde` 依赖只服务两个从未被消费的 derive
+
+`Cargo.toml` 的 `serde` 当前只被 `ids.rs:3`（`IntentId`）与 `backend.rs:14/21`
+（`WorkspaceBackend`）的 `Serialize`/`Deserialize` 用到，而这两个 derive 在**本 crate 内外
+均无使用点**——**落库编码是刻意不走 serde 的**（`persist.rs` 用显式的 `backend_str` /
+`parse_backend`，理由见设计：Rust 枚举的 serde 表示与落库编码是两件事）。
+
+这与 Task 1 已修掉的「`serde_json` 零使用」是同一类，只是被 `derive` 遮住了：
+零使用的**依赖**好认，零使用的 **derive** 不好认。
+
+**不紧急**：删 derive 与依赖是一行级改动，但会动 `IntentId` 的公开面（它是否该可序列化，
+取决于下篇的驱动会不会把它写进 CLI 参数或落库）。**随下篇一并决定**，本子项目不处置。
