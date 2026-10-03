@@ -178,6 +178,37 @@ fn enum_columns_use_the_lowercase_encoding() {
     tx.commit().unwrap();
 }
 
+/// `EffectType` 的编码往返：遍历**全部**变体，并断言名单的数目。
+///
+/// 数目断言是必需的：漏加新变体时名单长度不变，只遍历名单的断言照过——本 crate 的
+/// `EffectState::ALL` 缺这条是有记录的欠账（见该常量的文档），本用例不再欠一笔。
+///
+/// 编码现在还在 `EffectType::as_str` / `parse` 上（库列、审计 payload、策略条件三处
+/// 共用），故本用例同时是那三处的前提：`parse` 漏掉某个变体，条件里的对应取值就会
+/// 在解析期报错——这里先红。
+#[test]
+fn every_effect_type_round_trips_through_its_encoding() {
+    assert_eq!(EffectType::ALL.len(), 6, "EffectType 的名单与变体数不符");
+
+    for effect_type in EffectType::ALL {
+        let encoded = effect_type.as_str();
+        assert_eq!(
+            EffectType::parse(encoded),
+            Some(effect_type),
+            "{encoded} 应解回 {effect_type:?}"
+        );
+        assert!(
+            !encoded.is_empty() && encoded.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            "落库编码应为小写、多词以 _ 连接（Debug 表示含大写），实际 {encoded}"
+        );
+    }
+
+    // 表外取值一律 None：不取默认类型——取默认会让策略表漏判。
+    for bogus in ["", "charge ", "Charge", "send email", "not_a_type", "deploy_"] {
+        assert_eq!(EffectType::parse(bogus), None, "{bogus} 不应解出任何类型");
+    }
+}
+
 #[test]
 fn advance_follows_the_state_machine() {
     let (_dir, db) = db();

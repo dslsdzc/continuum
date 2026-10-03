@@ -62,7 +62,7 @@ pub fn save_artifact(
                 Some(n) => Value::text(n.clone()),
                 None => Value::Null,
             },
-            Value::text(privacy_str(artifact.privacy_class)),
+            Value::text(artifact.privacy_class.as_str()),
             Value::Int(i64::from(artifact.version)),
             Value::text(serde_json::to_string(&artifact.metadata).expect("metadata 可序列化")),
             Value::text(serde_json::to_string(&artifact.provenance).expect("provenance 可序列化")),
@@ -116,6 +116,12 @@ pub fn load_artifact(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
+    // 解码走枚举自己的 `parse`（编码的唯一来源）；表外取值在此转成库层错误，
+    // 不取默认档次——理由见 `PrivacyClass::parse` 的文档。
+    let raw_privacy = text(&row[5])?;
+    let privacy_class = PrivacyClass::parse(&raw_privacy)
+        .ok_or_else(|| PersistError::Database(format!("未知 PrivacyClass: {raw_privacy}")))?;
+
     Ok(Some(Artifact {
         id: ArtifactId::new(text(&row[0])?),
         artifact_type: parse_type(&text(&row[1])?)?,
@@ -131,7 +137,7 @@ pub fn load_artifact(
             .map_err(|e| PersistError::Database(e.to_string()))?,
         provenance: serde_json::from_str(&text(&row[8])?)
             .map_err(|e| PersistError::Database(e.to_string()))?,
-        privacy_class: parse_privacy(&text(&row[5])?)?,
+        privacy_class,
         version: int(&row[6])? as u32,
     }))
 }
@@ -177,27 +183,3 @@ fn parse_type(s: &str) -> Result<ArtifactType, PersistError> {
     })
 }
 
-fn privacy_str(p: PrivacyClass) -> &'static str {
-    match p {
-        PrivacyClass::Public => "public",
-        PrivacyClass::Personal => "personal",
-        PrivacyClass::Private => "private",
-        PrivacyClass::Secret => "secret",
-        PrivacyClass::LocalOnly => "local_only",
-    }
-}
-
-fn parse_privacy(s: &str) -> Result<PrivacyClass, PersistError> {
-    Ok(match s {
-        "public" => PrivacyClass::Public,
-        "personal" => PrivacyClass::Personal,
-        "private" => PrivacyClass::Private,
-        "secret" => PrivacyClass::Secret,
-        "local_only" => PrivacyClass::LocalOnly,
-        other => {
-            return Err(PersistError::Database(format!(
-                "未知 PrivacyClass: {other}"
-            )))
-        }
-    })
-}

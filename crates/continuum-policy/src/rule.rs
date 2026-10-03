@@ -201,12 +201,24 @@ enum Matcher {
     /// 取值相等。
     Eq(FactValue),
     /// 取值命中列表中的一项。
+    ///
+    /// 列表为空时恒不成立，且解析期**不拒**它：设计下篇第 5.1 节列的「不符」只有
+    /// 三类（事实名不命中、比较符不在封闭集合、取值类型不符），空列表不占任何一类，
+    /// 多立一类拒绝规则就是发明规范。但它确实属于该节要防的「永不匹配」形态，
+    /// 所以不靠注释保证它可见——由 `tests/condition.rs` 的
+    /// `an_empty_in_list_never_matches` 明文钉住：它不静默。
     In(Vec<FactValue>),
     /// 数值不小于下界。解析期已保证它只落在 `duration_ms` 上，故其值必是数值。
     Gte(FactValue),
 }
 
 /// 一个比较符。封闭集合，与设计下篇第 5.1 节一致。
+///
+/// 三个比较符各有自己的适用规则，都在解析期判定：
+/// - `eq` / `in`：适用于全部事实，取值类型须与该事实相符；`in` 的空列表被接受
+///   （见 [`Matcher::In`]）；
+/// - `gte`：只适用于 `duration_ms`，对别的事实报
+///   [`PolicyError::OperatorNotApplicable`]——给字符串或布尔事实排序没有定义。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Op {
     Eq,
@@ -235,12 +247,39 @@ impl Op {
 
 /// 谓词可引用的事实名。封闭集合，与 [`PolicyContext`] 的字段一一对应
 /// （设计下篇第 5.1 节：事实名必须命中 `PolicyContext` 的字段）。
+///
+/// **可观察性分两类**，逐条标明如下——设计下篇第 5.3 节的「事实不在上下文中即该条
+/// 不成立」只适用于第一类：
+///
+/// | 事实 | 观察性 | 上下文缺该字段时 |
+/// |---|---|---|
+/// | `privacy_class` | 缺省即不成立 | 该条不成立 |
+/// | `effect_type` | 缺省即不成立 | 该条不成立 |
+/// | `task_class` | 缺省即不成立 | 该条不成立 |
+/// | `duration_ms` | 缺省即不成立 | 该条不成立 |
+/// | `explicit_current` | **总可观察** | 取值为 `false`（`--approve` 未给） |
+///
+/// 非对称的理由：其余四个事实是「驱动可能不知道」，缺省等于未知，取更严的一侧
+/// （不成立）；而 `--approve` 给没给**总是已知**的，`Option` 的 `None` 在这里意为
+/// 「未给」而非「未知」。若把它也当缺省，`{"fact":"explicit_current","eq":false}`
+/// 将永不成立：一条第 5 级 `Deny` 配这个条件会静默失效，而一条更高层的 `Allow`
+/// 就会获胜——那是 fail-open，与第 5.3 节的 fail-closed 相反。完整论证见
+/// [`PolicyContext::explicit_current`]。
+///
+/// 两个方向各有用例：`tests/condition.rs` 的
+/// `explicit_current_is_an_always_observable_boolean_fact` 断言 `eq: false` 在未给
+/// `--approve` 时**匹配**、在给了时**不匹配**。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Fact {
+    /// 总可观察：恒有取值，见本枚举的说明。
     ExplicitCurrent,
+    /// 缺省即不成立。
     PrivacyClass,
+    /// 缺省即不成立。
     EffectType,
+    /// 缺省即不成立。
     TaskClass,
+    /// 缺省即不成立。
     DurationMs,
 }
 
@@ -299,6 +338,11 @@ impl FactValue {
 }
 
 /// 按事实的类型解析一个字面量。类型不符即返回 `Err`（设计下篇第 5.1 节）。
+///
+/// 两个枚举事实（`privacy_class`、`effect_type`）的取值经枚举自己的 `parse` 解码，
+/// 即与落库编码、驱动 `--effect` 解析**同一个来源**（`PrivacyClass::parse` /
+/// `EffectType::parse`）。故本 crate 不自建第二张字符串表：写错的条件在这里报
+/// `UnknownValue` 而不是静默不匹配，写错的编码在那些 crate 自己的用例里报红。
 fn parse_fact_value(fact: Fact, value: &Value) -> Result<FactValue, PolicyError> {
     let mismatch = |expected: &'static str| PolicyError::ValueTypeMismatch {
         fact: fact.name(),
@@ -319,7 +363,7 @@ fn parse_fact_value(fact: Fact, value: &Value) -> Result<FactValue, PolicyError>
             .ok_or_else(|| mismatch("非负整数")),
         Fact::PrivacyClass => {
             let name = value.as_str().ok_or_else(|| mismatch("字符串"))?;
-            privacy_from_name(name)
+            PrivacyClass::parse(name)
                 .map(FactValue::Privacy)
                 .ok_or_else(|| PolicyError::UnknownValue {
                     fact: fact.name(),
@@ -328,72 +372,13 @@ fn parse_fact_value(fact: Fact, value: &Value) -> Result<FactValue, PolicyError>
         }
         Fact::EffectType => {
             let name = value.as_str().ok_or_else(|| mismatch("字符串"))?;
-            effect_from_name(name)
+            EffectType::parse(name)
                 .map(FactValue::Effect)
                 .ok_or_else(|| PolicyError::UnknownValue {
                     fact: fact.name(),
                     value: name.to_string(),
                 })
         }
-    }
-}
-
-/// `EffectType` 的字符串名。编码与 `continuum-effect` 的落库编码同名同形。
-///
-/// 该编码的权威表在 `continuum_effect::persist` 内且不可达（`effect_type_str` 是
-/// `pub(crate)`、`parse_effect_type` 是模块私有），故此处自建一份。两个方向分开写：
-/// `effect_name` 的 match **穷尽且无通配臂**——给 `EffectType` 加变体时它编译失败，
-/// 作者被迫回到本文件；本函数从字符串出发，编译器帮不上忙，由本文件的 `tests` 模块
-/// 的往返断言兜住。往返断言盖不住的那一种情形记在那里。
-///
-/// `effect_name` 只在测试里用（它的存在就是为了让上面那次编译失败发生），故随之
-/// `cfg(test)`：它不参与任何生产路径。
-fn effect_from_name(name: &str) -> Option<EffectType> {
-    Some(match name {
-        "send_email" => EffectType::SendEmail,
-        "push_branch" => EffectType::PushBranch,
-        "publish" => EffectType::Publish,
-        "delete_remote" => EffectType::DeleteRemote,
-        "charge" => EffectType::Charge,
-        "deploy" => EffectType::Deploy,
-        _ => return None,
-    })
-}
-
-#[cfg(test)]
-fn effect_name(effect: EffectType) -> &'static str {
-    match effect {
-        EffectType::SendEmail => "send_email",
-        EffectType::PushBranch => "push_branch",
-        EffectType::Publish => "publish",
-        EffectType::DeleteRemote => "delete_remote",
-        EffectType::Charge => "charge",
-        EffectType::Deploy => "deploy",
-    }
-}
-
-/// `PrivacyClass` 的字符串名。理由与 `effect_name` 同：权威表在
-/// `continuum_artifact::persist` 内且不可达（`privacy_str` 与 `parse_privacy` 都是
-/// 模块私有），且本函数同样只为测试而存在（见 `effect_name` 的说明）。
-fn privacy_from_name(name: &str) -> Option<PrivacyClass> {
-    Some(match name {
-        "public" => PrivacyClass::Public,
-        "personal" => PrivacyClass::Personal,
-        "private" => PrivacyClass::Private,
-        "secret" => PrivacyClass::Secret,
-        "local_only" => PrivacyClass::LocalOnly,
-        _ => return None,
-    })
-}
-
-#[cfg(test)]
-fn privacy_name(privacy: PrivacyClass) -> &'static str {
-    match privacy {
-        PrivacyClass::Public => "public",
-        PrivacyClass::Personal => "personal",
-        PrivacyClass::Private => "private",
-        PrivacyClass::Secret => "secret",
-        PrivacyClass::LocalOnly => "local_only",
     }
 }
 
@@ -438,69 +423,4 @@ pub enum PolicyError {
     /// 取值是字符串，但不是该事实的封闭取值之一。
     #[error("事实 {fact} 的取值不在封闭集合内：{value}")]
     UnknownValue { fact: &'static str, value: String },
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// `EffectType` 的全部变体。
-    ///
-    /// 与 `EffectState::ALL` 同形。数目断言的必要性也在同一处：漏加新变体时
-    /// 长度不变，只遍历名单的断言照过。此处比那处多一层——
-    /// [`effect_name`] 的 match 穷尽，加变体时编译失败会把作者带到这里。
-    /// 仍盖不住的情形：作者补了 [`effect_name`] 的臂而不补本名单，
-    /// 此时往返断言走不到新变体，但 `effect_from_name` 若也漏补，
-    /// 任何用到新变体名的条件都会在解析期报 `UnknownValue`，不会静默错判。
-    const ALL_EFFECTS: [EffectType; 6] = [
-        EffectType::SendEmail,
-        EffectType::PushBranch,
-        EffectType::Publish,
-        EffectType::DeleteRemote,
-        EffectType::Charge,
-        EffectType::Deploy,
-    ];
-
-    /// `PrivacyClass` 的全部变体。理由同上。
-    const ALL_PRIVACY: [PrivacyClass; 5] = [
-        PrivacyClass::Public,
-        PrivacyClass::Personal,
-        PrivacyClass::Private,
-        PrivacyClass::Secret,
-        PrivacyClass::LocalOnly,
-    ];
-
-    /// 两张表都必须与其枚举互逆，且没有两个变体共用一个名字。
-    #[test]
-    fn both_name_tables_are_bijective() {
-        assert_eq!(ALL_EFFECTS.len(), 6, "EffectType 的名单与变体数不符");
-        assert_eq!(ALL_PRIVACY.len(), 5, "PrivacyClass 的名单与变体数不符");
-
-        for effect in ALL_EFFECTS {
-            let name = effect_name(effect);
-            assert_eq!(
-                effect_from_name(name),
-                Some(effect),
-                "{name} 不能解回 {effect:?}"
-            );
-        }
-        for privacy in ALL_PRIVACY {
-            let name = privacy_name(privacy);
-            assert_eq!(
-                privacy_from_name(name),
-                Some(privacy),
-                "{name} 不能解回 {privacy:?}"
-            );
-        }
-
-        let mut effect_names: Vec<&str> = ALL_EFFECTS.into_iter().map(effect_name).collect();
-        effect_names.sort_unstable();
-        effect_names.dedup();
-        assert_eq!(effect_names.len(), ALL_EFFECTS.len(), "EffectType 有两个变体重名");
-
-        let mut privacy_names: Vec<&str> = ALL_PRIVACY.into_iter().map(privacy_name).collect();
-        privacy_names.sort_unstable();
-        privacy_names.dedup();
-        assert_eq!(privacy_names.len(), ALL_PRIVACY.len(), "PrivacyClass 有两个变体重名");
-    }
 }

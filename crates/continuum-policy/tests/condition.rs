@@ -119,19 +119,34 @@ fn a_value_of_the_wrong_type_is_rejected_at_parse_time() {
 ///
 /// 这类错最像「手滑」：`{"eq": "charg"}` 或 `{"eq": "Charge"}` 若静默不匹配，
 /// 一条本该拦住的规则就永远不会生效。
+///
+/// 两个枚举事实各占一行：它们走的是同一条代码路径（枚举自己的 `parse`），
+/// 只钉一个会让另一条路径的退化无人过问。
 #[test]
 fn an_unknown_enum_value_is_rejected_at_parse_time() {
-    let error = Condition::parse(&json!({"fact": "effect_type", "eq": "charg"}))
-        .expect_err("effect_type 的取值不在封闭集合内应被拒绝");
+    for (condition, fact, value) in [
+        (
+            json!({"fact": "effect_type", "eq": "charg"}),
+            "effect_type",
+            "charg",
+        ),
+        (
+            json!({"fact": "privacy_class", "eq": "Personal"}),
+            "privacy_class",
+            "Personal",
+        ),
+    ] {
+        let error = Condition::parse(&condition).expect_err("取值不在封闭集合内应被拒绝");
 
-    assert_eq!(
-        error,
-        PolicyError::UnknownValue {
-            fact: "effect_type",
-            value: "charg".into(),
-        },
-        "应指名事实与那个不在集合内的取值"
-    );
+        assert_eq!(
+            error,
+            PolicyError::UnknownValue {
+                fact,
+                value: value.into(),
+            },
+            "应指名事实与那个不在集合内的取值"
+        );
+    }
 }
 
 /// `gte` 的取值类型同样受检查：`Matcher::Gte` 的文档断言其值必是数值，
@@ -239,7 +254,7 @@ fn a_conjunction_requires_every_term() {
     );
 }
 
-/// `in` 命中列表中的任一项即为真；空列表恒不成立（它结构合法，故解析期接受）。
+/// `in` 命中列表中的任一项即为真。
 #[test]
 fn an_in_list_matches_any_listed_value() {
     let condition = Condition::parse(&json!({"fact": "effect_type", "in": ["charge", "deploy"]}))
@@ -249,12 +264,30 @@ fn an_in_list_matches_any_listed_value() {
     assert!(condition.matches(&ctx_with_effect(Some(EffectType::Deploy))));
     assert!(!condition.matches(&ctx_with_effect(Some(EffectType::Publish))));
     assert!(!condition.matches(&ctx_with_effect(None)), "事实缺省即不成立");
+}
 
-    let empty = Condition::parse(&json!({"fact": "effect_type", "in": []})).expect("空 in 结构合法");
-    assert!(
-        !empty.matches(&ctx_with_effect(Some(EffectType::Charge))),
-        "空列表没有可命中的项，恒不成立"
-    );
+/// `{"in": []}` 结构合法（解析期接受），但**恒不成立**。
+///
+/// 单独一条用例，因为它是一个刻意的取法而不是顺带的行为：设计下篇第 5.1 节要防的
+/// 正是「永不匹配」的静默退化，而空 `in` 就是这种形态。之所以仍接受它，是因为该节
+/// 列的「不符」只有三类（事实名不命中、比较符不在封闭集合、取值类型不符），空列表
+/// 不占任何一类，多立一类拒绝规则就是发明规范。**既然接受了，就必须让它可见**：
+/// 这条用例就是它的对照片，将来若改成解析期拒绝，本用例会先红。
+#[test]
+fn an_empty_in_list_never_matches() {
+    let empty = Condition::parse(&json!({"fact": "effect_type", "in": []}))
+        .expect("空 in 结构合法，解析期接受");
+
+    for ctx in [
+        ctx_with_effect(Some(EffectType::Charge)),
+        ctx_with_effect(Some(EffectType::PushBranch)),
+        ctx_with_effect(None),
+    ] {
+        assert!(
+            !empty.matches(&ctx),
+            "空列表没有可命中的项，对任何上下文都不成立"
+        );
+    }
 }
 
 /// `gte` 比较数值；事实缺省即不成立。

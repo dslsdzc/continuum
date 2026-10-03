@@ -9,6 +9,9 @@ use serde_json::Value;
 /// 不依赖 serde」。派生 `snake_case` 的表示恰与落库编码**相同**，故问题不是
 /// 「两套表示」而是「两条读写路径」——同一条编码有两个产生点，改一处不会让
 /// 另一处失败。本 crate 的 serde 表示另无消费方（不落库、不传网络、不入 JSON）。
+///
+/// 编码本体在 [`EffectType::as_str`] / [`EffectType::parse`] 上：落库列、审计
+/// payload（`crate::journal`）与策略条件的取值都取用它，没有第二份表。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectType {
     SendEmail,
@@ -17,6 +20,58 @@ pub enum EffectType {
     DeleteRemote,
     Charge,
     Deploy,
+}
+
+impl EffectType {
+    /// 全部六个类型。供全量遍历的用例使用（与 [`EffectState::ALL`] 同形，
+    /// 那里的说明同样适用，含它挡不住的那一种情形）。
+    ///
+    /// 完整性与数目由 `tests/persist.rs` 的
+    /// `every_effect_type_round_trips_through_its_encoding` 把关。
+    pub const ALL: [EffectType; 6] = [
+        EffectType::SendEmail,
+        EffectType::PushBranch,
+        EffectType::Publish,
+        EffectType::DeleteRemote,
+        EffectType::Charge,
+        EffectType::Deploy,
+    ];
+
+    /// 设计下篇第 8 节的落库编码：小写、多词以 `_` 连接。
+    ///
+    /// **本函数是该编码唯一的产生点**：库列的写入、审计 payload 与策略条件的取值
+    /// 都取用它。match 穷尽且无通配臂：给枚举加变体时本函数编译不过，编码不会漏分支。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SendEmail => "send_email",
+            Self::PushBranch => "push_branch",
+            Self::Publish => "publish",
+            Self::DeleteRemote => "delete_remote",
+            Self::Charge => "charge",
+            Self::Deploy => "deploy",
+        }
+    }
+
+    /// [`EffectType::as_str`] 的**严格逆**：对 [`EffectType::ALL`] 里的每个变体都有
+    /// `EffectType::parse(t.as_str()) == Some(t)`，表外字符串一律 `None`。
+    ///
+    /// `None` 而不是默认类型：效应类型是策略裁决的依据，取默认会让策略表漏判
+    /// （与 `crate::persist` 的解码同一条理由）。
+    ///
+    /// 解码侧没有穷尽 match 的保护——来源是 `&str` 而非枚举，编译器点不出漏掉的变体，
+    /// 故由 `tests/persist.rs` 的 `every_effect_type_round_trips_through_its_encoding`
+    /// 遍历 [`EffectType::ALL`] 兜住。
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "send_email" => Self::SendEmail,
+            "push_branch" => Self::PushBranch,
+            "publish" => Self::Publish,
+            "delete_remote" => Self::DeleteRemote,
+            "charge" => Self::Charge,
+            "deploy" => Self::Deploy,
+            _ => return None,
+        })
+    }
 }
 
 /// 设计上篇第 7.2 节的七个状态。

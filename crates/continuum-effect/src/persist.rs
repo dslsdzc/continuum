@@ -1,13 +1,19 @@
 //! `effect` 表的迁移、枚举列编码与行级读写（设计下篇第 8 节）。
 //!
-//! 表定义、两个枚举列的编码辅助函数与行级读写放在同一文件：两个枚举列的编码
-//! 在库侧只有一个产生点（[`effect_type_str`] / [`state_str`]），解码也只有一处。
-//! `tests/persist.rs` 另以字面量断言落库取值，改编码会让那些字面量变红。
-//! 语义层（写入、推进、幂等键查询）在 [`crate::journal`]，该文件内没有 SQL 字面量。
+//! 表定义、枚举列的编码辅助函数与行级读写放在同一文件。`tests/persist.rs` 以
+//! 字面量断言落库取值，改编码会让那些字面量变红。语义层（写入、推进、幂等键查询）
+//! 在 [`crate::journal`]，该文件内没有 SQL 字面量。
 //!
 //! 两个枚举列**不依赖 serde**：`EffectType` 与 `EffectState` 都不派生 serde
 //! （Task 1 按裁定去掉，理由各处记在 `effect.rs` 的类型注释里）。落库编码一律
-//! 小写、多词以 `_` 连接，只走本文件的 `effect_type_str` / `state_str` 及其逆。
+//! 小写、多词以 `_` 连接。
+//!
+//! 编码的产生点分两处，各是**唯一**的：
+//! - `effect_type`：在类型自己身上——[`EffectType::as_str`] / [`EffectType::parse`]。
+//!   本 crate 外的两个消费方（`continuum-policy` 的条件取值，以及计划里 Task 12 的
+//!   驱动 `--effect` 解析）取用同一对函数，本文件不再自建表。
+//! - `state`：在本文件的 `state_str` / `parse_state`，因为 `EffectState` 至今只有
+//!   库列与审计 payload 两个消费方，两者同 crate。
 
 use crate::effect::{Effect, EffectId, EffectState, EffectType};
 use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
@@ -36,46 +42,11 @@ pub fn p2_effect_migrations() -> Vec<Migration> {
     )]
 }
 
-/// `effect.effect_type` 列的唯一编码来源。
-///
-/// 枚举是封闭的且本 match 穷尽无通配臂：给 `EffectType` 加变体时本函数编译不过，
-/// 编码不会漏掉分支。**解码侧没有这层保护**——[`parse_effect_type`] 是同一个枚举
-/// 的逆，加变体时它照旧编译，须由作者一并补上；漏补的后果是该变体写得进、读不回。
+/// `effect.state` 列的唯一编码来源。穷尽无通配臂：给 `EffectState` 加变体时本函数
+/// 编译不过，编码不会漏掉分支。
 ///
 /// `pub(crate)`：`crate::journal` 的审计 payload 要写同一个串，故它必须取用本函数
 /// 而非另抄一份字面量。crate 外不可见。
-pub(crate) fn effect_type_str(t: EffectType) -> &'static str {
-    match t {
-        EffectType::SendEmail => "send_email",
-        EffectType::PushBranch => "push_branch",
-        EffectType::Publish => "publish",
-        EffectType::DeleteRemote => "delete_remote",
-        EffectType::Charge => "charge",
-        EffectType::Deploy => "deploy",
-    }
-}
-
-/// `effect.effect_type` 列的唯一解码来源，与 [`effect_type_str`] 互逆。
-///
-/// 取值不在表内即报错，不取默认类型：效应类型是策略裁决的依据，取默认会让
-/// 策略表漏判。`tests/persist.rs` 的 `an_unknown_enum_column_value_is_rejected`
-/// 直接写入表外取值来钉住这条。
-fn parse_effect_type(s: &str) -> Result<EffectType, PersistError> {
-    Ok(match s {
-        "send_email" => EffectType::SendEmail,
-        "push_branch" => EffectType::PushBranch,
-        "publish" => EffectType::Publish,
-        "delete_remote" => EffectType::DeleteRemote,
-        "charge" => EffectType::Charge,
-        "deploy" => EffectType::Deploy,
-        other => {
-            return Err(PersistError::Database(format!("未知 EffectType: {other}")))
-        }
-    })
-}
-
-/// `effect.state` 列的唯一编码来源。穷尽无通配臂，理由同 [`effect_type_str`]；
-/// `pub(crate)` 的理由也同（审计 payload 与本列取同一个串）。
 pub(crate) fn state_str(s: EffectState) -> &'static str {
     match s {
         EffectState::Planned => "planned",
@@ -90,8 +61,10 @@ pub(crate) fn state_str(s: EffectState) -> &'static str {
 
 /// `effect.state` 列的唯一解码来源，与 [`state_str`] 互逆。
 ///
-/// 与 [`parse_effect_type`] 同理：表外取值报错，不取默认状态——把 `UNKNOWN`
-/// 猜成 `COMMITTED`/`FAILED` 正是设计上篇第 7.4 节「不猜」所禁止的。用例同上。
+/// 与 [`EffectType::parse`] 同理：表外取值报错，不取默认状态——把 `UNKNOWN`
+/// 猜成 `COMMITTED`/`FAILED` 正是设计上篇第 7.4 节「不猜」所禁止的。
+/// `tests/persist.rs` 的 `an_unknown_enum_column_value_is_rejected` 直接写入表外
+/// 取值来钉住这条（两个枚举列各一行，故两条解码路径都有对照片）。
 fn parse_state(s: &str) -> Result<EffectState, PersistError> {
     Ok(match s {
         "planned" => EffectState::Planned,
@@ -122,7 +95,7 @@ pub(crate) fn insert_row(tx: &Tx<'_>, effect: &Effect) -> Result<(), PersistErro
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         &[
             Value::text(effect.id.as_str()),
-            Value::text(effect_type_str(effect.effect_type)),
+            Value::text(effect.effect_type.as_str()),
             Value::text(effect.target.clone()),
             Value::text(parameters),
             Value::text(effect.authorization.clone()),
@@ -226,9 +199,14 @@ fn rows_to_effect(rows: Vec<Vec<Value>>) -> Result<Option<Effect>, PersistError>
     };
     let parameters: JsonValue =
         serde_json::from_str(&text_at(&row, 3)?).map_err(|e| PersistError::Database(e.to_string()))?;
+    // 解码走枚举自己的 `parse`（编码的唯一来源）；表外取值在此转成库层错误，
+    // 不取默认类型——理由见 `EffectType::parse` 的文档。
+    let raw_type = text_at(&row, 1)?;
+    let effect_type = EffectType::parse(&raw_type)
+        .ok_or_else(|| PersistError::Database(format!("未知 EffectType: {raw_type}")))?;
     Ok(Some(Effect {
         id: EffectId::new(text_at(&row, 0)?),
-        effect_type: parse_effect_type(&text_at(&row, 1)?)?,
+        effect_type,
         target: text_at(&row, 2)?,
         parameters,
         authorization: text_at(&row, 4)?,

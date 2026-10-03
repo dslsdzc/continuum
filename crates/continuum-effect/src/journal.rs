@@ -64,7 +64,7 @@ pub fn record_planned(tx: &Tx<'_>, effect: &Effect) -> Result<(), PersistError> 
         effect.planned_at,
         json!({
             "effect_id": effect.id.as_str(),
-            "effect_type": persist::effect_type_str(effect.effect_type),
+            "effect_type": effect.effect_type.as_str(),
             "target": effect.target,
             "idempotency_key": effect.idempotency_key,
             "state": persist::state_str(effect.state),
