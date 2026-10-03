@@ -144,3 +144,17 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 不写成绝对措辞。风险真实但很窄——第二条需连犯两处，而 E0004 会强制作者走到 `ALL` 所在的那一带。
 
 **留待某一阶段统一处理**：若要引入该形态，几处枚举应一起改，否则惯用法会一分为二。
+
+---
+
+## 七、`PersistError` 缺少可区分的冲突变体
+
+`Tx::execute` 把 rusqlite 的错误码抹成字符串，故唯一键冲突只能落在 `Database` 变体里、
+按**消息文本**断言（`UNIQUE constraint failed: effect.idempotency_key`）。
+调用方若想按类型分派（例如「撞唯一键就取既有记录」而不是「库坏了」），现在做不到。
+
+`continuum-effect` 的 `record_planned` 与 `advance` 都受此影响，各自按消息断言。
+**要类型层区分需改 `continuum-persist`**，那超出当时 task 的文件清单，故未动。
+
+**留待后续阶段**：若多处需要按类型分派数据库错误，再统一给 `PersistError` 加冲突变体；
+现在只有一处，按消息断言足够。
