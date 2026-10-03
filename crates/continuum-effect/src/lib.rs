@@ -1,8 +1,16 @@
-//! Effect Journal：记录体与状态机（设计上篇第 7 节）。
+//! Effect Journal：记录体、状态机、写入与推进（设计上篇第 7 节、下篇第 8 节）。
 //!
-//! 本 crate 目前只有类型与纯函数的状态机；落库（表定义、编码辅助函数、
-//! 恢复阶段）不在本 task。
+//! 分三层：
+//! - [`effect`]：记录体与纯函数状态机，不落库；
+//! - [`persist`]：`effect` 表的迁移、枚举列编码与行级读写；
+//! - [`journal`]：语义层——写入、推进、幂等键查询。
+//!
+//! 重启恢复（`MarkExecutingAsUnknown`）不在本 task。
 
 pub mod effect;
+pub mod journal;
+pub mod persist;
 
 pub use effect::{Effect, EffectId, EffectState, EffectType, StateError, transition};
+pub use journal::{advance, find_by_idempotency_key, load_effect, record_planned};
+pub use persist::p2_effect_migrations;
