@@ -24,8 +24,25 @@ use crate::rule::{Decision, Level, Policy};
 /// 成立）。
 ///
 /// 本函数**不**做「`--approve` 越过第 3–5 级」那一步的映射（设计下篇第 5.7 节的
-/// 表），也不读 [`crate::rule::Scope`]：`scope` 只记规则的来源，供存储与审计用，
-/// 不参与裁决（第 5.3 节的裁决规则里只有层级与决策）。
+/// 表）。**那张表不能逐行套到本函数的返回值上。** 本接法把第 2 级也当作表里的一条
+/// 规则一次性裁决（见上面的前置条件），故 `--approve` 已给出时返回 `Deny`，其含义
+/// 只有两种：
+///
+/// - **第 1 级为 `Deny`**——它高于第 2 级，此时**不铸造批准值**；
+/// - **调用方未按前置条件放入第 2 级规则**——此时本函数无从知道 `--approve` 的存在，
+///   `Deny` 只是「没有更高的规则放行」，是否铸造按第 5.7 节的接法处理。
+///
+/// 混用两种接法恰好在「第 1 级不可越」这条性质上 fail-open：把第一种含义的 `Deny`
+/// 按第 5.7 节表格里 `Deny` 那一行的字面读法（「有 `--approve` 才铸造」）处理，
+/// 就会给第 1 级 `Deny` 铸造出批准值。
+///
+/// 两种含义都由 `tests/arbitration.rs` 的
+/// `with_an_explicit_approval_a_deny_comes_only_from_the_first_level` 钉住。第二种
+/// 含义同时是「漏放第 2 级规则」的失误面：`--approve` 失效、拒绝照旧，即
+/// fail-closed——比相反方向（fail-open）安全。
+///
+/// [`crate::rule::Scope`] 不影响裁决结果：它只记规则的来源，供存储与审计用
+/// （第 5.3 节的裁决规则里只有层级与决策）。
 ///
 /// 用例见 `tests/arbitration.rs`。
 pub fn decide(policies: &[Policy], ctx: &PolicyContext) -> Decision {

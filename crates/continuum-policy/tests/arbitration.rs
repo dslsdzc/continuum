@@ -9,6 +9,7 @@
 //! 合成。故下面凡涉及 `--approve` 的用例都显式构造它（见 [`explicit_current_allow`]），
 //! 而不是假设裁决函数知道 `--approve` 的存在。
 
+use continuum_effect::EffectType;
 use continuum_policy::{
     Condition, Decision, ExplicitApproval, Level, Policy, PolicyContext, Scope, decide,
 };
@@ -119,9 +120,12 @@ fn within_a_level_the_stricter_decision_wins() {
 
 /// 无任何规则匹配时默认 `Deny`（设计下篇第 5.3 节）。
 ///
-/// 两种「无匹配」都要断言：规则集为空，以及规则集非空但条件全不成立。后者是
-/// fail-open 的常见入口——若把「条件不成立」与「条件无从求值」当成放行的理由，
-/// 空规则集那条仍会过，只有这一条会露出来。
+/// 「无匹配」有三条互不相同的路径，都断言：规则集为空、条件所引用的事实不在
+/// 上下文中（`src/rule.rs:183` 的 `observe` 给出 `None`）、以及事实在上下文中但
+/// **取值不符**（`src/rule.rs:189` 的比较给出 `false`）。后两条是 fail-open 的常见
+/// 入口——若把「条件不成立」当成放行的理由，空规则集那条仍会过，只有它们会露出来。
+/// 最后两条走的是不同的分支，故各写一条：只写其中一条时，另一条分支被改成什么
+/// 都不会有对照片。
 #[test]
 fn no_matching_rule_denies() {
     assert_eq!(
@@ -130,19 +134,89 @@ fn no_matching_rule_denies() {
         "空规则集应默认拒绝"
     );
 
-    // 条件引用 effect_type，而上下文不含该事实：该条不成立（设计下篇第 5.3 节），
-    // 不退化为「全部放行」。
-    let unmatched = vec![Policy {
-        level: Level::UserPersistent,
-        condition: Condition::parse(&json!({"fact": "effect_type", "eq": "charge"}))
-            .expect("已知事实、已知比较符、类型相符，应可解析"),
-        decision: Decision::Allow,
-        scope: Scope::User,
-    }];
+    // 同一条件，两个方向：事实缺省、事实有值但不符。
+    let condition = Condition::parse(&json!({"fact": "effect_type", "eq": "charge"}))
+        .expect("已知事实、已知比较符、类型相符，应可解析");
+    let only_rule = |condition: Condition| {
+        vec![Policy {
+            level: Level::UserPersistent,
+            condition,
+            decision: Decision::Allow,
+            scope: Scope::User,
+        }]
+    };
+
     assert_eq!(
-        decide(&unmatched, &unapproved()),
+        decide(&only_rule(condition.clone()), &unapproved()),
         Decision::Deny,
-        "唯一的规则条件不成立时，应默认拒绝而非取该规则的 Allow"
+        "事实不在上下文中时该规则不成立，应默认拒绝而非取该规则的 Allow"
+    );
+
+    let differing = PolicyContext {
+        effect_type: Some(EffectType::PushBranch),
+        ..PolicyContext::default()
+    };
+    assert_eq!(
+        decide(&only_rule(condition), &differing),
+        Decision::Deny,
+        "事实有值但取值不符时该规则同样不成立，应默认拒绝而非取该规则的 Allow"
+    );
+}
+
+/// 与 `decide` 的文档说明互为对照：`--approve` 已给出时返回 `Deny` 只有两种含义。
+///
+/// - 第 1 级 `Deny` 成立（第 2 级规则已在表里）；
+/// - 表里没有第 2 级规则——此时 `--approve` 不参与（`Deny` 是「无更高的规则放行」）。
+///
+/// 驱动据返回值决定是否铸造批准值。若把 `Deny` 按设计 §5.7 那一行的字面读法处理
+/// （有 `--approve` 即铸造），第一种含义就会 fail-open：第 1 级 `Deny` 加
+/// `--approve` 铸造出批准值，第 1 级失去不可越性。故这个「只有两种含义」必须被
+/// 钉住，而不是只写在注释里——每一侧都有断言。
+#[test]
+fn with_an_explicit_approval_a_deny_comes_only_from_the_first_level() {
+    // 第 1 级 Deny 在场：它高于第 2 级，故 Deny 留存——这正是「不可越」。
+    let first_level_deny = vec![
+        always(Level::SystemSafety, Decision::Deny),
+        always(Level::UserPersistent, Decision::Allow),
+        explicit_current_allow(),
+    ];
+    assert_eq!(
+        decide(&first_level_deny, &approved()),
+        Decision::Deny,
+        "第 1 级的 Deny 高于第 2 级，应留存"
+    );
+
+    // 第 1 级 Deny 不在场：第 3 级的 Deny 被第 2 级越过，`--approve` 已给出时
+    // 裁决不得留下 Deny。
+    let lower_level_deny = vec![
+        always(Level::UserPersistent, Decision::Deny), // 第 3 级
+        always(Level::RuntimeDefault, Decision::RequireApproval), // 第 5 级
+        explicit_current_allow(),
+    ];
+    assert_eq!(
+        decide(&lower_level_deny, &approved()),
+        Decision::Allow,
+        "第 1 级 Deny 不在场时，第 3 级的 Deny 应被第 2 级越过，不留下 Deny"
+    );
+
+    // 第二种含义：表里没有第 2 级规则时本函数无从知道 `--approve` 的存在，故
+    // 第 3 级的 Deny 照旧留存——这是「漏放第 2 级规则」的失误面，方向是
+    // fail-closed（`--approve` 失效），与上一条的 fail-open 相反。
+    assert_eq!(
+        decide(
+            &[always(Level::UserPersistent, Decision::Deny)],
+            &approved()
+        ),
+        Decision::Deny,
+        "表里没有第 2 级规则时，--approve 不参与，第 3 级的 Deny 留存"
+    );
+
+    // 同一含义的极端情形：表是空的。上面那条断言「有规则但不放行」，这条断言
+    // 「根本没有规则」，两者走的是裁决里不同的两支（有胜者、无胜者）。
+    assert_eq!(
+        decide(&[], &approved()),
+        Decision::Deny,
+        "表里没有第 2 级规则时，--approve 不改变「无匹配即拒绝」的结论"
     );
 }
 
