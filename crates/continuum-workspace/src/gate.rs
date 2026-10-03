@@ -21,6 +21,31 @@
 //! 返回 `Err` 之后调用方必须回滚该事务，不得提交。审计行写失败时变更已经生效而库里
 //! 没有记录，这一处窗口无法用事务合上，见各写入操作的文档。
 //!
+//! # 审计的归类（`§313` 与设计 6.4）
+//!
+//! 四项操作各记一条审计（设计 6.4：「五种操作中三种写入 Base 的，以及 `discard`，各写
+//! 一条审计记录」）。`kind` 取 [`AuditKind`]，归类如下——**连同「为什么不新增变体」与
+//! 那处已知的落差一并写在这里，免得后来者把查证重走一遍**（查证的路径是：`§313` 的八项
+//! 原文 → 设计 6.4 那句「类推」→《总纲》的影响等级）。
+//!
+//! - `apply_patch` / `cherry_pick` / `merge` → [`AuditKind::UserApprovals`]。这三项恰是收
+//!   [`GateApproval`] 的那些，`§16` 要求的「集成修改需要授权」（L3）落点正在其中，记的
+//!   就是**用户批准过的那次集成**。
+//! - `discard` → [`AuditKind::ExternalEffects`]。它不收批准值、也不动 Base，但确实在 Runtime
+//!   的库之外留下持久改动——worktree 后端删掉用户仓库里的 `ai/<intent>` 分支，overlay 后端
+//!   卸载覆盖层并删除工作目录。
+//!
+//! **已知的、刻意的落差：变体的名义等级与 `§15` 的影响等级对不上。** `§313` 的「外部副作用」
+//! 在《总纲》里对应 **L4**（`docs/01-总纲.md:815` 的效果等级分层），而 Gate 的三种写入是
+//! **L3**（同文件 `:806`：「从 AI worktree 向用户 branch 集成修改时，影响域升级为 L3」），
+//! `discard` 更是 **L0**。`§313` 的八项里没有任何一项是 L3 或 L0 的语义，**换任何变体同样
+//! 对不上**，故这里保留该映射而不把落差消掉——可用的消法只有两个，一个是改用一个同样不齐的
+//! 变体，一个是为一次语义类比新增变体，两者都不比保留更对。**落差要可见。**
+//!
+//! **也不新增变体**：`AuditKind::ALL` 是长度写死的 `[AuditKind; 8]`
+//! （`crates/continuum-events/src/audit.rs:38`），扩它会牵动 P0 的黄金向量与 serde rename
+//! 一致性用例——为一个语义类比去动 P0 既有的断言，是拿稳定的东西换不稳定的东西。
+//!
 //! # 两种后端的 view_diff
 //!
 //! 「Task 相对 Base 改了什么」在两个后端上不是同一件事，各按自己的形态取：
@@ -127,9 +152,7 @@ impl<'a> IntegrationGate<'a> {
         discard_task_workspace(self.base, task, backend)?;
         self.audit(
             tx,
-            // 「外部副作用」：`discard` 不收批准值，它不改 Base，但确实在 Runtime 的
-            // 库之外留下持久改动——worktree 后端删掉用户仓库里的 `ai/<intent>` 分支，
-            // overlay 后端卸载覆盖层并删除工作目录。设计 6.4 点的就是这一类。
+            // 归类与那处刻意的 L 级落差见模块文档「审计的归类」。
             AuditKind::ExternalEffects,
             occurred_at,
             "discard",
@@ -176,6 +199,7 @@ impl<'a> IntegrationGate<'a> {
         }
         self.audit(
             tx,
+            // 归类与那处刻意的 L 级落差见模块文档「审计的归类」。
             AuditKind::UserApprovals,
             occurred_at,
             "apply_patch",
@@ -229,6 +253,7 @@ impl<'a> IntegrationGate<'a> {
         }
         self.audit(
             tx,
+            // 归类与那处刻意的 L 级落差见模块文档「审计的归类」。
             AuditKind::UserApprovals,
             occurred_at,
             "cherry_pick",
@@ -268,6 +293,7 @@ impl<'a> IntegrationGate<'a> {
         }
         self.audit(
             tx,
+            // 归类与那处刻意的 L 级落差见模块文档「审计的归类」。
             AuditKind::UserApprovals,
             occurred_at,
             "merge",
@@ -277,7 +303,7 @@ impl<'a> IntegrationGate<'a> {
         )
     }
 
-    /// 把一次写入操作记入审计（设计 6.4）。
+    /// 把一次写入操作记入审计（设计 6.4）。**归类及其已知落差见模块文档「审计的归类」。**
     ///
     /// 只写一条记录，不做别的：`kind` 由调用方给出（各操作的归类写在各调用点），
     /// `occurred_at` 也由调用方给出——本层不取时钟，与 [`crate::WorkspaceRecord`]
