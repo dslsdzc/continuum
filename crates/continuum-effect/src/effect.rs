@@ -5,9 +5,10 @@ use serde_json::Value;
 /// 设计上篇第 7.5 节的六个效应类型。封闭枚举：策略要按类型裁决，
 /// 开放类型会让策略表漏判。
 ///
-/// 不派生 serde：落库编码由 Task 2 的显式辅助函数读写（设计下篇第 8 节：
-/// 「经显式辅助函数读写，不依赖 serde」），此外无消费方。派生会造出第二套
-/// 字符串表示，与落库编码并存。
+/// 不派生 serde：设计下篇第 8 节规定枚举列的落库编码「经显式辅助函数读写，
+/// 不依赖 serde」。派生 `snake_case` 的表示恰与落库编码**相同**，故问题不是
+/// 「两套表示」而是「两条读写路径」——同一条编码有两个产生点，改一处不会让
+/// 另一处失败。本 crate 的 serde 表示另无消费方（不落库、不传网络、不入 JSON）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectType {
     SendEmail,
@@ -20,7 +21,11 @@ pub enum EffectType {
 
 /// 设计上篇第 7.2 节的七个状态。
 ///
-/// 不派生 serde，理由同 [`EffectType`]。
+/// 不派生 serde：设计下篇第 8 节的落库编码是小写（`rolled_back`），
+/// 而派生 `SCREAMING_SNAKE_CASE` 会给出**另一套**字符串（`ROLLED_BACK`）——
+/// 同一事实两份表示，正是 P1 出过 Critical 的那类。本 crate 的 serde 表示
+/// 另无消费方（不落库、不传网络，`Effect.parameters` 是 `serde_json::Value`，
+/// 与枚举本身无关）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EffectState {
     Planned,
@@ -34,6 +39,11 @@ pub enum EffectState {
 
 impl EffectState {
     /// 全部七个状态，供全量遍历的用例使用（与 P1 的 `NodeState::ALL` 同形）。
+    ///
+    /// 完整性由 `tests/journal.rs` 的 `all_lists_every_variant_exactly_once`
+    /// 钉住：用例里的穷尽 match 使「加了变体却漏加进 `ALL`」编译失败，
+    /// 回到用例后由数目与覆盖断言判定 `ALL` 恰是全部变体的一个排列。
+    /// 该拦截的边界见 `ordinal` 的注释。
     pub const ALL: [EffectState; 7] = [
         EffectState::Planned,
         EffectState::Authorized,
@@ -47,7 +57,8 @@ impl EffectState {
 
 /// 效应记录的身份。稳定，不随状态变化。
 ///
-/// 不派生 serde，理由同 [`EffectType`]。
+/// 不派生 serde：与 [`EffectType`] 同理，本 crate 的 serde 表示无消费方，
+/// 而落库编码由 Task 2 的显式辅助函数读写（设计下篇第 8 节）。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct EffectId(String);
 
@@ -107,7 +118,9 @@ pub fn transition(from: EffectState, to: EffectState) -> Result<EffectState, Sta
 
 /// 设计上篇第 7.1 节的记录体。字段与类型照该节。
 ///
-/// 不派生 serde：本记录没有 JSON 或网络的消费方，落库由 Task 2 的列级读写完成。
+/// 不派生 serde：本记录没有 JSON 或网络的消费方，落库由 Task 2 的列级读写完成
+/// （设计下篇第 8 节）。派生会连带要求 [`EffectId`] 与两个枚举也派生，
+/// 从而把上面各自的 serde 表示一并拉回来。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
     pub id: EffectId,
