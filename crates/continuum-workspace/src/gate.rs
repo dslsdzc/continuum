@@ -215,21 +215,23 @@ impl<'a> IntegrationGate<'a> {
     /// 一类都行，`git rev-parse` 认得的写法即可）。它们必须能从 Base 的仓库解析出来
     /// ——Task 分支与 Base 在同一个仓库里，故 `ai/<intent>` 上的提交名都可用。
     ///
-    /// **worktree 后端上，空列表由本层拒绝**（[`WorkspaceError::GateRefused`]），不落到
-    /// git：git 在这种情形下打印用法并以 129 退出，调用方拿到的会是「git 命令失败」而不是
-    /// 「你没给提交」。要把 Task 的全部改动并入 Base，用
-    /// [`IntegrationGate::apply_patch`] 或 [`IntegrationGate::merge`]。
+    /// **空列表在两个后端上都由本层拒绝**（[`WorkspaceError::GateRefused`]）。它的语义是
+    /// 「摘这些提交」，空列表是**调用方错误**（忘了点名），不是「请求全部」——要全部有
+    /// [`IntegrationGate::merge`]，那才是它的用途；让两个同名方法做同一件事，会让调用方
+    /// 以为自己在做有粒度的集成。worktree 侧不落到 git 的另一个理由：git 在零参数下打印
+    /// 用法并以 129 退出，调用方拿到的会是「git 命令失败」而不是「你没给提交」。
     ///
-    /// **overlay 后端上没有提交粒度，按提交摘取不成立**（设计 6.3）：
-    /// - **非空列表一律拒绝**（[`WorkspaceError::GateRefused`]）。**不退化**为「并入全部
-    ///   改动」——那会静默地集成得**比调用方要求的更多**（点名一个提交，得到整棵树的
-    ///   改动），方向是危险的，故宁可报错。调用方要按提交粒度集成只能用 worktree 后端。
-    /// - **空列表退化为 [`IntegrationGate::merge`]**：那时请求的内容本就是「全部」，退化成
-    ///   并入整棵 Task 没有多并任何东西。故这一支落到 [`integrate_overlay`]。
+    /// **overlay 后端上没有提交粒度，按提交摘取不成立**（设计 6.3）：**一律拒绝**，空列表
+    /// 与非空列表都是。**不退化**为「并入全部改动」——那会静默地集成得**比调用方要求的
+    /// 更多**（点名一个提交，得到整棵树的改动），方向是危险的；而「同一调用在两种后端上
+    /// 给出相反处置」比单侧的静默更隐蔽（调用方按后端分派时会以为空列表处处等价）。
+    /// 调用方要按提交粒度集成只能用 worktree 后端。
     ///
     /// 拒绝排在**任何改动之前**，故被拒绝的调用在磁盘与库上都不留痕迹（用例：
+    /// `cherry_pick_refuses_an_empty_commit_list`（worktree 侧）、
     /// `cherry_pick_is_refused_on_the_overlay_backend`、
-    /// `cherry_pick_with_an_empty_list_merges_the_whole_task_on_the_overlay_backend`）。
+    /// `cherry_pick_with_an_empty_list_is_refused_on_the_overlay_backend`——三条合起来钉住
+    /// 「空列表在两个后端上同样被拒」）。
     ///
     /// **摘取中途失败会留下 git 的未完成状态。** `cherry-pick` 冲突时 git 停在冲突处
     /// （`CHERRY_PICK_HEAD` 与工作树里的冲突标记都在），本层不代 git 收尾：自动
@@ -258,19 +260,16 @@ impl<'a> IntegrationGate<'a> {
                 cherry_pick_worktree(self.base, commits)?;
             }
             WorkspaceBackend::Overlay => {
-                // 见本函数的文档：非空列表不退化，直接拒绝；空列表退化为 merge。
-                if !commits.is_empty() {
-                    return Err(WorkspaceError::GateRefused {
-                        reason: format!(
-                            "overlay 后端没有提交粒度，无法按提交摘取（请求了 {} 个提交）；\
-                             退化并入全部改动会静默地集成得比要求的多。要按提交粒度集成只能\
-                             用 worktree 后端，要并入全部改动用 apply_patch 或 merge",
-                            commits.len()
-                        ),
-                    }
-                    .into());
+                // 见本函数的文档：一律拒绝，空列表与非空列表都是（不退化）。
+                return Err(WorkspaceError::GateRefused {
+                    reason: format!(
+                        "overlay 后端没有提交粒度，无法按提交摘取（请求了 {} 个提交）；\
+                         退化并入全部改动会静默地集成得比要求的多。要按提交粒度集成只能\
+                         用 worktree 后端，要并入全部改动用 apply_patch 或 merge",
+                        commits.len()
+                    ),
                 }
-                integrate_overlay(self.base.root(), task.root())?;
+                .into());
             }
         }
         self.audit(
@@ -641,10 +640,10 @@ fn merge_worktree(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<(), Gate
 /// Base」，而 `apply_patch` 也只能是同一件事——覆盖层里既没有提交，也没有补丁的基准点。
 /// 二者共用本函数。
 ///
-/// **`cherry_pick` 只在一种情形下到这里**：请求了**空**提交列表时（那时请求的内容本就是
-/// 「全部」，退化成并入整棵 Task 没有多并任何东西）。非空列表要求提交粒度，而覆盖层没有，
-/// 故那一支直接拒绝（见 [`IntegrationGate::cherry_pick`] 的文档与
-/// `cherry_pick_is_refused_on_the_overlay_backend` 用例）。
+/// **`cherry_pick` 不到这里**：它按定义要提交粒度，而覆盖层没有，故那个后端上它一律被拒
+/// （空列表也拒，见 [`IntegrationGate::cherry_pick`] 的文档与
+/// `cherry_pick_is_refused_on_the_overlay_backend` 用例）。本函数只服务
+/// [`IntegrationGate::apply_patch`] 与 [`IntegrationGate::merge`] 两项。
 ///
 /// **改动集合取自 [`diff_trees`]，而不是直接读 upper 层。** 两者在「内容」上等价
 /// （upper 遮蔽 lower，故合并视图里就是 Task 的最终内容），差别在删除：upper 层表达
@@ -1785,13 +1784,14 @@ mod tests {
         assert!(audit_rows(&tx).is_empty(), "被拒绝的调用写了审计记录");
     }
 
-    /// overlay 后端上给**空**列表时，`cherry_pick` 退化为并入全部改动（设计 6.3）。
+    /// overlay 后端上给**空**列表时同样拒绝——**两个后端对「空列表」的处置一致**。
     ///
-    /// 与非空列表那一支（拒绝）是一对：分界就是「请求里到底有没有点名提交」。空列表下
-    /// 请求的内容本就是「全部」，退化成并入整棵 Task 没有多并任何东西；一旦点名了提交，
-    /// 退化就会多并——那才是危险的，故那边拒绝。
+    /// 空列表的语义是「摘这些提交」中的「没有提交」，是**调用方错误**（忘了点名），不是
+    /// 「请求全部」：要全部有 [`IntegrationGate::merge`]。让 overlay 侧把它退化成「并入
+    /// 全部」，会让同一个调用在两种后端上给出相反处置（worktree 拒、overlay 并），而
+    /// 调用方按后端分派时正会以为空列表处处等价——那比单侧的静默多集成更隐蔽。
     #[test]
-    fn cherry_pick_with_an_empty_list_merges_the_whole_task_on_the_overlay_backend() {
+    fn cherry_pick_with_an_empty_list_is_refused_on_the_overlay_backend() {
         let holder = tempfile::tempdir().unwrap();
         let base_path = holder.path().join("base");
         std::fs::create_dir(&base_path).unwrap();
@@ -1810,7 +1810,7 @@ mod tests {
 
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
-        IntegrationGate::new(&base)
+        let err = IntegrationGate::new(&base)
             .cherry_pick(
                 &tx,
                 &task,
@@ -1819,25 +1819,27 @@ mod tests {
                 1_000,
                 &GateApproval(()),
             )
-            .unwrap();
+            .unwrap_err();
 
+        // 与 worktree 侧（`cherry_pick_refuses_an_empty_commit_list`）**同一种错误**：
+        // 「空列表」在两个后端上是同一件事——调用方错误，两边都拒。
+        match &err {
+            GateError::Workspace(WorkspaceError::GateRefused { reason }) => assert!(
+                reason.contains("提交粒度"),
+                "拒绝的理由没说清是覆盖层没有提交粒度：{reason}"
+            ),
+            other => panic!("期望 GateRefused，得到 {other:?}"),
+        }
         assert_eq!(
             std::fs::read(base_path.join("要改的.txt")).unwrap(),
-            b"upper\n",
-            "空列表下没有并入 Task 的改动"
+            b"lower\n",
+            "被拒绝的调用把 Task 的改动并进了 Base（退化了）"
         );
-        assert_eq!(
-            std::fs::read_to_string(base_path.join("新增.txt")).unwrap(),
-            "新\n"
-        );
-        let rows = audit_rows(&tx);
-        tx.commit().unwrap();
-        assert_eq!(rows.len(), 1, "空列表的退化也应记一条审计");
         assert!(
-            rows[0].1.contains("cherry_pick"),
-            "审计 payload 里没有操作名：{}",
-            rows[0].1
+            !base_path.join("新增.txt").exists(),
+            "被拒绝的调用把 Task 的新增文件写进了 Base（退化了）"
         );
+        assert!(audit_rows(&tx).is_empty(), "被拒绝的调用写了审计记录");
     }
 
     /// `cherry_pick` 不给提交即拒绝，报出的是 `GateRefused` 而不是 git 的用法报错。
@@ -2171,7 +2173,7 @@ mod tests {
         // 为 0 还不够）。单测是另一个 target，取不到 `tests/common/` 那份模块，故这一处
         // 只能自己写一遍——改判定条件时三处要一起改。
         assert!(
-            stdout.contains("1 passed"),
+            stdout.contains(" 1 passed"),
             "子进程没有执行 {test_name}（过滤器对不上时 libtest 以 0 tests 退出 0，本用例\
              会静默变绿）。子进程输出：\n{stdout}"
         );

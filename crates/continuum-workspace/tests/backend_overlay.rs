@@ -98,7 +98,7 @@ fn reexec(test_name: &str, envs: &[(&str, &OsStr)], namespace: bool) -> bool {
     // 用例名写错（本函数的调用方是按名字传参的）就会静默变绿。守卫在 common 里，
     // 与 `tests/gate.rs`、`src/gate.rs` 的单测模块同形。
     common::assert_child_ran_one(test_name, &stdout);
-    // 只给需要命名空间的那一类打运行标记：设计遗留里那条窗口说的是「11 条需要用户与挂载
+    // 只给需要命名空间的那一类打运行标记：设计遗留里那条窗口说的是「13 条需要用户与挂载
     // 命名空间的用例」，读数要能对上这个数。`namespace: false` 的那些（只借 re-exec 隔离
     // 环境变量）不需要命名空间，窗口不涉及它们，多打一行只会让计数对不上。
     if namespace {

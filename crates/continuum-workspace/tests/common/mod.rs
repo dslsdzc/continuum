@@ -18,7 +18,7 @@
 /// 改成必然为假也照样 ok。故这里要求子进程的输出里有 `1 passed`。
 pub fn assert_child_ran_one(test_name: &str, stdout: &str) {
     assert!(
-        stdout.contains("1 passed"),
+        stdout.contains(" 1 passed"),
         "子进程没有执行 {test_name}（过滤器对不上时 libtest 以 0 tests 退出 0，本用例会\
          静默变绿）。子进程输出：\n{stdout}"
     );
