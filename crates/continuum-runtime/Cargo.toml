@@ -11,6 +11,7 @@ continuum-events = { path = "../continuum-events" }
 continuum-graph = { path = "../continuum-graph" }
 continuum-persist = { path = "../continuum-persist" }
 continuum-provider = { path = "../continuum-provider" }
+continuum-sandbox = { path = "../continuum-sandbox" }
 continuum-workspace = { path = "../continuum-workspace" }
 tokio = { workspace = true }
 thiserror = { workspace = true }

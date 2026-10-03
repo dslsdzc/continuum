@@ -1,6 +1,8 @@
-# P1 执行层：交接给 P2 的事项
+# P1 执行层：交接事项
 
-本文件只记 P2 开工前必须知道、而代码与设计正文里看不出来的东西。完整的遗留清单在
+本文件只记执行器就位前必须知道、而代码与设计正文里看不出来的东西。**收件阶段不作指定**——
+执行器归哪个阶段尚未确定，故本文一律用「执行器就位后」「接入执行器的阶段」这类措辞，不写阶段名。
+完整的遗留清单在
 `docs/superpowers/plans/2026-10-01-p1-execution-layer.md` 的「遗留」一节；设计正文在
 `docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md`。
 
@@ -11,9 +13,9 @@ P1 交付：`continuum-port`（Port 类型系统）、`continuum-operator`（算
 
 ---
 
-## 一、P2 必须遵守的接口约定
+## 一、执行器必须遵守的接口约定
 
-这三条已写进设计正文，但都是「P1 内无消费者、P2 才兑现」的约定，容易被当成注释略过。
+这三条已写进设计正文，但都是「P1 内无消费者、执行器就位后才兑现」的约定，容易被当成注释略过。
 
 **1. 写入函数返回 `Err` 之后，调用方必须回滚，不得提交**（设计 §16）。
 `apply_transition` 与 `save_artifact` 都可能在失败前已写入部分行——先写状态/元数据、再写事件，
@@ -35,10 +37,10 @@ P1 交付：`continuum-port`（Port 类型系统）、`continuum-operator`（算
 
 ---
 
-## 二、P1 建好但无生产调用方的机制（接线属 P2）
+## 二、P1 建好但无生产调用方的机制（接线属执行器）
 
 除测试外无调用点。这不是缺陷——P1 没有执行器，也就没有合法的「生产」位置——
-但 P2 接执行器时必须逐个接上，否则会重演「机制建好、运行路径不经过」。
+但接入执行器时必须逐个接上，否则会重演「机制建好、运行路径不经过」。
 
 `apply_transition`、`save_graph` / `load_graph`、`ArtifactStore::{persist, restore}`、
 `commit_with_content`、`BlobStore` 的落盘路径、`select_runnable` / `apply_blocking` /
@@ -49,12 +51,12 @@ P1 内真正接通的生产链只有两条：迁移注册（`main.rs`）与恢�
 
 ---
 
-## 三、P2 必须处理的设计遗留
+## 三、执行器必须处理的设计遗留
 
 **算子解析没有执行点。** 设计 §11.2 的 Failure condition 是「注册表中不存在
 `(operator_id, operator_version)` 时节点不进入 RUNNING，返回 `OperatorNotFound`」，
 但 P1 里 `Node::operator` 是 `OperatorRef`、`Node::new` 不查注册表、`transition` 也不收注册表。
-**P2 的 `Queued → Running` 是它唯一的合法落点**，必须在彼处调 `OperatorRegistry::resolve`
+**接入执行器后，`Queued → Running` 是它唯一的合法落点**，必须在彼处调 `OperatorRegistry::resolve`
 并做前置判定。
 
 **`RESOURCE` 的固有策略不能取 `RetryPolicy::default()`。** 设计 §13.1 给 RESOURCE 的是
@@ -64,17 +66,17 @@ P1 内真正接通的生产链只有两条：迁移注册（`main.rs`）与恢�
 
 **`EscalationPolicy::None` 把 `CONSTRAINT` / `AUTHORIZATION` 压成 `Fail`。** 设计 §13.1 要求这两类
 「立即升级为决策」，而 P1 内没有决策对象，`escalate()` 把它压成 `Fail`，语义是「无处可升级」
-而非「不该升级」。P2 引入决策落点时要一并处理，不要当成缺陷去改。
+而非「不该升级」。引入决策落点时要一并处理，不要当成缺陷去改。
 
 **`connect` 拒绝重复边，但 `adfir_edge` 表没有主键。** 构造层已挡住同一对端口的重复连边
-（`GraphError::DuplicateEdge`），落库侧没有约束。P2 若绕过构造层直接写表需自知。
+（`GraphError::DuplicateEdge`），落库侧没有约束。执行器若绕过构造层直接写表需自知。
 
 ---
 
 ## 四、已知缺口与陷阱
 
 **`ArtifactStore::persist` 是非幂等的裸 INSERT。** 与 `save_graph` 同类：同一个 id 再落一次必撞主键。
-P2 每次状态变化都要落库，届时需要 UPSERT 路径。
+执行器每次状态变化都要落库，届时需要 UPSERT 路径。
 
 **孤儿字节**：`commit_with_content` 落盘先于登记，登记失败时字节可能已留在盘上，
 调用方无法从错误区分「字节未落盘」与「字节已落盘但未登记」。内容寻址存储是幂等的，
@@ -84,7 +86,7 @@ P2 每次状态变化都要落库，届时需要 UPSERT 路径。
 `AlreadyCommitted`，进入分支的守卫排除 `UnresolvedInput`）。保留为防御，属零覆盖代码。
 
 **`invalidation` 的 EFFECT 边不参与传播，目前只由否定式间接保证**——用例名声称覆盖
-但从未构造 EFFECT 边。P2 若改动边集判定，这里没有守卫。
+但从未构造 EFFECT 边。后续若改动边集判定，这里没有守卫。
 
 **编码约定**：枚举列（`adfir_node.state`、`node_attempt.state`/`failure_class`、
 `adfir_edge.kind`、`adfir_port.direction`、`artifact.artifact_type`、`artifact.privacy_class`）

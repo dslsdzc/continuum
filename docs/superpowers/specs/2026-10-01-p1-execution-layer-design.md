@@ -509,7 +509,7 @@ Artifact 的二进制内容按 `content_hash` 寻址落磁盘，不存库。元�
 
 **每次尝试必须同时写这两张表。** 这是上面「单表取 `MAX` 即等价」成立的前提：现有实现（`mark_node_lost`）只从 `node_attempt` 取 `MAX(attempt)`，若将来有写入方只更新 `execution_profile` 而漏写 `node_attempt`，恢复钩子算出的号会与执行器的错位——不撞主键，但两表的同一个号不再指同一次执行。写入方新增时必须遵守此条。
 
-**边的去重。** `adfir_edge` 无主键，而 `AdfirGraph::connect` 不去重——同一对端口可以连两次并原样往返。P1 内无消费者受害；P2 接入调度后重复边会让 `edges_to` 双倍计数。`connect` 应对完全相同的边（两端节点、两端端口、`kind` 全同）返回错误而非静默接受。
+**边的去重。** `adfir_edge` 无主键，而 `AdfirGraph::connect` 不去重——同一对端口可以连两次并原样往返。P1 内无消费者受害；接入调度后重复边会让 `edges_to` 双倍计数。`connect` 应对完全相同的边（两端节点、两端端口、`kind` 全同）返回错误而非静默接受。
 
 **表的读写方。** 每张表的读写函数与表定义放在同一 crate。`continuum-runtime` 不直接对这些列写 SQL 字面量——编码分歧正是这样产生的。查询条件里的列取值同样属于该 crate：`WHERE state IN (...)` 的两个取值是编码，不是策略，故也参数化并取自 `state_str`。
 
@@ -576,14 +576,14 @@ ExecutionProfile  六个资源字段在 P3、P7 之前恒为 None，其写入路
 算子解析的落点    §11.2 的 Failure condition「注册表中不存在 (operator_id, operator_version)
                   时节点不进入 RUNNING，返回 OperatorNotFound」在 P1 无执行点：
                   Node::operator 是 OperatorRef，Node::new 不查注册表，transition 也不收注册表。
-                  P2 的 Queued → Running 是它唯一的合法落点，必须在彼处调 OperatorRegistry::resolve
+                  执行器就位后，Queued → Running 是它唯一的合法落点，必须在彼处调 OperatorRegistry::resolve
                   并做前置判定，否则未注册的算子也能进入 RUNNING。
 RESOURCE 的默认策略 §13.1 给 RESOURCE 的「退避后仍失败则升级」不能由 RetryPolicy::default()
                   满足（默认 max_attempts = 1，首次失败即失败）。P3 的 Router 必须显式给出。
-无执行点的机制    P1 定义了但没有生产调用方的机制，P2 接执行器时才有消费者：
+无执行点的机制    P1 定义了但没有生产调用方的机制，接入执行器时才有消费者：
                   apply_transition（第 16 节的写入函数）、save_graph / load_graph、
                   ArtifactStore::{persist, restore} 与 commit_with_content、
-                  BlobStore 的落盘路径。P1 内除测试外无调用点，接线属 P2。
+                  BlobStore 的落盘路径。P1 内除测试外无调用点，接线属执行器。
                   （select_runnable / apply_blocking / apply_unblocking / propagate_invalidation /
                   can_reuse / decide_retry / is_terminal / is_candidate_backend / OperatorRegistry
                   同属此类，见第 11.1、11.2、14 节的自陈。）

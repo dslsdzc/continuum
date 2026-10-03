@@ -61,6 +61,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("continuum-sandbox", &["continuum-workspace"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
+    //
+    // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
+    // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
+    // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇；
+    // core / events / provider 在 runtime 内至今无任何引用（`grep -rn 'continuum_core\|…'` 无命中）。
+    // 反向的边（真依赖却没登记）由本文件的断言抓住，不会静默。
     (
         "continuum-runtime",
         &[
@@ -70,6 +76,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-graph",
             "continuum-persist",
             "continuum-provider",
+            "continuum-sandbox",
             "continuum-workspace",
         ],
     ),
