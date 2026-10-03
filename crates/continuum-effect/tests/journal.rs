@@ -27,12 +27,8 @@ const LEGAL: [(EffectState, EffectState); 13] = [
 /// 覆盖三条断言。编译失败之所以必需：`ALL` 没同步时长度不变，
 /// `assert_eq!(…len(), 7)` 单靠自己照过。
 ///
-/// **残留缺口（据实记录）**：作者若只补上本函数的臂而不动 `ALL`，上一条用例
-/// 仍会全绿——新变体不在 `ALL` 里，循环就永远走不到它。关掉这个缺口只能让
-/// `ALL` 由变体清单生成（宏），或依赖 `std::mem::variant_count`（该函数在本
-/// 工具链上仍是 unstable，见 rustc E0658）。当前实现选择编译期拦截 + 用例断言
-/// 两层，而非改枚举的定义形态；`continuum-graph` 的 `NodeState` 连编译期拦截
-/// 都没有，故本 crate 不比既有更弱。
+/// 本拦截盖不住的那一种情形（补了本函数的臂，却不补 `ALL`）连同它为何关不掉，
+/// 记在 `EffectState::ALL` 的文档注释里——那里是库侧的权威说明，本文件不再重复。
 fn ordinal(state: EffectState) -> usize {
     match state {
         EffectState::Planned => 0,

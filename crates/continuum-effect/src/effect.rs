@@ -41,9 +41,19 @@ impl EffectState {
     /// 全部七个状态，供全量遍历的用例使用（与 P1 的 `NodeState::ALL` 同形）。
     ///
     /// 完整性由 `tests/journal.rs` 的 `all_lists_every_variant_exactly_once`
-    /// 钉住：用例里的穷尽 match 使「加了变体却漏加进 `ALL`」编译失败，
-    /// 回到用例后由数目与覆盖断言判定 `ALL` 恰是全部变体的一个排列。
-    /// 该拦截的边界见 `ordinal` 的注释。
+    /// 与其中的 `ordinal` 共同把关。**能挡住的情形**：给 `EffectState` 加变体而
+    /// 不同步更新它们——`ordinal` 的 match 穷尽且无通配臂，此时整个测试目标编译
+    /// 失败（`E0004`），作者被迫回到用例处，紧邻便是本条 `ALL` 的数目与覆盖断言。
+    ///
+    /// **挡不住的情形**（据实记录）：作者补上了 `ordinal` 的臂，却仍不把新变体
+    /// 加进本条 `ALL`。此时 `ALL` 的长度不变，数目与覆盖两条断言都照过，遍历也
+    /// 走不到新变体。单靠断言关不掉它：判定变体总数必须先能枚举变体，而枚举的
+    /// 来源只有手写名单本身（循环）或 `std::mem::variant_count`，后者在 rustc
+    /// 1.95 上仍是 unstable（`E0658`，issue #73662）。真正关掉它要让 `ALL` 与
+    /// 变体清单同源（由宏一并展开），那是跨 crate 的惯用法变更，不在本 crate
+    /// 单独做——`continuum-graph` 的 `NodeState::ALL` 形态相同。
+    ///
+    /// 维护本条 `ALL` 时请一并核 `tests/journal.rs` 的 `ordinal`。
     pub const ALL: [EffectState; 7] = [
         EffectState::Planned,
         EffectState::Authorized,
