@@ -469,16 +469,40 @@ impl<'a> IntegrationGate<'a> {
 ///   内容一起走进去，Base 的摘要随之变成 Task 内容的函数，而**别的 Intent 的 worktree
 ///   也在里面**——另一个 Intent 的改动会让本枚批准值失配（跨 Intent 耦合）；其二，那是
 ///   本层自己写出来的东西（worktree 目录、排除项、分支登记），不是用户的内容。
-///   **代价明说**：`.ai/` 之下用户自己的内容同样不算内容——改动它既不进摘要，也不会被
-///   集成（[`collect_files`] 同一条排除），两处口径一致。
+///   **代价明说**：`.ai/` 之下用户自己的内容同样不算内容——改动它**不进摘要**。但**在
+///   worktree 后端上它仍可能被集成**（两侧的规则并不相同，见下面那一段），那个方向是
+///   fail-open。
 ///
-/// **`.git` 与 `.ai/` 的排除在两侧（摘要、`view_diff`）逐项相同，且都是任意层级。**
-/// `view_diff` 的两条路各自也有这一条：overlay 经 [`collect_files`]（按名字，任意层级），
-/// worktree 经 git——而 git 侧的那一条同样是**任意层级**的：`.git/info/exclude` 里写的是
-/// `.ai/`（[`crate::worktree`] 的 `ensure_ai_excluded`），**不带前导斜杠**，按 gitignore
-/// 的规则（模式在结尾斜杠之外没有分隔符时可匹配任意层级）连嵌套的 `sub/.ai/` 一起挡住。
-/// 实测（git 2.56.0）`git check-ignore` 对 `.ai/h.txt`、`sub/deep/.ai/f.txt`、
-/// `x/.ai/g.txt` 三者在只写 `.ai/` 一行时都判为忽略，而未列名的 `top.txt` 不是。
+/// **两个后端的「两侧是否同一套规则」不同，逐一写明。**
+///
+/// - **overlay 后端：两侧逐项相同。** `view_diff` 经 [`collect_files`]，与 [`tree_digest`]
+///   跑的是**同一个名字测试**（`name == ".git" || name == AI_DIR`）：任意层级、不分条目
+///   种类（目录、常规文件、符号链接一视同仁）。
+/// - **worktree 后端：两侧不是同一套规则。** git 那一侧由 `.git/info/exclude` 里那一行
+///   `.ai/` 决定（[`crate::worktree`] 的 `ensure_ai_excluded`，**不带前导斜杠**，故按
+///   gitignore 的规则可匹配任意层级——实测 git 2.56.0：只写这一行时 `git check-ignore`
+///   对 `.ai/h.txt`、`sub/deep/.ai/f.txt`、`x/.ai/g.txt` 都判忽略，未列名的 `top.txt`
+///   不忽略）。但它与名字测试有**两处**差别：
+///   1. **只管目录**：`.ai/` 带尾斜杠，gitignore 的规则是「以斜杠结尾的模式只与目录匹配」。
+///      故**名为 `.ai` 的常规文件或符号链接不被忽略**：`git ls-files --others
+///      --exclude-standard` 会把它报成新增、untracked 那一步会把它复制过去，而
+///      [`tree_digest`] 与 [`collect_files`] 按名字跳过它（不分种类）。
+///   2. **只管未跟踪路径**：`--exclude-standard` 与 gitignore 都**压不住已跟踪路径**。
+///      故 Base 里**已提交**的 `sub/.ai/f.txt` 在 Task 里被改动时，`git diff --name-status`
+///      会把它报成修改、`git apply` 会把它应用到 Base，而它的内容**不在摘要里**。
+///
+/// **第 2 条的方向是 fail-open，本层今天没有关掉它。** 用户可以在 [`approve_integration`]
+/// 与写入操作之间改掉那个已跟踪的 `sub/.ai/f.txt`：摘要不变、[`IntegrationGate::verify_approval`]
+/// 照过、改动照落进 Base——为一份内容铸的批准值被应用到另一份上。**实测（worktree 后端）**：
+/// `view_diff.modified()` 给出 `["sub/.ai/f.txt"]`，而拿着铸造前那份内容铸出的批准值
+/// `apply_patch` 返回 `Ok(())`，Base 拿到的是铸造**之后**才写的那一份。第 1 条同样成立，
+/// 只是要取**嵌套**形态（`sub/.ai` 是一个常规文件）：根层那个名为 `.ai` 的文件会撞上
+/// `<base>/.ai/` 本是目录，被 [`ensure_not_a_directory`] 拒掉——那一处是偶然，不是保障。
+///
+/// 要关掉它须改排除规则本身，而那是**第二次设计裁定**，不是实现修复：「收窄为根层」只是
+/// 把同一处缝挪到别的路径上（嵌套的、已跟踪的内容仍会被应用而摘要不收），而给两个后端
+/// 分别定规则又会在 overlay 侧重新引入一处摘要/Diff 分歧。候选规则、实测输出与待裁定项
+/// 记在 `docs/superpowers/sdd/task-7-report.md` 的残余清单里。
 /// - **空的目录不绑定**（与 [`Diff`] 对目录的看法一致：git 不跟踪目录，三类改动以文件与
 ///   符号链接为单位）。`mkdir <base>/空目录` 不会使批准值失配，往里放文件才会。
 ///
@@ -1070,8 +1094,11 @@ fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, GateError> {
             // [`integrate_overlay`] 复制进 Base——而摘要按名字跳过 `.ai`
             // （[`tree_digest`]），两侧对「什么算内容」的看法于是分叉。worktree 后端上
             // git 侧本来就挡住了它（`.git/info/exclude` 里那一行，见 [`crate::worktree`]
-            // 的 `ensure_ai_excluded`），这一条把两个后端拉齐；两处排除**都是任意层级**，
-            // 依据与实测见 [`approve_integration`] 的文档。
+            // 的 `ensure_ai_excluded`），这一条让 overlay 侧也看不见它。
+            // **但两侧的规则并不逐项相同**：git 那条只管目录（`.ai/` 带尾斜杠）、只管
+            // 未跟踪路径，故名为 `.ai` 的常规文件与已跟踪的 `.ai/…` 仍会被报出并集成，
+            // 而本函数与 [`tree_digest`] 都按名字跳过它们——那一处 fail-open 的实测与
+            // 待裁定项见 [`approve_integration`] 的文档。
             //
             // 排除在这里而不是在调用方：本函数是 Diff 的唯一来源（[`diff_trees`]），
             // view_diff 报出的与集成落进 Base 的必须是同一个集合，两边各排一次早晚分叉。

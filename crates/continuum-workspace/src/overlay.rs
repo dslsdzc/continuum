@@ -57,7 +57,9 @@ const ID_HEX_LEN: usize = 16;
 /// **可见不等于算改动。** 集成那一侧按名字排除任意层级的 `.ai/`（`gate` 模块的
 /// `collect_files`），故 Task 内能看到的 `.ai/` 既不出现在 `view_diff` 里，也不会被
 /// `integrate_overlay` 复制进 Base——「`view_diff` 报出的 == 集成落进去的」那条不变式
-/// 因此照旧成立。
+/// 因此照旧成立。**本后端两侧是同一套判据**（都跑 `collect_files` 那个名字测试）；
+/// worktree 后端不是（那一侧是 git 的规则，只管目录、只管未跟踪路径），差别见
+/// `gate` 模块 `approve_integration` 的文档。
 pub struct OverlayBackend;
 
 /// 本进程是否处于一个用户命名空间内。
