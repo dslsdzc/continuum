@@ -53,6 +53,11 @@ const ID_HEX_LEN: usize = 16;
 /// lower（父目录 + 逐项），代价与收益不相称。功能上无害——upper 层的改动仍与 Base 隔离，
 /// 只是 Task 内多看到一个只读的 `.ai/`。worktree 后端没有这个可见性，这是两端在
 /// 「Task 内能看到什么」上的又一处分歧。
+///
+/// **可见不等于算改动。** 集成那一侧按名字排除任意层级的 `.ai/`（`gate` 模块的
+/// `collect_files`），故 Task 内能看到的 `.ai/` 既不出现在 `view_diff` 里，也不会被
+/// `integrate_overlay` 复制进 Base——「`view_diff` 报出的 == 集成落进去的」那条不变式
+/// 因此照旧成立。
 pub struct OverlayBackend;
 
 /// 本进程是否处于一个用户命名空间内。

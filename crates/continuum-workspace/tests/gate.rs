@@ -920,6 +920,67 @@ fn content_under_the_runtime_private_subtree_does_not_invalidate_the_approval() 
     );
 }
 
+/// worktree 后端：Task 根之下的 `.ai/…` **两侧都不看见**——`view_diff` 不报，集成不搬。
+///
+/// 与 overlay 那条（`the_runtime_private_subtree_is_not_integrated_on_the_overlay_backend`）
+/// 是一对，两条钉的是**两套机制**：这条钉 git 侧的排除（`.git/info/exclude` 里那一行
+/// `.ai/`，见 `backend_worktree.rs` 与 `worktree.rs` 的 `ensure_ai_excluded`），那条钉
+/// `collect_files` 的排除。缺了这条，「两个后端上 `.ai/` 都不是内容」只在一边有证据。
+///
+/// 对照臂：同一棵树里非 `.ai` 的普通文件照旧被报出并被集成——否则本条分不清「排除了
+/// `.ai`」与「Diff 整个空了」。
+#[test]
+fn the_runtime_private_subtree_is_not_integrated_on_the_worktree_backend() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    let task_root = task.root().to_path_buf();
+
+    // Task 侧：`.ai/` 下一个新文件（不被忽略的话会被算成「新增」），外加一个普通文件
+    std::fs::create_dir_all(task_root.join(".ai")).unwrap();
+    std::fs::write(task_root.join(".ai/秘密.txt"), "Task 的私有内容\n").unwrap();
+    std::fs::write(task_root.join("普通.txt"), "Task 的改动\n").unwrap();
+
+    let diff = IntegrationGate::new(&base)
+        .view_diff(&task, backend)
+        .unwrap();
+    assert!(
+        !diff.added().iter().any(|p| p.starts_with(".ai")),
+        "`.ai/` 下的文件进了 Diff：{diff:?}"
+    );
+    assert_eq!(
+        diff.added(),
+        &[PathBuf::from("普通.txt")][..],
+        "对照臂不成立：非 `.ai` 的普通文件没被报出（本条因而分不清「排除了 `.ai`」与\
+         「Diff 整个空了」）：{diff:?}"
+    );
+
+    let (_db_dir, db) = db();
+    let tx = db.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task,
+            backend,
+            1_000,
+            &approve_integration(&base, &task, backend).unwrap(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+
+    // Base 自己也有 `.ai/`（本 Task 的 worktree 就住在里面），故这里断言的是那个**具体
+    // 路径**没有出现，而不是「Base 里没有 .ai」。
+    assert!(
+        !base_path.join(".ai/秘密.txt").exists(),
+        "集成把 `.ai/` 下的内容搬进了 Base"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("普通.txt")).unwrap(),
+        "Task 的改动\n",
+        "对照臂不成立：普通文件没有进 Base"
+    );
+}
+
 // ===== OverlayFS 后端（需要用户与挂载命名空间）=====
 
 /// 标识「本进程是被重新执行出来的子进程」，防止再次 re-exec 造成无限递归。
@@ -1113,6 +1174,70 @@ fn symlinks_are_compared_by_their_target_on_the_overlay_backend() {
     assert!(
         diff.deleted().is_empty(),
         "悬空链接被当成了不存在：{diff:?}"
+    );
+}
+
+/// overlay 后端：Task 根之下的 `.ai/…` **不出现在 Diff 里，也不落进 Base**。
+///
+/// 与 worktree 那条（`the_runtime_private_subtree_is_not_integrated_on_the_worktree_backend`）
+/// 是一对。这个后端上它更要紧：Task 根是**合并视图**（lower 是整个 Base），故 Task 侧
+/// `.ai/…` 的新增若被当成改动，就会连同内容被 `integrate_overlay` 复制进 Base；而摘要按
+/// 名字跳过 `.ai`，两侧对「什么算内容」的看法于是分叉。排除落在 `collect_files` 一处，
+/// `diff_trees` 与 `integrate_overlay` 都走它，故「`view_diff` 报出的 == 集成落进去的」
+/// 那条既有不变式照旧成立。
+///
+/// 对照臂：同一棵树里非 `.ai` 的普通文件照旧被报出并被集成。
+#[test]
+fn the_runtime_private_subtree_is_not_integrated_on_the_overlay_backend() {
+    if !enter_namespace("the_runtime_private_subtree_is_not_integrated_on_the_overlay_backend") {
+        return;
+    }
+    let (_d, base_path) = base_with_lower();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    assert_eq!(backend, WorkspaceBackend::Overlay);
+    // Task 侧：`.ai/` 下一个新文件（落进 upper 层），外加一个普通文件
+    task.writable_root()
+        .write(".ai/秘密.txt", "Task 的私有内容\n".as_bytes())
+        .unwrap();
+    task.writable_root()
+        .write("普通.txt", "Task 的改动\n".as_bytes())
+        .unwrap();
+
+    let diff = IntegrationGate::new(&base)
+        .view_diff(&task, backend)
+        .unwrap();
+    assert!(
+        !diff.added().iter().any(|p| p.starts_with(".ai")),
+        "`.ai/` 下的文件进了 Diff：{diff:?}"
+    );
+    assert_eq!(
+        diff.added(),
+        &[PathBuf::from("普通.txt")][..],
+        "对照臂不成立：非 `.ai` 的普通文件没被报出：{diff:?}"
+    );
+
+    let (_db_dir, db) = db();
+    let tx = db.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task,
+            backend,
+            1_000,
+            &approve_integration(&base, &task, backend).unwrap(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+
+    assert!(
+        !base_path.join(".ai/秘密.txt").exists(),
+        "集成把 `.ai/` 下的内容复制进了 Base"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("普通.txt")).unwrap(),
+        "Task 的改动\n",
+        "对照臂不成立：普通文件没有进 Base"
     );
 }
 

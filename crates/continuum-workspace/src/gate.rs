@@ -463,22 +463,22 @@ impl<'a> IntegrationGate<'a> {
 ///
 /// - **`.git` 不进**：仓库的内部账本不是内容。判据与理由同 [`collect_files`]（Diff 一侧
 ///   也排除它）。
-/// - **`.ai/` 不进**（**任意深度**上名为 `.ai` 的目录，连同它的子树）：Runtime 在 Base
+/// - **`.ai/` 不进**（**任意层级**上名为 `.ai` 的目录，连同它的子树）：Runtime 在 Base
 ///   之内的私有子树（§5、[`AI_DIR`]）。两条理由各自都足够：其一，**worktree 后端的 Task
 ///   根就在 `<base>/.ai/worktrees/<intent>`**，不排除则「Base 树」的遍历会把 Task 连同
 ///   内容一起走进去，Base 的摘要随之变成 Task 内容的函数，而**别的 Intent 的 worktree
 ///   也在里面**——另一个 Intent 的改动会让本枚批准值失配（跨 Intent 耦合）；其二，那是
-///   本层自己写出来的东西（worktree 目录、排除项、分支登记）。**代价明说**：`.ai/` 之下
-///   用户自己的内容也不进摘要，改动它不会使批准值失配。
+///   本层自己写出来的东西（worktree 目录、排除项、分支登记），不是用户的内容。
+///   **代价明说**：`.ai/` 之下用户自己的内容同样不算内容——改动它既不进摘要，也不会被
+///   集成（[`collect_files`] 同一条排除），两处口径一致。
 ///
-/// **这一条排除只在摘要这一侧，与 `view_diff` 不是同一套判据。** 事实是：worktree 后端上
-/// git 也把 `.ai/` 挡住（`info/exclude` 里那一行，见 [`crate::worktree`]），故两个后端里
-/// 只有它「两边都不看见 `.ai/`」；**overlay 后端上 [`collect_files`] 只排除 `.git`，不排除
-/// `.ai`**——于是 overlay 的 `view_diff` 会把 `.ai/…` 的改动报出来，[`integrate_overlay`]
-/// 也就照那个 Diff 把它复制进 Base，而它**不在**摘要里。**这是一处已知的落差**（早于本
-/// 次改动，`collect_files` / `diff_trees` / `integrate_overlay` 三者共有），如何处置是一次
-/// **设计裁定**，本层不预先表态；事实与影响记在 `docs/superpowers/sdd/task-7-report.md`
-/// 的残余风险里。
+/// **`.git` 与 `.ai/` 的排除在两侧（摘要、`view_diff`）逐项相同，且都是任意层级。**
+/// `view_diff` 的两条路各自也有这一条：overlay 经 [`collect_files`]（按名字，任意层级），
+/// worktree 经 git——而 git 侧的那一条同样是**任意层级**的：`.git/info/exclude` 里写的是
+/// `.ai/`（[`crate::worktree`] 的 `ensure_ai_excluded`），**不带前导斜杠**，按 gitignore
+/// 的规则（模式在结尾斜杠之外没有分隔符时可匹配任意层级）连嵌套的 `sub/.ai/` 一起挡住。
+/// 实测（git 2.56.0）`git check-ignore` 对 `.ai/h.txt`、`sub/deep/.ai/f.txt`、
+/// `x/.ai/g.txt` 三者在只写 `.ai/` 一行时都判为忽略，而未列名的 `top.txt` 不是。
 /// - **空的目录不绑定**（与 [`Diff`] 对目录的看法一致：git 不跟踪目录，三类改动以文件与
 ///   符号链接为单位）。`mkdir <base>/空目录` 不会使批准值失配，往里放文件才会。
 ///
@@ -1056,16 +1056,27 @@ fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, GateError> {
         for entry in entries {
             let entry = entry.map_err(|e| io_error(root, e))?;
             let path = entry.path();
-            // **`.git` 不进差异集，也不递归进去。** 仓库的内部状态不是「内容」：它是
-            // git 自己的账本（HEAD、config、objects、refs……），集成它没有意义，而把
-            // 两侧的 `.git` 当内容比较是有害的——Task 根是 worktree 时 `.git` 是**文件**、
-            // Base 的 `.git` 是**目录**，两者按内容一比就是「Base 侧一整棵 .git 被删」
-            // 加「多了一个 .git」。`.git` 这个名字在 git 仓库里不可能是有意义的被跟踪
-            // 内容（git 自己拒绝跟踪它），故按名字排除不会丢掉任何真实改动。
+            // **`.git` 与 `.ai/` 不进差异集，也不递归进去**（按名字，任意层级）。
+            //
+            // `.git`：仓库的内部状态不是「内容」——它是 git 自己的账本（HEAD、config、
+            // objects、refs……），集成它没有意义，而把两侧的 `.git` 当内容比较是有害的
+            // ——Task 根是 worktree 时 `.git` 是**文件**、Base 的 `.git` 是**目录**，两者
+            // 按内容一比就是「Base 侧一整棵 .git 被删」加「多了一个 .git」。`.git` 这个
+            // 名字在 git 仓库里不可能是有意义的被跟踪内容（git 自己拒绝跟踪它），故按
+            // 名字排除不会丢掉任何真实改动。
+            //
+            // `.ai/`：Runtime 在 Base 之内的私有子树（§5、[`AI_DIR`]），不是用户的内容。
+            // 不排除则 overlay 后端上 Task 侧 `.ai/…` 的改动会被报成新增、并被
+            // [`integrate_overlay`] 复制进 Base——而摘要按名字跳过 `.ai`
+            // （[`tree_digest`]），两侧对「什么算内容」的看法于是分叉。worktree 后端上
+            // git 侧本来就挡住了它（`.git/info/exclude` 里那一行，见 [`crate::worktree`]
+            // 的 `ensure_ai_excluded`），这一条把两个后端拉齐；两处排除**都是任意层级**，
+            // 依据与实测见 [`approve_integration`] 的文档。
             //
             // 排除在这里而不是在调用方：本函数是 Diff 的唯一来源（[`diff_trees`]），
             // view_diff 报出的与集成落进 Base 的必须是同一个集合，两边各排一次早晚分叉。
-            if entry.file_name() == ".git" {
+            let name = entry.file_name();
+            if name == ".git" || name == AI_DIR {
                 continue;
             }
             // 相对路径由父级的相对路径拼出，不靠事后 strip_prefix：遍历的起点就是
@@ -1145,14 +1156,10 @@ fn finish(hasher: Sha256) -> [u8; 32] {
 
 /// 一棵树的**内容**摘要：逐条目把「类别 + 相对路径 + 内容」喂进哈希。
 ///
-/// 与 [`collect_files`] 相同的几条判据：不收目录、符号链接按目标路径、非常规条目不进、
-/// 读失败即 `Err`。差别有**两处**：
-///
-/// - 本函数把内容**流式**喂进哈希，不把整棵树收进内存，故大仓库下的内存占用是常数；
-/// - **本函数额外排除 `.ai/`**，而 [`collect_files`] 只排除 `.git`。**故两个后端的
-///   `view_diff` 与摘要对 `.ai/` 的处置并不一致**——事实、后果与「这是一次设计裁定」见
-///   [`approve_integration`] 的文档里那一节。别把这里的「与 `collect_files` 同判据」读成
-///   两处逐项相同。
+/// 与 [`collect_files`] 逐项相同的判据：不收目录、符号链接按目标路径、非常规条目不进、
+/// 读失败即 `Err`，以及**按名字排除 `.git` 与任意层级的 `.ai/`**（依据与实测见
+/// [`approve_integration`] 的文档那一节）。差别只有一处：本函数把内容**流式**喂进哈希，
+/// 不把整棵树收进内存，故大仓库下的内存占用是常数。
 ///
 /// **次序是确定的**：每层目录的条目先按文件名的**原始字节**排序再递归。`read_dir` 给的
 /// 次序由文件系统决定，不排序的话同一棵树两次遍历可能给出两个摘要——而本摘要的全部用处
