@@ -164,11 +164,14 @@ fn enum_columns_use_the_lowercase_encoding() {
     assert_eq!(text_of(&rows[1][0]), "delete_remote");
     assert_eq!(text_of(&rows[1][1]), "rolled_back");
 
-    // 落库的不是 Rust 枚举的 Debug 表示
-    for raw in [text_of(&rows[0][0]), text_of(&rows[1][0]), text_of(&rows[1][1])] {
+    // 落库编码的形态：遍历**全部**单元格，不逐索引列举——逐索引列举会漏格子
+    // （本用例早先的版本就漏了 `rows[0][1]`）。上面四条精确断言逐格钉住取值，
+    // 这条另管「形态合法且非 Debug 表示」，将来往本用例加行时也不会漏检。
+    for cell in rows.iter().flatten() {
+        let raw = text_of(cell);
         assert!(
-            !raw.contains("PushBranch") && !raw.contains("DeleteRemote") && !raw.contains("RolledBack"),
-            "列里是枚举的 Debug 表示而非小写编码：{raw}"
+            !raw.is_empty() && raw.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            "枚举列的落库编码应为小写、多词以 _ 连接（Debug 表示含大写），实际 {raw}"
         );
     }
 

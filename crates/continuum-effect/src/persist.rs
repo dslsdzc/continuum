@@ -5,12 +5,12 @@
 //! `tests/persist.rs` 另以字面量断言落库取值，改编码会让那些字面量变红。
 //! 语义层（写入、推进、幂等键查询）在 [`crate::journal`]，该文件内没有 SQL 字面量。
 //!
-//! 两个枚举列**不依赖 serde**：`EffectType` / `EffectState` 的 serde 表示
-//! （`SCREAMING_SNAKE_CASE`）与落库编码（小写）是两件事，落库只走本文件的
-//! `effect_type_str` / `state_str` 及其逆。
+//! 两个枚举列**不依赖 serde**：`EffectType` 与 `EffectState` 都不派生 serde
+//! （Task 1 按裁定去掉，理由各处记在 `effect.rs` 的类型注释里）。落库编码一律
+//! 小写、多词以 `_` 连接，只走本文件的 `effect_type_str` / `state_str` 及其逆。
 
 use crate::effect::{Effect, EffectId, EffectState, EffectType};
-use continuum_persist::{Migration, PersistError, Tx, Value};
+use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
 use serde_json::Value as JsonValue;
 
 /// 本 crate 在 `effect` 表上注册的迁移。
@@ -147,7 +147,7 @@ pub(crate) fn state_of(tx: &Tx<'_>, id: &EffectId) -> Result<Option<EffectState>
     let Some(row) = rows.into_iter().next() else {
         return Ok(None);
     };
-    Ok(Some(parse_state(&text(&row[0])?)?))
+    Ok(Some(parse_state(&text_at(&row, 0)?)?))
 }
 
 /// 改写状态列并把 `updated_at` 置为 `now`。其它列不动。
@@ -203,30 +203,48 @@ fn rows_to_effect(rows: Vec<Vec<Value>>) -> Result<Option<Effect>, PersistError>
         return Ok(None);
     };
     let parameters: JsonValue =
-        serde_json::from_str(&text(&row[3])?).map_err(|e| PersistError::Database(e.to_string()))?;
+        serde_json::from_str(&text_at(&row, 3)?).map_err(|e| PersistError::Database(e.to_string()))?;
     Ok(Some(Effect {
-        id: EffectId::new(text(&row[0])?),
-        effect_type: parse_effect_type(&text(&row[1])?)?,
-        target: text(&row[2])?,
+        id: EffectId::new(text_at(&row, 0)?),
+        effect_type: parse_effect_type(&text_at(&row, 1)?)?,
+        target: text_at(&row, 2)?,
         parameters,
-        authorization: text(&row[4])?,
-        idempotency_key: text(&row[5])?,
-        state: parse_state(&text(&row[6])?)?,
-        planned_at: int(&row[7])?,
-        updated_at: int(&row[8])?,
+        authorization: text_at(&row, 4)?,
+        idempotency_key: text_at(&row, 5)?,
+        state: parse_state(&text_at(&row, 6)?)?,
+        planned_at: int_at(&row, 7)?,
+        updated_at: int_at(&row, 8)?,
     }))
 }
 
-fn text(v: &Value) -> Result<String, PersistError> {
-    match v {
-        Value::Text(s) => Ok(s.clone()),
-        other => Err(PersistError::Database(format!("列应为文本，实际 {other:?}"))),
+/// 按下标取文本列。列类型不符报 [`PersistError::ColumnType`]，
+/// 形态与 `continuum-persist` 的 `Tx::audit_records` 同（那里的 `text_at`）。
+/// 列缺失（`None`）也算类型不符，`actual` 记 `"missing"`。
+fn text_at(row: &[Value], index: usize) -> Result<String, PersistError> {
+    match row.get(index) {
+        Some(Value::Text(s)) => Ok(s.clone()),
+        Some(other) => Err(PersistError::ColumnType {
+            index,
+            actual: kind_name(other),
+        }),
+        None => Err(PersistError::ColumnType {
+            index,
+            actual: "missing",
+        }),
     }
 }
 
-fn int(v: &Value) -> Result<i64, PersistError> {
-    match v {
-        Value::Int(i) => Ok(*i),
-        other => Err(PersistError::Database(format!("列应为整数，实际 {other:?}"))),
+/// 按下标取整数列，报错形态同 [`text_at`]。
+fn int_at(row: &[Value], index: usize) -> Result<i64, PersistError> {
+    match row.get(index) {
+        Some(Value::Int(i)) => Ok(*i),
+        Some(other) => Err(PersistError::ColumnType {
+            index,
+            actual: kind_name(other),
+        }),
+        None => Err(PersistError::ColumnType {
+            index,
+            actual: "missing",
+        }),
     }
 }
