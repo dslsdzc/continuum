@@ -336,11 +336,31 @@ fn ensure_ai_excluded(base: &Path) -> Result<(), WorkspaceError> {
 /// 以退出码判定成败，不看 stderr：`git worktree add` 成功时也会往 stderr
 /// 打印 "Preparing worktree ..."。失败时把 code 与 stderr 原样带回，
 /// 截断或改写都会让调用方丢掉 git 给出的具体原因。
-fn git(dir: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
+///
+/// 需要原始字节或需要给 git 传环境变量时用 [`git_raw`]：本函数经
+/// `from_utf8_lossy` 之后非 UTF-8 的字节已被替换字符顶掉（`-z` 输出里的路径会因此
+/// 失真），而 `trim` 是给「本来就是一行的文本」用的标量输出（修订号、路径）准备的。
+pub(crate) fn git(dir: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
+    let raw = git_raw(dir, args, &[])?;
+    Ok(String::from_utf8_lossy(&raw).trim().to_owned())
+}
+
+/// 在 `dir` 内执行一条 git 命令，返回**原始** stdout 字节；非零退出即 `GitFailed`。
+///
+/// `envs` 是额外传给 git 的环境变量，用于 `GIT_INDEX_FILE` 这类「让 git 把某个文件
+/// 写到别处」的开关（见 [`crate::gate`]）。其余环境原样继承。
+///
+/// 失败判定与错误内容与 [`git`] 同：只看退出码，失败时把 code 与 stderr 原样带回。
+pub(crate) fn git_raw(
+    dir: &Path,
+    args: &[&str],
+    envs: &[(&str, &std::ffi::OsStr)],
+) -> Result<Vec<u8>, WorkspaceError> {
     let output = Command::new("git")
         .arg("-C")
         .arg(dir)
         .args(args)
+        .envs(envs.iter().map(|(key, value)| (*key, *value)))
         .output()
         .map_err(|e| WorkspaceError::BackendUnavailable {
             reason: format!("无法执行 git：{e}"),
@@ -352,7 +372,7 @@ fn git(dir: &Path, args: &[&str]) -> Result<String, WorkspaceError> {
             stderr: String::from_utf8_lossy(&output.stderr).trim_end().to_owned(),
         });
     }
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    Ok(output.stdout)
 }
 
 /// 给错误附加一层上下文（哪一步、哪个分支、哪个路径）。
