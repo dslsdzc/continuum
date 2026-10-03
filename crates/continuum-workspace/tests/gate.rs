@@ -38,6 +38,8 @@
 //! 并把同一份路径同时交给夹具与断言（`discarding_a_foreign_root_through_the_gate_…`
 //! 就是如此），两侧同源，没有可比错的地方。
 
+mod common;
+
 use continuum_persist::{Db, Value};
 use continuum_workspace::{
     BaseWorkspace, GateError, IntentId, IntegrationGate, WorkspaceBackend, create_task_workspace,
@@ -609,13 +611,17 @@ fn enter_namespace(test_name: &str) -> bool {
         .env(OVERLAY_ROOT_ENV, &root)
         .output()
         .unwrap_or_else(|e| panic!("无法重新执行 {exe}：{e}"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
-        "子进程 {test_name} 失败（退出码 {:?}）：\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        "子进程 {test_name} 失败（退出码 {:?}）：\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
         out.status.code(),
-        String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    // 退出码为 0 还不够：过滤器对不上任何名字时 libtest 跑 0 条用例并以 0 退出，而本函数
+    // 的调用方是**按名字**传参的——一个拼写错误就会让用例静默变绿。守卫在 `tests/common/`
+    // 里，与 `tests/backend_overlay.rs`、`src/gate.rs` 的单测模块同形。
+    common::assert_child_ran_one(test_name, &stdout);
     // 子进程已退出，本次用例的 overlay 存储随临时目录一并清掉
     drop(holder);
     false

@@ -2165,6 +2165,11 @@ mod tests {
         // run」退出 0——只看退出码的话，这条用例会**静默变绿**：什么都没验，却报通过。
         // （实测过一次：单测二进制里的用例全名带模块路径 `gate::tests::…`，只传函数名时
         // `--exact` 匹配不上，于是断言一次也没执行。）
+        //
+        // 与 `tests/common/mod.rs` 的 `assert_child_ran_one`、以及 `tests/gate.rs`、
+        // `tests/backend_overlay.rs` 里对它的调用**同形**：三处都在同一条断定上（退出码
+        // 为 0 还不够）。单测是另一个 target，取不到 `tests/common/` 那份模块，故这一处
+        // 只能自己写一遍——改判定条件时三处要一起改。
         assert!(
             stdout.contains("1 passed"),
             "子进程没有执行 {test_name}（过滤器对不上时 libtest 以 0 tests 退出 0，本用例\

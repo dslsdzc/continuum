@@ -10,6 +10,8 @@
 //! 路径一律取 `canonicalize` 之后的值：临时目录可能落在符号链接之下，而实现比较的是
 //! 规范路径，两侧不规范化会让失败点指向断言而不是实现。
 
+mod common;
+
 use continuum_workspace::{
     BaseWorkspace, IntentId, TaskWorkspace, WorkspaceBackend, WorkspaceError, create_task_workspace,
     discard_task_workspace, in_user_namespace,
@@ -91,13 +93,17 @@ fn reexec(test_name: &str, envs: &[(&str, &OsStr)], namespace: bool) -> bool {
     let out = command
         .output()
         .unwrap_or_else(|e| panic!("无法重新执行 {exe}：{e}"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
-        "子进程 {test_name} 失败（退出码 {:?}）：\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        "子进程 {test_name} 失败（退出码 {:?}）：\n--- stdout ---\n{stdout}\n--- stderr ---\n{}",
         out.status.code(),
-        String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
+    // 退出码为 0 还不够：过滤器对不上任何名字时 libtest 跑 0 条用例并以 0 退出，
+    // 用例名写错（本函数的调用方是按名字传参的）就会静默变绿。守卫在 common 里，
+    // 与 `tests/gate.rs`、`src/gate.rs` 的单测模块同形。
+    common::assert_child_ran_one(test_name, &stdout);
     false
 }
 
