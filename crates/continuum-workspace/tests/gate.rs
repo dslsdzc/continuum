@@ -26,11 +26,14 @@
 //! 通过（见 [`skip`]）。这一段与 `tests/backend_overlay.rs` 的写法同源——两个测试二进制
 //! 是两个 crate，取不到对方的东西。
 //!
-//! **写入操作（`apply_patch` / `cherry_pick` / `merge`）的用例不在这里**：它们收
-//! `&GateApproval`，而该值在 crate 之外没有构造路径（`tests/compile_fail/
-//! gate_approval_*.rs` 钉的就是这一点）——本文件是另一个 crate，拿不出批准值。
-//! 那三条用例在 `src/gate.rs` 的单测模块里。`discard` 不收批准值，故它连同它的审计
-//! 记录一条都留在本文件。
+//! **写入操作（`apply_patch` / `cherry_pick` / `merge`）的用例与只读的那些同在
+//! 本文件**：批准值在 crate 之外仍然拿不到（`tests/compile_fail/gate_approval_*.rs`
+//! 钉的是「没有**无名**构造路径」），但自设计 §7.2 起它有一个公开的**具名**产生点
+//! `approve_integration`——本文件是另一个 crate，正是那个产生点的外部使用者，故
+//! 「铸一枚 → 拿去集成」这条链在这里走得通。集成本身的语义（补丁、未跟踪文件、
+//! 审计归类等）仍在 `src/gate.rs` 的单测模块里。
+//!
+//! `discard` 不收批准值，故它连同它的审计记录一条都留在本文件。
 //!
 //! 两个后端的夹具（[`git_repo`] 与 [`base_with_lower`]）把根取 `canonicalize` 之后的
 //! 值：临时目录可能落在符号链接之下，而 `TaskWorkspace` 持有的根是规范化结果，两侧
@@ -42,8 +45,8 @@ mod common;
 
 use continuum_persist::{Db, Value};
 use continuum_workspace::{
-    BaseWorkspace, GateError, IntentId, IntegrationGate, WorkspaceBackend, create_task_workspace,
-    discard_task_workspace,
+    BaseWorkspace, GateError, IntentId, IntegrationGate, WorkspaceBackend, approve_integration,
+    create_task_workspace, discard_task_workspace,
 };
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -550,6 +553,369 @@ fn discard_writes_an_audit_record() {
     );
 }
 
+// ===== 批准值的绑定（设计 §7.2）=====
+//
+// 铸一枚（`approve_integration`）→ 拿它去集成。这一组用例钉的是「一枚只为一次集成
+// 背书」：别的 Task、别的后端、铸造之后变过的树，都要被拒，且**拒绝排在动第一个字节
+// 之前**（Base 逐字节不变，审计链上一条都不多）。
+//
+// 每条拒绝的用例都带**对照臂**：不接受之后用正确的那一枚再走一遍。没有对照臂的话，
+// 「被拒」可能来自任何别的原因（补丁打不上、布局不符、后端不可用），而这里要钉的恰恰
+// 是「因为批准值不是这一枚」。
+
+/// 一枚批准值只为**它那一次**集成背书：同一 Base 下另一个 Intent 拿不走它。
+///
+/// 两个 Task 的内容**逐字节相同**（同名、同内容的改动），故本条能变红的唯一来源是绑定里
+/// 除内容之外的那一部分——Task 的位置与 Intent 标识。少了它，两枚摘要相同，另一枚批准值
+/// 会安静地放行，而调用方看不出自己批准的是哪一次集成。
+#[test]
+fn an_approval_for_one_integration_does_not_authorize_another() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task_a, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    let (task_b, backend_b) = create_task_workspace(&base, &IntentId::new("i2")).unwrap();
+    assert_eq!(backend, WorkspaceBackend::Worktree);
+    assert_eq!(backend_b, backend, "两个 Task 的后端不同，本用例的前提不成立");
+    for task in [&task_a, &task_b] {
+        std::fs::write(task.root().join("要改的.txt"), "内容一样\n").unwrap();
+    }
+
+    let approval_for_a = approve_integration(&base, &task_a, backend).unwrap();
+    let before = tree_snapshot(&base_path);
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    let err = IntegrationGate::new(&base)
+        .apply_patch(&tx, &task_b, backend, 1_000, &approval_for_a)
+        .unwrap_err();
+    match &err {
+        GateError::ApprovalMismatch { reason } => {
+            // 报文里给出的是**这次**集成的标识（可供人判断拿错了哪一个），而**不是**摘要
+            // 本身——那串十六进制对读错误的人没有信息，可行动的一步是重新铸一枚。
+            assert!(
+                reason.contains("intent=i2") && reason.contains("backend=worktree"),
+                "报错里没有这次集成的标识：{reason}"
+            );
+            let digest_like = reason
+                .split(|c: char| !c.is_ascii_hexdigit())
+                .any(|run| run.len() >= 64);
+            assert!(!digest_like, "报错里出现了摘要本身：{reason}");
+        }
+        other => panic!("期望 ApprovalMismatch（把 A 的批准值拿去给 B 用），得到 {other:?}"),
+    }
+    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert!(
+        audit_rows(&tx).is_empty(),
+        "被拒的集成写了审计记录（拒绝应当排在任何变更之前）"
+    );
+    tx.commit().unwrap();
+
+    // 对照臂：B 自己铸的那一枚照常放行——「被拒」因此不是别的原因造成的
+    let (_db_dir_b, db_b) = db();
+    let tx = db_b.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task_b,
+            backend,
+            1_000,
+            &approve_integration(&base, &task_b, backend).unwrap(),
+        )
+        .unwrap();
+    let rows = audit_rows(&tx);
+    tx.commit().unwrap();
+    assert_eq!(rows.len(), 1, "对照臂没有写审计记录");
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
+        "内容一样\n",
+        "对照臂没有把改动带进 Base"
+    );
+}
+
+/// 铸造之后 Base 被改动 ⇒ 摘要失配（设计 §7.2 的**刻意后果**）。
+///
+/// 改的是 **Task 没碰过**的文件：`view_diff` 的清单里没有它，两个根也没变。这一条因此是
+/// 「摘要由内容派生」的判据——「路径 + `view_diff` 的路径清单」那种算法在这里**恰好看不
+/// 出来**，而设计点名的后果正是它。批准的是「把**当前**这份差异应用过去」：Base 换了内容，
+/// 落点就不再是批准时的那个。
+#[test]
+fn changing_the_base_between_approval_and_application_invalidates_it() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+
+    let approval = approve_integration(&base, &task, backend).unwrap();
+    // Task 没碰过的那个文件，在 Base 侧被改动
+    std::fs::write(base_path.join("要删的.txt"), "用户在 Base 上改的\n").unwrap();
+    let before = tree_snapshot(&base_path);
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    let err = IntegrationGate::new(&base)
+        .apply_patch(&tx, &task, backend, 1_000, &approval)
+        .unwrap_err();
+    match &err {
+        GateError::ApprovalMismatch { .. } => {}
+        other => panic!("期望 ApprovalMismatch（Base 在铸造之后被改动），得到 {other:?}"),
+    }
+    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert!(
+        audit_rows(&tx).is_empty(),
+        "被拒的集成写了审计记录（拒绝应当排在任何变更之前）"
+    );
+    tx.commit().unwrap();
+
+    // 对照臂：Base 改动之后重新铸一枚，集成照常进行——「被拒」不是因为补丁打不上
+    let (_db_dir_b, db_b) = db();
+    let tx = db_b.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task,
+            backend,
+            1_000,
+            &approve_integration(&base, &task, backend).unwrap(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
+        "Task 改过\n",
+        "重新铸造之后集成本该成功"
+    );
+}
+
+/// 铸一枚、紧接着集成：照常成功。Base 得到改动，Task 仍在，审计记一条。
+#[test]
+fn a_fresh_approval_applies_normally() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+    std::fs::write(task.root().join("新文件.txt"), "Task 新增\n").unwrap();
+    let head_before = run_git(&base_path, &["rev-parse", "HEAD"]);
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task,
+            backend,
+            1_000,
+            &approve_integration(&base, &task, backend).unwrap(),
+        )
+        .unwrap();
+    let rows = audit_rows(&tx);
+    tx.commit().unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
+        "Task 改过\n",
+        "新旧内容的改动没有进 Base"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("新文件.txt")).unwrap(),
+        "Task 新增\n",
+        "未跟踪的新增没有进 Base"
+    );
+    assert!(task.root().exists(), "集成把 Task 搬走了");
+    assert_eq!(
+        run_git(&base_path, &["rev-parse", "HEAD"]),
+        head_before,
+        "apply_patch 不该替用户提交"
+    );
+    assert_eq!(rows.len(), 1, "集成应恰好多出一条审计记录");
+}
+
+/// 三个写入操作**各自**在动手之前比对摘要。
+///
+/// 逐项各建一个仓库（与 `the_write_operations_write_an_audit_record` 同一路数）：一条链上
+/// 跑三次的话，某一支漏掉比对会被另一支的拒绝掩盖。任何一支漏掉，它就会把改动落进 Base
+/// 而不报错——三条分开才看得出是哪一支漏了。
+#[test]
+fn every_write_operation_refuses_a_stale_approval() {
+    for operation in ["apply_patch", "cherry_pick", "merge"] {
+        let (_d, base_path) = git_repo();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+        let task_root = task.root().to_path_buf();
+        std::fs::write(task_root.join("要改的.txt"), "Task 改过\n").unwrap();
+        run_git(&task_root, &["add", "-A"]);
+        run_git(&task_root, &["commit", "-m", "Task 的一个提交"]);
+        let commit = run_git(&task_root, &["rev-parse", "HEAD"]);
+
+        let approval = approve_integration(&base, &task, backend).unwrap();
+        // 铸造之后改 Base：三个操作都必须因此拒绝（改的是 Task 没碰过的那个文件）
+        std::fs::write(base_path.join("要删的.txt"), "用户在 Base 上改的\n").unwrap();
+        let before = tree_snapshot(&base_path);
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        let gate = IntegrationGate::new(&base);
+        let err = match operation {
+            "apply_patch" => gate.apply_patch(&tx, &task, backend, 1_000, &approval),
+            "cherry_pick" => gate.cherry_pick(&tx, &task, backend, &[&commit], 1_000, &approval),
+            "merge" => gate.merge(&tx, &task, backend, 1_000, &approval),
+            other => panic!("未覆盖的操作：{other}"),
+        }
+        .unwrap_err();
+        assert!(
+            matches!(err, GateError::ApprovalMismatch { .. }),
+            "{operation}：期望 ApprovalMismatch，得到 {err:?}"
+        );
+        assert_eq!(
+            tree_snapshot(&base_path),
+            before,
+            "{operation}：被拒的集成动了 Base"
+        );
+        assert!(
+            audit_rows(&tx).is_empty(),
+            "{operation}：被拒的集成写了审计记录"
+        );
+    }
+}
+
+/// 后端也进摘要：换后端就是换这一次集成的含义。
+///
+/// `view_diff` 的结果按后端而异（worktree 后端走 git，overlay 后端逐文件比较），而批准值
+/// 批准的是「这一次集成」。给一个 worktree 后端的工作区铸一枚 **overlay 后端**的批准值，
+/// 再按 worktree 写入 → 必须拒绝。**本用例不需要命名空间**：铸造只对两棵树算摘要、不看
+/// 布局，写入按 worktree 走。
+#[test]
+fn an_approval_minted_for_another_backend_is_refused() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    assert_eq!(backend, WorkspaceBackend::Worktree);
+    std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+
+    let approval = approve_integration(&base, &task, WorkspaceBackend::Overlay).unwrap();
+    let before = tree_snapshot(&base_path);
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    let err = IntegrationGate::new(&base)
+        .apply_patch(&tx, &task, backend, 1_000, &approval)
+        .unwrap_err();
+    match &err {
+        GateError::ApprovalMismatch { .. } => {}
+        other => panic!("期望 ApprovalMismatch（批准值的后端与本次不符），得到 {other:?}"),
+    }
+    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert!(audit_rows(&tx).is_empty(), "被拒的集成写了审计记录");
+    tx.commit().unwrap();
+
+    // 对照臂：按本次后端铸的那一枚照常放行
+    let (_db_dir_b, db_b) = db();
+    let tx = db_b.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task,
+            backend,
+            1_000,
+            &approve_integration(&base, &task, backend).unwrap(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
+        "Task 改过\n",
+        "对照臂没有把改动带进 Base"
+    );
+}
+
+/// 内容不变的两次历史改动之后，同一枚批准值仍然有效。
+///
+/// 这是「摘要绑定的是**内容**，输入里没有 Base 的 HEAD、当前分支与提交历史」的直接可观察
+/// 后果（见 `approve_integration` 的文档「不绑定的东西」）。少了本用例，那句措辞是一句
+/// 无从验证的绝对话；而它正是「用 mtime / 提交号当判据」那条路的反面——那条路会把这两次
+/// 历史改动都算成「树变了」。
+#[test]
+fn a_content_preserving_commit_does_not_invalidate_the_approval() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+
+    let approval = approve_integration(&base, &task, backend).unwrap();
+    // 两次历史改动，内容一字未动
+    run_git(&base_path, &["commit", "--allow-empty", "-m", "不改内容的提交"]);
+    run_git(&base_path, &["checkout", "-q", "-b", "另一条分支"]);
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(&tx, &task, backend, 1_000, &approval)
+        .unwrap();
+    let rows = audit_rows(&tx);
+    tx.commit().unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
+        "Task 改过\n",
+        "内容没变，集成本该照常进行"
+    );
+    assert_eq!(rows.len(), 1, "集成应恰好多出一条审计记录");
+    assert_eq!(
+        current_branch(&base_path),
+        "另一条分支",
+        "apply_patch 动了 Base 的当前分支"
+    );
+}
+
+/// Runtime 的私有子树（`<base>/.ai/`）不进摘要：改动它不使批准值失配。
+///
+/// 排除的两条理由见 `approve_integration` 的文档（worktree 后端的 Task 根就在里面，
+/// 别的 Intent 的 worktree 也在里面）。本用例把它变成可观察的：往 `<base>/.ai/` 下写一个
+/// **不属于任何 Task** 的文件，同一枚批准值照常有效。
+///
+/// 边界一并钉住：`.ai/` 之下**属于本 Task** 的改动仍是 Task 的内容，照旧使摘要失配
+/// （见本用例后半段）。
+#[test]
+fn content_under_the_runtime_private_subtree_does_not_invalidate_the_approval() {
+    let (_d, base_path) = git_repo();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+
+    let approval = approve_integration(&base, &task, backend).unwrap();
+    // 不属于任何 Task、也不在任何 Task 根之内的一个文件
+    std::fs::write(base_path.join(".ai/别的.txt"), "与本次集成无关\n").unwrap();
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(&tx, &task, backend, 1_000, &approval)
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要改的.txt")).unwrap(),
+        "Task 改过\n",
+        "`.ai/` 之下的改动不该使本次集成失配"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base_path.join(".ai/别的.txt")).unwrap(),
+        "与本次集成无关\n",
+        "集成不该动 `.ai/` 下的东西"
+    );
+
+    // 边界：本 Task 根之内的改动是 **Task 的内容**，照旧失配
+    let approval = approve_integration(&base, &task, backend).unwrap();
+    std::fs::write(task.root().join("Task 后来又改的.txt"), "Task 的内容\n").unwrap();
+    let (_db_dir_b, db_b) = db();
+    let tx = db_b.begin().unwrap();
+    let err = IntegrationGate::new(&base)
+        .apply_patch(&tx, &task, backend, 1_000, &approval)
+        .unwrap_err();
+    assert!(
+        matches!(err, GateError::ApprovalMismatch { .. }),
+        "Task 内容变了却没有失配：{err:?}"
+    );
+}
+
 // ===== OverlayFS 后端（需要用户与挂载命名空间）=====
 
 /// 标识「本进程是被重新执行出来的子进程」，防止再次 re-exec 造成无限递归。
@@ -746,6 +1112,71 @@ fn symlinks_are_compared_by_their_target_on_the_overlay_backend() {
     );
 }
 
+/// 与 `changing_the_base_between_approval_and_application_invalidates_it` 同题，
+/// 跑在 overlay 后端上。**两个后端上都要成立**，因为它钉的是设计 §7.2 的后果，而那句话
+/// 没有限定后端。
+///
+/// 这个后端上「Base 侧的内容」本来就是比较的一端（`view_diff` 逐文件比两棵**当前**树），
+/// 故改一个 Task 没碰过的文件时，两棵树都在变——失配没有第二种可能。
+#[test]
+fn changing_the_base_between_approval_and_application_invalidates_it_on_the_overlay_backend() {
+    if !enter_namespace(
+        "changing_the_base_between_approval_and_application_invalidates_it_on_the_overlay_backend",
+    ) {
+        return;
+    }
+    let (_d, base_path) = base_with_lower();
+    let base = BaseWorkspace::new(&base_path).unwrap();
+    let (task, backend) = create_task_workspace(&base, &IntentId::new("i1")).unwrap();
+    assert_eq!(backend, WorkspaceBackend::Overlay);
+    task.writable_root().write("要改的.txt", b"upper").unwrap();
+
+    let approval = approve_integration(&base, &task, backend).unwrap();
+    // Task 没碰过的那个文件，在 lower 侧被改动
+    std::fs::write(base_path.join("要删的.txt"), "用户在 lower 上改的\n").unwrap();
+    let before = tree_snapshot(&base_path);
+
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
+    let err = IntegrationGate::new(&base)
+        .apply_patch(&tx, &task, backend, 1_000, &approval)
+        .unwrap_err();
+    match &err {
+        GateError::ApprovalMismatch { .. } => {}
+        other => panic!("期望 ApprovalMismatch（Base 在铸造之后被改动），得到 {other:?}"),
+    }
+    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert!(
+        audit_rows(&tx).is_empty(),
+        "被拒的集成写了审计记录（拒绝应当排在任何变更之前）"
+    );
+    tx.commit().unwrap();
+
+    // 对照臂：重新铸一枚，Task 的改动照常落进 Base
+    let (_db_dir_b, db_b) = db();
+    let tx = db_b.begin().unwrap();
+    IntegrationGate::new(&base)
+        .apply_patch(
+            &tx,
+            &task,
+            backend,
+            1_000,
+            &approve_integration(&base, &task, backend).unwrap(),
+        )
+        .unwrap();
+    tx.commit().unwrap();
+    assert_eq!(
+        std::fs::read(base_path.join("要改的.txt")).unwrap(),
+        b"upper",
+        "对照臂没有把改动带进 Base"
+    );
+    assert_eq!(
+        std::fs::read_to_string(base_path.join("要删的.txt")).unwrap(),
+        "用户在 lower 上改的\n",
+        "Task 没碰过的文件被集成动了"
+    );
+}
+
 #[test]
 fn discard_removes_the_task_and_leaves_the_base_unchanged_on_the_overlay_backend() {
     if !enter_namespace("discard_removes_the_task_and_leaves_the_base_unchanged_on_the_overlay_backend")
@@ -761,8 +1192,8 @@ fn discard_removes_the_task_and_leaves_the_base_unchanged_on_the_overlay_backend
         .write("Task 的东西.txt", "Task 侧内容\n".as_bytes())
         .unwrap();
 
-    let (_db_dir, db) = db();
-    let tx = db.begin().unwrap();
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
     IntegrationGate::new(&base)
         .discard(&tx, &task, backend, 1_000)
         .unwrap();
@@ -805,8 +1236,8 @@ fn discarding_a_foreign_root_through_the_gate_reports_the_backend_error() {
 
     // overlay 后端：形态校验排在 umount 之前，故不需要命名空间也走得到（与
     // `tests/backend_overlay.rs` 里那条同源）。
-    let (_db_dir, db) = db();
-    let tx = db.begin().unwrap();
+    let (_db_dir_a, db_a) = db();
+    let tx = db_a.begin().unwrap();
     let err = IntegrationGate::new(&base)
         .discard(&tx, &task, WorkspaceBackend::Overlay, 1_000)
         .unwrap_err();

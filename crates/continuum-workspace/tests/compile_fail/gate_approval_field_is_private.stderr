@@ -7,5 +7,5 @@ error[E0423]: cannot initialize a tuple struct which contains private fields
 note: constructor is not visible here due to private fields
  --> src/gate.rs
   |
-  | pub struct GateApproval(());
-  |                         ^^ private field
+  | pub struct GateApproval([u8; 32]);
+  |                         ^^^^^^^^ private field

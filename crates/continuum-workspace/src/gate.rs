@@ -7,7 +7,18 @@
 //! **只读操作不收批准值。** 它们不动 Base，按 `§15` 的影响级是 L0，收一个
 //! [`GateApproval`] 只会让「这个值代表什么」变得含糊。写入操作一律收
 //! `&GateApproval`，使「集成修改需要授权」有落点（§16、设计 6.2）；该类型在本模块内
-//! 定义但没有公开构造函数，其产生点在下篇交给驱动。
+//! 定义、字段私有且没有公开构造函数，唯一的产生点是 [`approve_integration`]。
+//!
+//! # 批准值的绑定（设计 §7）
+//!
+//! 上篇的保证是「[`GateApproval`] 类型层不可构造」；设计 §7.1 把它松到「**只有一个
+//! 具名的产生点**」，维持手段是评审与 grep。松的是构造路径，不是绑定：§7.2 要求产出的
+//! 那一枚**只对具体一次集成有效**，故 [`approve_integration`] 收下这次集成的标识，
+//! 值里携带它的摘要（算法、代价与边界都写在那个函数的文档里）。
+//!
+//! 三个写入操作在**动第一个字节之前**重算摘要并比对，不匹配即拒
+//! （[`GateError::ApprovalMismatch`]）。`discard` 不在其列：它不收批准值
+//! （[`IntegrationGate::discard`]），也就不做这道比对。
 //!
 //! # 写入操作与事务
 //!
@@ -73,10 +84,11 @@ use crate::backend::{WorkspaceBackend, discard_task_workspace};
 use crate::base::BaseWorkspace;
 use crate::error::WorkspaceError;
 use crate::persist::backend_str;
-use crate::task::TaskWorkspace;
+use crate::task::{AI_DIR, TaskWorkspace};
 use crate::worktree;
 use continuum_events::audit::AuditKind;
 use continuum_persist::{PersistError, Tx, Value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::OpenOptions;
@@ -192,7 +204,8 @@ impl<'a> IntegrationGate<'a> {
         occurred_at: i64,
         approval: &GateApproval,
     ) -> Result<(), GateError> {
-        let _ = approval;
+        // 批准摘要的比对排在**任何**后端动作之前：不符即拒，Base 一字不动。
+        self.verify_approval(task, backend, approval)?;
         match backend {
             WorkspaceBackend::Worktree => apply_patch_worktree(self.base, task)?,
             WorkspaceBackend::Overlay => {
@@ -239,6 +252,10 @@ impl<'a> IntegrationGate<'a> {
     /// `cherry_pick_with_an_empty_list_is_refused_on_the_overlay_backend`——三条合起来钉住
     /// 「空列表在两个后端上同样被拒」）。
     ///
+    /// **批准摘要的比对排在最前**（见 [`IntegrationGate::verify_approval`]），故批准值不符
+    /// 时先报的是 [`GateError::ApprovalMismatch`]：授权是否成立排在「这次请求本身是否成立」
+    /// 之前——没授权就无从谈起要摘哪些提交。两者都在任何改动之前，故拿到的都是拒。
+    ///
     /// **摘取中途失败会留下 git 的未完成状态。** `cherry-pick` 冲突时 git 停在冲突处
     /// （`CHERRY_PICK_HEAD` 与工作树里的冲突标记都在），本层不代 git 收尾：自动
     /// `--abort` 会把用户可能已经开始的冲突解决一并丢掉。错误原样报出，收拾由用户
@@ -252,7 +269,8 @@ impl<'a> IntegrationGate<'a> {
         occurred_at: i64,
         approval: &GateApproval,
     ) -> Result<(), GateError> {
-        let _ = approval;
+        // 批准摘要的比对排在**任何**后端动作之前：不符即拒，Base 一字不动。
+        self.verify_approval(task, backend, approval)?;
         match backend {
             WorkspaceBackend::Worktree => {
                 if commits.is_empty() {
@@ -313,7 +331,8 @@ impl<'a> IntegrationGate<'a> {
         occurred_at: i64,
         approval: &GateApproval,
     ) -> Result<(), GateError> {
-        let _ = approval;
+        // 批准摘要的比对排在**任何**后端动作之前：不符即拒，Base 一字不动。
+        self.verify_approval(task, backend, approval)?;
         match backend {
             WorkspaceBackend::Worktree => merge_worktree(self.base, task)?,
             WorkspaceBackend::Overlay => {
@@ -332,6 +351,39 @@ impl<'a> IntegrationGate<'a> {
             backend,
             None,
         )
+    }
+
+    /// 写入操作动手之前的那道闸：重算本次集成的摘要，与批准值携带的那一枚比对。
+    ///
+    /// 排在**任何**后端动作之前——补丁、`git cherry-pick`、覆盖层集成、形态校验都在它
+    /// 之后，故被拒的调用在磁盘与库上都不留痕迹。用例
+    /// `every_write_operation_refuses_a_stale_approval`（三个操作各一条链）与
+    /// `changing_the_base_between_approval_and_application_invalidates_it` 一并钉住
+    /// 「Base 逐字节不变、审计链上一条不多」。
+    ///
+    /// **摘要重算会失败**（读不到某个条目），此时报的是那个 I/O 错误而不是拒绝：读不出
+    /// 「现在是什么」与「现在不是批准时的那一份」是两件事，把它们折叠成同一个拒绝，会让
+    /// 「重新铸一枚就能过」这种误导性的处置看起来可行。
+    fn verify_approval(
+        &self,
+        task: &TaskWorkspace,
+        backend: WorkspaceBackend,
+        approval: &GateApproval,
+    ) -> Result<(), GateError> {
+        let expected = integration_digest(self.base, task, backend)?;
+        if expected == approval.0 {
+            return Ok(());
+        }
+        Err(GateError::ApprovalMismatch {
+            reason: format!(
+                "这次集成（intent={}、backend={}、base={}）的摘要与批准值携带的不符：\
+                 这一枚是为另一次集成铸的，或者铸造之后 Base 或 Task 的内容被改动过。\
+                 要批准**当前**这份集成，重新调用 approve_integration",
+                task.intent_id().as_str(),
+                backend_str(backend),
+                self.base.root().display(),
+            ),
+        })
     }
 
     /// 把一次写入操作记入审计（设计 6.4）。**归类及其已知落差见模块文档「审计的归类」。**
@@ -370,17 +422,89 @@ impl<'a> IntegrationGate<'a> {
     }
 }
 
+/// 集成授权的唯一产生点（设计 §7.2）。
+///
+/// 收下这次集成的标识（Base、Task、后端），铸出一枚只对它有效的 [`GateApproval`]。
+/// 调用方须先取得授权（设计 §5.7：驱动在集成前问策略）；Capability 与 Authority 就位
+/// 后，产生点移交给那一处。
+///
+/// # 摘要由两棵树的内容派生
+///
+/// 算法见 [`integration_digest`]：把**后端编码、Base 根、Task 根、Intent 标识**与
+/// **两棵树各自的内容摘要**按序喂进一次 SHA-256。三个要说清的选择：
+///
+/// - **判据是内容，不是「路径 + `view_diff` 的路径清单」。** 后者在 §7.2 的刻意后果上
+///   不成立：用户改一个 Task 没碰过的文件时，那个路径不在 `view_diff` 的清单里、两个根
+///   也没变，摘要因而**失配不了**——而「集成前改动 Base 会使摘要失配」正是设计点名的
+///   后果（用例 `changing_the_base_between_approval_and_application_invalidates_it`）。
+/// - **也不取元数据（mtime、大小）。** 元数据回答的是「文件看起来变了吗」，不是「内容
+///   是什么」：同样长度、同一时刻改写的文件元数据逐项相同（`IndexCopy` 的文档里那条
+///   git 的 racy 规则，正是这个坑的另一种形态）。
+/// - **位置与 Intent 也进摘要**：内容相同的两棵树分属不同 Intent 时得到两枚不同的值。
+///   批准值绑定的是**这一次**集成，不只是这一份字节（用例
+///   `an_approval_for_one_integration_does_not_authorize_another`）。**后端也进**：
+///   [`IntegrationGate::view_diff`] 的结果按后端而异（分派到 `diff_worktree` 与
+///   `diff_trees`），换后端就是换这一次集成的含义。
+///
+/// # 代价
+///
+/// 每次调用走遍两棵树，把每个条目的字节各过一次 SHA-256，量级是 **O(Base 的字节数 +
+/// Task 的字节数)**，与仓库大小成正比。一次完整的「铸造 + 写入」因而要走四棵树：铸造两
+/// 棵、写入前的比对两棵。文件内容经 `io::copy` 流式喂入，内存里不留副本，但**磁盘读取
+/// 是实打实的**——Base 是一个大仓库时，这一步可能比补丁本身贵。这是「判据是内容」的
+/// 直接代价：省掉内容，就回到上面那个**失配不了**的算法。
+///
+/// # 不进摘要的两处，与一处不绑定
+///
+/// - **`.git` 不进**：仓库的内部账本不是内容。判据与理由同 [`collect_files`]。
+/// - **`.ai/` 不进**：Runtime 在 Base 之内的私有子树（§5、[`AI_DIR`]）。两条理由各自
+///   都足够：其一，**worktree 后端的 Task 根就在 `<base>/.ai/worktrees/<intent>`**，不
+///   排除则「Base 树」的遍历会把 Task 连同内容一起走进去，Base 的摘要随之变成 Task 内容
+///   的函数，而**别的 Intent 的 worktree 也在里面**——另一个 Intent 的改动会让本枚批准值
+///   失配（跨 Intent 耦合）；其二，那是本层自己写出来的东西（worktree 目录、排除项、
+///   分支登记），不是用户的内容，`view_diff` 报出的差异里也从来没有它。**代价明说**：
+///   `<base>/.ai/` 之下用户自己的内容也不进摘要，改动它不会使批准值失配。判据与
+///   `view_diff` 一致——`.ai/` 是 Runtime 的保留名字。
+/// - **空的目录不绑定**（与 [`Diff`] 对目录的看法一致：git 不跟踪目录，三类改动以文件与
+///   符号链接为单位）。`mkdir <base>/空目录` 不会使批准值失配，往里放文件才会。
+///
+/// # 不绑定的东西
+///
+/// 摘要绑定的是**两棵树的内容**，输入里没有 Base 的 HEAD、当前分支与提交历史。可观察的
+/// 后果是：在 Base 上做一个不改内容的提交、或切到内容相同的一条分支之后，同一枚批准值
+/// 仍然有效（用例 `a_content_preserving_commit_does_not_invalidate_the_approval`）。这是
+/// 算法选定的边界，不是疏漏：§7.2 要绑的是「把当前这份差异应用过去」，而内容相同时
+/// Diff 是同一份、补丁仍打得上去（`merge` 会少一次快进，结果仍是「Task 的改动进入
+/// Base」，只是多一个合并提交）。要连历史一并绑定，须把 HEAD 也喂进哈希——那会让「用户
+/// 在 Base 上提交」也变成失配，而对补丁的应用性没有影响。
+pub fn approve_integration(
+    base: &BaseWorkspace,
+    task: &TaskWorkspace,
+    backend: WorkspaceBackend,
+) -> Result<GateApproval, GateError> {
+    Ok(GateApproval(integration_digest(base, task, backend)?))
+}
+
 /// 集成修改的批准值。
 ///
-/// **无公开构造函数**：字段私有，也没有 `new` 一类的关联函数。写入操作（Task 9）
-/// 一律收 `&GateApproval`，使「从隔离工作空间集成回用户分支需要授权」有落点
-/// （`§16`、设计 6.2）——缺少它时 Gate 退化为「谁调用谁生效」。
+/// **无公开构造函数，只有一个具名的产生点**：[`approve_integration`]。字段私有，也没有
+/// `new` 一类的关联函数，故「**无名**构造路径」不存在——`tests/compile_fail/
+/// gate_approval_*.rs` 的两条编译失败样例钉的就是这一点（它们钉的不是「Crate 外拿不到
+/// 批准值」，那条保证按设计 §7.1 已经放宽）。
 ///
-/// 本子项目内由驱动的显式确认参数产生；Capability 与 Authority 就位后，其产生点
+/// **一枚只对一次集成有效。** 值里携带的是铸造那一刻这次集成的摘要
+/// （[`integration_digest`]）：两棵树的内容、后端、两棵树的位置与 Intent 标识。三个写入
+/// 操作在动第一个字节之前重算摘要并比对，不匹配即拒
+/// （[`GateError::ApprovalMismatch`]）——故「拿另一枚为另一次集成背书」不成立，铸造之后
+/// 改动了任一棵树也不成立。
+///
+/// 写入操作一律收 `&GateApproval`，使「从隔离工作空间集成回用户分支需要授权」有落点
+/// （`§16`、设计 6.2）——缺少它时 Gate 退化为「谁调用谁生效」。本子项目内由驱动的显式
+/// 确认参数产生（[`approve_integration`]）；Capability 与 Authority 就位后，其产生点
 /// 移交给那一处。只读操作（[`IntegrationGate::view_diff`]、[`IntegrationGate::discard`]）
 /// 不收本值：它们不动 Base。
 #[derive(Debug)]
-pub struct GateApproval(());
+pub struct GateApproval([u8; 32]);
 
 /// Task 相对 Base 的改动（`§257` 的 view diff）。
 ///
@@ -457,6 +581,24 @@ pub enum GateError {
     /// 不会撤销它，见模块文档「写入操作与事务」。
     #[error(transparent)]
     Persist(#[from] PersistError),
+    /// 批准值与本次集成不对应（设计 §7.2）：写入操作在动第一个字节之前重算摘要，
+    /// 与批准值携带的那一枚比对，不符即拒。
+    ///
+    /// 三种来源，都**不是**「调用方拿错了对象」这么窄：
+    /// - 这一枚是为另一次集成铸的（别的 Task、别的 Base、别的后端）；
+    /// - 铸造之后 Base 或 Task 的内容被改动过——**包括 Task 没碰过的文件**，那正是
+    ///   §7.2 点名的刻意后果；
+    /// - 手工拼出来的值（字段私有，crate 外拼不出，但库内别的代码可以）。
+    ///
+    /// 与 [`Self::Workspace`] 里那个 [`WorkspaceError::GateRefused`] **分开**：那一个的语义是
+    /// 「这次请求本身不成立或这个后端做不到」（空提交列表、覆盖层没有提交粒度），与批准值
+    /// 无关。两者混为一谈，会让「拒绝是因为没授权」这一支凭空多出一类与授权无关的来源。
+    ///
+    /// **`reason` 里不出现摘要本身**：那是一枚 SHA-256 的十六进制，对读错误的人没有信息，
+    /// 而「换一枚重新铸造」才是可行动的那一步——要与别处的日志对账时，把两边各自重算一次
+    /// 更有意义。
+    #[error("批准值与本次集成不符：{reason}")]
+    ApprovalMismatch { reason: String },
     /// 后端给出的结果无法解释，或后端以本层读不出的方式失败。
     ///
     /// 两处来源：
@@ -938,6 +1080,130 @@ fn collect_files(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>, GateError> {
     Ok(out)
 }
 
+/// 批准摘要的域分隔标签。
+///
+/// 喂进哈希的第一个字段：把本层的摘要与别处用同一份输入算出的摘要分开（同一对树在
+/// 本 crate 之外也可能被哈希，用途不同就该得到不同的值）。**末段的版本号是这份输入
+/// 定义的版本**：输入一改就要改它，否则新旧两种算法算出的值会在同一个字段里混着比。
+const APPROVAL_DOMAIN: &str = "continuum-workspace/approval/v1";
+
+/// [`tree_digest`] 里条目类别的标记字节。有了它，一个内容恰为某个链接目标的常规文件
+/// 才不会与那个链接撞成同一串。
+const ENTRY_FILE: u8 = 1;
+const ENTRY_SYMLINK: u8 = 2;
+
+/// 一次集成的摘要：写入操作据此判断手里的批准值是不是为**这一次**集成铸的。
+///
+/// 输入按序是：域分隔标签、后端编码、Base 根、Task 根、Intent 标识、Base 树的内容摘要、
+/// Task 树的内容摘要。**为什么是这些、代价是什么、哪两处不进、什么不绑定**，都写在
+/// [`approve_integration`] 的文档里——那是这份算法唯一的规范来源，这里不复述。
+///
+/// 每一段都按「长度 + 字节」喂（[`field`]）：只喂字节的话，两个相邻字段的切分点就不可
+/// 判定（`"ab"+"c"` 与 `"a"+"bc"` 会喂出同一串字节）。
+fn integration_digest(
+    base: &BaseWorkspace,
+    task: &TaskWorkspace,
+    backend: WorkspaceBackend,
+) -> Result<[u8; 32], GateError> {
+    let mut hasher = Sha256::new();
+    field(&mut hasher, APPROVAL_DOMAIN.as_bytes());
+    field(&mut hasher, backend_str(backend).as_bytes());
+    field(&mut hasher, base.root().as_os_str().as_encoded_bytes());
+    field(&mut hasher, task.root().as_os_str().as_encoded_bytes());
+    field(&mut hasher, task.intent_id().as_str().as_bytes());
+    field(&mut hasher, &tree_digest(base.root())?);
+    field(&mut hasher, &tree_digest(task.root())?);
+    Ok(finish(hasher))
+}
+
+/// 把一个字段按「长度 + 字节」喂进哈希器（切分点可判定的理由见 [`integration_digest`]）。
+fn field(hasher: &mut Sha256, bytes: &[u8]) {
+    hasher.update((bytes.len() as u64).to_le_bytes());
+    hasher.update(bytes);
+}
+
+/// 收尾：SHA-256 的定长结果转成数组（`finalize` 给的是一个泛型数组）。
+fn finish(hasher: Sha256) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&hasher.finalize());
+    out
+}
+
+/// 一棵树的**内容**摘要：逐条目把「类别 + 相对路径 + 内容」喂进哈希。
+///
+/// 与 [`collect_files`] 同一套判据：不收目录、符号链接按目标路径、非常规条目不进、读
+/// 失败即 `Err`。**两处的判据必须一致**——`view_diff` 报出的「内容」与摘要算的「内容」
+/// 若各说各话，「改动使摘要失配」就会有反例。差别只在一处：本函数把内容**流式**喂进
+/// 哈希，不把整棵树收进内存，故大仓库下的内存占用是常数。
+///
+/// **次序是确定的**：每层目录的条目先按文件名的**原始字节**排序再递归。`read_dir` 给的
+/// 次序由文件系统决定，不排序的话同一棵树两次遍历可能给出两个摘要——而本摘要的全部用处
+/// 就是「同一棵树必得同一枚值」。
+///
+/// 排除 `.git` 与 `.ai/`（理由见 [`approve_integration`] 的文档），符号链接不跟随
+/// （跟随会走进环，见 [`collect_files`] 的文档）。
+fn tree_digest(root: &Path) -> Result<[u8; 32], GateError> {
+    let mut hasher = Sha256::new();
+    digest_dir(root, Path::new(""), &mut hasher)?;
+    Ok(finish(hasher))
+}
+
+/// [`tree_digest`] 的递归主体。`rel` 是 `root` 之下的相对路径。
+///
+/// **目录自身不喂任何字节**（与 [`Diff`] 对目录的看法一致）：一个空目录在哈希里不留
+/// 痕迹，有内容的目录经其子条目的相对路径体现。故 `mkdir <base>/空目录` 不会使摘要变化
+/// ——这是 [`approve_integration`] 的文档明说的那一条边界。
+fn digest_dir(root: &Path, rel: &Path, hasher: &mut Sha256) -> Result<(), GateError> {
+    let entries = std::fs::read_dir(root).map_err(|e| io_error(root, e))?;
+    // 名字与种类一起收下：种类取自 `read_dir` 且**不跟随**符号链接（与 `collect_files`
+    // 同一条），排完序再遍历，次序因而与文件系统给出的次序无关。
+    let mut items = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| io_error(root, e))?;
+        let file_type = entry.file_type().map_err(|e| io_error(&entry.path(), e))?;
+        items.push((entry.file_name(), file_type));
+    }
+    items.sort_by(|(a, _), (b, _)| a.as_encoded_bytes().cmp(b.as_encoded_bytes()));
+
+    for (name, file_type) in items {
+        // `.git` 与 `.ai/` 不进摘要：判据与理由见 `approve_integration` 的文档。
+        if name == OsStr::new(".git") || name == OsStr::new(AI_DIR) {
+            continue;
+        }
+        let path = root.join(&name);
+        let rel = rel.join(&name);
+        if file_type.is_dir() {
+            digest_dir(&path, &rel, hasher)?;
+        } else if file_type.is_symlink() {
+            field(hasher, &[ENTRY_SYMLINK]);
+            field(hasher, rel.as_os_str().as_encoded_bytes());
+            let target = std::fs::read_link(&path).map_err(|e| io_error(&path, e))?;
+            field(hasher, target.as_os_str().as_encoded_bytes());
+        } else if file_type.is_file() {
+            field(hasher, &[ENTRY_FILE]);
+            field(hasher, rel.as_os_str().as_encoded_bytes());
+            digest_file(&path, hasher)?;
+        }
+        // 非常规条目（FIFO、套接字、设备）**不进**：与 `collect_files` 同一条判据
+        // （覆盖层 upper 层里的白障正是这类条目，故这一条同时让白障不成问题）。
+    }
+    Ok(())
+}
+
+/// 把一个常规文件的内容流式喂进哈希。
+///
+/// 先喂长度（分帧），内容再经 `std::io::copy` 送进哈希器——哈希器实现了
+/// `std::io::Write`，故不必先把整个文件读进内存。文件在此之后被并发改动时，读到的字节
+/// 数是另一个值：那只会让摘要是「实际读到的那些字节」的函数（两个不同的读取不会因此
+/// 得到同一串），与本层的保障无关——本层的保障是「同一棵静止的树必得同一枚值」。
+fn digest_file(path: &Path, hasher: &mut Sha256) -> Result<(), GateError> {
+    let mut file = std::fs::File::open(path).map_err(|e| io_error(path, e))?;
+    let len = std::fs::metadata(path).map_err(|e| io_error(path, e))?.len();
+    field(hasher, &len.to_le_bytes());
+    std::io::copy(&mut file, hasher).map_err(|e| io_error(path, e))?;
+    Ok(())
+}
+
 /// 一条改动的类别。`Diff` 的三类各对应一个集合，本类型只在解析中途用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ChangeKind {
@@ -1308,6 +1574,137 @@ mod tests {
         assert!(diff.is_empty(), "空目录被算成了改动：{diff:?}");
     }
 
+    /// 内容相同、**创建次序相反**的两棵树得到同一枚摘要。
+    ///
+    /// 这条钉的是 [`tree_digest`] 的次序确定性：`read_dir` 给的次序由文件系统决定，不排序
+    /// 的话两份副本可能给出两枚不同的值。而「同一棵树必得同一枚值」不是锦上添花的要求——
+    /// 铸造与写入前的比对是**两次独立的遍历**，次序不定就等于批准值有一半概率失配。
+    ///
+    /// 「创建次序相反」是造出次序差异的手段，不是判据的根据：本用例断言的是两份**内容
+    /// 相同**的树摘要相等，故它在任何文件系统上都成立；它能否在去掉排序的实现上变红，
+    /// 取决于该文件系统是否按创建次序返回条目（tmpfs 是，按名哈希的目录不是）。
+    #[test]
+    fn two_copies_of_the_same_tree_get_the_same_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        let names = ["一.txt", "二.txt", "三.txt", "子目录/四.txt", "子目录/五.txt"];
+        for name in names {
+            let path = a.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, format!("{name} 的内容")).unwrap();
+        }
+        for name in names.iter().rev() {
+            let path = b.join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, format!("{name} 的内容")).unwrap();
+        }
+        assert_eq!(
+            tree_digest(&a).unwrap(),
+            tree_digest(&b).unwrap(),
+            "两份内容相同的树给出了不同的摘要（遍历次序没定？）"
+        );
+    }
+
+    /// 空目录与非常规条目都不进摘要——两者都不是「内容」。
+    ///
+    /// 空目录那一半钉的是「目录自身不喂任何字节」：[`approve_integration`] 的文档明说
+    /// `mkdir <base>/空目录` 不会使批准值失配，本用例是那句话的用例。FIFO 那一半同时钉
+    /// 「不会被读」：若实现改成「不是目录就读内容」，读一个没有写者的 FIFO 会**阻塞**，
+    /// 本用例会挂住而不是失败。`mkfifo` 取不到时跳过 FIFO 一段并打标记（与
+    /// `the_tree_diff_compares_symlinks_by_their_target_and_skips_odd_entries` 同法）。
+    #[test]
+    fn the_tree_digest_ignores_empty_directories_and_odd_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        for root in [&a, &b] {
+            std::fs::create_dir_all(root.join("子目录")).unwrap();
+            std::fs::write(root.join("一样.txt"), "一样").unwrap();
+        }
+        // 只在 a 里多出：一个空目录，以及（若本机有 `mkfifo`）一个 FIFO
+        std::fs::create_dir_all(a.join("空目录")).unwrap();
+        let made = std::process::Command::new("mkfifo")
+            .arg(a.join("管道"))
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !made {
+            eprintln!(
+                "【跳过】the_tree_digest_ignores_empty_directories_and_odd_entries 的 FIFO 一段：\
+                 mkfifo 不可用。空目录那一段仍然执行。"
+            );
+        }
+        assert_eq!(
+            tree_digest(&a).unwrap(),
+            tree_digest(&b).unwrap(),
+            "空目录或非常规条目进了摘要"
+        );
+    }
+
+    /// 摘要重算遇到读不到的条目时，报的是**那个 I/O 错误**，不是「批准值不符」。
+    ///
+    /// 两件事的区别是实质的：I/O 失败连「现在是什么」都读不出，而「不符」说的是「现在
+    /// 不是批准时的那一份」。把它们折叠成同一个拒绝，会让「重新铸一枚就能过」这种误导性
+    /// 的处置看起来可行（见 [`IntegrationGate::verify_approval`] 的文档）。
+    ///
+    /// 权限位对 root 不起作用，故 root 下显式跳过并打标记（与本模块既有的那条同法）。
+    #[test]
+    fn an_unreadable_tree_reports_the_io_error_instead_of_a_mismatch() {
+        if running_as_root() {
+            eprintln!(
+                "【跳过】an_unreadable_tree_reports_the_io_error_instead_of_a_mismatch：\
+                 本进程以 root 运行，权限位挡不住读取。本用例未执行断言。"
+            );
+            return;
+        }
+        let (_d, base_path) = git_repo();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) =
+            crate::backend::create_task_workspace(&base, &crate::ids::IntentId::new("i1")).unwrap();
+        std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+
+        // 铸造时读得通，之后 Base 里一个条目读不出来
+        let approval = approve_integration(&base, &task, backend).unwrap();
+        let unreadable = base_path.join("要删的.txt");
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        let err = IntegrationGate::new(&base)
+            .apply_patch(&tx, &task, backend, 1_000, &approval)
+            .unwrap_err();
+        match &err {
+            GateError::Workspace(WorkspaceError::IoFailed { path, .. }) => {
+                assert_eq!(path, &unreadable, "错误里的路径不是读不到的那一个：{err}");
+            }
+            other => panic!("期望读失败原样报出（而不是 ApprovalMismatch），得到 {other:?}"),
+        }
+        std::fs::set_permissions(&unreadable, std::fs::Permissions::from_mode(0o600)).unwrap();
+    }
+
+    /// 同一份集成铸两次得到同一枚摘要。
+    ///
+    /// 钉的是「同一输入必得同一摘要」（设计 §7.2 的摘要要求）里最容易被破坏的那一半：
+    /// 摘要里掺进任何随调用而变的东西（时刻、随机量、进程内的计数器），这条就红。
+    /// **不去动两棵树**——两次调用之间只有一个 `Tx` 的事实无关，摘要不碰数据库。
+    #[test]
+    fn minting_twice_on_an_unchanged_integration_gives_the_same_approval() {
+        let (_d, base_path) = git_repo();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) =
+            crate::backend::create_task_workspace(&base, &crate::ids::IntentId::new("i1")).unwrap();
+        std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+
+        let first = approve_integration(&base, &task, backend).unwrap();
+        let second = approve_integration(&base, &task, backend).unwrap();
+        assert_eq!(
+            first.0, second.0,
+            "同一份集成铸出的两枚批准值不同：摘要里掺进了随调用而变的东西"
+        );
+    }
+
     /// 符号链接按**目标路径**比较，不跟随目标；非常规条目（FIFO）不进结果。
     ///
     /// 「不跟随」是 `collect_files` 文档里的一条：跟随的话，悬空的链接会以 `NotFound`
@@ -1555,6 +1952,15 @@ mod tests {
         (dir, db)
     }
 
+    /// 为**当前**这两棵树铸一枚批准值。
+    ///
+    /// 用法是在调用点上内联（`&mint(&base, &task, backend)`）：摘要因而在写入操作之前
+    /// 的那一刻算出，与实现里「写入前重算」的时序一致。先铸、中间再改树的用例自己
+    /// 把值接住。
+    fn mint(base: &BaseWorkspace, task: &TaskWorkspace, backend: WorkspaceBackend) -> GateApproval {
+        approve_integration(base, task, backend).unwrap()
+    }
+
     /// `audit_log` 的全部（kind, payload）。
     fn audit_rows(tx: &Tx<'_>) -> Vec<(String, String)> {
         tx.query("SELECT kind, payload FROM audit_log ORDER BY seq", &[])
@@ -1595,7 +2001,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         IntegrationGate::new(&base)
-            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .apply_patch(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
             .unwrap();
         tx.commit().unwrap();
 
@@ -1691,7 +2097,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         IntegrationGate::new(&base)
-            .cherry_pick(&tx, &task, backend, &[&first], 1_000, &GateApproval(()))
+            .cherry_pick(&tx, &task, backend, &[&first], 1_000, &mint(&base, &task, backend))
             .unwrap();
         tx.commit().unwrap();
 
@@ -1748,7 +2154,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         IntegrationGate::new(&base)
-            .merge(&tx, &task, backend, 1_000, &GateApproval(()))
+            .merge(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
             .unwrap();
         tx.commit().unwrap();
 
@@ -1800,13 +2206,13 @@ mod tests {
             );
             match operation {
                 "apply_patch" => gate
-                    .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+                    .apply_patch(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
                     .unwrap(),
                 "cherry_pick" => gate
-                    .cherry_pick(&tx, &task, backend, &[&commit], 1_000, &GateApproval(()))
+                    .cherry_pick(&tx, &task, backend, &[&commit], 1_000, &mint(&base, &task, backend))
                     .unwrap(),
                 "merge" => gate
-                    .merge(&tx, &task, backend, 1_000, &GateApproval(()))
+                    .merge(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
                     .unwrap(),
                 other => panic!("未覆盖的操作：{other}"),
             }
@@ -1871,7 +2277,7 @@ mod tests {
                 WorkspaceBackend::Overlay,
                 &["HEAD~1"],
                 1_000,
-                &GateApproval(()),
+                &mint(&base, &task, WorkspaceBackend::Overlay),
             )
             .unwrap_err();
 
@@ -1922,7 +2328,7 @@ mod tests {
                 WorkspaceBackend::Overlay,
                 &[],
                 1_000,
-                &GateApproval(()),
+                &mint(&base, &task, WorkspaceBackend::Overlay),
             )
             .unwrap_err();
 
@@ -1964,7 +2370,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         let err = IntegrationGate::new(&base)
-            .cherry_pick(&tx, &task, backend, &[], 1_000, &GateApproval(()))
+            .cherry_pick(&tx, &task, backend, &[], 1_000, &mint(&base, &task, backend))
             .unwrap_err();
 
         match &err {
@@ -2013,7 +2419,7 @@ mod tests {
         let tx = db.begin().unwrap();
 
         let err = IntegrationGate::new(&base)
-            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .apply_patch(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
             .unwrap_err();
         assert!(
             matches!(err, GateError::Persist(_)),
@@ -2044,7 +2450,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         IntegrationGate::new(&base)
-            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .apply_patch(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
             .unwrap();
         tx.commit().unwrap();
 
@@ -2077,7 +2483,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         let err = IntegrationGate::new(&base)
-            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .apply_patch(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
             .unwrap_err();
 
         match &err {
@@ -2224,7 +2630,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         let err = IntegrationGate::new(&base)
-            .apply_patch(&tx, &task, WorkspaceBackend::Overlay, 1_000, &GateApproval(()))
+            .apply_patch(&tx, &task, WorkspaceBackend::Overlay, 1_000, &mint(&base, &task, WorkspaceBackend::Overlay))
             .unwrap_err();
 
         assert!(
@@ -2256,7 +2662,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         let err = IntegrationGate::new(&base)
-            .merge(&tx, &task, WorkspaceBackend::Overlay, 1_000, &GateApproval(()))
+            .merge(&tx, &task, WorkspaceBackend::Overlay, 1_000, &mint(&base, &task, WorkspaceBackend::Overlay))
             .unwrap_err();
 
         assert!(
@@ -2546,7 +2952,7 @@ mod tests {
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
         IntegrationGate::new(&base)
-            .apply_patch(&tx, &task, backend, 1_000, &GateApproval(()))
+            .apply_patch(&tx, &task, backend, 1_000, &mint(&base, &task, backend))
             .unwrap();
         let rows = audit_rows(&tx);
         tx.commit().unwrap();

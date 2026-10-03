@@ -18,9 +18,9 @@ pub use base::BaseWorkspace;
 pub use error::WorkspaceError;
 // Gate 是 Task 与 Base 之间的唯一通道（§257）。五种操作都已实现：只读的 view_diff
 // 与 discard，以及写入的 apply_patch、cherry_pick、merge。后三者收 `&GateApproval`
-// ——该类型没有公开构造函数，故本子项目内还没有调用点：它的产生点在下篇交给驱动
-// （设计 6.2），在此之前三项写入操作在 crate 外调用不到。
-pub use gate::{Diff, GateApproval, GateError, IntegrationGate};
+// ——该类型没有公开构造函数，唯一的产生点是 `approve_integration`（设计 7.1、7.2）。
+// 它收下这次集成的标识，铸出的值携带其摘要，故一枚只对这一次集成有效。
+pub use gate::{Diff, GateApproval, GateError, IntegrationGate, approve_integration};
 pub use ids::IntentId;
 pub use persist::{
     WorkspaceRecord, load_workspace, p2_workspace_migrations, remove_workspace, save_workspace,
