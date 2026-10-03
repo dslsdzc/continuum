@@ -596,10 +596,14 @@ fn an_approval_for_one_integration_does_not_authorize_another() {
                 reason.contains("intent=i2") && reason.contains("backend=worktree"),
                 "报错里没有这次集成的标识：{reason}"
             );
-            let digest_like = reason
-                .split(|c: char| !c.is_ascii_hexdigit())
-                .any(|run| run.len() >= 64);
-            assert!(!digest_like, "报错里出现了摘要本身：{reason}");
+            // 用批准值自己的 `Debug` 形式去查，而不是扫「像不像十六进制」：`[u8; 32]` 的
+            // `Debug` 是一串十进制数字（`[12, 34, …]`），按十六进制扫会整串溜过去。
+            // （重算出来的那一枚在 crate 外取不到，它由单测里的
+            // `the_mismatch_reason_does_not_leak_the_digest` 钉。）
+            assert!(
+                !reason.contains(&format!("{approval_for_a:?}")),
+                "报错里出现了批准值携带的摘要：{reason}"
+            );
         }
         other => panic!("期望 ApprovalMismatch（把 A 的批准值拿去给 B 用），得到 {other:?}"),
     }

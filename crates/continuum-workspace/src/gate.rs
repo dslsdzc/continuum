@@ -252,9 +252,10 @@ impl<'a> IntegrationGate<'a> {
     /// `cherry_pick_with_an_empty_list_is_refused_on_the_overlay_backend`——三条合起来钉住
     /// 「空列表在两个后端上同样被拒」）。
     ///
-    /// **批准摘要的比对排在最前**（见 [`IntegrationGate::verify_approval`]），故批准值不符
-    /// 时先报的是 [`GateError::ApprovalMismatch`]：授权是否成立排在「这次请求本身是否成立」
-    /// 之前——没授权就无从谈起要摘哪些提交。两者都在任何改动之前，故拿到的都是拒。
+    /// **批准摘要的比对写在空列表判定之前**（见 [`IntegrationGate::verify_approval`]）。
+    /// 两者都在任何改动之前，故各自单独出现时拿到的都是拒。**两个同时成立时报哪一个**由
+    /// 这处次序决定（摘要在前），而**这个组合没有用例**——两个方向都是拒且都不动 Base，
+    /// 故本层不据此作任何承诺。
     ///
     /// **摘取中途失败会留下 git 的未完成状态。** `cherry-pick` 冲突时 git 停在冲突处
     /// （`CHERRY_PICK_HEAD` 与工作树里的冲突标记都在），本层不代 git 收尾：自动
@@ -355,11 +356,15 @@ impl<'a> IntegrationGate<'a> {
 
     /// 写入操作动手之前的那道闸：重算本次集成的摘要，与批准值携带的那一枚比对。
     ///
-    /// 排在**任何**后端动作之前——补丁、`git cherry-pick`、覆盖层集成、形态校验都在它
-    /// 之后，故被拒的调用在磁盘与库上都不留痕迹。用例
+    /// 排在**所有后端动作之前**（补丁、`git cherry-pick`、覆盖层集成、形态校验都在它
+    /// 之后），故被拒的调用在磁盘与库上都不留痕迹。用例
     /// `every_write_operation_refuses_a_stale_approval`（三个操作各一条链）与
     /// `changing_the_base_between_approval_and_application_invalidates_it` 一并钉住
     /// 「Base 逐字节不变、审计链上一条不多」。
+    ///
+    /// **本条只声明这一半，不声明与别的拒绝的先后**：过期的批准值叠上一个本来就会被拒的
+    /// 请求（形态不符、空提交列表）时，先报哪一个由代码的次序决定（摘要在前），而**这个
+    /// 组合没有用例**。两个方向都是 fail-closed、都不动 Base，故没有可观察的差别需要钉。
     ///
     /// **摘要重算会失败**（读不到某个条目），此时报的是那个 I/O 错误而不是拒绝：读不出
     /// 「现在是什么」与「现在不是批准时的那一份」是两件事，把它们折叠成同一个拒绝，会让
@@ -456,15 +461,24 @@ impl<'a> IntegrationGate<'a> {
 ///
 /// # 不进摘要的两处，与一处不绑定
 ///
-/// - **`.git` 不进**：仓库的内部账本不是内容。判据与理由同 [`collect_files`]。
-/// - **`.ai/` 不进**：Runtime 在 Base 之内的私有子树（§5、[`AI_DIR`]）。两条理由各自
-///   都足够：其一，**worktree 后端的 Task 根就在 `<base>/.ai/worktrees/<intent>`**，不
-///   排除则「Base 树」的遍历会把 Task 连同内容一起走进去，Base 的摘要随之变成 Task 内容
-///   的函数，而**别的 Intent 的 worktree 也在里面**——另一个 Intent 的改动会让本枚批准值
-///   失配（跨 Intent 耦合）；其二，那是本层自己写出来的东西（worktree 目录、排除项、
-///   分支登记），不是用户的内容，`view_diff` 报出的差异里也从来没有它。**代价明说**：
-///   `<base>/.ai/` 之下用户自己的内容也不进摘要，改动它不会使批准值失配。判据与
-///   `view_diff` 一致——`.ai/` 是 Runtime 的保留名字。
+/// - **`.git` 不进**：仓库的内部账本不是内容。判据与理由同 [`collect_files`]（Diff 一侧
+///   也排除它）。
+/// - **`.ai/` 不进**（**任意深度**上名为 `.ai` 的目录，连同它的子树）：Runtime 在 Base
+///   之内的私有子树（§5、[`AI_DIR`]）。两条理由各自都足够：其一，**worktree 后端的 Task
+///   根就在 `<base>/.ai/worktrees/<intent>`**，不排除则「Base 树」的遍历会把 Task 连同
+///   内容一起走进去，Base 的摘要随之变成 Task 内容的函数，而**别的 Intent 的 worktree
+///   也在里面**——另一个 Intent 的改动会让本枚批准值失配（跨 Intent 耦合）；其二，那是
+///   本层自己写出来的东西（worktree 目录、排除项、分支登记）。**代价明说**：`.ai/` 之下
+///   用户自己的内容也不进摘要，改动它不会使批准值失配。
+///
+/// **这一条排除只在摘要这一侧，与 `view_diff` 不是同一套判据。** 事实是：worktree 后端上
+/// git 也把 `.ai/` 挡住（`info/exclude` 里那一行，见 [`crate::worktree`]），故两个后端里
+/// 只有它「两边都不看见 `.ai/`」；**overlay 后端上 [`collect_files`] 只排除 `.git`，不排除
+/// `.ai`**——于是 overlay 的 `view_diff` 会把 `.ai/…` 的改动报出来，[`integrate_overlay`]
+/// 也就照那个 Diff 把它复制进 Base，而它**不在**摘要里。**这是一处已知的落差**（早于本
+/// 次改动，`collect_files` / `diff_trees` / `integrate_overlay` 三者共有），如何处置是一次
+/// **设计裁定**，本层不预先表态；事实与影响记在 `docs/superpowers/sdd/task-7-report.md`
+/// 的残余风险里。
 /// - **空的目录不绑定**（与 [`Diff`] 对目录的看法一致：git 不跟踪目录，三类改动以文件与
 ///   符号链接为单位）。`mkdir <base>/空目录` 不会使批准值失配，往里放文件才会。
 ///
@@ -1131,10 +1145,14 @@ fn finish(hasher: Sha256) -> [u8; 32] {
 
 /// 一棵树的**内容**摘要：逐条目把「类别 + 相对路径 + 内容」喂进哈希。
 ///
-/// 与 [`collect_files`] 同一套判据：不收目录、符号链接按目标路径、非常规条目不进、读
-/// 失败即 `Err`。**两处的判据必须一致**——`view_diff` 报出的「内容」与摘要算的「内容」
-/// 若各说各话，「改动使摘要失配」就会有反例。差别只在一处：本函数把内容**流式**喂进
-/// 哈希，不把整棵树收进内存，故大仓库下的内存占用是常数。
+/// 与 [`collect_files`] 相同的几条判据：不收目录、符号链接按目标路径、非常规条目不进、
+/// 读失败即 `Err`。差别有**两处**：
+///
+/// - 本函数把内容**流式**喂进哈希，不把整棵树收进内存，故大仓库下的内存占用是常数；
+/// - **本函数额外排除 `.ai/`**，而 [`collect_files`] 只排除 `.git`。**故两个后端的
+///   `view_diff` 与摘要对 `.ai/` 的处置并不一致**——事实、后果与「这是一次设计裁定」见
+///   [`approve_integration`] 的文档里那一节。别把这里的「与 `collect_files` 同判据」读成
+///   两处逐项相同。
 ///
 /// **次序是确定的**：每层目录的条目先按文件名的**原始字节**排序再递归。`read_dir` 给的
 /// 次序由文件系统决定，不排序的话同一棵树两次遍历可能给出两个摘要——而本摘要的全部用处
@@ -1193,9 +1211,13 @@ fn digest_dir(root: &Path, rel: &Path, hasher: &mut Sha256) -> Result<(), GateEr
 /// 把一个常规文件的内容流式喂进哈希。
 ///
 /// 先喂长度（分帧），内容再经 `std::io::copy` 送进哈希器——哈希器实现了
-/// `std::io::Write`，故不必先把整个文件读进内存。文件在此之后被并发改动时，读到的字节
-/// 数是另一个值：那只会让摘要是「实际读到的那些字节」的函数（两个不同的读取不会因此
-/// 得到同一串），与本层的保障无关——本层的保障是「同一棵静止的树必得同一枚值」。
+/// `std::io::Write`，故不必先把整个文件读进内存。
+///
+/// **本层保证的只有「同一棵静止的树必得同一枚值」。** 文件在读取期间被并发改动时，长度
+/// （取自读完 `File::open` 之后**另一次** `metadata` 调用）与实际复制的字节数可以不一致，
+/// 那一次读取因而得到一个既非「错」、也非「可预测」的值。这里不声称并发交错下会发生什么，
+/// 只声明不并发时的确定性——而铸造与写入前的比对正是两次这样的读取，故这条确定性是那份
+/// 保障的全部依据。
 fn digest_file(path: &Path, hasher: &mut Sha256) -> Result<(), GateError> {
     let mut file = std::fs::File::open(path).map_err(|e| io_error(path, e))?;
     let len = std::fs::metadata(path).map_err(|e| io_error(path, e))?.len();
@@ -1624,21 +1646,67 @@ mod tests {
         }
         // 只在 a 里多出：一个空目录，以及（若本机有 `mkfifo`）一个 FIFO
         std::fs::create_dir_all(a.join("空目录")).unwrap();
-        let made = std::process::Command::new("mkfifo")
+        let fifo_made = std::process::Command::new("mkfifo")
             .arg(a.join("管道"))
             .status()
             .map(|s| s.success())
             .unwrap_or(false);
-        if !made {
+        // 断言消息随「FIFO 那一段这次跑没跑」而变：跳过时，失败文本里也要看得出本轮
+        // 只验了空目录这一半——否则一条被跳过的分支会让这条用例看起来什么都验过了。
+        let scope = if fifo_made {
+            "空目录或非常规条目（FIFO）进了摘要"
+        } else {
+            "空目录进了摘要（FIFO 一段本次跳过：mkfifo 不可用，本轮只执行了空目录这一半）"
+        };
+        if !fifo_made {
             eprintln!(
                 "【跳过】the_tree_digest_ignores_empty_directories_and_odd_entries 的 FIFO 一段：\
                  mkfifo 不可用。空目录那一段仍然执行。"
             );
         }
-        assert_eq!(
-            tree_digest(&a).unwrap(),
-            tree_digest(&b).unwrap(),
-            "空目录或非常规条目进了摘要"
+        assert_eq!(tree_digest(&a).unwrap(), tree_digest(&b).unwrap(), "{scope}");
+    }
+
+    /// 拒绝的报文里不出现摘要本身——连它的 `Debug` 形式也不出现。
+    ///
+    /// 要在 crate 内才做得到：这里能同时拿到**重算出来的那一枚**与批准值携带的那一枚，
+    /// 而 `tests/gate.rs` 那边（`an_approval_for_one_integration_does_not_authorize_another`）
+    /// 只拿得到后者。按十六进制扫是不够的——`[u8; 32]` 的 `Debug` 是一串十进制数字，
+    /// 那种写法整串都能溜过去，故这里直接拿 `Debug` 的渲染结果去查。
+    ///
+    /// 报文里该有的是**这次**集成的标识（`verify_approval` 那句 `reason`），那才是读错误
+    /// 的人能用上的东西。
+    #[test]
+    fn the_mismatch_reason_does_not_leak_the_digest() {
+        let (_d, base_path) = git_repo();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let (task, backend) =
+            crate::backend::create_task_workspace(&base, &crate::ids::IntentId::new("i1")).unwrap();
+        std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
+        let approval = approve_integration(&base, &task, backend).unwrap();
+        // 铸造之后改 Base：写入时重算出来的那一枚与批准值里的那一枚**都**不该出现在报文里
+        std::fs::write(base_path.join("要删的.txt"), "用户在 Base 上改的\n").unwrap();
+        let recomputed = integration_digest(&base, &task, backend).unwrap();
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        let err = IntegrationGate::new(&base)
+            .apply_patch(&tx, &task, backend, 1_000, &approval)
+            .unwrap_err();
+        let GateError::ApprovalMismatch { reason } = &err else {
+            panic!("期望 ApprovalMismatch，得到 {err:?}");
+        };
+        assert!(
+            !reason.contains(&format!("{recomputed:?}")),
+            "报文里出现了重算出的摘要：{reason}"
+        );
+        assert!(
+            !reason.contains(&format!("{approval:?}")),
+            "报文里出现了批准值携带的摘要：{reason}"
+        );
+        assert!(
+            reason.contains("intent=i1") && reason.contains("backend=worktree"),
+            "报文里没有这次集成的标识：{reason}"
         );
     }
 
