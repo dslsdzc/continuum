@@ -160,8 +160,15 @@ WritablePath     独立类型，唯一构造入口是 TaskWorkspace::writable_ro
    可写根，而 `Sandbox::spawn` 收的正是 `&TaskWorkspace`，于是内核层的隔离会反过来给 Base
    开写权限——三层保证里最外一层被从内部绕过。
 
-第 2 条允许 Task 根位于 Base **之内**（worktree 后端即此形态：Task 根在
-`<base>/.ai/worktrees/<intent>`），因为此时可写范围是 Base 的一个子目录而非 Base 本身。
+第 2 条**仅在一种情形下**允许 Task 根位于 Base 之内：**它落在 `<base>/.ai/` 之下**
+（第 5 节定的 Runtime 私有子树，worktree 后端即此形态：Task 根在
+`<base>/.ai/worktrees/<intent>`）。其余落在 Base 之内的路径一律拒绝。
+
+**为什么是「仅此一种」**：判据必须与它自己的理由同宽。允许 Base 之内的**理由**是「可写范围
+是后端的私有子树而非 Base 本身」——而这个理由**不覆盖任意子目录**。早期版本只挡「等于 Base」
+与「为 Base 的祖先」，于是 `new_outside(&base, "<base>/src", id)` 会成功，其 `writable_root()`
+给出一个能改写用户工作内容的句柄，且 `Sandbox::spawn` 会照此把写权限开给子进程（实测两条
+机制下子进程写入 `exit=0`）——**§257 的「唯一通道」由此被一条公开 API 绕过**。
 
 **本层的适用范围：路径分量层面，不含符号链接。** `WritablePath` 的越界检查是对路径字符串的
 纯运算（拒绝 `..` 与绝对路径），不触碰文件系统，因此**结构上不可能**检出「Task 根内有一个
