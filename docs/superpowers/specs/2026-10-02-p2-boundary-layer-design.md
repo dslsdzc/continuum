@@ -729,7 +729,7 @@ view_diff 的索引副本   `view_diff` 每次整份复制 Base 的索引（`GIT
                       付一次全量拷贝，且新增一个对可写临时目录的依赖。
                       P3 若引入缓存存储，此处可改为按需。
 overlay 的跳过窗口   需要用户与挂载命名空间的用例共 13 条（`tests/backend_overlay.rs` 8、
-                      `tests/gate.rs` 4、`src/gate.rs` 1）。**无 `unshare` 的机器上这 11 条会全部
+                      `tests/gate.rs` 4、`src/gate.rs` 1）。**无 `unshare` 的机器上这 13 条会全部
                       跳过而套件仍绿**——整个 overlay 后端都无从验证，这与 bubblewrap 的窗口
                       同性质。不改为 panic（命名空间取不到时覆盖层本就建不出来，把「本机能力
                       不足」报成失败是拿红色掩盖真实信息）。
