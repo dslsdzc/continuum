@@ -158,3 +158,50 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 
 **留待后续阶段**：若多处需要按类型分派数据库错误，再统一给 `PersistError` 加冲突变体；
 现在只有一处，按消息断言足够。
+
+---
+
+## 八、批准值摘要与 worktree 后端的集成集合在 `.ai` 上不重合（fail-open）
+
+**现象。** Task 7 给 `GateApproval` 加了内容派生摘要，其输入含两棵树的 `tree_digest`。
+摘要按**名字**排除 `.git` 与 `.ai`（任意层级、不分条目种类）。overlay 后端上集成集合
+与之同源（两侧都跑 `collect_files` 的那个名字测试），故两侧一致；**worktree 后端上不重合**，
+因为 `view_diff` 与 `apply_patch` 那一侧是 git 的规则，两者有两处差别：
+
+1. **只管目录。** `.git/info/exclude` 里写的是 `.ai/`（`worktree.rs` 的 `ensure_ai_excluded`），
+   带尾斜杠，故 gitignore 只与**目录**匹配。名为 `.ai` 的常规文件或符号链接不被忽略，
+   会被 `git ls-files --others --exclude-standard` 报成新增并被复制进 Base，而摘要跳过它。
+2. **只管未跟踪路径。** gitignore 不压制已跟踪路径。故 Base 里**已提交**的 `sub/.ai/f.txt`
+   在 Task 里被改动时，`git diff` 会报出、`git apply` 会应用，而它的内容**不在摘要里**。
+
+**第 2 条的方向是 fail-open。** 用户可在铸造批准值与写入操作之间改掉那个已跟踪文件：
+摘要不变、`verify_approval` 照过、改动照落进 Base——为一份内容铸的批准值被应用到另一份上。
+实测（worktree 后端）：`view_diff.modified()` 给出 `["sub/.ai/f.txt"]`，拿着铸造前那份内容
+铸出的批准值 `apply_patch` 返回 `Ok(())`，Base 拿到的是铸造**之后**才写的那一份。
+第 1 条同样成立，但要取**嵌套**形态（`sub/.ai` 是一个常规文件）：根层那个名为 `.ai` 的文件
+会撞上 `<base>/.ai/` 本是目录，被 `ensure_not_a_directory` 拒掉——**那一处是偶然，不是保障**。
+
+**可达性的现实前提。** Base 里须存在已提交的 `.ai/…`。`.ai/` 是 Runtime 的保留名字，
+`worktree.rs` 在创建时就把它写进 `info/exclude`，故这只在「用户在排除规则生效**之前**
+就提交过」这一类仓库里成立（实测用 `git add -f` 造出该形态）。可达性窄，但方向不利。
+
+**为什么不在 Task 7 关掉。** 关掉要改排除规则本身，而这是**第二次设计裁定**，不是实现修复：
+
+- 「收窄为根层」不解决问题——`<task_root>/.ai/…` 下被跟踪的内容仍会被 git 应用而摘要不收，
+  只是把同一处缝挪到别的路径上。
+- 给两个后端分别定规则（worktree 侧任务树一律不排 `.ai`；overlay 侧两棵树都排根层 `.ai`）
+  会在 overlay 侧重新引入一处摘要与 Diff 的分歧。
+
+**一条否定结论（免得重走）。** 不要试图通过 `info/exclude` 修第 2 条：把 `.ai/` 改成 `.ai`
+能摸到名为 `.ai` 的文件，但 **gitignore 压不住已跟踪路径**，故该文件根本关不掉第 2 条。
+
+**两条候选规则，待裁定。**
+
+- **规则 R（只根层排除）**：`digest_dir` 的 `.ai` 名字测试只对 walked root 的直接子项生效
+  （`rel` 为空），`.git` 仍任意层级；`collect_files` 保持现状或同样收窄。
+  worktree 侧净效果相对今天为 fail-closed；overlay 侧摘要覆盖成为 Diff 的**超集**
+  → fail-closed 但会多想，并重新产生一处（安全方向上的）摘要与 Diff 分歧。
+- **严格按设计 §4.1**：两侧都只排除 `<base>/.ai` 这个保留子树，其余照常。
+
+**现状**：本轮只订正了那处把「两侧判据逐项相同」写死的文档措辞，并写明上述 fail-open 与实测。
+代码未改。
