@@ -59,5 +59,4 @@ fn an_explicit_approval_participates_in_equality() {
         PolicyContext::default(),
         "给出 --approve 与不给不是同一个上下文"
     );
-    assert_eq!(given, given.clone(), "上下文可比较");
 }

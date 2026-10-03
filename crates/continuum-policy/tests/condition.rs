@@ -70,6 +70,85 @@ fn an_absent_fact_does_not_match() {
     );
 }
 
+/// 事实表里「缺省即不成立」那一列的四个事实，逐条都有对照片。
+///
+/// 与 `an_absent_fact_does_not_match` 的分工：那条是 brief 指定的单条用例（`effect_type`），
+/// 这条把同一断言扩到四个事实。**必须扩**：注释里的「逐条标明」若只有其中一个有对照片，
+/// 另外三个就是说大了的说法（纪律 2）。
+///
+/// `duration_ms` 取 `gte: 0` 这个下界是有意的：若事实在场，任何取值都满足它，
+/// 故它不成立的唯一原因就是事实缺省。
+#[test]
+fn every_defaulted_fact_term_fails_to_match() {
+    for condition in [
+        json!({"fact": "privacy_class", "eq": "personal"}),
+        json!({"fact": "effect_type", "eq": "charge"}),
+        json!({"fact": "task_class", "eq": "build"}),
+        json!({"fact": "duration_ms", "gte": 0}),
+    ] {
+        let parsed = Condition::parse(&condition)
+            .unwrap_or_else(|e| panic!("{condition} 应可解析：{e}"));
+        assert!(
+            !parsed.matches(&PolicyContext::default()),
+            "{condition} 在什么都不说的上下文里不应成立"
+        );
+    }
+}
+
+/// `eq` 用在 `duration_ms` 上：与它自己的取值类型（非负整数）相符才可解析，
+/// 也是 `parse_fact_value` 的 `DurationMs` 分支经 `eq` 走通的那条路径。
+///
+/// 此前该分支只被 `gte` 用例走到过，`eq` 一侧无对照片。
+#[test]
+fn a_duration_equality_compares_numbers() {
+    let condition =
+        Condition::parse(&json!({"fact": "duration_ms", "eq": 1000})).expect("eq 应可解析");
+    let elapsed = |ms: Option<u64>| PolicyContext {
+        duration_ms: ms,
+        ..PolicyContext::default()
+    };
+
+    assert!(condition.matches(&elapsed(Some(1000))), "等于该值应成立");
+    assert!(!condition.matches(&elapsed(Some(999))), "不等应不成立");
+    assert!(!condition.matches(&elapsed(None)), "事实缺省即不成立");
+
+    // 取值类型与事实不符：负数、浮点、字符串一律在解析期被拒。
+    for condition in [
+        json!({"fact": "duration_ms", "eq": -1}),
+        json!({"fact": "duration_ms", "eq": 1.5}),
+        json!({"fact": "duration_ms", "eq": "1000"}),
+    ] {
+        let parsed = Condition::parse(&condition);
+        assert!(
+            matches!(
+                parsed,
+                Err(PolicyError::ValueTypeMismatch {
+                    fact: "duration_ms",
+                    ..
+                })
+            ),
+            "{condition} 应报取值类型不符，实得 {parsed:?}"
+        );
+    }
+}
+
+/// `in` 的取值必须是数组：给一个标量不能在解析期被当成「只有一个元素的列表」。
+#[test]
+fn an_in_value_that_is_not_an_array_is_rejected_at_parse_time() {
+    for condition in [
+        json!({"fact": "effect_type", "in": "charge"}),
+        json!({"fact": "effect_type", "in": 3}),
+        json!({"fact": "effect_type", "in": null}),
+        json!({"fact": "duration_ms", "in": 1000}),
+    ] {
+        let parsed = Condition::parse(&condition);
+        assert!(
+            matches!(parsed, Err(PolicyError::ValueTypeMismatch { .. })),
+            "{condition} 应报取值类型不符，实得 {parsed:?}"
+        );
+    }
+}
+
 /// 未知事实名在**解析期**即被拒，而不是留到求值时不匹配。
 #[test]
 fn an_unknown_fact_is_rejected_at_parse_time() {
@@ -205,6 +284,10 @@ fn a_malformed_condition_is_rejected_at_parse_time() {
         json!({"fact": 3, "eq": "charge"}),
         json!({"fact": "effect_type", "eq": "charge", "note": "x"}),
         json!({"all": [{"fact": "effect_type", "eq": "charge"}, 3]}),
+        // `all` 数组的每一项都必须是**谓词**：再嵌一层 `all` 不是谓词，
+        // 因为谓词必须带 `fact` 与恰一个比较符。
+        json!({"all": [{"all": []}]}),
+        json!({"all": [{"all": [{"fact": "effect_type", "eq": "charge"}]}]}),
     ] {
         let parsed = Condition::parse(&condition);
         assert!(
