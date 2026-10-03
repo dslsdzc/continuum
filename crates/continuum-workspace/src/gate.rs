@@ -220,10 +220,11 @@ impl<'a> IntegrationGate<'a> {
     /// 提交」。要把 Task 的全部改动并入 Base，用 [`IntegrationGate::apply_patch`] 或
     /// [`IntegrationGate::merge`]。
     ///
-    /// **overlay 后端上本操作退化为与 [`IntegrationGate::merge`] 同一个动作**
-    /// （设计 6.3）：那个后端没有提交历史，`commits` 无从兑现，并入的是 Task 的**全部**
-    /// 改动。此时传进来的提交名不会让本层少并或多并任何东西——调用方若要按提交粒度
-    /// 集成，只能用 worktree 后端。
+    /// **overlay 后端上本操作不成立，一律拒绝**（[`WorkspaceError::GateRefused`]，设计
+    /// 6.3）：那个后端没有提交粒度，`commits` 无从兑现。**不退化**为「并入全部改动」
+    /// ——那会静默地集成得**比调用方要求的更多**（点名一个提交，得到整棵树的改动），
+    /// 方向是危险的，故宁可报错。调用方要按提交粒度集成只能用 worktree 后端；要并入
+    /// 全部改动，用 [`IntegrationGate::apply_patch`] 或 [`IntegrationGate::merge`]。
     ///
     /// **摘取中途失败会留下 git 的未完成状态。** `cherry-pick` 冲突时 git 停在冲突处
     /// （`CHERRY_PICK_HEAD` 与工作树里的冲突标记都在），本层不代 git 收尾：自动
@@ -249,7 +250,20 @@ impl<'a> IntegrationGate<'a> {
         }
         match backend {
             WorkspaceBackend::Worktree => cherry_pick_worktree(self.base, commits)?,
-            WorkspaceBackend::Overlay => integrate_overlay(self.base.root(), task.root())?,
+            // 见本函数的文档：这一支不退化，直接拒绝。拒绝排在**任何改动之前**，故
+            // 被拒绝的调用在磁盘与库上都不留痕迹（用例：src/gate.rs 里的
+            // `cherry_pick_is_refused_on_the_overlay_backend`）。
+            WorkspaceBackend::Overlay => {
+                return Err(WorkspaceError::GateRefused {
+                    reason: format!(
+                        "overlay 后端没有提交粒度，无法按提交摘取（请求了 {} 个提交）；\
+                         退化并入全部改动会静默地集成得比要求的多。要按提交粒度集成只能用\
+                         worktree 后端，要并入全部改动用 apply_patch 或 merge",
+                        commits.len()
+                    ),
+                }
+                .into());
+            }
         }
         self.audit(
             tx,
@@ -613,11 +627,15 @@ fn merge_worktree(base: &BaseWorkspace, task: &TaskWorkspace) -> Result<(), Gate
     Ok(())
 }
 
-/// overlay 后端的三项写入操作：把 Task 相对 Base 的改动（[`Diff`]）落进 Base。
+/// overlay 后端的 `apply_patch` 与 `merge`：把 Task 相对 Base 的改动（[`Diff`]）落进 Base。
 ///
-/// 设计 6.3 把这个后端上的 `cherry_pick` 与 `merge` 定为同一个动作——「把 upper 层的
-/// 内容合并进 Base」；`apply_patch` 在这个后端上也只能是同一件事（没有提交，也没有
-/// 补丁的基准点）。三项共用本函数。
+/// 两个操作在这个后端上是同一件事（设计 6.3）：`merge` 是「把 upper 层的内容合并进
+/// Base」，而 `apply_patch` 也只能是同一件事——覆盖层里既没有提交，也没有补丁的基准点。
+/// 二者共用本函数。
+///
+/// **第三项写入操作不在这里。** `cherry_pick` 按定义要提交粒度，而覆盖层没有——它不退化
+/// 到本函数，而是直接拒绝（见 [`IntegrationGate::cherry_pick`] 的文档与
+/// `cherry_pick_is_refused_on_the_overlay_backend` 用例）。
 ///
 /// **改动集合取自 [`diff_trees`]，而不是直接读 upper 层。** 两者在「内容」上等价
 /// （upper 遮蔽 lower，故合并视图里就是 Task 的最终内容），差别在删除：upper 层表达
@@ -1704,6 +1722,58 @@ mod tests {
                 rows[0].1
             );
         }
+    }
+
+    /// overlay 后端上 `cherry_pick` 一律拒绝，**不退化为「并入全部改动」**（设计 6.3）。
+    ///
+    /// 退化会静默地集成得**比调用方要求的更多**：点名一个提交，落进 Base 的却是整棵树
+    /// 的改动。方向危险，故宁可报错。
+    ///
+    /// 拒绝排在**任何后端操作之前**，故本条不需要命名空间也不需要有覆盖层——工作区是
+    /// 一个普通目录即可（与 `tests/gate.rs` 的
+    /// `discarding_a_foreign_root_through_the_gate_reports_the_backend_error` 同一路数）。
+    #[test]
+    fn cherry_pick_is_refused_on_the_overlay_backend() {
+        let holder = tempfile::tempdir().unwrap();
+        let base_path = holder.path().join("base");
+        std::fs::create_dir(&base_path).unwrap();
+        let task_root = holder.path().join("task");
+        std::fs::create_dir_all(&task_root).unwrap();
+        let base = BaseWorkspace::new(&base_path).unwrap();
+        let task = crate::TaskWorkspace::new_outside(
+            &base,
+            &task_root,
+            crate::ids::IntentId::new("i1"),
+        )
+        .unwrap();
+        // Task 里有真改动：若那一支退化了，这处改动就会落进 Base
+        task.writable_root().write("Task 的改动.txt", b"x\n").unwrap();
+
+        let (_db_dir, db) = db();
+        let tx = db.begin().unwrap();
+        let err = IntegrationGate::new(&base)
+            .cherry_pick(
+                &tx,
+                &task,
+                WorkspaceBackend::Overlay,
+                &["HEAD~1"],
+                1_000,
+                &GateApproval(()),
+            )
+            .unwrap_err();
+
+        match &err {
+            GateError::Workspace(WorkspaceError::GateRefused { reason }) => assert!(
+                reason.contains("提交粒度"),
+                "拒绝的理由没说清是覆盖层没有提交粒度：{reason}"
+            ),
+            other => panic!("期望 GateRefused，得到 {other:?}"),
+        }
+        assert!(
+            !base_path.join("Task 的改动.txt").exists(),
+            "被拒绝的调用把 Task 的改动写进了 Base（退化了）"
+        );
+        assert!(audit_rows(&tx).is_empty(), "被拒绝的调用写了审计记录");
     }
 
     /// `cherry_pick` 不给提交即拒绝，报出的是 `GateRefused` 而不是 git 的用法报错。
