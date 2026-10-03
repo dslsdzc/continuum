@@ -212,20 +212,151 @@ fn exec_takes_every_following_token_verbatim() {
 #[test]
 fn a_duplicate_value_option_is_rejected() {
     // 静默取后一个会让 `--base /a --base /b` 看起来像「指定了 /a」，而实际跑 /b。
-    let err = cli::parse([
-        "task", "--base", "/a", "--base", "/b", "--intent", "i1", "--exec", "true",
-    ])
-    .unwrap_err();
-    assert_eq!(err, CliError::DuplicateOption { option: "--base" });
+    //
+    // **四个带取值的选项逐项过**，不只抽两个：模块文档「# 重复选项」那节写的是
+    // 「`--base` / `--intent` / `--sandbox` / `--db` 只接受一次」，是一项**四点
+    // 枚举上的绝对断言**。只钉住其中两点时，没钉住的那两条分支可以被改成任何东西
+    // 而没有对照片——这正是纪律 2 说的「绝对措辞藏在『A 或 B』的完备性里」。
+    let cases: [(Vec<&str>, &'static str); 4] = [
+        (
+            vec![
+                "task", "--base", "/a", "--base", "/b", "--intent", "i1", "--exec", "true",
+            ],
+            "--base",
+        ),
+        (
+            vec![
+                "task", "--base", "/b", "--intent", "i1", "--intent", "i2", "--exec", "true",
+            ],
+            "--intent",
+        ),
+        (
+            vec![
+                "task", "--base", "/b", "--intent", "i1", "--sandbox", "landlock", "--sandbox",
+                "bubblewrap", "--exec", "true",
+            ],
+            "--sandbox",
+        ),
+        (vec!["recover", "--db", "/a", "--db", "/b"], "--db"),
+    ];
+    for (args, option) in cases {
+        let err = cli::parse(args).unwrap_err();
+        // 断言到**具体变体与具体选项**（纪律 3），并断言信息点名了它。
+        assert_eq!(err, CliError::DuplicateOption { option });
+        assert!(
+            err.to_string().contains(option),
+            "错误信息应点名 {option}，实际：{err}"
+        );
+    }
 
-    let err = cli::parse(["recover", "--db", "/a", "--db", "/b"]).unwrap_err();
-    assert_eq!(err, CliError::DuplicateOption { option: "--db" });
-
-    // 开关重复是幂等的，照常接受。
+    // 开关型选项重复是幂等的（重复不改变结果），故照常接受——两个开关各来一次。
     let a = task_args([
-        "task", "--base", "/b", "--intent", "i1", "--apply", "--apply", "--exec", "true",
+        "task",
+        "--base",
+        "/b",
+        "--intent",
+        "i1",
+        "--apply",
+        "--apply",
+        "--exec",
+        "true",
     ]);
-    assert!(a.apply);
+    assert!(a.apply, "`--apply` 重复给出应照常接受，且仍为真");
+
+    let a = task_args([
+        "task",
+        "--base",
+        "/b",
+        "--intent",
+        "i1",
+        "--approve",
+        "--approve",
+        "--exec",
+        "true",
+    ]);
+    assert!(a.approve, "`--approve` 重复给出应照常接受，且仍为真");
+
+    // 「`--effect` 本就可重复」由 `an_effect_names_a_known_type` 末段覆盖
+    // （两条 `--effect` 都留下，且类型与目标各按出现次序对上）。
+}
+
+/// `CliError` 的文档写着「每个变体都点名**具体是哪一个**选项/取值出了错」——
+/// 这也是一项枚举上的绝对断言，故这里把**全部十个变体**过一遍。
+///
+/// 唯一没有「出错对象」可点的是 `MissingSubcommand`（没有子命令，就没有出错的那个
+/// 东西），它的信息改为列出**可用的**子命令，同样是为了不让人逐个试；它单独断言。
+#[test]
+fn every_error_variant_names_the_offending_token() {
+    let named = [
+        (
+            CliError::UnknownSubcommand {
+                name: "nope".to_owned(),
+            },
+            "nope",
+        ),
+        (
+            CliError::MissingValue {
+                option: "--sandbox",
+            },
+            "--sandbox",
+        ),
+        (
+            CliError::MissingOption {
+                option: "--intent",
+            },
+            "--intent",
+        ),
+        (
+            CliError::UnknownOption {
+                name: "--zzz".to_owned(),
+            },
+            "--zzz",
+        ),
+        (
+            CliError::DuplicateOption {
+                option: "--sandbox",
+            },
+            "--sandbox",
+        ),
+        (
+            CliError::UnknownSandboxMechanism {
+                name: "nope".to_owned(),
+            },
+            "nope",
+        ),
+        (
+            CliError::EffectWithoutColon {
+                value: "push_branch".to_owned(),
+            },
+            "push_branch",
+        ),
+        (
+            CliError::EffectWithEmptyTarget {
+                value: "publish:".to_owned(),
+            },
+            "publish:",
+        ),
+        (
+            CliError::UnknownEffectType {
+                name: "nope".to_owned(),
+            },
+            "nope",
+        ),
+    ];
+    for (err, token) in named {
+        assert!(
+            err.to_string().contains(token),
+            "{err:?} 的信息应点名 {token}，实际：{err}"
+        );
+    }
+
+    let msg = CliError::MissingSubcommand.to_string();
+    for available in ["task", "recover"] {
+        assert!(
+            msg.contains(available),
+            "缺少子命令时应列出可用的 {available}，实际：{msg}"
+        );
+    }
 }
 
 #[test]
