@@ -1,0 +1,13 @@
+error[E0451]: fields `kind`, `scope`, `expiry` and `issuer` of struct `Capability` are private
+  --> tests/compile_fail/capability_fields_are_private.rs:7:9
+   |
+ 6 |     let _ = Capability {
+   |             ---------- in this type
+ 7 |         kind: CapabilityKind::Git(GitAction::Push),
+   |         ^^^^ private field
+ 8 |         scope: String::from("origin/main"),
+   |         ^^^^^ private field
+ 9 |         expiry: 0,
+   |         ^^^^^^ private field
+10 |         issuer: Issuer::PolicyWithExplicitApproval,
+   |         ^^^^^^ private field

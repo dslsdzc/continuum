@@ -10,8 +10,13 @@ continuum-effect = { path = "../continuum-effect" }
 # 本 task 的使用点：`error.rs` 的 `CapabilityError` 派生 `thiserror::Error`。
 thiserror = { workspace = true }
 
+[dev-dependencies]
+# 本 task 的使用点：`tests/type_level.rs` 用编译失败样例钉住「不可构造 / 不可与裸
+# 字符串互换」（设计 §2.3 第三条、第 8 节）。与 continuum-workspace 的用法同形。
+trybuild = { workspace = true }
+
 # 其余依赖由需要它们的 task 增量加（设计第 6 节的边表是允许集合，不是一次性声明清单；
 # 叶子 crate 的条目记实际依赖，同理见 continuum-policy 的 Cargo.toml）：
 # continuum-core（`ToolId`，Task 3）、continuum-persist（`tool` 表，Task 3）、
 # continuum-events（`AuditKind::CapabilityGrants`，Task 4）、serde / serde_json（同上）、
-# dev-dep tempfile（落库用例）与 trybuild（设计第 8 节的编译失败样例，Task 2 起）。
+# dev-dep tempfile（落库用例，Task 3）。

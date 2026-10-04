@@ -1,0 +1,5 @@
+error[E0599]: no variant or associated item named `Push` found for enum `FsAction` in the current scope
+ --> tests/compile_fail/an_illegal_combination_cannot_be_written.rs:6:50
+  |
+6 |     let _ = CapabilityKind::Filesystem(FsAction::Push);
+  |                                                  ^^^^ variant or associated item not found in `FsAction`
