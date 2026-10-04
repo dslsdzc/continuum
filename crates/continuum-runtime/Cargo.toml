@@ -11,9 +11,16 @@ continuum-effect = { path = "../continuum-effect" }
 continuum-events = { path = "../continuum-events" }
 continuum-graph = { path = "../continuum-graph" }
 continuum-persist = { path = "../continuum-persist" }
+# Task 10 起：第 7 步的集成路径要查策略（`load_policies`）并按裁决决定是否铸造批准值
+# （`decide` / `PolicyContext` / `ExplicitApproval`）。
+continuum-policy = { path = "../continuum-policy" }
 continuum-provider = { path = "../continuum-provider" }
 continuum-sandbox = { path = "../continuum-sandbox" }
 continuum-workspace = { path = "../continuum-workspace" }
+# Task 10 起：`task_cmd` 要构造第 2 级（`ExplicitCurrent`）那条内建规则，而 `Policy` 的
+# `condition` 只能经 `Condition::parse(&serde_json::Value)` 造出——`continuum-policy`
+# 不提供别的构造入口，故驱动取用它。
+serde_json = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 

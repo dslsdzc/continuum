@@ -1,5 +1,11 @@
-//! `task` 子命令的端到端用例：建工作区、沙箱执行、未 `--apply` 时的清理（设计下篇
-//! 第 4.2 节第 1–6 步与第 8 步）。
+//! `task` 子命令的端到端用例：建工作区、沙箱执行、`--apply` 的策略裁决与集成、
+//! 未 `--apply`（或命令失败）时的清理（设计下篇第 4.2 节第 1–8 步）。
+//!
+//! **本文件的 `--apply` 用例全部受 [`require_auto_selected_sandbox`] 门控**（驱动要真的
+//! 跑起来才谈得上集成）。裁决本身不依赖沙箱，故它的承重断言**不放在这里**：
+//! `src/task_cmd.rs` 的 `#[cfg(test)] mod tests` 直接驱动 `arbitrate` / `mints`，
+//! 无门控地逐格钉住那张映射表与本文件四条用例的模型面。本文件负责的另一半是
+//! **接线**——驱动器真的按那个裁决去做了没有。
 //!
 //! 全部经 `env!("CARGO_BIN_EXE_continuum-runtime")` 驱动**真实二进制**（与 P1 的
 //! `recovery_roundtrip` 同法）：判据的对象是「驱动在真实内核、真实 git、真实挂载下做了
@@ -13,6 +19,7 @@
 //! 工作目录（`pwd`）与驱动算出的路径都是规范路径，两侧不规范化会让失败点指向断言。
 
 use continuum_persist::{Db, Value};
+use continuum_policy::{Condition, Decision, Level, Policy, Scope};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -125,6 +132,39 @@ fn workspace_rows(db: &Path) -> Vec<(String, String, String)> {
         .collect();
     tx.commit().unwrap();
     out
+}
+
+/// 一条条件恒真（空合取）的规则：任何 `PolicyContext` 都成立。
+///
+/// 恒真是刻意的：本文件的用例要钉的是**驱动有没有按裁决行事**，条件怎么求值属
+/// `continuum-policy` 的用例（`tests/condition.rs` / `tests/arbitration.rs`）。
+fn always(level: Level, decision: Decision) -> Policy {
+    Policy {
+        level,
+        condition: Condition::parse(&serde_json::json!({"all": []}))
+            .expect("空合取是合法条件"),
+        decision,
+        scope: Scope::User,
+    }
+}
+
+/// 建出 `policy` 表并写入若干规则，供随后启动的驱动读回。
+///
+/// **用 `continuum_policy` 自己的 `save_policy` 写，不手写 SQL 字面量**：驱动读的是该
+/// crate 的编码（`level` / `decision` / `scope` 三列与 `condition` 列），手抄一份到测试里
+/// 就是给同一件事立第二个来源——`save_policy` 改了编码，手抄那份照样绿，而驱动读不回。
+/// （读回来那几处反过来要手写 SQL，理由见 [`workspace_rows`]。）
+///
+/// 只应用 `policy` 这一条迁移：驱动自己开库时会把它那份清单里其余几条补上，
+/// 编号 41 已记录在案故被跳过。这顺带证明两边的清单能接上，而不是各建各的表。
+fn seed_policies(db: &Path, rules: &[(&str, Level, Decision)]) {
+    let handle = Db::open_with(db, continuum_policy::p2_policy_migrations()).unwrap();
+    handle.migrate().unwrap();
+    let tx = handle.begin().unwrap();
+    for (id, level, decision) in rules {
+        continuum_policy::save_policy(&tx, id, &always(*level, *decision)).unwrap();
+    }
+    tx.commit().unwrap();
 }
 
 /// 退出码为 0 的守卫，失败时把 stdout/stderr 一并带出来（否则只知道断言挂了）。
@@ -690,5 +730,292 @@ fn an_overlay_task_reexecs_itself_into_a_namespace_and_cleans_up() {
         "Base 里多出了东西"
     );
 
+    ran(TEST);
+}
+
+// ── 第 7 步：`--apply` 的策略裁决与集成（Task 10）────────────────────────
+
+/// 库里一条第 5 级 `Allow`，**不传 `--approve`**：集成照做，Base 出现改动。
+///
+/// 这是「铸造不必等 `--approve`」那一侧的接照片：设计第 5.7 节第一行。缺了它，
+/// 一个「一律要求 `--approve`」的实现能通过下面所有「有 `--approve` 才放行」的用例。
+#[test]
+fn an_allowed_integration_is_applied_without_the_flag() {
+    const TEST: &str = "an_allowed_integration_is_applied_without_the_flag";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
+
+    let out = run_task(
+        &base,
+        &db,
+        &["--apply", "--exec", "sh", "-c", "echo applied > applied.txt"],
+        &[],
+    );
+    assert_success(&out);
+
+    // 判据（设计第 9 节）：Base 出现该改动、**Task 仍在**。
+    assert_eq!(
+        std::fs::read_to_string(base.join("applied.txt")).unwrap(),
+        "applied\n",
+        "集成应把 Task 的新文件落进 Base"
+    );
+    assert!(
+        worktree_task_root(&base).exists(),
+        "`--apply` 成功之后不清理工作区（设计第 4.2 节）"
+    );
+    assert_eq!(
+        workspace_rows(&db).len(),
+        1,
+        "`--apply` 成功之后记录也留着"
+    );
+    ran(TEST);
+}
+
+/// 第 3 级 `RequireApproval` + 不传 `--approve`：**拒绝集成**，工作区保留。
+///
+/// 断言到**哪一种**拒绝（纪律 3）：信息里点名裁决值是「要求批准」，而不是笼统的非零退出
+/// ——后者也可能是沙箱没起来、git 失败等等。
+#[test]
+fn a_require_approval_rule_needs_the_flag() {
+    const TEST: &str = "a_require_approval_rule_needs_the_flag";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    seed_policies(&db, &[("r1", Level::UserPersistent, Decision::RequireApproval)]);
+
+    let out = run_task(
+        &base,
+        &db,
+        &["--apply", "--exec", "sh", "-c", "echo nope > nope.txt"],
+        &[],
+    );
+    assert!(
+        !out.status.success(),
+        "集成被拒时整条命令必须报失败\n--- stdout ---\n{}",
+        stdout_of(&out)
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("要求批准"),
+        "应点名裁决为「要求批准」，实际 stderr：{stderr}"
+    );
+    assert!(
+        !base.join("nope.txt").exists(),
+        "被拒的集成不得在 Base 留下任何改动"
+    );
+    assert!(
+        worktree_task_root(&base).exists(),
+        "集成被拒时工作区必须保留——改动仍是完整可用的"
+    );
+    ran(TEST);
+}
+
+/// 第 3 级 `Deny` + `--approve` → **放行**（设计第 5.5 节）。
+///
+/// 与下一条方向相反，缺一不可：只留这一条，一个「`--approve` 一律放行」的实现全绿，
+/// 而那正是把第 1 级也一起越过的 fail-open。
+#[test]
+fn the_flag_overrides_a_user_policy_deny() {
+    const TEST: &str = "the_flag_overrides_a_user_policy_deny";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    seed_policies(&db, &[("r1", Level::UserPersistent, Decision::Deny)]);
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--apply",
+            "--approve",
+            "--exec",
+            "sh",
+            "-c",
+            "echo ok > allowed.txt",
+        ],
+        &[],
+    );
+    assert_success(&out);
+    assert_eq!(
+        std::fs::read_to_string(base.join("allowed.txt")).unwrap(),
+        "ok\n",
+        "第 3 级的 Deny 应被 --approve 越过，改动落进 Base"
+    );
+    ran(TEST);
+}
+
+/// **第 1 级 `Deny` + `--approve` → 仍拒**（设计第 5.5 节：唯一越不过的那一级）。
+///
+/// 与上一条是同一条命令结构、只换了规则所在层级。上一条绿而这条红，才说明「第 1 级
+/// 不可越」是**层级**在起作用，而不是「`--approve` 根本没接线」。
+#[test]
+fn the_flag_cannot_override_system_safety() {
+    const TEST: &str = "the_flag_cannot_override_system_safety";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    seed_policies(&db, &[("r1", Level::SystemSafety, Decision::Deny)]);
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--apply",
+            "--approve",
+            "--exec",
+            "sh",
+            "-c",
+            "echo bad > bad.txt",
+        ],
+        &[],
+    );
+    assert!(
+        !out.status.success(),
+        "第 1 级的 Deny 不得被 --approve 越过\n--- stdout ---\n{}",
+        stdout_of(&out)
+    );
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("禁止"),
+        "应点名裁决为「禁止」（与上一条的「要求批准」可分辨），实际 stderr：{stderr}"
+    );
+    assert!(
+        !base.join("bad.txt").exists(),
+        "第 1 级 Deny 下 Base 必须一字未动"
+    );
+    assert!(
+        worktree_task_root(&base).exists(),
+        "被拒时工作区保留（同样是完整的改动）"
+    );
+    ran(TEST);
+}
+
+/// 集成被拒后**工作区与记录都在**——三样都断言（Task 根、记录、分支）。
+///
+/// 设计第 4.2 节：「丢弃一份未被批准的改动会让用户无从恢复」。三样分开断言是因为它们
+/// 由不同代码路径产生：Task 根在磁盘上、记录在库里、分支在 git 里；只断言其中一样时，
+/// 另两样被误删不会有对照片。
+#[test]
+fn a_refused_integration_keeps_the_workspace() {
+    const TEST: &str = "a_refused_integration_keeps_the_workspace";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    seed_policies(&db, &[("r1", Level::UserPersistent, Decision::RequireApproval)]);
+
+    let out = run_task(
+        &base,
+        &db,
+        &["--apply", "--exec", "sh", "-c", "echo kept > kept.txt"],
+        &[],
+    );
+    assert!(!out.status.success(), "被拒的集成不得报成功");
+    // 断言到**哪一种**拒绝（纪律 3）：规则是第 3 级 `RequireApproval`，故信息里应点名
+    // 「要求批准」，而不是笼统的非零退出——后者也可能是沙箱没起来、git 失败等等。
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("要求批准"),
+        "应点名裁决为「要求批准」，实际 stderr：{stderr}"
+    );
+
+    assert!(
+        worktree_task_root(&base).exists(),
+        "Task 根被删了：{}",
+        worktree_task_root(&base).display()
+    );
+    assert_eq!(
+        workspace_rows(&db).len(),
+        1,
+        "记录被删了，用户再也找不到那份改动"
+    );
+    assert!(
+        local_branches(&base).contains(&format!("ai/{INTENT}")),
+        "worktree 后端的分支被删了"
+    );
+    // Base 一字未动：顶层仍是 `.ai/`（worktree 后端的私有子树）、`.git/` 与用户的文件。
+    assert_eq!(
+        dir_entries(&base),
+        vec![".ai", ".git", "README.md"],
+        "被拒的集成在 Base 留下了东西"
+    );
+    // 那份没被批准的改动确实还在 Task 里（「无从恢复」的反面）。
+    assert_eq!(
+        std::fs::read_to_string(worktree_task_root(&base).join("kept.txt")).unwrap(),
+        "kept\n",
+        "被拒后 Task 里的改动应原样留着"
+    );
+    ran(TEST);
+}
+
+/// 命令退出码非 0：**不做集成**，但**照旧清理工作区**（设计第 4.2 节）。
+///
+/// 两个方向都承重。**不集成**：库里放一条「什么都放行」的第 5 级 `Allow`，若实现仍去
+/// 集成，Base 会拿到半成品而调用方拿到的是失败。**仍清理**：这一支留下的是半成品，
+/// 而记录是裸 `INSERT`，留着会让同一个 Intent 再也创建不了。
+#[test]
+fn a_failed_command_is_not_integrated_and_the_workspace_is_cleaned() {
+    const TEST: &str = "a_failed_command_is_not_integrated_and_the_workspace_is_cleaned";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    // 一条恒真的第 5 级 Allow：只要驱动走第 7 步，半成品就会落进 Base。
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--apply",
+            "--exec",
+            "sh",
+            "-c",
+            "echo half > partial.txt; exit 3",
+        ],
+        &[],
+    );
+    // 失败是哪一种：命令自己以退出码 3 结束，不是策略拒绝、也不是沙箱没起来。
+    assert!(!out.status.success(), "命令失败时整条命令必须报失败");
+    let stderr = stderr_of(&out);
+    assert!(
+        stderr.contains("以退出码 3"),
+        "期望「命令以退出码 3 失败」，实际 stderr：{stderr}"
+    );
+    assert!(
+        !base.join("partial.txt").exists(),
+        "命令失败时不得把半成品集成进 Base（第 7 步不走）"
+    );
+    assert!(
+        workspace_rows(&db).is_empty(),
+        "命令失败时仍要收尾：记录应被清掉，否则同一个 Intent 再也创建不了"
+    );
+    assert!(
+        !worktree_task_root(&base).exists(),
+        "命令失败时仍要收尾：Task 根应被清掉"
+    );
+    assert_eq!(
+        local_branches(&base),
+        vec!["main".to_owned()],
+        "命令失败时仍要收尾：分支应被回收"
+    );
     ran(TEST);
 }

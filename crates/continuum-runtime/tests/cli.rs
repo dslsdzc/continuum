@@ -5,8 +5,8 @@
 //! 拿不到解析结果本身。
 //!
 //! `task` 的行为判据（建区、沙箱执行、清理）在 `task_cli.rs` 里经二进制观察；本文件只放
-//! 解析这一层，以及两条「选项尚未接线」的判定——那两条要的是退出码与 stderr，两条路都能走，
-//! 放在这里是为了与它们替换掉的占位用例同处一地。
+//! 解析这一层，以及「选项尚未接线」的判定——它要的是退出码与 stderr，两条路都能走，
+//! 放在这里是为了与它替换掉的占位用例同处一地。（`--apply` 那条判定已随 Task 10 接线删除。）
 
 use continuum_effect::EffectType;
 use continuum_runtime::cli::{self, CliError, Command, EffectSpec, RecoverArgs, SandboxMechanism};
@@ -502,38 +502,6 @@ fn the_effect_option_is_refused_until_the_journal_is_wired() {
     assert!(
         stderr.contains("--effect"),
         "错误里应点名是哪个选项尚未接线，实际 stderr：{stderr}"
-    );
-}
-
-/// `--apply` 的策略裁决与集成要到 Task 10 才接线，故现在给了它同样必须**报错**。
-///
-/// 不静默忽略的理由比 `--effect` 那条更硬：未接线时唯一能走的收尾路径是「未给
-/// `--apply`」的第 7 步，它会把工作区丢弃——收下 `--apply` 却照旧丢弃，等于既没集成、
-/// 又毁掉了用户的改动。
-///
-/// **Task 10 接线时必须删除本用例**（连同 `task_cmd::TaskError::ApplyNotWired`）。
-#[test]
-fn the_apply_option_is_refused_until_the_integration_is_wired() {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_continuum-runtime"))
-        .args([
-            "task", "--base", "/b", "--intent", "i1", "--db", "/db", "--apply", "--exec", "true",
-        ])
-        .output()
-        .expect("continuum-runtime 无法执行");
-    assert!(!out.status.success(), "尚未接线的选项必须让整条命令返回非零退出码");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("尚未接线"),
-        "应明说尚未接线，实际 stderr：{stderr}"
-    );
-    assert!(
-        stderr.contains("--apply"),
-        "错误里应点名是哪个选项尚未接线，实际 stderr：{stderr}"
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.is_empty(),
-        "拒掉一条尚未接线的调用不得有 stdout 输出，实际：{stdout}"
     );
 }
 

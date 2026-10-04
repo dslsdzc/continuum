@@ -1,15 +1,18 @@
 //! 迁移编号与名称的唯一性，以及「注册的集合」与「实际应用的集合」一致。
 //!
 //! 本文件与 `startup.rs` 的分工：这里的断言**直接列出期望的迁移集合**，不依赖
-//! 任何计数；`startup.rs` 那三处「迁移应用 N 项」抓的是另一件事——启动输出确实
+//! 任何计数；`startup.rs` 那几处「迁移应用 N 项」抓的是另一件事——启动输出确实
 //! 报了那么多项。两处都在，不是重复：计数断言的判别力依赖「作者按实际输出改
-//! 断言」，数从 5 变 6 时把它改成 5 同样能过，而后果是新表根本没建。本文件的
+//! 断言」，数从 6 变 7 时把它改成 6 同样能过，而后果是新表根本没建。本文件的
 //! 集合比对不受这一点影响。
 
 use continuum_persist::{Db, Migration, Value, builtin_migrations};
 use std::process::Command;
 
-/// 期望的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace）。
+/// 期望的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy）。
+///
+/// `policy` 由 Task 10 加上（第 7 步的集成路径要读它），`effect` 留待 Task 11——
+/// 每张表由「用它的那个 task」注册，见 `main.rs` 装配处的说明。
 ///
 /// **这是 `main.rs` 装配处的第二份转录**。转录的风险由下面的比对抵掉——
 /// `the_runtime_applies_…` 拿**实际启动后**落在 `schema_migrations` 里的集合与
@@ -25,6 +28,7 @@ fn expected_migrations() -> Vec<Migration> {
     m.extend(continuum_artifact::p1_artifact_migrations());
     m.extend(continuum_graph::p1_graph_migrations());
     m.extend(continuum_workspace::p2_workspace_migrations());
+    m.extend(continuum_policy::p2_policy_migrations());
     m
 }
 

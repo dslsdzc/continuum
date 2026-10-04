@@ -90,6 +90,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 收窄到 `EffectType` 的封闭枚举（下篇第 6.8 节：开放类型会让策略表漏判，
     // 未知类型不该到运行期才失败），故解析器取用该 crate 的 `EffectType::parse`。
     //
+    // Task 10 起加上 policy：第 7 步的集成路径要查策略并按裁决决定是否铸造批准值
+    // （下篇第 5.7 节），故取用该 crate 的 `load_policies` / `decide` / `PolicyContext`
+    // 与它的 `p2_policy_migrations()`（`policy` 表由驱动自己建，见 `main.rs` 的装配处）。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
     // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇；
@@ -104,6 +108,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-events",
             "continuum-graph",
             "continuum-persist",
+            "continuum-policy",
             "continuum-provider",
             "continuum-sandbox",
             "continuum-workspace",

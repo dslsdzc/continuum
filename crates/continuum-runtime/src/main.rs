@@ -26,8 +26,8 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        // 第 1–6 步与第 8 步已接线；第 7 步（`--apply`）与效应的 Journal 写入分别由
-        // Task 10、Task 11 接入，在那之前给了对应选项即报错（见 `task_cmd`）。
+        // 第 1–8 步已接线；只剩效应的 Journal 写入由 Task 11 接入，在那之前给了
+        // `--effect` 即报错（见 `task_cmd`）。
         Ok(Command::Task(a)) => match task_cmd::run(&a, &raw) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -43,16 +43,23 @@ fn main() -> ExitCode {
     }
 }
 
-/// 本驱动全量注册的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace）。
+/// 本驱动全量注册的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy）。
 ///
 /// `recover` 与 `task` 共用同一份，两处各写一份清单会让「注册的集合」有两个来源：
 /// `task` 要 `workspace` 表（设计第 4.2 节第 3 步落库），若它那份少一条，症状要到
 /// 落库时以「表不存在」的形式出现，而不是在装配处。
+///
+/// **每张表由「用它的那个 task」注册**（计划 Task 10/11）：`policy` 由 Task 10 加上
+/// （第 7 步的 `load_policies` 要读它），`effect` 由 Task 11 加上。把它们一次排在装配
+/// 收尾的 Task 12，会让 Task 10 与 Task 11 各要一张还没建的表——**表要在用它之前建**，
+/// 这条在端到端测试与真实调用上是同一件事（用户跑 `task --apply` 同样会撞上
+/// 「no such table」），不只是测试夹具的问题。
 pub(crate) fn runtime_migrations() -> Vec<Migration> {
     let mut migrations = continuum_persist::builtin_migrations();
     migrations.extend(continuum_artifact::p1_artifact_migrations());
     migrations.extend(continuum_graph::p1_graph_migrations());
     migrations.extend(continuum_workspace::p2_workspace_migrations());
+    migrations.extend(continuum_policy::p2_policy_migrations());
     migrations
 }
 
