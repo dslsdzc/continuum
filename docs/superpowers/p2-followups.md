@@ -246,7 +246,7 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 - **P2a 用例 `tests/gate.rs::every_write_operation_refuses_a_stale_approval` 的快照判据比摘要宽**
   （Task 9）。`tree_snapshot` 什么也不排除，而 `tree_digest` 在任意层级跳 `.git`/`.ai`，
   故 git 的后台维护锁 `.git/objects/maintenance.lock` 的开合会让它偶发失败（加压时一次，44 次
-  重跑 0 次）。**方向是改测试侧快照，不动产品代码**；实测已确认那次集成确实被拒（`ApprovalMismatch`
+  重跑 0 次；Task 11 期间**全量并行跑**时又复现过一次，同一支，单跑与紧接的下一次全量均通过）。**方向是改测试侧快照，不动产品代码**；实测已确认那次集成确实被拒（`ApprovalMismatch`
   断言排在快照断言之前且通过），**不是 fail-open**。
 
 ### 9.3 需要写进注释或文档的
