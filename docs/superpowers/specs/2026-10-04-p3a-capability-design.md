@@ -117,12 +117,12 @@ pub struct Capability {
 
 §253 的 `issuer` 字段记签发来源。规范里的终极来源是 Authority Host（§292，长期阶段）；本阶段尚无该宿主。
 
-**本子项目采用**：`Issuer::PolicyWithExplicitApproval`——即**策略裁决 + 显式确认**这条路径，也就是 `continuum-workspace` 的 `gate.rs` 里已经点名的那个位置（其文档原文：「Capability 与 Authority 就位后，其产生点移交给那一处」）。签发点**唯一且具名**，与 P2 的 `GateApproval` 同形。`Issuer` 为封闭枚举，`AuthorityHost` 那一变体在本阶段**不产出**，它标出移交的去向。
+**本子项目采用**：`Issuer::PolicyWithExplicitApproval`——即**策略裁决 + 显式确认**这条路径，也就是 `continuum-workspace` 的 `gate.rs` 里已经点名的那个位置（其文档原文：「Capability 与 Authority 就位后，其产生点移交给那一处」）。**该变体名标的是这条路径的名字，不是「本次附了显式确认」这一位**——这一区别单看名字会读错，下一段即写明。签发点**唯一且具名**，与 P2 的 `GateApproval` 同形。`Issuer` 为封闭枚举，`AuthorityHost` 那一变体在本阶段**不产出**，它标出移交的去向。
 
 **签发点不重判，故 `Grant` / `Verdict` 已删（执行期裁定，记此以免后被当成漏实现）。**
 计划的 Task 2 代码块曾给 `mint` 一个 `granted: Grant` 入参，用来在签发点再算一遍「裁决值 × 是否附了显式确认」的六格表。那会把**同一个判断变成两个产生点**——而那张六格表的唯一落点已在驱动（`continuum-runtime` 的 `mints`）。去掉重判后 `Grant` / `Verdict` 没有任何消费方，连同两个错误变体一并删除，`mint` 的签名为 `mint(kind, scope, expiry)`。
 
-由此，「**什么授权了这一次**」不记在能力上，而由驱动写进 Effect Journal 的 `authorization` 字段（§2.3 第三条末段即是此意：那里记的是描述，不是凭据本身）。`Issuer` 只记签发的**路径**。故本阶段签发的每一枚能力都记 `PolicyWithExplicitApproval`，**包括未附 `--approve` 的 `Allow`**——它标的是本阶段唯一那条路径的名字，不是「本次附了显式确认」这一位；后者在 Journal 里。这一条**不留给读者自行推断**：`mint` 与 `Issuer` 的文档都写明，且 `tests/capability.rs` 的 `every_minted_capability_records_the_only_issuer_of_this_stage` 逐项钉住。
+由此，「**什么授权了这一次**」不记在能力上，而由驱动写进 Effect Journal 的 `authorization` 字段（§2.3「凭据不落库」一段即是此意：那里记的是描述，不是凭据本身）。`Issuer` 只记签发的**路径**。故本阶段签发的每一枚能力都记 `PolicyWithExplicitApproval`，**包括未附 `--approve` 的 `Allow`**——它标的是本阶段唯一那条路径的名字，不是「本次附了显式确认」这一位；后者在 Journal 里。这一条**不留给读者自行推断**：`mint` 与 `Issuer` 的文档都写明，且 `tests/capability.rs` 的 `every_minted_capability_records_the_only_issuer_of_this_stage` 逐项钉住。
 
 **移交义务**：Authority Host 就位后，本子项目的签发点移交给它。该义务以两件东西固定，而不是一句将来时——`Issuer` 枚举里那个尚未产出的变体，与本节这段文字。**本项目的教训**：只写在文档里的将来时会烂（P2b 终审查出的「可拒绝后重跑」即是一例），故凡可承载于类型的移交，不留在文字里。
 

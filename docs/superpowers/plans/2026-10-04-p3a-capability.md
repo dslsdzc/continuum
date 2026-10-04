@@ -220,7 +220,7 @@ pub enum Issuer {
 /// §253 的五要素。字段私有、无公开构造函数：唯一产出路径是 [`crate::mint`]。
 ///
 /// 三条结构性保证（设计 §2.3）：
-/// 1. `full_access` 不存在——不是「禁止作默认」，是没有这个成员；
+/// 1. `full_access` 不存在——不是「禁止作默认」，是没有这个成员、**也没有这个字段**；
 /// 2. `expiry` 必填，无「不过期」的表示（§51 的 short-lived 是结构而非约定）；
 ///    **本类型不读时钟**：校验收 `now`。
 /// 3. 不可与裸字符串互换——无 `From<&str>`、无 `FromStr`，只有单向的 `Display`（供审计与日志）。
@@ -241,7 +241,10 @@ impl Capability {
     /// §253 的二字段形状（`resource` / `action`）。存储与比较用 `kind`，
     /// 故 `Filesystem.Push` 这类组合无从写出。
     pub fn resource(&self) -> &'static str { /* 七个 resource 各自的串 */ }
-    pub fn action(&self) -> &'static str { /* 各 action 的串；encoding 同落库约定 */ }
+    /// 各 action 的串：**照录项按规范原样**（§88 的多词用点号、§253 的多词用下划线），
+    /// **推导项按本仓展示词汇约定**。**不是落库编码**——本 crate 不落库（设计 §2.3），
+    /// 这两个访问器只把 §253 的形状呈现出来，故「encoding 同落库约定」是伪前提，勿照抄。
+    pub fn action(&self) -> &'static str { /* 各 action 的串；逐项来历见实现 */ }
 
     /// 本类型不读时钟：`now` 由调用方给（本项目既有约定）。
     pub fn is_valid_at(&self, now: i64) -> Result<(), CapabilityError> {
