@@ -409,6 +409,29 @@ fn a_persist_failure_while_loading_the_tool_is_not_swallowed() {
     tx.commit().unwrap();
 }
 
+/// `Persist` 的**第二个产生方**：写审计那次往返失败，同样不许吞。
+///
+/// 只能在同一事务里丢掉审计表来确定性制造——表缺失时 `append_audit` 必然失败。
+/// 此时工具、出示集、声明集都合法，失败只可能来自那次写。
+#[test]
+fn an_audit_write_failure_is_reported_as_persist() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    save_tool(&tx, &profile("t1", vec![])).unwrap();
+    tx.execute("DROP TABLE audit_log", &[]).unwrap();
+
+    match authorize(&tx, &ToolId::new("t1"), &[], 7).unwrap_err() {
+        // 报的是 Persist，且内层消息点出**审计**这一次往返（不是「工具不存在」）
+        CapabilityError::Persist(PersistError::Database(m)) => assert!(
+            m.contains("audit_log"),
+            "错误信息应指出审计写入失败，实际 {m}"
+        ),
+        other => panic!("应为 CapabilityError::Persist(PersistError::Database(_))，实际 {other:?}"),
+    }
+
+    tx.commit().unwrap();
+}
+
 /// **方向相反的对照臂**：拒绝一律不写审计（五种失败各走一遍）。
 #[test]
 fn a_rejected_authorization_writes_no_audit_row() {

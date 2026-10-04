@@ -55,13 +55,21 @@ pub enum CapabilityError {
     #[error("工具 {} 不在登记表中", id.as_str())]
     UnknownTool { id: ToolId },
 
-    /// 读取登记项本身失败（列里是表外取值、类型不符等）。
+    /// [`crate::authorize`] 的两次数据库往返之一失败。**两个产生方**：
     ///
-    /// 不吞成 [`CapabilityError::UnknownTool`]、也不吞成「无需能力」：数据库层的失败
-    /// 若被静默降级，`authorize` 的签名仍会返回 `Ok`，而调用方拿到的是一次**没查过
-    /// 声明表**的授权。照片：`tests/authorize.rs` 的
-    /// `a_persist_failure_while_loading_the_tool_is_not_swallowed`。
-    #[error("读取工具登记项失败: {0}")]
+    /// - **[`load_tool`](crate::load_tool) 读登记项**（列里是表外取值、列类型不符等）：
+    ///   不吞成 [`CapabilityError::UnknownTool`]、也不吞成「无需能力」——数据库层的失败
+    ///   若被静默降级，`authorize` 的签名仍会返回 `Ok`，而调用方拿到的是一次**没查过
+    ///   声明表**的授权。照片：`tests/authorize.rs` 的
+    ///   `a_persist_failure_while_loading_the_tool_is_not_swallowed`；
+    /// - **`Tx::append_audit` 写审计**（表缺失等）：同样不许吞——吞掉它会让这次授权
+    ///   有授权之实而无审计之据。照片：同文件的
+    ///   `an_audit_write_failure_is_reported_as_persist`。
+    ///
+    /// **消息刻意只说「持久化失败」**：本变体由两个产生方共用一个 `#[from]`，若消息写成
+    /// 「读取…失败」就会在写审计那条路径上告诉操作者一件假事。具体是哪一次往返失败，
+    /// 由内层 [`PersistError`] 的消息给出（它带表名/取值）。
+    #[error("持久化失败: {0}")]
     Persist(#[from] PersistError),
 
     /// 工具声明了这枚能力，调用方没有出示（§252：`Tool` MUST NOT 接收未声明的

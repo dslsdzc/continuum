@@ -24,7 +24,16 @@ use crate::persist::load_tool;
 /// 都是消费方要用的：这是哪个工具（[`AuthorizedTool::tool_id`]），以及准了哪些能力
 /// （[`AuthorizedTool::granted`]）。**刻意不给 `#[allow(dead_code)]`**：字段由这两个
 /// 访问器读，故不需要。
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// **只派生 [`Debug`]，且它不是白留的**：`tests/authorize.rs` 的每条用例都经
+/// `Result::unwrap()` / `unwrap_err()` 取用 `authorize` 的返回值，而 `Result::unwrap`
+/// 要求 `T: Debug`——去掉它，整个 `tests/authorize.rs` 编译不过（实测：15 处 E0277）。
+///
+/// 其余三个曾经派生过的 trait 已删，各有理由：`Clone` 无人克隆，`PartialEq` / `Eq`
+/// 无人比较整个 `AuthorizedTool`（消费方读的是 [`AuthorizedTool::tool_id`] 与
+/// [`AuthorizedTool::granted`] 给出的值）。本项目对「声明了没有消费方的东西」要么删、
+/// 要么写明理由，此处是删。将来若真有消费方，那时再按需加，并同时补照片。
+#[derive(Debug)]
 pub struct AuthorizedTool {
     tool_id: ToolId,
     granted: Vec<Capability>,
@@ -95,9 +104,11 @@ pub fn authorize(
     presented: &[Capability],
     now: i64,
 ) -> Result<AuthorizedTool, CapabilityError> {
-    let profile = load_tool(tx, tool_id)?.ok_or_else(|| CapabilityError::UnknownTool {
-        id: tool_id.clone(),
-    })?;
+    // 只克隆一次 id：失败臂把它交给 `UnknownTool`，成功臂把它交给 `AuthorizedTool`。
+    let id = tool_id.clone();
+    let Some(profile) = load_tool(tx, tool_id)? else {
+        return Err(CapabilityError::UnknownTool { id });
+    };
     let declared = profile.tool().required_capabilities();
 
     // 第一遍：出示集必须是声明集的子集，且每枚都未失效。
@@ -128,7 +139,7 @@ pub fn authorize(
     )?;
 
     Ok(AuthorizedTool {
-        tool_id: tool_id.clone(),
+        tool_id: id,
         granted: presented.to_vec(),
     })
 }
