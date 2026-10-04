@@ -5,7 +5,7 @@
 
 use continuum_capability::{
     CapabilityError, CapabilityKind, EmailAction, EnvAction, FsAction, GitAction, GithubAction,
-    Grant, Issuer, PaymentAction, RegistryAction, Verdict, mint,
+    Issuer, PaymentAction, RegistryAction, mint,
 };
 
 /// 词汇表里的每一个 kind，各带上 §253 二字段形状要求它给出的两个串。
@@ -98,13 +98,7 @@ fn resource_and_action_strings_follow_the_spec_examples() {
     }
 
     for (kind, resource, action) in ALL_KINDS {
-        let cap = mint(
-            kind,
-            String::from("scope/one"),
-            10,
-            Grant::Policy(Verdict::Allow),
-        )
-        .expect("Allow 裁决应能签发，本用例只借它取串");
+        let cap = mint(kind, String::from("scope/one"), 10).expect("本用例只借它取串");
         assert_eq!(cap.resource(), resource, "{kind:?} 的 resource 串");
         assert_eq!(cap.action(), action, "{kind:?} 的 action 串");
     }
@@ -144,7 +138,7 @@ fn display_renders_the_253_shape() {
     ];
 
     for (kind, scope, expected) in cases {
-        let cap = mint(kind, scope.to_string(), 10, Grant::Policy(Verdict::Allow)).unwrap();
+        let cap = mint(kind, scope.to_string(), 10).unwrap();
         assert_eq!(cap.to_string(), expected, "{kind:?} 的 Display 形状");
     }
 }
@@ -158,7 +152,6 @@ fn valid_before_the_expiry_instant() {
         CapabilityKind::Git(GitAction::Push),
         String::from("origin/main"),
         1_000,
-        Grant::Policy(Verdict::Allow),
     )
     .unwrap();
 
@@ -176,7 +169,6 @@ fn expired_at_and_after_the_expiry_instant() {
         CapabilityKind::Git(GitAction::Push),
         String::from("origin/main"),
         1_000,
-        Grant::Policy(Verdict::Allow),
     )
     .unwrap();
 
@@ -220,49 +212,37 @@ fn mint_rejects_an_empty_scope() {
     let kind = CapabilityKind::Git(GitAction::Push);
 
     assert_eq!(
-        mint(kind, String::new(), 7, Grant::Policy(Verdict::Allow)),
+        mint(kind, String::new(), 7),
         Err(CapabilityError::EmptyScope),
         "空 scope 应被拒"
     );
 
     // 有效侧（承重：没有它，恒 Err 的实现照过）。
-    let cap = mint(
-        kind,
-        String::from("origin/main"),
-        7,
-        Grant::Policy(Verdict::Allow),
-    )
-    .expect("非空 scope 应被收下");
+    let cap = mint(kind, String::from("origin/main"), 7).expect("非空 scope 应被收下");
     assert_eq!(cap.scope(), "origin/main", "scope 应原样带过来");
+
+    // 边界：**首尾空白不算空**——判据是 `is_empty()`，与先例逐字相同，本处不做 trim。
+    // 这一格是照实钉住「没有额外规则」：若有人改成 `trim().is_empty()`（或以别的方式
+    // 规范化 scope），本断言变红，回去读 [`CapabilityError::EmptyScope`] 的文档。
+    let blank = mint(kind, String::from("  "), 7).expect("首尾空白不是空：本处不做 trim");
+    assert_eq!(blank.scope(), "  ", "scope 原样带过来，不规范化");
 }
 
-/// `mint` **不重判** `granted`：三种裁决值 × 显式确认给没给，**六种取值一律铸出**。
+/// 三个字段原样带过来（`kind` / `scope` / `expiry`），且**签发不需要任何授权输入**。
 ///
-/// 判定（那六格）的唯一落点在驱动的 `mints`（`continuum-runtime/src/task_cmd.rs:649-654`），
-/// 本 crate 只记录结果——理由见 `mint` 的文档：判两处即同一判断有两个产生点。
-///
-/// **本条是反过来的照片**：它把「本处不复核」这件事钉在六种取值上。日后若有人在此
-/// 重加六格重判（例如让 `Deny` 拒绝），本条立刻变红——那时请回去读 `mint` 的文档，
-/// 而不是删掉本条。六种取值逐个列出、不抽代表。
+/// 后一半是本条的重点：`mint` 的签名里**没有**「裁决值」「是否附显式确认」这类入参，
+/// 故本处不可能重判驱动的判定——判定的唯一落点是驱动（`continuum-runtime` 的
+/// `mints`，理由与照片见 `mint` 的文档）。这条性质由**签名**承载：旧版曾有一个
+/// `granted: Grant` 入参并在此按六格重判，那个入参连同 `Grant`/`Verdict` 两个类型
+/// 已因「判定只留一处」而删除（来历见 task-2-report 第 3.3、3.5 节）。
 #[test]
-fn mint_does_not_re_judge_the_grant() {
+fn minting_carries_the_three_fields_and_takes_no_authorization_input() {
     let kind = CapabilityKind::Git(GitAction::Push);
-    let scope = || String::from("origin/main");
 
-    for granted in [
-        Grant::Policy(Verdict::Allow),
-        Grant::Policy(Verdict::RequireApproval),
-        Grant::Policy(Verdict::Deny),
-        Grant::PolicyWithExplicitApproval(Verdict::Allow),
-        Grant::PolicyWithExplicitApproval(Verdict::RequireApproval),
-        Grant::PolicyWithExplicitApproval(Verdict::Deny),
-    ] {
-        let cap = mint(kind, scope(), 7, granted)
-            .unwrap_or_else(|e| panic!("本处不重判，{granted:?} 也该铸得出，却得到 {e:?}"));
-        assert_eq!(cap.kind(), kind, "kind 应原样带过来");
-        assert_eq!(cap.scope(), "origin/main", "scope 应原样带过来");
-        assert_eq!(cap.expiry(), 7, "expiry 应原样带过来");
-    }
+    let cap = mint(kind, String::from("origin/main"), 7).expect("非空 scope 应能签发");
+    assert_eq!(cap.kind(), kind, "kind 应原样带过来");
+    assert_eq!(cap.scope(), "origin/main", "scope 应原样带过来");
+    assert_eq!(cap.expiry(), 7, "expiry 应原样带过来");
 }
 
 /// 签发点不读时钟：`expiry` 早已过去也照样铸得出，且 `0` 不是「不过期」的哨兵。
@@ -276,7 +256,6 @@ fn mint_does_not_read_the_clock() {
         CapabilityKind::Git(GitAction::Push),
         String::from("origin/main"),
         0,
-        Grant::Policy(Verdict::Allow),
     )
     .expect("本函数不读时钟，过期的 expiry 也该铸得出");
 
@@ -288,7 +267,7 @@ fn mint_does_not_read_the_clock() {
     );
 }
 
-/// 本阶段的**唯一**签发来源逐项沿用：六种 `Grant` 取值铸出的能力都记
+/// 本阶段的**唯一**签发来源逐项沿用：**十二个 kind** 铸出的能力都记
 /// [`Issuer::PolicyWithExplicitApproval`]。
 ///
 /// 它同时是「[`Issuer::AuthorityHost`] 在本 crate 中不产出」的照片——本 crate 只有
@@ -296,28 +275,17 @@ fn mint_does_not_read_the_clock() {
 /// 是公开枚举的变体，下游可以构造它；能构造却无人构造，正是「移交去向已标出、
 /// 本阶段尚无该宿主」的据实形态。
 ///
-/// 名字记的是**签发路径**（策略裁决 + 显式确认），不是「本次附带了一次显式确认」：
-/// 未给确认的那三个取值也记它，否则本阶段无第二个来源可记。六种取值逐个断言，
-/// 不抽代表。
+/// 遍历 [`ALL_KINDS`] 而不抽一个代表：签发来源与 kind 无关，但「每一个 kind 的产出
+/// 路径都经过同一个签发点」正是这条要说的，故逐个走。
 #[test]
 fn every_minted_capability_records_the_only_issuer_of_this_stage() {
-    let kind = CapabilityKind::Environment(EnvAction::Deploy);
-    let cases = [
-        Grant::Policy(Verdict::Allow),
-        Grant::Policy(Verdict::RequireApproval),
-        Grant::Policy(Verdict::Deny),
-        Grant::PolicyWithExplicitApproval(Verdict::Allow),
-        Grant::PolicyWithExplicitApproval(Verdict::RequireApproval),
-        Grant::PolicyWithExplicitApproval(Verdict::Deny),
-    ];
-
-    for granted in cases {
-        let cap = mint(kind, String::from("prod"), 7, granted)
-            .unwrap_or_else(|e| panic!("{granted:?} 应能签发，却得到 {e:?}"));
+    for (kind, _, _) in ALL_KINDS {
+        let cap = mint(kind, String::from("prod"), 7)
+            .unwrap_or_else(|e| panic!("{kind:?} 应能签发，却得到 {e:?}"));
         assert_eq!(
             cap.issuer(),
             Issuer::PolicyWithExplicitApproval,
-            "{granted:?} 那格记录的签发来源"
+            "{kind:?} 记录的签发来源"
         );
     }
 }

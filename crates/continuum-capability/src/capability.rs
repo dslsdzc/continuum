@@ -185,23 +185,25 @@ impl CapabilityKind {
 /// 规范里的终极来源是 Authority Host（§292，长期阶段），本阶段尚无该宿主。
 /// [`Issuer::AuthorityHost`] 在**本 crate 中不产出**（唯一签发点 [`mint`] 只记另一个
 /// 变体；照片是 `tests/capability.rs` 的
-/// `every_minted_capability_records_the_only_issuer_of_this_stage`，三格成功全在）。
+/// `every_minted_capability_records_the_only_issuer_of_this_stage`，十二个 kind 全在）。
 /// 它标出移交的去向（设计第 10 节第 2 条）——凡可承载于类型的移交不留在文字里。
 /// 它是公开枚举的变体，故下游**可以**构造它；本阶段没有那样做的签发方。
 ///
 /// 本阶段签发的每一枚能力都记 [`Issuer::PolicyWithExplicitApproval`]：那是**本阶段
-/// 唯一签发路径**的名字（策略裁决 + 显式确认），与「本次是否附带了一次显式确认」
-/// **不是同一个问题**。`Grant::Policy(Verdict::Allow)`（未给 `--approve`）铸出的能力
-/// 同样记它——本阶段没有第二个来源可记。照片：`tests/capability.rs` 的
-/// `every_minted_capability_records_the_only_issuer_of_this_stage`（三格成功逐个断言）。
+/// 唯一签发路径**的名字（策略裁决 + 显式确认）。名字记的是**路径**，不是「本次附带
+/// 了一次显式确认」——那一位信息属驱动（它随 [`mint`] 的签名一起不入本类型，理由见
+/// `mint` 的文档）。照片：`tests/capability.rs` 的
+/// `every_minted_capability_records_the_only_issuer_of_this_stage`（逐项断言）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Issuer {
     PolicyWithExplicitApproval,
     AuthorityHost,
 }
 
-/// §253 的五要素。字段私有、无公开构造函数：本 crate 里唯一的产出路径是 [`mint`]
-/// （两条构造通道各有一份编译失败样例：无公开构造函数、结构体字面量被拒）。
+/// §253 的五要素。字段私有、无公开构造函数：本 crate 里唯一的产出路径是 [`mint`]。
+/// **crate 外**由类型保证——两条构造通道各有一份编译失败样例（无公开构造函数、
+/// 结构体字面量被拒）；**crate 内**的第二个产出点由评审与 grep 维持，理由与那张
+/// 同形的既有判据见 [`mint`] 的文档。
 ///
 /// 三条结构性保证（设计 §2.3）：
 ///
@@ -287,34 +289,36 @@ impl std::fmt::Display for Capability {
 /// 本 crate 里没有第二个产出 `Capability` 的公开路径：另外两条构造通道（公开构造
 /// 函数、结构体字面量）各有一份 `tests/compile_fail/` 样例。
 ///
-/// `granted` 是「什么授权了这一次」的表示，由调用方（驱动）从策略裁决构造——
-/// 本 crate 不依赖 `continuum-policy`，故用本 crate 自己的类型（依赖方向在本项目
-/// 是逐对断言的硬约束）。
+/// # 判定不在本函数里：唯一落点是驱动的 `mints`
 ///
-/// # 本函数**不重判** `granted`：判定在驱动，本处只记录结果
-///
-/// 六格判定（裁决值 × `--approve` 给没给）的**唯一**落点在驱动：
+/// 「这次授权铸不铸得出」的判定（裁决值 × `--approve` 给没给，六格）**只**在驱动：
 /// `continuum-runtime` 的 `mints`（`crates/continuum-runtime/src/task_cmd.rs:649-654`，
 /// 设计下篇第 5.7 节的表在本仓的接法），其照片是那里的
 /// `the_mapping_from_a_decision_to_minting_has_six_cells` 与
 /// `a_system_safety_deny_is_not_overridden_by_the_flag`。
 ///
 /// 若本函数也按那六格算一遍，同一个判断就有了**两个产生点**——改一处不会让另一处
-/// 失败，而本项目一贯把这类形状判为缺陷（P2 为此出过 Critical）。故：
+/// 失败，而本项目一贯把这类形状判为缺陷（P2 为此出过 Critical）。故本函数的签名里
+/// **没有**裁决值、也没有「是否附了显式确认」这类入参：不是「本处复核后放行」，而是
+/// **本处无从复核**。
 ///
-/// - `Grant` / `Verdict` 是**记录**，不是待复核的条件：它们的取值由驱动决定，其内容
-///   （裁决值、是否附显式确认）由驱动在 Effect Journal 的 `authorization` 字段留档
-///   （设计 §2.3），本类型不重复记；
-/// - 本函数只判**它自己**能判的事：`scope` 是否为空（见下）。
+/// 由此，本 crate 里曾经有过的 `Grant` 与 `Verdict` 两个类型**已删除**——去掉重判后
+/// 它们没有任何消费方（`issuer` 恒为本阶段那一条路径，一位信息，[`Issuer`] 已有那个
+/// 变体）。本 crate 对「声明了没有消费方的东西」一贯要么删、要么写明理由，这次是删；
+/// 来历见 `.superpowers/sdd/task-2-report.md` 第 3.3、3.5 节。
 ///
-/// 照片：`tests/capability.rs` 的 `mint_does_not_re_judge_the_grant`——六种 `Grant`
-/// 取值**一律铸出**，故日后若有人在此重加重判，该用例变红，回来读这段。
+/// 「只有一个具名的签发点」这条保证由此**不再由类型独家承担**：类型层保证的是
+/// 「crate 外造不出来」（两份 `tests/compile_fail/` 样例），crate 内的第二个产出点由
+/// 评审与 grep 维持——与 P2 对 `GateApproval` 的既有判据同形
+/// （`crates/continuum-workspace/src/gate.rs:12-17`：「只有一个具名的产生点，维持手段是
+/// 评审与 grep，不再是类型」）。本 crate 内 `Capability` 的字段私有，故除本模块外
+/// 无处能写字面量；本模块内的第二处由评审把关。
 ///
-/// # 真正的失败路径：空 `scope`
+/// # 失败路径：空 `scope`
 ///
 /// §253 的 `scope` 是自由文本，而空作用域的能力**没有任何下游能判断它指的是什么**
 /// （凭据签发、执行点与对账都要读它）。与 P2b 的「效应目标为空在解析期即拒」是同一条
-/// 判据，见 [`CapabilityError::EmptyScope`]。照片：同文件的
+/// 判据，见 [`CapabilityError::EmptyScope`]。照片：`tests/capability.rs` 的
 /// `mint_rejects_an_empty_scope`（两侧都有）。
 ///
 /// **本函数不读时钟**（与 [`Capability::is_valid_at`] 同一条约定），故 `expiry` 是否
@@ -324,48 +328,16 @@ pub fn mint(
     kind: CapabilityKind,
     scope: String,
     expiry: i64,
-    granted: Grant,
 ) -> Result<Capability, CapabilityError> {
     if scope.is_empty() {
         return Err(CapabilityError::EmptyScope);
     }
 
-    // 本阶段的签发来源只有一个（设计 §2.4）：`granted` 的两个臂都落到它。写成一行
-    // 是**刻意**的——本处不按裁决值分支，正是上一条要避免的重判；让「两臂落到同一处」
-    // 这件事在代码里也看得见，比留一个不读的入参诚实。
-    let issuer = match granted {
-        Grant::Policy(_) | Grant::PolicyWithExplicitApproval(_) => {
-            Issuer::PolicyWithExplicitApproval
-        }
-    };
-
     Ok(Capability {
         kind,
         scope,
         expiry,
-        issuer,
+        // 本阶段的签发路径只有一条（设计 §2.4）；Authority Host 就位后由它接手。
+        issuer: Issuer::PolicyWithExplicitApproval,
     })
-}
-
-/// 「什么授权了这一次」的**记录**。`PolicyWithExplicitApproval` 对应 §5.5 的
-/// `--approve`：显式确认**已给出**时用后者，未给出时用前者。
-///
-/// **它是记录，不是待复核的条件**：[`mint`] 不按它分支（判定在驱动的 `mints`，
-/// 理由见那里的文档）。两个变体的取值由驱动给出，本 crate 只据此记签发来源。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Grant {
-    Policy(Verdict),
-    PolicyWithExplicitApproval(Verdict),
-}
-
-/// 策略裁决的结果。与 `continuum_policy::Decision` 的三个取值一一对应
-/// （`Allow` / `Deny` / `RequireApproval`，见 `crates/continuum-policy/src/rule.rs:88-92`）；
-/// 由驱动转换过来（本 crate 不依赖 `continuum-policy`，依赖方向是逐对断言的硬约束）。
-///
-/// **本类型不是本 crate 的判据**：它随 [`Grant`] 一起只是记录，[`mint`] 不读它的值。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict {
-    Allow,
-    RequireApproval,
-    Deny,
 }

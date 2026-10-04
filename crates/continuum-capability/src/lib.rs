@@ -16,7 +16,7 @@ pub mod capability;
 pub mod error;
 
 pub use capability::{
-    Capability, CapabilityKind, EmailAction, EnvAction, FsAction, GitAction, GithubAction, Grant,
-    Issuer, PaymentAction, RegistryAction, Verdict, mint,
+    Capability, CapabilityKind, EmailAction, EnvAction, FsAction, GitAction, GithubAction, Issuer,
+    PaymentAction, RegistryAction, mint,
 };
 pub use error::CapabilityError;
