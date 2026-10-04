@@ -425,6 +425,12 @@ pub fn load_tools(tx: &Tx<'_>) -> Result<Vec<ToolProfile>, PersistError>;
 
 `runtime_migrations()` 加 `continuum_capability::p3_capability_migrations()`。**全仓搜「迁移应用」与迁移计数断言，逐条确认新值**；注意 `tests/startup.rs` 的 `second_startup_applies_no_migration` 断言 `0`，它与「迁移应用 N 项」**不是同一类断言**，不要改。
 
+**协调者开工前预检到的具体位置与数值**（**先自己核一遍再照着改**，尤其版本号；这一节是计划正文，照抄前须对源）：
+- 已占用的迁移编号：`1`、`2`（P0 内置）、`10`（artifact）、`20`（graph）、`30`（workspace）、`40`（effect）、`41`（policy）——共 7 条。P3 取哪一号由你按未占用值定（前几位是十位一档，`50` 是自然取法，但**判据是「未占用」不是「好看」**）。
+- 迁移集合有**第二份转录**：`crates/continuum-runtime/tests/migrations.rs` 的 `expected_migrations()` 必须同步 extend——该文件的注释说明了为什么它是这个形态，以及为什么两处都在不是重复。
+- 迁移计数断言的**三处要改、一处不要改**（`crates/continuum-runtime/tests/startup.rs`）：`:24`（`7` → `8`）、`:90`（`7` → `8`）、`:79`（`5` → `6`，那个用例的 `Db::open` 只带 P0 内置迁移，故启动时补的是 P1+P2+P3）；`:43` 的 `0` **不要动**——它断的是「第二次启动不再应用」，与总数无关。三处的行内注释（「P0 两条 + P1 两条 + P2 三条」那类）**一并更新**，否则注释会与断言互相打脸。
+- `Cargo.lock` 随依赖变化一并提交（本项目既有约定）。
+
 - [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
