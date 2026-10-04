@@ -329,16 +329,28 @@ rustc 1.95 上仍 unstable（E0658），实测「加变体并补 `ordinal` 的�
 都不算）。逐项核过 §2.1 的清单：
 
 - **已接线**：`detect_backend`、`create_task_workspace`、`WorkspaceRecord`、`save_workspace`、
-  `load_workspace`、`remove_workspace`、`discard_task_workspace`、`in_user_namespace`、
-  `Sandbox` / `SandboxCapabilities` / `SandboxError`、`GateError`、`WorkspaceError`。
-  `GateApproval` 的名字不出现在驱动里，但由 `approve_integration` 产生、`apply_patch` 消费，
-  是接上的——**按名字 grep 会漏判它**。
-- **仍无生产调用方，且是「入口越少越好」那条裁定的直接后果**（协调者点名了前两项）：
-  - `IntegrationGate::cherry_pick`、`IntegrationGate::merge`；
-  - `IntegrationGate::view_diff`、`IntegrationGate::discard`——**裁定当时只点了前两项，这两项
-    是同一理由的推论**。设计 §4.2 第 7 步只走 `apply_patch`，第 8 步只走 `discard_task_workspace`
-    （那是 workspace 的同名函数，不是 Gate 的方法）。`view_diff` 另在批准值摘要的文档里被引作
-    「摘要与它相关」，但摘要算的是 `tree_digest`，**并不调用它**——那句话是语义关联，不是调用关系。
+  `load_workspace`、`remove_workspace`、`discard_task_workspace`（经 Gate，见下）、
+  `in_user_namespace`、`Sandbox` / `SandboxCapabilities` / `SandboxError`、`GateError`、
+  `WorkspaceError`。`GateApproval` 的名字不出现在驱动里，但由 `approve_integration` 产生、
+  `apply_patch` 消费，是接上的——**按名字 grep 会漏判它**。
+- **`IntegrationGate::discard`：曾是真缺口，Task 12 已补**。驱动第 8 步原先直接调
+  `discard_task_workspace`，**每次清理都少写一条设计上篇 §6.4 要求的审计记录**——
+  `discard → AuditKind::ExternalEffects`。这不是「没有入口」那一类（`cherry_pick`/`merge` 才是），
+  **`discard` 是驱动必须走的路径**，只是走了低一层的那条，把 Gate 里的审计绕过去了。
+  现在第 8 步与「落库失败」那一支都经 `IntegrationGate::discard`（内部仍调
+  `discard_task_workspace`，次序与那几条守卫不变），`remove_workspace` 照旧在其后。
+  照片：`tests/task_cli.rs::discarding_the_workspace_writes_one_external_effects_audit_row`
+  （恰一行、`kind` 为 `external effects`、payload 含 `discard`/`intent=i1`/`backend=worktree`；
+  把清理换回直接调底层函数时它红、而 `the_workspace_record_is_written_and_then_removed` 照绿）。
+  **这条最初被本文件的作者判成「同一裁定的推论」——判错了**，协调者核源码与 §6.4 后纠正。
+  留此一行记来历：**「没有入口」与「有入口但走了更低一层」是两件事，前者才是裁定覆盖的范围**。
+- **仍无生产调用方、且属「入口越少越好」那条裁定**：`IntegrationGate::cherry_pick`、
+  `IntegrationGate::merge`。
+- **`IntegrationGate::view_diff`：无生产调用方，但这是裁定的推论，不是漏接线。** 设计 §4.2 的
+  序列里没有任何一步要显示差异，故它没有入口是设计使然；§7.2 曾把「`view_diff` 的结果」列为
+  摘要的输入，**那一处已被裁定改掉**——Task 7 实现摘要时改由两棵树的**内容**派生
+  （`tree_digest`，是 `view_diff` 清单的超集），理由是「改 Base 侧未碰过的文件」在只喂清单时
+  不会失配。故 `approve_integration` 的文档里「摘要与 `view_diff` 相关」是**语义关联，不是调用关系**。
 - **`OverlayBackend`：零引用，连 `continuum-workspace` 内也没有。** 它是文档载体——一个单元
   结构体，承载 overlay 后端的命名空间约束与 `.ai/` 可见性说明；驱动用的是
   `WorkspaceBackend::Overlay` 与 `in_user_namespace`，没有它可接线的地方。**是否删掉这个空壳属

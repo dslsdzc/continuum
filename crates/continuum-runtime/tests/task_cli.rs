@@ -228,6 +228,31 @@ fn authorization_of(db: &Path, target: &str) -> String {
     value
 }
 
+/// 库里 `audit_log` 的全部 `(kind, payload)`，按 seq 排序。
+///
+/// 读的是**落库的文本**：本文件要钉的正是 `kind` 列的编码（设计 §6.4 定的
+/// `AuditKind::ExternalEffects`）与 payload 里的操作名，经 `AuditRecord` 的类型化读回会把
+/// 这两层都盖掉。
+fn audit_rows(db: &Path) -> Vec<(String, String)> {
+    let db = Db::open(db).expect("打开数据库失败");
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query("SELECT kind, payload FROM audit_log ORDER BY seq", &[])
+        .expect("读 audit_log 失败");
+    let out = rows
+        .iter()
+        .map(|r| {
+            let text = |v: &Value| match v {
+                Value::Text(s) => s.clone(),
+                other => panic!("审计列应为文本，实际 {other:?}"),
+            };
+            (text(&r[0]), text(&r[1]))
+        })
+        .collect();
+    tx.commit().unwrap();
+    out
+}
+
 /// 一条条件恒真（空合取）的规则：任何 `PolicyContext` 都成立。
 ///
 /// 恒真是刻意的：本文件的用例要钉的是**驱动有没有按裁决行事**，条件怎么求值属
@@ -515,6 +540,44 @@ fn the_workspace_record_is_written_and_then_removed() {
         vec!["main".to_owned()],
         "只应剩下用户自己的分支"
     );
+    ran(TEST);
+}
+
+/// 第 8 步放弃工作区时**经 Gate 写了一条审计记录**（设计上篇第 6.4 节）。
+///
+/// `discard` 与三个写入 Base 的操作一样要入审计，变体映射是
+/// `discard → AuditKind::ExternalEffects`。本条是该要求在本驱动里的唯一照片：把清理路径
+/// 换回直接调 `discard_task_workspace`（本 task 之前正是如此）时，`kind` 那一行整个消失，
+/// 而 `the_workspace_record_is_written_and_then_removed` 照绿——后者只看记录、目录与分支，
+/// 看不见审计。
+///
+/// 不给 `--effect`：效应登记也写 `external effects` 的审计行（`continuum-effect` 的
+/// `journal::audit`），带上它这条就分不清「多出来的一行」是谁写的。故本条的断言是
+/// **恰一行**，而不是「至少一行」。
+#[test]
+fn discarding_the_workspace_writes_one_external_effects_audit_row() {
+    const TEST: &str = "discarding_the_workspace_writes_one_external_effects_audit_row";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    assert_success(&run_task(&base, &db, &["--exec", "true"], &[]));
+
+    // 期望值**手写**在这里（钉 `kind` 列的编码），不调 `AuditKind::as_str` 去生成。
+    let rows = audit_rows(&db);
+    assert_eq!(rows.len(), 1, "第 8 步应恰写一条审计记录，实际 {rows:?}");
+    assert_eq!(rows[0].0, "external effects", "变体映射应为 ExternalEffects");
+    // payload 里点名是哪一种操作，且带 Intent 与后端——三者都在 Gate 的 `audit` 里拼。
+    for needle in ["discard", "intent=i1", "backend=worktree"] {
+        assert!(
+            rows[0].1.contains(needle),
+            "审计 payload 应含 {needle:?}，实际 {:?}",
+            rows[0].1
+        );
+    }
     ran(TEST);
 }
 

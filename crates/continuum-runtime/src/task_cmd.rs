@@ -146,11 +146,11 @@ pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
     if let Err(e) = save_record(&db, &record) {
         // 落库失败 ⇒ 出现「有工作区无记录」。记录还没有，第 8 步那条按记录回收的路
         // 走不到，故这里用手里的句柄就地放弃；此后若回收也失败，两条事实都带出去。
-        return Err(match discard_task_workspace(&base, &task, created_backend) {
+        return Err(match discard_unrecorded_workspace(&db, &base, &task, created_backend) {
             Ok(()) => e,
             Err(cleanup) => TaskError::Context {
                 context: format!("落库失败（{e}）之后，放弃本次建出的工作区也失败"),
-                source: Box::new(TaskError::Workspace(cleanup)),
+                source: Box::new(cleanup),
             },
         });
     }
@@ -430,6 +430,13 @@ fn run_in_sandbox(
 
 /// 第 8 步：按落库记录放弃工作区，成功之后再删记录。
 ///
+/// **放弃经 [`IntegrationGate::discard`]，不直接调 [`discard_task_workspace`]**（设计上篇
+/// 第 6.4 节）：`discard` 与那三个写入 Base 的操作一样要写一条审计记录，而**层在 Gate**
+/// ——收下事务、在回收成功之后补记 `AuditKind::ExternalEffects` 那一行的都是它。绕过它
+/// 走底层函数，每次清理都会少一条设计要求的审计记录（本 task 之前正是如此，见
+/// `p2-followups.md`）。Gate 内部仍调 [`discard_task_workspace`]，故 overlay 的
+/// 「`umount` 未成功就绝不往下走」那几条守卫不被旁路。
+///
 /// **`backend` 取自记录**（设计第 4.4 节）：记录里写的是哪个后端，`discard` 就按哪个后端
 /// 回收。这一项有判别力——把它换成写死的某个后端，worktree 与 overlay 两个方向都会以
 /// 另一条错误失败（见 `tests/task_cli.rs` 的
@@ -437,7 +444,8 @@ fn run_in_sandbox(
 /// `path` 则**没有判别力**（本次运行里它们与命令行/句柄同值，换掉不可观察），理由与不补
 /// 用例的处置见模块文档「后端的取用点」一节。
 ///
-/// `discard` 失败时直接返回，`tx` 随之析构回滚，记录因此留着——这就是「失败则不删记录」。
+/// `discard` 失败时直接返回，`tx` 随之析构回滚，审计行与记录的删除都不落库——这就是
+/// 「失败则不删记录」。
 fn discard_recorded_workspace(db: &Db, intent: &IntentId) -> Result<(), TaskError> {
     let tx = db.begin()?;
     let record = load_workspace(&tx, intent)?.ok_or_else(|| TaskError::RecordMissing {
@@ -446,9 +454,34 @@ fn discard_recorded_workspace(db: &Db, intent: &IntentId) -> Result<(), TaskErro
 
     let base = BaseWorkspace::new(record.base_path.clone())?;
     let task = TaskWorkspace::new_outside(&base, record.path.clone(), record.intent_id.clone())?;
-    discard_task_workspace(&base, &task, record.backend)?;
+    IntegrationGate::new(&base).discard(&tx, &task, record.backend, now_millis())?;
 
     remove_workspace(&tx, &record.intent_id)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// 落库失败那一支的放弃：手上有句柄，但**库里没有本 Intent 的记录**。
+///
+/// 与 [`discard_recorded_workspace`] 同法经 [`IntegrationGate::discard`]（审计行的产生点
+/// 只有一个），差别只在「没有记录可删」——没有记录就无从 [`load_workspace`]，故这里收
+/// 手边的句柄而不是 Intent。
+///
+/// **`db.begin()` 失败时退回裸 [`discard_task_workspace`]**：那时审计行写不进任何地方
+/// （连接已不可用），而本支要避免的恰恰是「有工作区无记录」——为了一条无论如何都写不成
+/// 的审计行把工作区留下，方向反了。**这一支没有用例**：造不出「已打开的连接无法开始
+/// 事务」，据实记为未被任何用例覆盖的代码路径（与 [`TaskError::RecordMissing`] 同类）。
+fn discard_unrecorded_workspace(
+    db: &Db,
+    base: &BaseWorkspace,
+    task: &TaskWorkspace,
+    backend: WorkspaceBackend,
+) -> Result<(), TaskError> {
+    let tx = match db.begin() {
+        Ok(tx) => tx,
+        Err(_) => return discard_task_workspace(base, task, backend).map_err(TaskError::from),
+    };
+    IntegrationGate::new(base).discard(&tx, task, backend, now_millis())?;
     tx.commit()?;
     Ok(())
 }
