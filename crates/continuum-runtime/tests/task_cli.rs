@@ -178,6 +178,36 @@ fn ran(test: &str) {
     eprintln!("【运行】{test}：本条：执行 1、跳过 0。");
 }
 
+/// 本机是否有**至少一个**可用的沙箱机制（驱动不给 `--sandbox` 时为自动选择）。
+///
+/// 判据与驱动取的是同一处：`Sandbox::capabilities().restricts_filesystem_writes`
+/// （理由见 `sandbox_select` 的模块文档）。两个都为假时驱动会以 `NoneAvailable` 拒绝运行，
+/// 故**所有不给 `--sandbox` 的用例**在那样的机器上都跑不起来。
+fn any_sandbox_mechanism_available() -> bool {
+    continuum_sandbox::Sandbox::landlock()
+        .capabilities()
+        .restricts_filesystem_writes
+        || continuum_sandbox::Sandbox::bubblewrap()
+            .capabilities()
+            .restricts_filesystem_writes
+}
+
+/// 依赖「驱动能自动选出一个机制」的用例的入口。返回 `false` 表示已**显式**跳过。
+///
+/// 少了这一步，本机既无 Landlock（内核 ABI < 1）也无 `bwrap` 时这些用例会**硬失败**——
+/// 把「本机没有隔离机制」报成「实现有缺陷」。与三条受能力门控的用例同法：
+/// 不静默通过，读数（执行/跳过条数）在 `--nocapture` 下可见。
+fn require_auto_selected_sandbox(test: &str) -> bool {
+    if any_sandbox_mechanism_available() {
+        return true;
+    }
+    skip(
+        test,
+        "本机既无 Landlock（内核 ABI < 1）也无 bwrap，驱动会以「两者都不可用」拒绝运行",
+    );
+    false
+}
+
 // ── 用例 ────────────────────────────────────────────────────────────────
 
 /// 命令在沙箱里跑得起来，且**写进的是 Task 根**，Base 里没有。
@@ -187,6 +217,10 @@ fn ran(test: &str) {
 /// 文件落在哪儿。未 `--apply` 时 Task 根随后就被清理，跑完之后无法再观察它。
 #[test]
 fn a_task_command_runs_in_the_sandbox_and_can_write_the_task() {
+    const TEST: &str = "a_task_command_runs_in_the_sandbox_and_can_write_the_task";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
@@ -234,6 +268,7 @@ fn a_task_command_runs_in_the_sandbox_and_can_write_the_task() {
         "初始内容\n".as_bytes(),
         "Base 的用户文件被改了"
     );
+    ran(TEST);
 }
 
 /// 同一条命令**写不进 Base**，而写 Task 仍成功（对照臂）。
@@ -242,6 +277,10 @@ fn a_task_command_runs_in_the_sandbox_and_can_write_the_task() {
 /// 不含 Base 路径，那是调用方义务；用相对路径也顺便测了「子进程自己往上走」这一形态。
 #[test]
 fn the_same_command_cannot_write_the_base() {
+    const TEST: &str = "the_same_command_cannot_write_the_base";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
@@ -307,6 +346,7 @@ fn the_same_command_cannot_write_the_base() {
         !base.join("kept.txt").exists(),
         "对照臂的文件落在了 Base 里"
     );
+    ran(TEST);
 }
 
 /// 未 `--apply`：跑完之后记录与工作区都不留。
@@ -315,6 +355,10 @@ fn the_same_command_cannot_write_the_base() {
 /// worktree 后端特有的分支。三者都要没了，才算第 8 步走完。
 #[test]
 fn the_workspace_record_is_written_and_then_removed() {
+    const TEST: &str = "the_workspace_record_is_written_and_then_removed";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
@@ -337,22 +381,35 @@ fn the_workspace_record_is_written_and_then_removed() {
         vec!["main".to_owned()],
         "只应剩下用户自己的分支"
     );
+    ran(TEST);
 }
 
-/// 命令行里没有任何入口能给出**另一个**后端，且驱动用的后端就是落库记录里的那个。
+/// 命令行里没有任何入口能给出**另一个**后端。两个方向各有一条照片：
 ///
-/// 这条不是形式主义：上篇那条 Critical（`integrate_overlay` 删光 Base 的 `.git`）之所以
-/// 打不到，正是因为没有任何入口能给出一个与记录不符的后端。
+/// - **入口不存在**（本用例前半）：`--backend` 在解析期即被拒，且拒绝发生在任何 I/O
+///   之前（Base 一字未动、库文件都没建）。这条不是形式主义：上篇那条 Critical
+///   （`integrate_overlay` 删光 Base 的 `.git`）之所以打不到，正是因为没有任何入口能给出
+///   一个与记录不符的后端。
+/// - **驱动用的就是记录里那个**：本用例后半走 worktree 方向——放弃若误用 overlay 后端，
+///   `require_layout` 会先拒（那不是 overlay 布局），放弃不成，记录、Task 根与分支都会
+///   留着，下面三条断言随即变红。
 ///
-/// 两个方向分别有照片：
-/// - **入口不存在**：`--backend` 在解析期即被拒（本用例前半），且拒绝发生在任何 I/O
-///   之前（Base 一字未动）。
-/// - **用的就是记录里那个**：本用例后半走 worktree 方向——记录里写的是 `worktree`，若
-///   放弃时误用 overlay 后端，`require_layout` 会先拒（那不是 overlay 布局），放弃不成，
-///   记录与 Task 根都会留着，下面三条断言随即变红。记录那侧的**直接**照片在
-///   [`a_failed_discard_keeps_the_workspace_record`]（放弃失败，记录留得下来，可以读列）。
+/// **本用例这一臂单独分不出「取自记录」与「重新探测」**：在「Base 始终是同一个 git 仓库」
+/// 这个前提下，`record.backend` 与现场 `detect_backend` 给出同一个值，两者不可分辨。
+/// 真正把它分开的是 [`a_failed_discard_keeps_the_workspace_record`]（那条能把记录读回来
+/// 看那一列），M5 变红也靠它。唯一能让本臂具备该判别力的装置是「Base 在创建与回收之间
+/// 改变形态」（例如创建后 `git init`），本 task 没有造这个装置。
+///
+/// 整条用例都在 [`require_auto_selected_sandbox`] 的门控之下——**包括方向一**（它本身
+/// 不需要机制：`--backend` 在解析期就被拒）。本机没有任何机制时，驱动对**任何** `task`
+/// 调用都拒绝运行，这个文件的前提在那样的机器上不成立，故整条跳过、读数是干净的
+/// 「执行 0、跳过 1」，而不是让方向一单独留下一个半吊子读数。
 #[test]
 fn there_is_no_way_to_override_the_backend_from_the_command_line() {
+    const TEST: &str = "there_is_no_way_to_override_the_backend_from_the_command_line";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
@@ -382,6 +439,7 @@ fn there_is_no_way_to_override_the_backend_from_the_command_line() {
         vec!["main".to_owned()],
         "worktree 后端的放弃应把 ai/{INTENT} 一并删掉"
     );
+    ran(TEST);
 }
 
 /// 第 8 步的次序：放弃**失败**时不删记录，工作区也原样留着。
@@ -395,6 +453,10 @@ fn there_is_no_way_to_override_the_backend_from_the_command_line() {
 /// git——创建那一步（`git branch`、`git worktree add`）必须照常成功。
 #[test]
 fn a_failed_discard_keeps_the_workspace_record() {
+    const TEST: &str = "a_failed_discard_keeps_the_workspace_record";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
@@ -467,6 +529,7 @@ fn a_failed_discard_keeps_the_workspace_record() {
         local_branches(&base).contains(&format!("ai/{INTENT}")),
         "放弃失败却把分支删了"
     );
+    ran(TEST);
 }
 
 /// 显式指定 `--sandbox bubblewrap` 时**跑的确实是 bubblewrap**。
@@ -561,6 +624,10 @@ fn an_overlay_task_reexecs_itself_into_a_namespace_and_cleans_up() {
     const TEST: &str = "an_overlay_task_reexecs_itself_into_a_namespace_and_cleans_up";
     if !namespace_available() {
         skip(TEST, "unshare -Urm 无法建立用户与挂载命名空间");
+        return;
+    }
+    // 命名空间能建起来还不够：本用例不给 `--sandbox`，驱动还要能自动选出一个机制。
+    if !require_auto_selected_sandbox(TEST) {
         return;
     }
 
