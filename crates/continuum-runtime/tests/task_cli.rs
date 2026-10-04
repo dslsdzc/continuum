@@ -19,7 +19,9 @@
 //! 路径一律取 `canonicalize` 之后的值：临时目录可能落在符号链接之下，而子进程报出的
 //! 工作目录（`pwd`）与驱动算出的路径都是规范路径，两侧不规范化会让失败点指向断言。
 
-use continuum_effect::MarkExecutingAsUnknown;
+use continuum_effect::{
+    Effect, EffectId, EffectState, EffectType, MarkExecutingAsUnknown, record_planned,
+};
 use continuum_persist::{Db, RecoveryRegistry, Value, run_recovery};
 use continuum_policy::{Condition, Decision, Level, Policy, Scope};
 use std::ffi::OsStr;
@@ -170,6 +172,39 @@ fn effect_states(db: &Path) -> Vec<String> {
         .into_iter()
         .map(|(_, _, state)| state)
         .collect()
+}
+
+/// 在 `effect` 表里种下一条记录，模拟「上一次运行已经登记过这个键」。
+///
+/// 键与 id 由测试**手写字面量**（`<意图字节长>:<意图>:<类型>:<目标>`），不调驱动私有的
+/// `effect_key`：手写的字面量钉住格式，调实现去拼则格式改了两者一起漂移、断言照过。
+fn seed_effect(db: &Path, intent: &str, effect_type: EffectType, target: &str) {
+    let mut migrations = continuum_persist::builtin_migrations();
+    migrations.extend(continuum_effect::p2_effect_migrations());
+    let handle = Db::open_with(db, migrations).expect("打开数据库失败");
+    handle.migrate().expect("应用迁移失败");
+    let key = format!(
+        "{}:{intent}:{}:{target}",
+        intent.len(),
+        effect_type.as_str()
+    );
+    let tx = handle.begin().unwrap();
+    record_planned(
+        &tx,
+        &Effect {
+            id: EffectId::new(key.clone()),
+            effect_type,
+            target: target.to_owned(),
+            parameters: serde_json::json!({}),
+            authorization: "种下的既有记录".to_owned(),
+            idempotency_key: key,
+            state: EffectState::Planned,
+            planned_at: 1,
+            updated_at: 1,
+        },
+    )
+    .expect("种下既有记录失败");
+    tx.commit().unwrap();
 }
 
 /// 目标为 `target` 的那条效应记录的 `authorization` 列（设计第 6.7 节）。
@@ -1389,6 +1424,69 @@ fn a_failing_command_fails_all_declared_effects() {
             "失败的命令不得让记录停在 EXECUTING（设计第 6.4 节）"
         );
     }
+    ran(TEST);
+}
+
+/// 多条 `--effect` 里**任意一条**的键已存在即拒绝**整条**命令——不是只跳过那一条。
+///
+/// 与 `the_same_idempotency_key_refuses_to_run_again` 的分界：那一条只声明一条 `--effect`，
+/// 分不出「拒绝整条」与「只拒绝/跳过那一条」；本条先声明一条**新**的 `publish`，再声明
+/// 一条**已登记**的 `push_branch`。若实现只跳过冲突的那一条，`publish` 会被写进库里、
+/// 命令也会照跑——两条断言随即变红。这是设计第 6.5 节「已存在记录即拒绝运行整条命令」
+/// 的字面落点（多效应下的「整条」）。
+#[test]
+fn any_declared_key_existing_refuses_the_whole_command() {
+    const TEST: &str = "any_declared_key_existing_refuses_the_whole_command";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    // 种下 (i1, push_branch, origin/main)；命令里 publish:t1 是新的一条。
+    seed_effect(&db, INTENT, EffectType::PushBranch, "origin/main");
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--effect",
+            "publish:t1",
+            "--effect",
+            "push_branch:origin/main",
+            "--exec",
+            "sh",
+            "-c",
+            "echo COMMAND-RAN",
+        ],
+        &[],
+    );
+
+    assert!(
+        !out.status.success(),
+        "任意一条键已存在即拒绝整条命令\n--- stdout ---\n{}",
+        stdout_of(&out)
+    );
+    assert!(
+        stderr_of(&out).contains("幂等键"),
+        "应点名幂等键冲突，实际 stderr：{}",
+        stderr_of(&out)
+    );
+    // **整条**被拒的分界：那条**新**声明的 publish 不得落库。只跳过冲突那条的实现会在这里变红。
+    assert_eq!(
+        effect_rows(&db),
+        vec![(
+            "push_branch".to_owned(),
+            "origin/main".to_owned(),
+            "planned".to_owned()
+        )],
+        "被拒的整条命令不得写下任何一条新效应"
+    );
+    assert!(
+        !stdout_of(&out).contains("COMMAND-RAN"),
+        "被拒的命令不得执行（命令自身的效应不该发生）\n--- stdout ---\n{}",
+        stdout_of(&out)
+    );
     ran(TEST);
 }
 
