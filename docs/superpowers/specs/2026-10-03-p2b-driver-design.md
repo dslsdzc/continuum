@@ -129,11 +129,12 @@ continuum recover --db <路径>
 1  判后端（detect_backend）
 2  若为 overlay 且不在用户命名空间内 → 把自身 re-exec 进 `unshare -Urm`，重新从第 1 步开始
 3  create_task_workspace，随即 save_workspace 落库
-4  对每个 --effect：写 PLANNED → AUTHORIZED → EXECUTING（第 6.3 节）
+4  先查一次策略（第 6.3/6.7 节：authorization 要记裁决结果），再对每个 --effect：
+   写 PLANNED → AUTHORIZED → EXECUTING（第 6.3 节）
    —— 若幂等键已存在记录，在此拒绝整条命令 ——
 5  在 Sandbox 内运行 --exec，工作目录为 Task 根
 6  命令退出码 0 → 各 Effect 写 COMMITTED；非 0 → 写 FAILED
-7  若给 --apply **且命令退出码为 0**：查策略 → 按裁决铸造或不铸造批准值 → 经 Gate 应用
+7  若给 --apply **且命令退出码为 0**：按第 4 步已得的裁决铸造或不铸造批准值 → 经 Gate 应用
 8  若**未给 --apply，或命令退出码非 0**：经 IntegrationGate::discard 成功后再 remove_workspace
 ```
 
@@ -157,10 +158,22 @@ Task 9 起初正是那么写的（当时的 brief 也那么写），Task 12 的�
 未被批准」那一支才值得付。
 
 **第 7 步裁决为「不铸造」时（含第 1 级 Deny）：拒绝集成，但保留工作区**——不 `discard`。
-用户的改动仍在 Task 里，给出 `--approve` 后可重跑。丢弃一份未被批准的改动会让用户
-无从恢复，而保留它的代价只是一个目录。
+用户的改动仍在 Task 里，丢弃一份未被批准的改动会让用户无从恢复，而保留它的代价只是一个目录。
+
+**但「保留」不等于「可经本驱动重跑」——这一点必须写实。** 原句曾写「给出 `--approve` 后可重跑」，
+**那是假的**：第二次运行的第 3 步 `create_task_workspace` 必然失败——worktree 后端会撞上
+`fatal: a branch named '<分支>' already exists`，overlay 后端显式拒绝已存在的 Intent 目录；
+两个后端都造不出重跑。若第一次还声明过 `--effect`，幂等键会再拒一次。故保留工作区的实际含义是
+**用户可进该 Task 工作区自行处理（手工 git）**；经本驱动的重跑目前**不可行**（见 `p2-followups.md`
+第九节，属后续阶段要决定的「续跑」能力）。
 
 `--apply` 与「集成被拒」是两件事：前者是请求，后者是结果。请求了但被拒，工作区不清理。
+
+**策略只查一次，位置在第 4 步（写效应之前）**，第 7 步复用该裁决、不再第二次查——
+`authorization` 要记裁决结果（第 6.7 节），而它在 `PLANNED` 时就写下（第 6.3 节），
+故裁决必须在那之前已有。**今天该「只查一次」不可观察**（`PolicyContext` 除
+`explicit_current` 外全为 `None`，早查晚查同结果）；**若日后注入 `duration_ms` 之类，
+这个次序要重审**（命令时长只有跑完才知道）。
 
 第 2 步的判定**必须排在创建任何东西之前**——否则会建出一个子进程看不见的工作区
 （设计上篇 §5）。re-exec 用环境变量标识「已经进来过」，防止递归。
@@ -417,7 +430,9 @@ send_email / push_branch / publish / delete_remote / charge / deploy
 ```rust
 /// 集成授权的唯一产生点。
 ///
-/// `digest` 由 base 根、task 根与 `view_diff` 的结果派生，使这一枚**只对这一次集成**有效。
+/// `digest` 由 base 根、task 根**与两棵树的内容摘要**派生，使这一枚**只对这一次集成**有效。
+/// **不是「`view_diff` 的结果」**——只喂差异清单的算法在「改 Base 侧 Task 没碰过的文件」时
+/// 恰好看不出差异，即 fail-open；内容摘要是清单判据的**超集**，故取内容。
 /// 调用方须先取得授权（第 5.7 节）；Capability 与 Authority 就位后，产生点移交给那一处。
 pub fn approve_integration(
     base: &BaseWorkspace,
@@ -428,8 +443,9 @@ pub fn approve_integration(
 
 Gate 在写入前重算摘要并比对，不匹配即拒。**伪造一枚也换不了另一次集成的授权。**
 
-摘要的算法是本子项目定的（具体形式由实现定，须写进文档）。它与 `view_diff` 的结果相关，
-故**在集成前改动 Base 会使摘要失配**——这是刻意的：批准的是「把当前这份差异应用过去」。
+摘要的算法是本子项目定的（具体形式由实现定，须写进文档）。它取**两棵树的内容**，
+故**在集成前改动 Base 会使摘要失配**（**包括 Task 没碰过的文件**）——这是刻意的：
+批准的是「把当前这份差异应用过去」。
 
 ---
 
@@ -511,7 +527,8 @@ P4 的 Current Contract --approve 占第 2 级是占位。P4 就位后须决定�
 --approve 的定级      按 §105 字面取「显式当前指令高于用户持久策略」，
                       故一个命令行开关可推翻持久策略。若日后判定 Deny 应更硬，须改这里。
 摘要算法              approve_integration 的摘要形式由实现定，须写进文档。
-                      它与 view_diff 的结果相关，故集成前改动 Base 会使摘要失配——刻意的。
+                      它取两棵树的内容（非 view_diff 的差异清单），故集成前改动 Base
+                      ——包括 Task 没碰过的文件——会使摘要失配。刻意的。
 PolicyContext 的扩充  新增字段会让原本不匹配的规则开始匹配。每次扩充须重审既有规则。
 两个 crate 的消费者    Policy Engine 的消费者是驱动的集成路径（第 5.7 节）；
                       Effect Journal 的消费者是驱动的效应声明（第 6.3 节）。

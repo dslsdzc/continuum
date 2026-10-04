@@ -237,8 +237,12 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 
 - **`ArtifactType` 有两份独立的编解码表**（Task 4 复审发现）：
   `crates/continuum-artifact/src/persist.rs` 与 `crates/continuum-graph/src/persist.rs` 各一份，
-  取值逐字相同。**这是活的重复**，与 Task 4 已消除的 `EffectType`/`PrivacyClass` 那一类同形，
-  只是当时不在该 task 的 diff 内故未动。
+  取值逐字相同。**这是活的重复**，与 Task 4 已消除的 `EffectType`/`PrivacyClass` 那一类同形。
+  **订正一处错误的说辞**：这里原写「当时不在该 task 的 diff 内故未动」——**不成立**。
+  Task 4 的 commit `16134e1`（「枚举编码提为类型自己的方法」）**编辑的正是
+  `crates/continuum-artifact/src/persist.rs`**，把 `PrivacyClass` 的编解码搬到类型上，
+  却把**同一个文件里** `ArtifactType` 的两张表原样留成自由函数——同一文件里两种形态并存。
+  全分支终审核出此点。（留一条不实的理由比缺陷本身更坏。）
 - **`PrivacyClass` 的 serde 派生未被收掉**（Task 4）。当天查得无消费方，尚未构成第二套表示，
   但 `Artifact` 自身派生 `Serialize` 且字段含 `privacy_class`，**单独摘掉会让 `Artifact` 的派生
   编译不过**，故不是可独立移除的。已在该枚举的文档注释里写明「今天无序列化路径，但
