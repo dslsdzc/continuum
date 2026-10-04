@@ -286,7 +286,13 @@ git commit -m "feat(capability): 五要素与三条结构性保证"
 **Files:**
 - Create: `crates/continuum-capability/src/tool.rs`
 - Modify: `crates/continuum-capability/src/{lib.rs,error.rs}`
+- Modify: `crates/continuum-capability/Cargo.toml`（加 `continuum-core`、`serde_json`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-capability` 条目加 `continuum-core`）
 - Create: `crates/continuum-capability/tests/tool.rs`
+
+> **依赖边与 `ALLOWED` 必须同步改**（本条是计划原稿的漏项）：本 task 起用 `continuum-core` 的 `ToolId`，
+> 故 `Cargo.toml` 与 `ALLOWED` 各加一条。那张表的断言是逐对 `assert_eq!`，只改一处会红——**两处一起改**。
+> 同一漏项在 Task 4（`continuum-persist`）与 Task 5（`continuum-events`）各有一份，已一并补进那两节。
 
 **Interfaces:**
 - Consumes: Task 1 的 `CapabilityKind`；**既有的** `continuum_core::tool::ToolId`（`crates/continuum-core/src/tool.rs`，§316 的 ToolProvider 接口类型，`continuum-provider` 已在用）
@@ -359,6 +365,8 @@ git commit -m "feat(capability): Tool 与 ToolProfile"
 **Files:**
 - Create: `crates/continuum-capability/src/persist.rs`
 - Modify: `crates/continuum-capability/src/{lib.rs,error.rs}`
+- Modify: `crates/continuum-capability/Cargo.toml`（加 `continuum-persist`；dev-dep `tempfile`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-capability` 条目加 `continuum-persist`）
 - Create: `crates/continuum-capability/tests/persist.rs`
 - Modify: `crates/continuum-runtime/src/main.rs`（迁移装配）
 - Modify: `crates/continuum-runtime/tests/{migrations.rs,startup.rs}`（连带断言）
@@ -429,6 +437,8 @@ git commit -m "feat(capability): tool 表与读写"
 **Files:**
 - Create: `crates/continuum-capability/src/registry.rs`
 - Modify: `crates/continuum-capability/src/{lib.rs,error.rs}`
+- Modify: `crates/continuum-capability/Cargo.toml`（加 `continuum-events`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-capability` 条目加 `continuum-events`）
 - Create: `crates/continuum-capability/tests/authorize.rs`
 
 **Interfaces:**
