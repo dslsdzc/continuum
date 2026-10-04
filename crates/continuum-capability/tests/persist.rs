@@ -61,6 +61,29 @@ fn unregistered(id: &str) -> ToolProfile {
     ToolProfile::new(sample(id), None, None, Trust)
 }
 
+/// 无外部副作用（`effect_class` 为 `None`）、非确定、且尚未登记画像。
+///
+/// 这条画像专门给**解码侧**用：`effect_class = None` 与 `deterministic = false`
+/// 是「fail-open 的那一侧」——把它们默认成某个 `EffectType` / `true`，工具会被当成
+/// 有副作用的确定性工具。故这条必须经 `load_tool` 读回并逐字段断言，只在写侧查原始
+/// 列值不够（复审 Important）。
+fn pure(id: &str) -> ToolProfile {
+    ToolProfile::new(
+        Tool::new(
+            ToolId::new(id),
+            "0.1".to_owned(),
+            json!({}),
+            json!({}),
+            vec![],
+            None,
+            false,
+        ),
+        None,
+        None,
+        Trust,
+    )
+}
+
 fn text_of(v: &Value) -> String {
     match v {
         Value::Text(s) => s.clone(),
@@ -118,9 +141,11 @@ fn tool_round_trips() {
     // 空表读出空表，不是错误
     assert!(load_tools(&tx).unwrap().is_empty(), "空表应读出空列表");
 
-    // 两种画像状态各存一条：`Some`（画像已登记）与 `None`（尚未登记）。
-    // 两者都必须往返——设计 §10 第 9 条禁止让 `Some` 一侧不可观察。
-    for profile in [registered("a"), unregistered("b")] {
+    // 三种画像状态各存一条，且都**经 `load_tool` 读回**：
+    // `Some`（画像已登记）、`None`（尚未登记），以及 `pure`（无外部副作用、非确定）。
+    // 三者都必须往返——设计 §10 第 9 条禁止让 `Some` 一侧不可观察；`pure` 一侧是
+    // `effect_class` / `deterministic` 两个解码分支的 fail-open 侧（复审 Important）。
+    for profile in [registered("a"), unregistered("b"), pure("c")] {
         save_tool(&tx, &profile).unwrap();
         let back = load_tool(&tx, profile.tool().id())
             .unwrap()
@@ -132,11 +157,30 @@ fn tool_round_trips() {
     // 逐格钉住两侧画像状态，别让上面的整结构比对独自承担
     let a = load_tool(&tx, &ToolId::new("a")).unwrap().unwrap();
     let b = load_tool(&tx, &ToolId::new("b")).unwrap().unwrap();
+    let c = load_tool(&tx, &ToolId::new("c")).unwrap().unwrap();
     assert_eq!(a.cost(), Some(Cost), "已登记画像应读回 Some(Cost)");
     assert_eq!(a.latency(), Some(Latency), "已登记画像应读回 Some(Latency)");
     assert_eq!(b.cost(), None, "尚未登记画像应读回 None");
     assert_eq!(b.latency(), None, "尚未登记画像应读回 None");
     assert_eq!((a.trust(), b.trust()), (Trust, Trust));
+    // `effect_class` 的两个方向都经 `load_tool` 钉住：`Some` 侧不许丢，`None` 侧
+    // 不许被默认成任何 `EffectType`（纯计算/只读工具被当成有外部副作用是 fail-open）
+    assert_eq!(
+        a.tool().effect_class(),
+        Some(EffectType::DeleteRemote),
+        "有外部副作用的工具应读回其类型"
+    );
+    assert_eq!(
+        c.tool().effect_class(),
+        None,
+        "无外部副作用必须读回 None，不得默认成某个 EffectType"
+    );
+    // `deterministic` 的两个方向同理
+    assert!(a.tool().deterministic(), "deterministic=true 应读回 true");
+    assert!(
+        !c.tool().deterministic(),
+        "deterministic=false 必须读回 false，不得默认成 true"
+    );
 
     // 不存在的 id 是 `None`，不是错误
     assert!(
@@ -146,9 +190,10 @@ fn tool_round_trips() {
 
     // 全量读按 id 升序
     let all = load_tools(&tx).unwrap();
-    assert_eq!(all.len(), 2);
+    assert_eq!(all.len(), 3);
     assert_eq!(all[0].tool().id().as_str(), "a");
     assert_eq!(all[1].tool().id().as_str(), "b");
+    assert_eq!(all[2].tool().id().as_str(), "c");
 
     tx.commit().unwrap();
 }
@@ -183,12 +228,21 @@ fn enum_columns_use_the_lowercase_encoding() {
     assert_eq!(text_of(&rows[0][4]), "");
     assert_eq!(int_of(&rows[0][5]), 1, "deterministic 的 true 应落成 1");
 
-    // 形态：元素是小写、多词以 _ 连接，且**不是** Debug 表示（Debug 含大写）
-    for element in ["filesystem_read", "git_worktree_write"] {
+    // 形态：对被写进去的**实际 kind 值**断言（不是对上面手写的字面量再数一遍——
+    // 那样只有人改了字面量才会红，读起来却像覆盖了编码性质）。`as_str()` 必须是小写、
+    // 多词以 `_` 连接，且不得含 `action()` 的点号（Debug 表示含大写，同样被排除）。
+    for kind in [
+        CapabilityKind::Filesystem(FsAction::Read),
+        CapabilityKind::Git(GitAction::WorktreeWrite),
+    ] {
+        let encoded = kind.as_str();
         assert!(
-            !element.is_empty()
-                && element.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
-            "落库编码应为小写、多词以 _ 连接（Debug 表示含大写），实际 {element}"
+            !encoded.is_empty() && encoded.chars().all(|c| c.is_ascii_lowercase() || c == '_'),
+            "落库编码应为小写、多词以 _ 连接（Debug 表示含大写），{kind:?} 给出 {encoded}"
+        );
+        assert!(
+            !encoded.contains('.'),
+            "落库编码不得含 action() 的点号，{kind:?} 给出 {encoded}"
         );
     }
     assert!(
@@ -196,25 +250,8 @@ fn enum_columns_use_the_lowercase_encoding() {
         "落库编码不得是 Debug 表示"
     );
 
-    // deterministic 的 false 一侧同样有照片
-    save_tool(
-        &tx,
-        &ToolProfile::new(
-            Tool::new(
-                ToolId::new("b"),
-                "1".to_owned(),
-                json!({}),
-                json!({}),
-                vec![],
-                None,
-                false,
-            ),
-            None,
-            None,
-            Trust,
-        ),
-    )
-    .unwrap();
+    // deterministic 的 false 与 effect_class 的 NULL 一侧同样有照片（写侧）
+    save_tool(&tx, &pure("b")).unwrap();
     let rows = tx
         .query("SELECT deterministic, effect_class FROM tool WHERE id = 'b'", &[])
         .unwrap();
@@ -380,9 +417,62 @@ fn an_unknown_enum_column_value_is_rejected() {
             other => panic!("{id}: 应为 PersistError::Database 变体，实际 {other:?}"),
         }
     }
-    assert!(
-        load_tool(&tx, &ToolId::new("ok")).unwrap().is_some(),
-        "合法行应读得回来（对照臂）"
+    // 对照臂不只看「读得回来」，还逐项断言两个可空/布尔列的原值——否则
+    // 「合法行」这一侧也是只钉了「没报错」，`effect_class` / `deterministic` 的
+    // fail-open 默认仍能活过本用例
+    let ok = load_tool(&tx, &ToolId::new("ok"))
+        .unwrap()
+        .expect("合法行应读得回来（对照臂）");
+    assert_eq!(ok.tool().effect_class(), None, "对照臂的 effect_class 应为 None");
+    assert!(!ok.tool().deterministic(), "对照臂的 deterministic 应为 false");
+
+    tx.commit().unwrap();
+}
+
+/// 列类型不符（[`PersistError::ColumnType`]）与列缺失两条错误臂各有照片。
+///
+/// SQLite 的 TEXT 亲和列会把整数转成文本，故「类型不符」用 **BLOB** 制造：blob 不被
+/// 亲和转换，读回是 [`Value::Blob`]，`text_at` / `int_at` 都收窄不了。
+/// 列缺失那一臂库侧没有产生方（`SELECT` 的列清单固定），照片在 `src/persist.rs` 的
+/// 单元用例 `a_short_row_reports_the_missing_column`。
+#[test]
+fn a_column_of_the_wrong_type_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    // version（第 1 列）与 deterministic（第 6 列）各写一个 BLOB，其余列合法
+    tx.execute(
+        "INSERT INTO tool
+           (id, version, input_schema, output_schema, required_capabilities,
+            effect_class, deterministic, cost, latency, trust)
+         VALUES ('bad_version', ?1, '{}', '{}', '[]', NULL, 0, NULL, NULL, '')",
+        &[Value::Blob(vec![1, 2, 3])],
+    )
+    .unwrap();
+    tx.execute(
+        "INSERT INTO tool
+           (id, version, input_schema, output_schema, required_capabilities,
+            effect_class, deterministic, cost, latency, trust)
+         VALUES ('bad_det', '1', '{}', '{}', '[]', NULL, ?1, NULL, NULL, '')",
+        &[Value::Blob(vec![1, 2, 3])],
+    )
+    .unwrap();
+
+    // 断言是**哪一种** Err（哪个下标、实际类型），不是「返回了 Err」
+    assert_eq!(
+        load_tool(&tx, &ToolId::new("bad_version")).unwrap_err(),
+        PersistError::ColumnType {
+            index: 1,
+            actual: "blob",
+        },
+        "version 列是 BLOB，应报第 1 列类型不符"
+    );
+    assert_eq!(
+        load_tool(&tx, &ToolId::new("bad_det")).unwrap_err(),
+        PersistError::ColumnType {
+            index: 6,
+            actual: "blob",
+        },
+        "deterministic 列是 BLOB，应报第 6 列类型不符"
     );
 
     tx.commit().unwrap();

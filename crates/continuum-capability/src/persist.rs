@@ -209,50 +209,80 @@ fn row_to_profile(row: &[Value]) -> Result<ToolProfile, PersistError> {
     ))
 }
 
-/// 按下标取文本列。列类型不符报 [`PersistError::ColumnType`]，
-/// 形态与 `continuum-persist` 的 `Tx::audit_records` 同（那里的 `text_at`）。
-/// 列缺失（`None`）也算类型不符，`actual` 记 `"missing"`。
+/// 按下标取列，用 `convert` 把该列的 [`Value`] 收窄到 `T`。
+///
+/// **`PersistError::ColumnType` 只在本函数里构造一处**：三个具体取列函数
+/// （[`text_at`] / [`optional_text_at`] / [`int_at`]）只提供各自的 `convert`，
+/// 不各写一遍 index / `kind_name` / `"missing"` 的映射。形态与
+/// `continuum-persist` 的 `Tx::audit_records` 同（那里的 `text_at`）。
+///
+/// 收窄不了的两种情形都报同一变体，靠 `actual` 区分：列在但类型不符记该值的
+/// [`kind_name`]；列缺失（`convert` 根本没被调到）记 `"missing"`。
+fn column_at<T>(
+    row: &[Value],
+    index: usize,
+    convert: impl Fn(&Value) -> Option<T>,
+) -> Result<T, PersistError> {
+    row.get(index)
+        .and_then(convert)
+        .ok_or_else(|| PersistError::ColumnType {
+            index,
+            actual: row.get(index).map_or("missing", kind_name),
+        })
+}
+
+fn as_text(v: &Value) -> Option<String> {
+    match v {
+        Value::Text(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn as_int(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int(i) => Some(*i),
+        _ => None,
+    }
+}
+
+/// `NULL` 收窄成 `Some(None)`（「该列是空的」也是一个可观察的结果，不是收窄失败），
+/// 文本收窄成 `Some(Some(text))`，其余 `None`（收窄失败）。
+fn as_optional_text(v: &Value) -> Option<Option<String>> {
+    match v {
+        Value::Null => Some(None),
+        Value::Text(s) => Some(Some(s.clone())),
+        _ => None,
+    }
+}
+
 fn text_at(row: &[Value], index: usize) -> Result<String, PersistError> {
-    match row.get(index) {
-        Some(Value::Text(s)) => Ok(s.clone()),
-        Some(other) => Err(PersistError::ColumnType {
-            index,
-            actual: kind_name(other),
-        }),
-        None => Err(PersistError::ColumnType {
-            index,
-            actual: "missing",
-        }),
-    }
+    column_at(row, index, as_text)
 }
 
-/// 按下标取可空文本列：`NULL` → `None`，文本 → `Some`，其余报错（形态同 [`text_at`]）。
+/// `NULL` → `None`，文本 → `Some`，其余报错。
 fn optional_text_at(row: &[Value], index: usize) -> Result<Option<String>, PersistError> {
-    match row.get(index) {
-        Some(Value::Null) => Ok(None),
-        Some(Value::Text(s)) => Ok(Some(s.clone())),
-        Some(other) => Err(PersistError::ColumnType {
-            index,
-            actual: kind_name(other),
-        }),
-        None => Err(PersistError::ColumnType {
-            index,
-            actual: "missing",
-        }),
-    }
+    column_at(row, index, as_optional_text)
 }
 
-/// 按下标取整数列，报错形态同 [`text_at`]。
 fn int_at(row: &[Value], index: usize) -> Result<i64, PersistError> {
-    match row.get(index) {
-        Some(Value::Int(i)) => Ok(*i),
-        Some(other) => Err(PersistError::ColumnType {
-            index,
-            actual: kind_name(other),
-        }),
-        None => Err(PersistError::ColumnType {
-            index,
-            actual: "missing",
-        }),
+    column_at(row, index, as_int)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `actual: "missing"` 那一臂在集成测试里**没有产生方**：`SELECT` 的列清单固定，
+    /// 库侧不会给出短行（`NULL` 是 [`Value::Null`]，不是缺列）。故直接喂一行空列，
+    /// 钉住 `column_at` 对「列缺失」的处置——否则这条错误臂无照片。
+    #[test]
+    fn a_short_row_reports_the_missing_column() {
+        assert_eq!(
+            row_to_profile(&[]).unwrap_err(),
+            PersistError::ColumnType {
+                index: 0,
+                actual: "missing",
+            }
+        );
     }
 }
