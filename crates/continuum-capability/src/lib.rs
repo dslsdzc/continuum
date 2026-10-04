@@ -1,20 +1,24 @@
 //! Capability：能力的半封闭词汇表，以及它与 `EffectType` 的对应（设计第 2 节）。
 //!
-//! 分三层：
+//! 分四层：
 //! - [`capability`]：resource 的封闭枚举与各自的动作集、`EffectType` 的对应，
 //!   以及 §253 的五要素 [`Capability`] 与它唯一的签发点 [`mint`]；
 //! - [`tool`]：§252 的工具定义 [`Tool`] 与 §87 的登记项 [`ToolProfile`]；
+//! - [`persist`]：`tool` 表的迁移与行级读写（设计第 3.3、7 节）；
 //! - [`error`]：本 crate 的错误类型。
 //!
-//! 本 crate 不含 I/O。落库（`tool` 表，设计第 3.3 节）由后续 task 接上，
-//! 届时经 `continuum-persist` 的 `Tx` 访问，该依赖也在那时才声明。
+//! 本 crate 不持有数据库连接：落库经 `continuum-persist` 的 `Tx` 访问（该依赖自
+//! Task 4 起声明），与 `continuum-core` 的「不含 I/O」是同一条边界。
 //!
-//! **凭据不落库**：`Capability` 只在内存中传递（设计第 2.3 节），故本 crate 至今
-//! 没有任何枚举落库编码——[`Capability::resource`] / [`Capability::action`] 返回的
-//! 串是 §253 的展示词汇，不是库列编码（它按给例照录，不按落库约定拼）。
+//! **凭据不落库**：`Capability` 本体只在内存中传递（设计第 2.3 节）。本 crate 落库的
+//! 是 [`Tool`] / [`ToolProfile`]，其枚举落库编码为 [`CapabilityKind::as_str`]
+//! （`required_capabilities` 列的元素）。[`Capability::resource`] /
+//! [`Capability::action`] 返回的是 §253 的展示词汇，**不是**库列编码（按给例照录，
+//! 不按落库约定拼；两者取值不同，见 [`CapabilityKind::action`] 的文档）。
 
 pub mod capability;
 pub mod error;
+pub mod persist;
 pub mod tool;
 
 pub use capability::{
@@ -22,6 +26,7 @@ pub use capability::{
     PaymentAction, RegistryAction, mint,
 };
 pub use error::CapabilityError;
+pub use persist::{load_tool, load_tools, p3_capability_migrations, save_tool};
 pub use tool::{Cost, Latency, Tool, ToolProfile, Trust};
 
 /// §252 的 `Tool.id` 与 §316 的 ToolProvider 接口类型**是同一个类型**：

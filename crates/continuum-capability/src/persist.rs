@@ -1,0 +1,258 @@
+//! `tool` 表的迁移、编码适配与行级读写（设计 §3.3、§7）。
+//!
+//! 表定义、编码委托与行级读写同址（同 P2 的 `continuum-effect/src/persist.rs`）。
+//! **编码本体不在本文件**：
+//! - `required_capabilities` 的**元素**取自 [`CapabilityKind::as_str`] / `parse`；
+//! - `effect_class` 取自 `continuum-effect` 既有的 [`EffectType::as_str`] / `parse`，
+//!   **不自建第二份**；
+//! - `cost` / `latency` / `trust` 取自 [`Cost`] / [`Latency`] / [`Trust`] 自己的
+//!   那一对函数。
+//!
+//! 本文件只做两件适配：`required_capabilities` 的**容器**（JSON 字符串数组，与
+//! `continuum-graph` 的 `adfir_node.capabilities` 列同形），以及**列 ↔ `Option`**
+//! （`NULL` ↔ `None`）。表外取值一律转成 [`PersistError`]，**不取默认值**。
+
+use continuum_core::tool::ToolId;
+use continuum_effect::EffectType;
+use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
+use serde_json::Value as JsonValue;
+
+use crate::capability::CapabilityKind;
+use crate::tool::{Cost, Latency, Tool, ToolProfile, Trust};
+
+/// 列清单只写一份：两条读路径（按 id、全量）共用同一列序，`row_to_profile` 按它
+/// 取列，列序改了只有一处要改。
+const COLUMNS: &str = "id, version, input_schema, output_schema, required_capabilities, \
+                       effect_class, deterministic, cost, latency, trust";
+
+/// 本 crate 在 `tool` 表上注册的迁移。
+///
+/// 编号 50：1、2 是 `continuum-persist` 的内建（events、audit_log），10 是 P1 的
+/// artifact，20 是 P1 的 graph，30 是 P2 的 workspace，40 是 P2 的 effect，41 是 P2
+/// 的 policy——七条都在**本驱动装配的那个集合**里，50 在该集合里未被占用（唯一性由
+/// `crates/continuum-runtime/tests/migrations.rs` 的 `migration_versions_are_unique`
+/// 逐条断言）。
+///
+/// **「未被占用」是按库说的，不是全仓**：`crates/continuum-persist/tests/recovery.rs`
+/// 的 `db_with_probe()` 另有一张探针表也用编号 50，但它只与 `builtin_migrations()`
+/// 一起开库，与驱动的集合**永不同库**，故不冲突。本段先前写的是「50 未被占用」，
+/// 那是全仓层面的假命题——「我 grep 到的那些」不等于全集，这条订正留在此处。
+pub fn p3_capability_migrations() -> Vec<Migration> {
+    vec![Migration::new(
+        50,
+        "p3_capability",
+        "CREATE TABLE tool (
+            id                     TEXT PRIMARY KEY,
+            version                TEXT NOT NULL,
+            input_schema           TEXT NOT NULL,
+            output_schema          TEXT NOT NULL,
+            required_capabilities  TEXT NOT NULL,
+            effect_class           TEXT,
+            deterministic          INTEGER NOT NULL,
+            cost                   TEXT,
+            latency                TEXT,
+            trust                  TEXT NOT NULL
+        );",
+    )]
+}
+
+/// 插入一条登记项。调用方（Task 5 起是 Registry 的装载方）负责给出完整的画像。
+///
+/// 裸 `INSERT`，不 `OR REPLACE`：同 id 的第二次写入由主键拒绝，判据在库层而非调用方
+/// 自查（设计 §3.3；与 `effect` 表的唯一索引同一条判据）。
+/// `tests/persist.rs` 的 `saving_the_same_id_twice_is_rejected` 断言被拒后原行不变。
+pub fn save_tool(tx: &Tx<'_>, profile: &ToolProfile) -> Result<(), PersistError> {
+    let tool = profile.tool();
+    tx.execute(
+        "INSERT INTO tool
+           (id, version, input_schema, output_schema, required_capabilities,
+            effect_class, deterministic, cost, latency, trust)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        &[
+            Value::text(tool.id().as_str()),
+            Value::text(tool.version()),
+            Value::text(to_json(tool.input_schema(), "input_schema")?),
+            Value::text(to_json(tool.output_schema(), "output_schema")?),
+            Value::text(encode_capabilities(tool.required_capabilities())?),
+            match tool.effect_class() {
+                Some(effect) => Value::text(effect.as_str()),
+                None => Value::Null,
+            },
+            Value::Int(if tool.deterministic() { 1 } else { 0 }),
+            presence(profile.cost().as_ref().map(Cost::as_str)),
+            presence(profile.latency().as_ref().map(Latency::as_str)),
+            Value::text(profile.trust().as_str()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 按 id 读一条登记项。不存在返回 `None`。
+pub fn load_tool(tx: &Tx<'_>, id: &ToolId) -> Result<Option<ToolProfile>, PersistError> {
+    let rows = tx.query(
+        &format!("SELECT {COLUMNS} FROM tool WHERE id = ?1"),
+        &[Value::text(id.as_str())],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    Ok(Some(row_to_profile(&row)?))
+}
+
+/// 全部登记项，按 id 升序（顺序固定，调用方才不必自己排）。
+pub fn load_tools(tx: &Tx<'_>) -> Result<Vec<ToolProfile>, PersistError> {
+    tx.query(&format!("SELECT {COLUMNS} FROM tool ORDER BY id"), &[])?
+        .iter()
+        .map(|row| row_to_profile(row))
+        .collect()
+}
+
+/// 存在性编码：`None` → `NULL`（尚未登记画像），`Some(字面量)` → 该字面量。
+fn presence(literal: Option<&'static str>) -> Value {
+    match literal {
+        Some(s) => Value::text(s),
+        None => Value::Null,
+    }
+}
+
+/// `required_capabilities` 的容器编码：JSON 字符串数组。
+///
+/// 元素一律取自 [`CapabilityKind::as_str`]，**不派生 serde、不用 `Debug`**。容器选
+/// JSON 数组是因为本仓已有同形的列（`continuum-graph` 的 `adfir_node.capabilities`），
+/// 且数组里的元素是自由文本、定长分隔符（如逗号）在有取值域的那天会撞上取值本身。
+fn encode_capabilities(kinds: &[CapabilityKind]) -> Result<String, PersistError> {
+    let names: Vec<&str> = kinds.iter().map(CapabilityKind::as_str).collect();
+    serde_json::to_string(&names)
+        .map_err(|e| PersistError::Database(format!("required_capabilities 不可序列化为 JSON: {e}")))
+}
+
+/// [`encode_capabilities`] 的逆。表外元素报 [`PersistError::Database`]，
+/// 不跳过也不取默认 kind。
+fn decode_capabilities(s: &str) -> Result<Vec<CapabilityKind>, PersistError> {
+    let names: Vec<String> = serde_json::from_str(s).map_err(|e| {
+        PersistError::Database(format!("required_capabilities 不是字符串数组（{s}）: {e}"))
+    })?;
+    names
+        .iter()
+        .map(|name| {
+            CapabilityKind::parse(name)
+                .ok_or_else(|| PersistError::Database(format!("未知 CapabilityKind: {name}")))
+        })
+        .collect()
+}
+
+fn to_json(value: &JsonValue, column: &str) -> Result<String, PersistError> {
+    serde_json::to_string(value)
+        .map_err(|e| PersistError::Database(format!("{column} 不可序列化为 JSON: {e}")))
+}
+
+fn parse_json(s: &str, column: &str) -> Result<JsonValue, PersistError> {
+    serde_json::from_str(s)
+        .map_err(|e| PersistError::Database(format!("{column} 不是合法 JSON: {e}")))
+}
+
+/// 一行 → 登记项。列序与 [`COLUMNS`] 一一对应。
+///
+/// 每条枚举列的**表外取值**都在此转成具体 `Err`，不取默认值——把串猜成另一枚能力或
+/// 另一个效应类型，正是设计要拦的（同 [`EffectType::parse`] 的文档）。
+fn row_to_profile(row: &[Value]) -> Result<ToolProfile, PersistError> {
+    let id = ToolId::new(text_at(row, 0)?);
+    let input_schema = parse_json(&text_at(row, 2)?, "input_schema")?;
+    let output_schema = parse_json(&text_at(row, 3)?, "output_schema")?;
+    let required_capabilities = decode_capabilities(&text_at(row, 4)?)?;
+
+    let effect_class = match optional_text_at(row, 5)? {
+        None => None,
+        Some(raw) => Some(EffectType::parse(&raw).ok_or_else(|| {
+            PersistError::Database(format!("未知 EffectType: {raw}"))
+        })?),
+    };
+
+    // 布尔列只认 0 / 1；其它整数值是表外取值，不当作真值
+    let deterministic = match int_at(row, 6)? {
+        0 => false,
+        1 => true,
+        other => return Err(PersistError::Database(format!("未知 deterministic: {other}"))),
+    };
+
+    let cost = match optional_text_at(row, 7)? {
+        None => None,
+        Some(raw) => Some(
+            Cost::parse(&raw)
+                .ok_or_else(|| PersistError::Database(format!("未知 Cost: {raw}")))?,
+        ),
+    };
+    let latency = match optional_text_at(row, 8)? {
+        None => None,
+        Some(raw) => Some(
+            Latency::parse(&raw)
+                .ok_or_else(|| PersistError::Database(format!("未知 Latency: {raw}")))?,
+        ),
+    };
+    let raw_trust = text_at(row, 9)?;
+    let trust = Trust::parse(&raw_trust)
+        .ok_or_else(|| PersistError::Database(format!("未知 Trust: {raw_trust}")))?;
+
+    Ok(ToolProfile::new(
+        Tool::new(
+            id,
+            text_at(row, 1)?,
+            input_schema,
+            output_schema,
+            required_capabilities,
+            effect_class,
+            deterministic,
+        ),
+        cost,
+        latency,
+        trust,
+    ))
+}
+
+/// 按下标取文本列。列类型不符报 [`PersistError::ColumnType`]，
+/// 形态与 `continuum-persist` 的 `Tx::audit_records` 同（那里的 `text_at`）。
+/// 列缺失（`None`）也算类型不符，`actual` 记 `"missing"`。
+fn text_at(row: &[Value], index: usize) -> Result<String, PersistError> {
+    match row.get(index) {
+        Some(Value::Text(s)) => Ok(s.clone()),
+        Some(other) => Err(PersistError::ColumnType {
+            index,
+            actual: kind_name(other),
+        }),
+        None => Err(PersistError::ColumnType {
+            index,
+            actual: "missing",
+        }),
+    }
+}
+
+/// 按下标取可空文本列：`NULL` → `None`，文本 → `Some`，其余报错（形态同 [`text_at`]）。
+fn optional_text_at(row: &[Value], index: usize) -> Result<Option<String>, PersistError> {
+    match row.get(index) {
+        Some(Value::Null) => Ok(None),
+        Some(Value::Text(s)) => Ok(Some(s.clone())),
+        Some(other) => Err(PersistError::ColumnType {
+            index,
+            actual: kind_name(other),
+        }),
+        None => Err(PersistError::ColumnType {
+            index,
+            actual: "missing",
+        }),
+    }
+}
+
+/// 按下标取整数列，报错形态同 [`text_at`]。
+fn int_at(row: &[Value], index: usize) -> Result<i64, PersistError> {
+    match row.get(index) {
+        Some(Value::Int(i)) => Ok(*i),
+        Some(other) => Err(PersistError::ColumnType {
+            index,
+            actual: kind_name(other),
+        }),
+        None => Err(PersistError::ColumnType {
+            index,
+            actual: "missing",
+        }),
+    }
+}

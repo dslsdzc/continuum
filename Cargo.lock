@@ -70,7 +70,9 @@ version = "0.1.0"
 dependencies = [
  "continuum-core",
  "continuum-effect",
+ "continuum-persist",
  "serde_json",
+ "tempfile",
  "thiserror",
  "trybuild",
 ]
@@ -182,6 +184,7 @@ name = "continuum-runtime"
 version = "0.1.0"
 dependencies = [
  "continuum-artifact",
+ "continuum-capability",
  "continuum-core",
  "continuum-effect",
  "continuum-events",

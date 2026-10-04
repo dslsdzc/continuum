@@ -181,9 +181,50 @@ impl ToolProfile {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Cost;
 
-/// §87 的 `latency`，**单位结构体**：处置与理由同 [`Cost`]。
+impl Cost {
+    /// 「画像已登记」这一状态在 `tool.cost` 列上的编码：**空串**。
+    ///
+    /// [`Cost`] 的取值域为空（设计 §3.1：只定容器形状），故本串**不携带任何取值
+    /// 信息**，只表示「这个个体存在」。它与 `NULL` 的区别是全部信息量：列上
+    /// `NULL` = 尚未登记画像（[`Option::None`]），非 `NULL` = 已登记
+    /// （[`Option::Some`]）。列 ↔ `Option` 的适配在 `crate::persist`，本函数只管
+    /// 那个个体的串。
+    ///
+    /// **空串在这里不是「空 / 未知 / 未登记」**——「未登记」是 `NULL`。取空串而非某个
+    /// 非空字面量（如 `"default"`），是因为取值域为空时没有任何规范术语可依据，
+    /// 而非空字面量有被读成规范术语的风险。`tests/persist.rs` 的
+    /// `the_presence_encoding_has_exactly_one_literal` 两侧都钉（空串接受、表外取值
+    /// 拒绝）。
+    pub fn as_str(&self) -> &'static str {
+        ""
+    }
+
+    /// [`Cost::as_str`] 的**严格逆**：只接受空串，其余一律 `None`。
+    ///
+    /// `None` 而非默认个体：表外取值若被当成 `Cost` 会成为第二份表示（与
+    /// [`EffectType::parse`] 同一条理由）；调用方（`crate::persist`）把它转成具体
+    /// `Err`。
+    pub fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() { Some(Cost) } else { None }
+    }
+}
+
+/// §87 的 `latency`，**单位结构体**：处置与理由同 [`Cost`]（含 `as_str` / `parse`
+/// 那对存在性编码，行为与 [`Cost`] 逐字相同）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Latency;
+
+impl Latency {
+    /// 见 [`Cost::as_str`]：空串只表示「画像已登记」，`NULL` 才表示「尚未登记」。
+    pub fn as_str(&self) -> &'static str {
+        ""
+    }
+
+    /// 见 [`Cost::parse`]：只接受空串，表外取值一律 `None`。
+    pub fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() { Some(Latency) } else { None }
+    }
+}
 
 /// §87 的 `trust`，**单位结构体**：取值域留空（设计 §3.1）。
 ///
@@ -192,3 +233,19 @@ pub struct Latency;
 /// [`ToolProfile`] 的文档）。规范未给信任等级，本模块不发明。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Trust;
+
+impl Trust {
+    /// `tool.trust` 列上的编码：**空串**，且该列**恒非 `NULL`**。
+    ///
+    /// 与 [`Cost::as_str`] 同理，空串只是那个个体的名字（规范未给），**不是**
+    /// 「空 / 未知 / 无信任判定」——没有「尚未判定」这一状态（理由见 [`ToolProfile`]
+    /// 的文档），故这里没有 `NULL` 可用，`Option` 也不存在。
+    pub fn as_str(&self) -> &'static str {
+        ""
+    }
+
+    /// [`Trust::as_str`] 的**严格逆**：只接受空串，其余一律 `None`。
+    pub fn parse(s: &str) -> Option<Self> {
+        if s.is_empty() { Some(Trust) } else { None }
+    }
+}

@@ -155,9 +155,11 @@ impl CapabilityKind {
     /// 而不是只留在报告里，正是本项目「订正时把错误说法的来历留在原地」的手法：
     /// 后来者看到不对称会想改，得先看到这段。
     ///
-    /// 另：这里的串**不是落库编码**——[`Capability`] 不落库（设计 §2.3），本 crate 也
-    /// 没有任何枚举落库编码。它们是 §253 的展示词汇，只经 [`Display`](std::fmt::Display)
-    /// 出、不进。
+    /// 另：这里的串**不是落库编码**。它们是 §253 的展示词汇，只经
+    /// [`Display`](std::fmt::Display) 出；`Capability` 本体不落库（设计 §2.3）。
+    /// **落库的是 [`CapabilityKind::as_str`]**——本 crate 落库的枚举元素是
+    /// `Tool.required_capabilities` 里的 kind（Task 4 起），它用的是那一对编码函数，
+    /// 与此处逐项取值不同（见 [`CapabilityKind::as_str`]）。
     ///
     /// match 穷尽且无通配臂：加动作时本函数编译不过，串不会漏分支。逐项取值由
     /// `tests/capability.rs` 的 `resource_and_action_strings_follow_the_spec_examples`
@@ -177,6 +179,69 @@ impl CapabilityKind {
             Self::Payment(PaymentAction::Charge) => "charge",
             Self::Environment(EnvAction::Deploy) => "deploy",
         }
+    }
+
+    /// 落库编码（设计 §3.3）：小写，多词以 `_` 连接，`resource` 与 `action` 之间也以
+    /// `_` 连接。**本函数是该编码唯一的产生点**：`tool.required_capabilities` 列的元素
+    /// 写入取用它，解码侧取 [`CapabilityKind::parse`]。
+    ///
+    /// # 与 [`CapabilityKind::action`] **不是同一张串表**
+    ///
+    /// `action()` 复现 §88 / §253 的**展示词汇**，按给例照录，故
+    /// [`GitAction::WorktreeWrite`] 是 `worktree.write`（**点号**）——
+    /// 那个串里有 `.`，不满足落库编码「小写 + `_`」的约定，**不可**直接落库。
+    /// 本函数给出的是 `git_worktree_write`。
+    ///
+    /// 两者的照片：`tests/persist.rs` 的
+    /// `capability_kind_storage_encoding_round_trips_every_arm` 同时断言
+    /// `action() == "worktree.write"` 与 `as_str() == "git_worktree_write"`，
+    /// 并遍历全部十二个 kind。
+    ///
+    /// **不要「统一」这两个函数**：把 `action()` 改成下划线会产不出 §88 的字面串
+    /// `git.worktree.write`；把本函数改成点号会违反落库约定。不对称的来历同样记在
+    /// [`CapabilityKind::action`] 的文档里。
+    ///
+    /// match 穷尽且无通配臂：加 kind 时本函数编译不过，编码不会漏分支。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Filesystem(FsAction::Read) => "filesystem_read",
+            Self::Filesystem(FsAction::Write) => "filesystem_write",
+            Self::Git(GitAction::Read) => "git_read",
+            Self::Git(GitAction::WorktreeWrite) => "git_worktree_write",
+            Self::Git(GitAction::CommitLocal) => "git_commit_local",
+            Self::Git(GitAction::Push) => "git_push",
+            Self::Git(GitAction::DeleteRemote) => "git_delete_remote",
+            Self::Github(GithubAction::CreatePr) => "github_create_pr",
+            Self::Email(EmailAction::Send) => "email_send",
+            Self::Registry(RegistryAction::Publish) => "registry_publish",
+            Self::Payment(PaymentAction::Charge) => "payment_charge",
+            Self::Environment(EnvAction::Deploy) => "environment_deploy",
+        }
+    }
+
+    /// [`CapabilityKind::as_str`] 的**严格逆**：每个 kind 都有
+    /// `parse(k.as_str()) == Some(k)`，表外字符串一律 `None`。
+    ///
+    /// `None` 而非某个默认 kind：把表外串猜成另一枚能力，正是 §253 要拦的伪造路径
+    /// （与 [`EffectType::parse`] 同一条理由）。解码侧没有穷尽 match 的保护——来源是
+    /// `&str` 而非枚举，编译器点不出漏掉的臂，故由 `tests/persist.rs` 的
+    /// `capability_kind_storage_encoding_round_trips_every_arm` 遍历全部十二个 kind 兜住。
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "filesystem_read" => Self::Filesystem(FsAction::Read),
+            "filesystem_write" => Self::Filesystem(FsAction::Write),
+            "git_read" => Self::Git(GitAction::Read),
+            "git_worktree_write" => Self::Git(GitAction::WorktreeWrite),
+            "git_commit_local" => Self::Git(GitAction::CommitLocal),
+            "git_push" => Self::Git(GitAction::Push),
+            "git_delete_remote" => Self::Git(GitAction::DeleteRemote),
+            "github_create_pr" => Self::Github(GithubAction::CreatePr),
+            "email_send" => Self::Email(EmailAction::Send),
+            "registry_publish" => Self::Registry(RegistryAction::Publish),
+            "payment_charge" => Self::Payment(PaymentAction::Charge),
+            "environment_deploy" => Self::Environment(EnvAction::Deploy),
+            _ => return None,
+        })
     }
 }
 

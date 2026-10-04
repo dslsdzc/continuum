@@ -6,6 +6,9 @@ rust-version.workspace = true
 
 [dependencies]
 continuum-artifact = { path = "../continuum-artifact" }
+# Task 4 起：`main.rs` 的装配处注册 `p3_capability_migrations()`（`tool` 表由用它的
+# 那个 task 注册）。Task 7 接强制点 (2) 时另会用到它的类型。
+continuum-capability = { path = "../continuum-capability" }
 continuum-core = { path = "../continuum-core" }
 continuum-effect = { path = "../continuum-effect" }
 continuum-events = { path = "../continuum-events" }
