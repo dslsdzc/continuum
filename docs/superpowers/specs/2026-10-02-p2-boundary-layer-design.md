@@ -106,12 +106,17 @@ Integration Gate 与两种 Workspace 同 crate：三者共用同一批路径类�
 ```
 continuum-workspace  → continuum-persist, continuum-events
 continuum-sandbox    → continuum-workspace
-continuum-effect     → continuum-core, continuum-persist, continuum-events
-continuum-policy     → continuum-core, continuum-persist, continuum-artifact,
-                       continuum-effect
+continuum-effect     → continuum-persist, continuum-events
+continuum-policy     → continuum-persist, continuum-artifact, continuum-effect
 continuum-runtime    → continuum-workspace, continuum-sandbox, continuum-policy,
                        continuum-effect, 以及既有各 crate
 ```
+
+**订正（本图原列 `continuum-effect → continuum-core` 与 `continuum-policy → continuum-core`
+两条边，下篇实现时都未采用）**：`continuum-effect` 的 `core` 边在 P2 下篇 Task 1 即去掉
+（commit `bfdb29b`，该 crate 零引用它），`continuum-policy` 的在终审修复波去掉（同为零引用，
+见下篇设计 §3）。本图是**预测**，预测与实际不一致时以实际为准，故此处按实际订正——
+**留着一条已不存在的边，后来者照图办就会把它加回去**。
 
 `continuum-workspace → continuum-events` 由第 6.4 节要求：Gate 的审计记录经
 `Tx::append_audit` 写入，该函数的 `kind` 参数类型 `AuditKind` 定义在 `continuum-events`。
