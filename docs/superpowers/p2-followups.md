@@ -322,3 +322,41 @@ rustc 1.95 上仍 unstable（E0658），实测「加变体并补 `ordinal` 的�
 
 这与本项目那条既有认识同源：手写的计划文本事实错误率高，**正文措辞是约束、但约束之间会互相冲突**，
 冲突时要挑出哪一条与其余全部相容。
+
+### 9.8 上篇无生产调用方的 pub 项：逐项复核的结果（Task 12）
+
+口径：生产调用方 = `crates/continuum-runtime/src/` 里的引用（测试、以及被引用项自己所在的 crate
+都不算）。逐项核过 §2.1 的清单：
+
+- **已接线**：`detect_backend`、`create_task_workspace`、`WorkspaceRecord`、`save_workspace`、
+  `load_workspace`、`remove_workspace`、`discard_task_workspace`、`in_user_namespace`、
+  `Sandbox` / `SandboxCapabilities` / `SandboxError`、`GateError`、`WorkspaceError`。
+  `GateApproval` 的名字不出现在驱动里，但由 `approve_integration` 产生、`apply_patch` 消费，
+  是接上的——**按名字 grep 会漏判它**。
+- **仍无生产调用方，且是「入口越少越好」那条裁定的直接后果**（协调者点名了前两项）：
+  - `IntegrationGate::cherry_pick`、`IntegrationGate::merge`；
+  - `IntegrationGate::view_diff`、`IntegrationGate::discard`——**裁定当时只点了前两项，这两项
+    是同一理由的推论**。设计 §4.2 第 7 步只走 `apply_patch`，第 8 步只走 `discard_task_workspace`
+    （那是 workspace 的同名函数，不是 Gate 的方法）。`view_diff` 另在批准值摘要的文档里被引作
+    「摘要与它相关」，但摘要算的是 `tree_digest`，**并不调用它**——那句话是语义关联，不是调用关系。
+- **`OverlayBackend`：零引用，连 `continuum-workspace` 内也没有。** 它是文档载体——一个单元
+  结构体，承载 overlay 后端的命名空间约束与 `.ai/` 可见性说明；驱动用的是
+  `WorkspaceBackend::Overlay` 与 `in_user_namespace`，没有它可接线的地方。**是否删掉这个空壳属
+  上篇的范围**，此处只记事实，不算漏接线。
+
+### 9.9 迁移编号撞车时，集合断言红在哪一处（Task 12）
+
+上篇遗留的那条验证义务（装配齐了之后，把某个迁移编号改成已占用的值，看
+`tests/migrations.rs::the_runtime_applies_exactly_the_expected_migration_set` 是否真变红）已做：
+把 `p2_effect` 的编号由 40 改成 41（`p2_policy` 已占用）后该用例**变红**，但**红在
+`out.status.success()` 那一步**（`启动失败: 数据库错误: no such table: effect`），**不是在集合
+比对上**。原因正是本 task 新接的线：`recover` 现在会跑效应恢复钩子，钩子要读 `effect` 表，而撞车
+使该表没被建出，驱动先失败了。整条用例仍是红的、缺陷仍被抓住，但**「库里应用的集合 == 期望集合」
+那句 `assert_eq` 自己没有照片**。
+
+要单独拍到它，得另造一次能让 `recover` 跑完而集合仍不一致的变异——去掉
+`runtime_migrations()` 里的一行注册即可（实测去掉 policy 注册：错在 `migrations.rs:112`，左 6 条、
+右 7 条，`assert_eq` 本身的判别力由此确认）。同一次撞车变异里
+`migration_versions_are_unique` 也按设计变红（`[41, 41]`）。
+
+**两条路都是红，但红的不是同一句断言**；只跑「编号撞车」这一种变异会误以为集合比对已被拍过。

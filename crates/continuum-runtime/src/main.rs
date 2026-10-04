@@ -2,12 +2,12 @@
 //!
 //! 迁移集合为 P0 内置迁移加 P1、P2 各层迁移；恢复钩子由各层注册。
 
-use continuum_persist::{Db, Migration, PersistError, RecoveryRegistry, run_recovery};
+use continuum_persist::Migration;
 use continuum_runtime::cli::{self, Command};
 use std::ffi::OsString;
-use std::path::Path;
 use std::process::ExitCode;
 
+mod recover_cmd;
 mod recovery;
 mod sandbox_select;
 mod task_cmd;
@@ -19,7 +19,7 @@ fn main() -> ExitCode {
     // 重建会丢掉形状（同一个值可以有多种写法）。
     let raw: Vec<OsString> = std::env::args_os().skip(1).collect();
     match cli::parse(args) {
-        Ok(Command::Recover(a)) => match startup(&a.db) {
+        Ok(Command::Recover(a)) => match recover_cmd::run(&a.db) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("启动失败: {e}");
@@ -63,30 +63,6 @@ pub(crate) fn runtime_migrations() -> Vec<Migration> {
     migrations
 }
 
-/// `recover` 子命令的实现：打开数据库、应用迁移、执行 §319 恢复五阶段。
-///
-/// **这是今天的全部实现，不是终态**：Task 12 会补上本子项目的恢复装配——注册 effect
-/// 的恢复钩子（`MarkExecutingAsUnknown`）。各层的迁移已由用到它们的 task 各自注册
-/// （见 [`runtime_migrations`]），本函数不再缺迁移。在此之前它已是真实现——三个既有
-/// 用例正依赖它的产出。
-fn startup(path: &Path) -> Result<(), PersistError> {
-    let db = Db::open_with(path, runtime_migrations())?;
-    let applied = db.migrate()?;
-    println!("迁移应用 {applied} 项");
-
-    let hook = recovery::MarkRunningNodesLost::new();
-    let marked = hook.counter();
-
-    let mut registry = RecoveryRegistry::new();
-    registry.register(Box::new(hook));
-    let report = run_recovery(&db, &registry)?;
-    println!("跳过记录 {} 条", report.skipped_records);
-    println!(
-        "标记 LOST {} 个节点",
-        marked.load(std::sync::atomic::Ordering::Relaxed)
-    );
-    for phase in &report.phases {
-        println!("{}: {} 钩子", phase.phase.as_str(), phase.hooks_run);
-    }
-    Ok(())
-}
+// `recover` 的实现已移进 [`recover_cmd`]（与 `task_cmd` 对称）：本模块只做分发与
+// 装配清单。恢复钩子的注册（P1 的 `MarkRunningNodesLost` 与本子项目的
+// `MarkExecutingAsUnknown`）在那边的 [`recover_cmd::run`] 里。
