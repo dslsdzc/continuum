@@ -141,9 +141,14 @@ pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
     // 第 7 步：命令**成功**且给了 `--apply` → 查策略、集成。**这一支不清理工作区**，
     // 成功与被拒都不清理（设计第 4.2 节）。命令失败时第 7 步不走（同上）。
     if args.apply && execution.is_ok() {
+        // 这层上下文**只**记「哪一步、哪个 Intent」，不替错误断言工作区还在不在：
+        // 第 7 步的错误不都是那一类——[`TaskError::RecordMissing`] 的含义恰恰是
+        // **记录已经不在了**，「记录原样保留」对它为假；而 `Gate` 那一支「工作区保留」
+        // 成立却没被论证过。确实成立的那一支（裁决不铸造）把保证写在
+        // [`TaskError::IntegrationRefused`] 自己的 `Display` 里，更靠近它成立的地方。
         return apply_recorded_integration(&db, args).map_err(|e| TaskError::Context {
             context: format!(
-                "集成未完成（Intent {}）；工作区与记录原样保留，未清理",
+                "第 7 步（策略裁决与集成）失败（Intent {}）",
                 args.intent.as_str()
             ),
             source: Box::new(e),
@@ -246,7 +251,8 @@ fn discard_recorded_workspace(db: &Db, intent: &IntentId) -> Result<(), TaskErro
 ///
 /// **这一支不清理工作区**：成功与被拒都不清理（设计第 4.2 节）。被拒时改动是完整可用的，
 /// 丢弃它会让用户无从恢复；成功时也一样——集成把改动并进 Base 是一条独立的通道，
-/// 收不收尾由第 8 步单独规定，而第 8 步只在「未给 `--apply`」时走。
+/// 收不收尾由第 8 步单独规定，而**第 8 步只在「未给 `--apply`」或「命令退出码非 0」时走**，
+/// 本函数成功返回后不会再回到那里。
 ///
 /// **`backend` 一律取自记录**（设计第 4.4 节），与第 8 步同一处口径。
 ///
@@ -359,24 +365,42 @@ fn arbitrate(policies: &[Policy], ctx: &PolicyContext) -> Decision {
 ///
 /// # 本接法的映射
 ///
-/// - `Allow` → 铸造。只可能来自「第 2 级那条规则成立」（即 `--approve` 已给出），
-///   或第 1 级的一条 `Allow`（它高于第 2 级，且不拦任何东西）。
-/// - `RequireApproval` → 有 `--approve` 才铸造。**这一支不是死代码**：`--approve` 未给出
-///   时它来自第 3–5 级；**已给出时**它来自一条与第 2 级同层且更严的落库规则，或来自
-///   第 1 级的一条 `RequireApproval`（第 1 级高于第 2 级）。故 `approved` 这个入参在
-///   这一支上是可观察的，`mints` 的取值表逐格钉住它。
+/// `--approve` 已给出时那条第 2 级内建 `Allow` 会参与夺冠（它是第 2 级），故裁决值只能
+/// 来自比它更高（第 1 级）或与它同层更严的规则；未给出时它不成立，裁决值由落库规则或
+/// 「无匹配默认 `Deny`」给出。下面逐种裁决**列全来源**——纪律要求「绝对措辞须有对应
+/// 用例」，故每一支来源都要有照片，见各条末尾。
 ///
-///   注意最后那句「不是死代码」说的是**这一整支**，不是 `approved == true` 那一格：
-///   第 3–5 级的 `RequireApproval` 在 `--approve` 已给出时**确实**会被第 2 级的 `Allow`
-///   越过而返回 `Allow`。剩下两条能返回 `RequireApproval` 的路（第 1 级、第 2 级同层
-///   更严）各有照片，见
-///   `a_require_approval_verdict_survives_the_flag_at_the_first_two_levels`——
-///   没有那张照片，「已给出时它来自……」就是一句无对照的断言。
-/// - `Deny` + `--approve` **未**给出 → 不铸造。
-/// - `Deny` + `--approve` **已**给出 → 不铸造。第 2 级那条规则在表里时，`--approve`
-///   已给出却仍返回 `Deny`，只可能出自第 1 级 `Deny`（它高于第 2 级），或出自
-///   「调用方没把第 2 级规则放进表里」（此时 `Deny` 只是「没有更高的规则放行」）。
-///   **两种都不该铸造。**
+/// - **`Allow` → 铸造。** 夺冠的那条规则是 `Allow`，来源只有两类：
+///   1. **落库的一条 `Allow`**——层级不限（[`explicit_current_rule`] 已说明 `save_policy`
+///      不校验层级来源）。**无 `--approve` 时的主路径正是落库的第 3–5 级 `Allow`，
+///      即设计第 5.7 节第一行**；照片：`a_runtime_default_allow_mints_without_the_flag`
+///      与端到端的 `an_allowed_integration_is_applied_without_the_flag`。
+///   2. **第 2 级内建的那条**（[`explicit_current_rule`]），即 `--approve` 已给出时；
+///      照片：`with_no_rule_at_all_the_flag_still_decides`。
+/// - **`RequireApproval` → 有 `--approve` 才铸造。** 夺冠的那条规则是 `RequireApproval`：
+///   - `--approve` **未**给出：只能来自落库的某条 `RequireApproval`（层级不限，理由同上；
+///     设计上落库的是第 3、4 级、第 5 级内建，但 `save_policy` 不拦第 1 级）；照片：
+///     `a_require_approval_rule_needs_the_flag` 的前半段。
+///   - `--approve` **已**给出：落库的第 3–6 级会被第 2 级的 `Allow` 越过（同一张照片的
+///     后半段），但仍有两处返回 `RequireApproval`——**落库的第 1 级**，或**与第 2 级同层
+///     的一条**（同层取更严，压过内建的 `Allow`）；两处各一张照片，见
+///     `a_require_approval_verdict_survives_the_flag_at_the_first_two_levels`。故
+///     `approved` 这个入参在这一支上可观察，六格表逐格钉住它。
+/// - **`Deny` + `--approve` 未给出 → 不铸造。**（夺冠的是一条落库 `Deny`，或无任何规则
+///   匹配而落到默认 `Deny`。）
+/// - **`Deny` + `--approve` 已给出 → 不铸造。** 此时那条内建 `Allow` 在表里，却仍返回
+///   `Deny`，来源只有三种：
+///   1. **落库的第 1 级 `Deny`**（高于第 2 级）；照片：
+///      `a_system_safety_deny_is_not_overridden_by_the_flag`。
+///   2. **落库一条与第 2 级同层的 `Deny`**（`ExplicitCurrent`；同层取更严，压过内建的
+///      `Allow`）——可达性论据同第 1 条来源：`save_policy` 不校验层级来源；照片：
+///      `a_same_level_persisted_deny_survives_the_flag`。
+///   3. **调用方没把第 2 级规则放进表里**（违反 [`decide`] 的前置条件）：此时 `Deny` 只是
+///      「没有更高的规则放行」，`decide` 无从知道 `--approve` 的存在。**本驱动不走这条**
+///      （[`arbitrate`] 恒把那条规则放进表里），故它没有照片——列在这里是为了让「`Deny`
+///      的三种含义」在本层是完整的，三种的处置见 `engine.rs` 的说明。
+///   **三种都不该铸造**：第 1 种是命令开关越不过的那条防线；后两种若铸造，就是把
+///   「更严的同层规则」或「一条都没放行」读成了批准。
 ///
 /// 「无任何规则匹配时默认 `Deny`」这一路（设计第 5.3 节）由此自动落到「给出 `--approve`
 /// 才放行」：未给出即 `Deny` 不铸造，给出则那条第 2 级规则成立、裁决为 `Allow` 而铸造——
@@ -457,7 +481,8 @@ pub enum TaskError {
     /// 丢弃它会让用户无从恢复。`path` 就是那份改动所在之处。
     ///
     /// `decision` 取 [`decision_name`] 的中文名，使调用方能分辨是「要求批准」还是
-    /// 「禁止」——前者的处置是给出 `--approve` 重跑，后者（第 1 级）则无解。
+    /// 「禁止」——前者的处置是给出 `--approve` 重跑；**后者再加 `--approve` 也没用**
+    /// （[`mints`] 列的三种 `Deny` 来源都越不过），得从那条规则本身或被拒的原因入手。
     #[error("策略裁决为 {decision}，拒绝集成；改动仍在 Task 工作区 {path}，未丢弃")]
     IntegrationRefused {
         decision: &'static str,
@@ -577,8 +602,8 @@ mod tests {
         assert!(!mints(Decision::Deny, false), "Deny 而未给出 --approve → 不铸造");
         assert!(
             !mints(Decision::Deny, true),
-            "Deny 且已给出 --approve → 仍不铸造：此时它只可能出自第 1 级，\
-             或出自调用方没把第 2 级规则放进表里"
+            "Deny 且已给出 --approve → 仍不铸造。三种来源（落库第 1 级、落库同层更严、\
+             调用方没放第 2 级规则）都不该铸造，见 `mints` 的文档"
         );
     }
 
@@ -659,6 +684,21 @@ mod tests {
             "同层取更严：RequireApproval 压过内建的 Allow"
         );
         assert!(mints(Decision::RequireApproval, true));
+    }
+
+    /// 落库一条**与第 2 级同层**的 `Deny`：`--approve` 已给出也仍返回 `Deny`。
+    ///
+    /// 这是 `mints` 文档里「`Deny` + `--approve` 已给出」三种来源中的第 2 种的落点。
+    /// 同层取更严（`severity(Deny) > severity(Allow)`），故它压过内建的那条第 2 级 `Allow`。
+    #[test]
+    fn a_same_level_persisted_deny_survives_the_flag() {
+        let table = vec![always(Level::ExplicitCurrent, Decision::Deny)];
+        assert_eq!(
+            arbitrate(&table, &approved()),
+            Decision::Deny,
+            "同层取更严：落库的第 2 级 Deny 压过内建的 Allow，--approve 越不过"
+        );
+        assert!(!mints(Decision::Deny, true), "同层更严的 Deny 一律不铸造");
     }
 
     /// 第 5 级 `Runtime Default` 的 `Allow`：不传 `--approve` 也放行。
