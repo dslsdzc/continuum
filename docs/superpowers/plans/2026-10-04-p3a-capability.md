@@ -251,23 +251,19 @@ impl Capability {
 
 /// **唯一的签发点**（设计 §2.4）。今天的临时签发方是「策略裁决 + 显式确认」，
 /// 也就是 `continuum-workspace` 的 `gate.rs` 已经点名的那个位置。
-///
-/// `granted` 是「什么授权了这一次」的表示，由调用方（驱动）从策略裁决构造——
-/// 本 crate 不依赖 `continuum-policy`，故用本 crate 自己的类型。
 pub fn mint(
     kind: CapabilityKind,
     scope: String,
     expiry: i64,
-    granted: Grant,
 ) -> Result<Capability, CapabilityError>;
-
-/// 「什么授权了这一次」。`ExplicitApproval` 对应 §5.5 的 `--approve`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Grant { Policy(Verdict), PolicyWithExplicitApproval(Verdict) }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict { Allow, RequireApproval, Deny }
 ```
+
+**执行期裁定（Task 2）：函数体里不再判「裁决值 × 是否附了显式确认」的六格表。** 本计划原稿给过一个
+`granted: Grant` 入参来做这件事，它会让同一个判断有**两个产生点**——那张六格表的唯一落点已在驱动
+（`continuum-runtime` 的 `mints`）。去掉重判后 `Grant` / `Verdict` 没有消费方，**连同它们的两个错误
+变体一并删除**；「什么授权了这一次」由驱动写进 Effect Journal 的 `authorization` 字段。设计与 §2.4
+已同步记下这条（`Issuer` 只记签发的**路径**）。**这是本节代码块的订正，不是漏实现**——后来者照抄
+上面的签名即可，勿按原稿把 `Grant` 加回来。
 
 `Display` 输出形如 `git.push:origin/main`（§253 的例子形状），**只出不进**。
 
@@ -569,7 +565,9 @@ cargo test -p continuum-runtime --test capability_gate
 
 **这与 P2 的「策略只查一次」不冲突，但必须写清楚，否则会被读成冲突**：P2 那条裁定的对象是**集成**的裁决（`--apply` 那一支，第 7 步复用第 4 步的那一次），而这里是**逐条效应**的裁决——问的是不同的问题（「这条效应准不准」vs「这次集成准不准」），上下文里填的字段也不同。两处各自查一次，互不复用。
 
-**裁决到 `Verdict` 的映射**（`continuum-capability` 不依赖 `continuum-policy`，故在驱动侧转）：`Decision::Allow → Verdict::Allow`、`RequireApproval → Verdict::RequireApproval`、`Deny → Verdict::Deny`；给了 `--approve` 时用 `Grant::PolicyWithExplicitApproval`，否则 `Grant::Policy`。**三个臂逐条写，不抽代表**（枚举式断言逐项有照片）。
+**裁决到「铸不铸得出能力」的映射**（`continuum-capability` 不依赖 `continuum-policy`，故三臂的判定在驱动侧写）：`Decision::Allow` → 铸；`Decision::RequireApproval` → 给了 `--approve` 才铸；`Decision::Deny` → 不铸。**三个臂逐条写，不抽代表**（枚举式断言逐项有照片）。这与驱动的 `mints`（`task_cmd.rs:649-654`）是同一张六格表——**复用它，不要在强制点里另写一遍**；`mint` 的签名里没有裁决值可传（Task 2 的裁定：签发点不重判）。
+
+**本计划原稿此处写过 `Verdict` / `Grant` 两个类型**（`Decision::Allow → Verdict::Allow` 那一套）。它们已按 Task 2 的裁定删除，故本 task **不引入这两个名字**：映射的产物是「铸出的 `Capability` 或拒绝」，不是某个中间的裁决类型。
 
 **连接器侧那半个义务由类型承载**（设计 §4.2）：
 
