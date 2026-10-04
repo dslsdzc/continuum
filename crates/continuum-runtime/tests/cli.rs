@@ -4,9 +4,9 @@
 //! 哪一个变体、信息里点名了哪个 token。驱动二进制只能看到退出码与 stderr 的文本，
 //! 拿不到解析结果本身。
 //!
-//! `task` 的行为判据（建区、沙箱执行、清理）在 `task_cli.rs` 里经二进制观察；本文件只放
-//! 解析这一层，以及「选项尚未接线」的判定——它要的是退出码与 stderr，两条路都能走，
-//! 放在这里是为了与它替换掉的占位用例同处一地。（`--apply` 那条判定已随 Task 10 接线删除。）
+//! `task` 的行为判据（建区、沙箱执行、效应声明、清理）在 `task_cli.rs` 里经二进制观察；
+//! 本文件只放解析这一层。解析期的拒绝（如 `--backend` 是未知选项、`--effect` 目标为空）
+//! 同样经二进制可见，那几条落在 `task_cli.rs`。
 
 use continuum_effect::EffectType;
 use continuum_runtime::cli::{self, CliError, Command, EffectSpec, RecoverArgs, SandboxMechanism};
