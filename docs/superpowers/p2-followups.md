@@ -256,9 +256,11 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
   **两次独立调用**里用不同拼法铸造与应用，批准值会莫名失效。
 - **`USAGE` 里的程序名取 `continuum`**（Task 8），而实际 bin 名是 `continuum-runtime`。
   取自设计 §4.1 的用法行。改名或加别名不在该 task 内。
-- **两条删除义务**（Task 9 起）：Task 10 接上集成后须删 `TaskError::ApplyNotWired` 与
-  `the_apply_option_is_refused_until_the_integration_is_wired`；Task 11 接上 Journal 后须删
-  `EffectNotWired` 与 `the_effect_option_is_refused_until_the_journal_is_wired`。
+- ~~**两条删除义务**（Task 9 起）~~ **已履行**（Task 10 删了 `ApplyNotWired` 与其用例，
+  Task 11 删了 `EffectNotWired` 与其用例）。留此行只为记来历：那两条是**未接线期间的临时占位**，
+  各配一条钉住「尚未接线」的用例，接线时必须一并删——**否则会留下一条钉着已不存在行为的用例**。
+  （`task_is_a_declared_placeholder_until_it_is_wired` 属同一类，在 Task 9 分派到 `task_cmd::run`
+  时即必然变红，已随之删除。）
 - **`TaskError::RecordMissing` 是一条没有照片的防御分支**（Task 9）。它要求「本次运行刚写过的
   记录被别处删掉」，端到端造不出（要靠并发）。方向是 fail-closed（宁可报错也不按猜出来的后端
   回收），据实记为**未被任何用例覆盖的代码路径**。
