@@ -20,11 +20,15 @@
 //! - bubblewrap：`Sandbox::capabilities` 取「构造期是否定位到 `bwrap`」，定位不到时
 //!   `spawn` 同样拒绝启动。
 //!
-//! 故本模块不必另立一套「可用性」判据——多一套判据就会与 `spawn` 的判定漂移，而漂移的
-//! 后果是这里说可用、那里拒绝启动。
+//! 该等价在 `continuum-sandbox` 内**两侧各有自己的用例**（一边断言报告为假、一边断言
+//! 拒绝启动）：`sandbox::tests::spawn_refuses_when_landlock_is_unavailable` 与
+//! `landlock::tests::abi_below_one_means_the_mechanism_does_not_exist`、
+//! `sandbox::tests::bubblewrap_refuses_to_start_when_the_binary_is_missing`。
+//! 本模块据以判定的正是那份报告，故它说谎时本模块会跟着错——这层依赖是刻意的，
+//! 多立一套「可用性」判据只会与 `spawn` 漂移，而漂移的后果是这里说可用、那里拒绝启动。
 //!
-//! 本模块**不**读环境变量、不假定任何机制可用：不可用时一律 `Err`，不静默放出一个
-//! 零隔离的子进程（设计第 4.3 节的 fail-closed 方向）。
+//! 本模块**不**读环境变量、不假定任何机制可用：不可用时一律 `Err`（两个 `Err` 变体各有
+//! 用例），不静默放出一个零隔离的子进程（设计第 4.3 节的 fail-closed 方向）。
 
 use continuum_runtime::cli::SandboxMechanism;
 use continuum_sandbox::{Sandbox, SandboxCapabilities};
