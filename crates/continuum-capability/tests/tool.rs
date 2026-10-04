@@ -34,8 +34,14 @@ fn output_schema() -> Value {
     })
 }
 
-/// 一个七个字段取值两两可分辨的样例工具。
-fn sample_tool() -> Tool {
+/// 样例工具：除 `deterministic` 外，其余六个字段由 [`sample_tool`] 定死。
+///
+/// 七个字段里只有 `input_schema` / `output_schema` 是**同型**的一对（都是
+/// `serde_json::Value`），把构造参数写反在类型上合法，故这一对取值必须可分——
+/// `a_tool_carries_its_definition_fields` 为此另加一条互不相等断言。余下六个字段
+/// 两两异型（`ToolId` / `String` / `Vec<CapabilityKind>` / `Option<EffectType>` /
+/// `bool`），位置写反即编译不过，**给不出也不需要照片**。
+fn sample_tool_with_deterministic(deterministic: bool) -> Tool {
     Tool::new(
         ToolId::new("git.push"),
         String::from("1.4.0"),
@@ -46,8 +52,13 @@ fn sample_tool() -> Tool {
             CapabilityKind::Git(GitAction::Push),
         ],
         Some(EffectType::PushBranch),
-        true,
+        deterministic,
     )
+}
+
+/// 样例工具，`deterministic = true`。
+fn sample_tool() -> Tool {
+    sample_tool_with_deterministic(true)
 }
 
 /// `Tool` 的七个字段原样带回（§252）。
@@ -55,6 +66,10 @@ fn sample_tool() -> Tool {
 /// 逐字段断言而不是抽一两个代表：七个访问器各读各的字段，手写映射能各自漂移。
 /// `input_schema` / `output_schema` 那两条另加一条**互不相等**的断言——两个字段
 /// 同型，把构造参数写反（或把访问器接错字段）在类型上合法，只有取值不同才看得见。
+///
+/// `deterministic` **两侧都钉**：两个工具**只在该字段上不同**（其余六个字段同源，
+/// 见 [`sample_tool_with_deterministic`]），故断言可归因到这一个字段。只钉 `true`
+/// 那一侧的话，一个恒返回 `true` 的实现照过——而 `false` 恰是出 bug 时会翻过去的那侧。
 #[test]
 fn a_tool_carries_its_definition_fields() {
     let tool = sample_tool();
@@ -81,7 +96,13 @@ fn a_tool_carries_its_definition_fields() {
         Some(EffectType::PushBranch),
         "effect_class"
     );
-    assert!(tool.deterministic(), "deterministic");
+
+    assert!(tool.deterministic(), "deterministic = true 应原样带回");
+    let nondeterministic = sample_tool_with_deterministic(false);
+    assert!(
+        !nondeterministic.deterministic(),
+        "deterministic = false 应原样带回（只钉 true 一侧的话，恒返回 true 的实现照过）"
+    );
 }
 
 /// 登记项含定义：`ToolProfile` 取回的 `Tool` 与构造时一致（设计 §3.1）。
