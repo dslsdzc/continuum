@@ -1,10 +1,12 @@
 //! Capability：能力的半封闭词汇表，以及它与 `EffectType` 的对应（设计第 2 节）。
 //!
-//! 分四层：
+//! 分五层：
 //! - [`capability`]：resource 的封闭枚举与各自的动作集、`EffectType` 的对应，
 //!   以及 §253 的五要素 [`Capability`] 与它唯一的签发点 [`mint`]；
 //! - [`tool`]：§252 的工具定义 [`Tool`] 与 §87 的登记项 [`ToolProfile`]；
 //! - [`persist`]：`tool` 表的迁移与行级读写（设计第 3.3、7 节）；
+//! - [`registry`]：强制点 (1)——[`authorize`] 与 [`AuthorizedTool`]，唯一能把工具
+//!   交给调用方的路径（设计第 3.4 节）；
 //! - [`error`]：本 crate 的错误类型。
 //!
 //! 本 crate 不持有数据库连接：落库经 `continuum-persist` 的 `Tx` 访问（该依赖自
@@ -19,6 +21,7 @@
 pub mod capability;
 pub mod error;
 pub mod persist;
+pub mod registry;
 pub mod tool;
 
 pub use capability::{
@@ -27,6 +30,7 @@ pub use capability::{
 };
 pub use error::CapabilityError;
 pub use persist::{load_tool, load_tools, p3_capability_migrations, save_tool};
+pub use registry::{AuthorizedTool, authorize};
 pub use tool::{Cost, Latency, Tool, ToolProfile, Trust};
 
 /// §252 的 `Tool.id` 与 §316 的 ToolProvider 接口类型**是同一个类型**：

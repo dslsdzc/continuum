@@ -84,12 +84,16 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // crate 上以免 continuum-effect 反向依赖）；Task 3 起加上 core——`Tool.id` 复用
     // `continuum_core::tool::ToolId`，**不另建第二个 `ToolId`**（设计 §3.1）；
     // Task 4 起加上 persist——`tool` 表的迁移与读写经 `Tx`（设计 §3.3、§7）。
-    // 余下一条（events 的 `AuditKind::CapabilityGrants`）由需要它的 task（Task 5）
-    // 增量补上，与 continuum-policy 删零使用边、P2b 的「迁移由用它的 task 注册」同一
-    // 判据——叶子 crate 的条目记实际依赖。
+    // Task 5 起加上 events——`registry.rs` 的 `authorize` 在成功授权时写一条
+    // `AuditKind::CapabilityGrants`（设计 §3.4）。至此设计 §6 的边表在本 crate 上到齐。
     (
         "continuum-capability",
-        &["continuum-core", "continuum-effect", "continuum-persist"],
+        &[
+            "continuum-core",
+            "continuum-effect",
+            "continuum-events",
+            "continuum-persist",
+        ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
