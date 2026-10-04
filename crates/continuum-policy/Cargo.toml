@@ -6,7 +6,8 @@ rust-version.workspace = true
 
 [dependencies]
 continuum-artifact = { path = "../continuum-artifact" }
-continuum-core = { path = "../continuum-core" }
+# 无 continuum-core：本 crate 对它的引用为零，而叶子 crate 的条目记实际依赖（设计下篇
+# 第 3 节）。设计第 3 节的依赖方向图曾列过这条边，按该口径它是假边，故不声明。
 continuum-effect = { path = "../continuum-effect" }
 continuum-persist = { path = "../continuum-persist" }
 # Task 4 尚无使用点（条件解析只用 `serde_json::Value`）；消费方是 Task 6 的 Policy 落库。

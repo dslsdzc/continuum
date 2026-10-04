@@ -58,6 +58,11 @@
 //!
 //! - **第 7 步裁决为「不铸造」时（含第 1 级 `Deny`）：拒绝集成，但保留工作区**，不
 //!   `discard`。命令**成功**了，用户的改动是完整可用的，丢弃它才叫「让用户无从恢复」。
+//!   **但「保留」不等于「可经本驱动重跑」**：第二次运行的第 3 步
+//!   `create_task_workspace` 必然失败——worktree 后端撞 `fatal: a branch named
+//!   '<分支>' already exists`，overlay 后端显式拒绝已存在的 Intent 目录；即便跨过
+//!   第 3 步，第一次声明过的 `--effect` 的幂等键也会在第 4 步再拒一次。故保留的实际
+//!   含义是**用户进该 Task 工作区自行处理（手工 git）**；本驱动目前没有重跑路径。
 //! - **第 8 步反过来：命令失败也照旧清理**。这一支留下的是**半成品**，而更要紧的是
 //!   **记录**——[`save_workspace`] 是裸 `INSERT`（`continuum-workspace/src/persist.rs`），
 //!   保留记录会让**同一个 Intent 再也创建不了**，用户得手工删记录与分支才能重试。
@@ -719,8 +724,11 @@ pub enum TaskError {
     /// 丢弃它会让用户无从恢复。`path` 就是那份改动所在之处。
     ///
     /// `decision` 取 [`decision_name`] 的中文名，使调用方能分辨是「要求批准」还是
-    /// 「禁止」——前者的处置是给出 `--approve` 重跑；**后者再加 `--approve` 也没用**
-    /// （[`mints`] 列的三种 `Deny` 来源都越不过），得从那条规则本身或被拒的原因入手。
+    /// 「禁止」。**两者都重跑不了**：第二次运行的第 3 步 `create_task_workspace` 必然
+    /// 失败——worktree 后端撞已存在的分支，overlay 后端拒绝已存在的 Intent 目录；即便
+    /// 跨过第 3 步，有 `--effect` 时幂等键也会在第 4 步再拒一次。用户须进本错误给出的
+    /// `path` 自行处理（手工 git）。**对「禁止」还有一层：它本就越不过**（[`mints`] 列的
+    /// 三种 `Deny` 来源都越不过），得从那条规则本身或被拒的原因入手。
     #[error("策略裁决为 {decision}，拒绝集成；改动仍在 Task 工作区 {path}，未丢弃")]
     IntegrationRefused {
         decision: &'static str,

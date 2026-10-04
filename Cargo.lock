@@ -137,7 +137,6 @@ name = "continuum-policy"
 version = "0.1.0"
 dependencies = [
  "continuum-artifact",
- "continuum-core",
  "continuum-effect",
  "continuum-persist",
  "serde",

@@ -121,7 +121,7 @@ pub fn save_graph(tx: &Tx<'_>, graph: &AdfirGraph) -> Result<(), PersistError> {
                         Direction::Output => "output",
                     }),
                     Value::text(port.name()),
-                    Value::text(artifact_type_str(port.artifact_type())),
+                    Value::text(port.artifact_type().as_str()),
                 ],
             )?;
         }
@@ -401,31 +401,15 @@ pub(crate) fn parse_state(s: &str) -> Result<NodeState, PersistError> {
     })
 }
 
-fn artifact_type_str(t: ArtifactType) -> &'static str {
-    match t {
-        ArtifactType::SourceTree => "source_tree",
-        ArtifactType::Patch => "patch",
-        ArtifactType::TestResult => "test_result",
-        ArtifactType::Text => "text",
-        ArtifactType::Json => "json",
-        ArtifactType::Blob => "blob",
-    }
-}
-
+/// 端口列里的类型串解回枚举。
+///
+/// 编解码本身在 `continuum_artifact` 的 [`ArtifactType::as_str`] /
+/// [`ArtifactType::parse`] 上（唯一产生点）——本文件曾自存一张与 artifact 侧逐字相同的
+/// 表，已删。此处只把 `None` 翻成落库层的错误：消息与旧实现逐字相同
+/// （`未知 ArtifactType: {other}`），调用方的断言不变。
 fn parse_artifact_type(s: &str) -> Result<ArtifactType, PersistError> {
-    Ok(match s {
-        "source_tree" => ArtifactType::SourceTree,
-        "patch" => ArtifactType::Patch,
-        "test_result" => ArtifactType::TestResult,
-        "text" => ArtifactType::Text,
-        "json" => ArtifactType::Json,
-        "blob" => ArtifactType::Blob,
-        other => {
-            return Err(PersistError::Database(format!(
-                "未知 ArtifactType: {other}"
-            )))
-        }
-    })
+    ArtifactType::parse(s)
+        .ok_or_else(|| PersistError::Database(format!("未知 ArtifactType: {s}")))
 }
 
 fn edge_kind_str(k: EdgeKind) -> &'static str {

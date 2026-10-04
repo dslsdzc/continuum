@@ -69,19 +69,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &["continuum-events", "continuum-persist"],
     ),
     // P2 边界层的策略层。artifact 与 effect 有使用点：设计下篇第 5.6 节的
-    // `PolicyContext` 装 `PrivacyClass` 与 `EffectType`。core 与 persist 在本 task
-    // 尚无使用点，但设计第 3 节把这两条边写进了本 crate 的依赖方向，而本表与
-    // `Cargo.toml` 必须逐对一致，故照记——与本文件对叶子 crate「记实际依赖」的
-    // 口径不同，是设计给出的边与使用点不一致时的取法。
+    // `PolicyContext` 装 `PrivacyClass` 与 `EffectType`；persist 自 Task 6 起大量使用
+    // （`src/persist.rs` 的迁移与 `load_policies`）。
+    // **不含 continuum-core**：本 crate 对它的引用为零（`grep -rn continuum_core` 无命中），
+    // 设计第 3 节虽在依赖方向图里列过这条边，但同一节又定「叶子 crate 的条目记实际依赖，
+    // 故无使用点的边即假边」——留一条零使用的边与该口径冲突，故删（`Cargo.toml` 同步删）。
     // 不含 continuum-events：策略变更不在 `§313` 的必录清单内（设计上篇第 3 节）。
     (
         "continuum-policy",
-        &[
-            "continuum-artifact",
-            "continuum-core",
-            "continuum-effect",
-            "continuum-persist",
-        ],
+        &["continuum-artifact", "continuum-effect", "continuum-persist"],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。

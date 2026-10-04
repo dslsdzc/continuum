@@ -238,9 +238,14 @@ fn the_first_level_cannot_be_overridden() {
     );
 }
 
-/// 第 3–5 级的 `Deny` 可被 `--approve` 越过（设计下篇第 5.5、5.7 节）。
+/// 落库的 `Deny` 可被 `--approve` 越过（设计下篇第 5.5、5.7 节）。
+///
+/// 用例体只摆**第 3 级**（`UserPersistent`）一条规则。**这不是缺照片**：
+/// `engine.rs` 的比较靠 `Level` 派生的 `Ord`，没有按层级手写的臂，故一个代表臂在
+/// 机制上就足以覆盖第 3–5 级这一整段。用例名原写「第 3–5 级」，名比体宽，已改为
+/// 不代表具体级数的说法。
 #[test]
-fn an_explicit_approval_outranks_levels_three_to_five() {
+fn an_explicit_approval_outranks_the_persisted_deny() {
     let policies = vec![
         always(Level::UserPersistent, Decision::Deny), // 第 3 级
         explicit_current_allow(),
@@ -249,7 +254,7 @@ fn an_explicit_approval_outranks_levels_three_to_five() {
     assert_eq!(
         decide(&policies, &approved()),
         Decision::Allow,
-        "第 2 级高于第 3 级：--approve 给出时应越过第 3 级的 Deny"
+        "第 2 级高于落库的第 3 级：--approve 给出时应越过它那条 Deny"
     );
 }
 

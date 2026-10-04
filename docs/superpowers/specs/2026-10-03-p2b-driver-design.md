@@ -91,13 +91,16 @@ crates/
 
 ```
 continuum-effect   → continuum-persist, continuum-events
-continuum-policy   → continuum-core, continuum-persist, continuum-artifact, continuum-effect
+continuum-policy   → continuum-persist, continuum-artifact, continuum-effect
 continuum-runtime  → 全部
 ```
 
 `continuum-effect` 不依赖 `continuum-core`：该 crate 不使用其类型。叶子 crate 的 `ALLOWED`
 条目记的是**实际依赖**（与 `continuum-runtime` 那条记「规范允许集合」不同，见
 `docs/superpowers/p2-followups.md` 第四节），故无使用点的边即假边。
+
+`continuum-policy` 同理不依赖 `continuum-core`：它对该 crate 零引用。上面的依赖方向图
+原列过这条边，按同一口径是假边，已删（终审修复波，与 `Cargo.toml` 及 `ALLOWED` 一处同改）。
 
 `continuum-policy` 的两条既有阶段的边由第 5.6 节的 `PolicyContext` 要求：它装 `PrivacyClass`
 （属 `continuum-artifact`）与 `EffectType`（属 `continuum-effect`）。把这两个字段改成字符串可以
@@ -113,10 +116,11 @@ continuum-runtime  → 全部
 ## 4.1 形态
 
 ```
-continuum task    --base <目录> --intent <id> --db <路径> --exec <命令>
+continuum task    --base <目录> --intent <id> --db <路径>
                   [--apply] [--approve]
                   [--sandbox <机制>]
                   [--effect <类型>:<目标>]...
+                  --exec <命令> [参数...]        （--exec 必须最后）
 continuum recover --db <路径>
 ```
 

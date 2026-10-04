@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// `§239` 的类型集合。枚举外的类型不可表达。
+///
+/// 字符串名在 [`ArtifactType::as_str`] / [`ArtifactType::parse`] 上，是该编码唯一
+/// 的产生点（同 [`PrivacyClass`]）：库列（`crate::persist`）与图侧的端口列
+/// （`continuum-graph` 的 `persist`）都取用它，两处不再各存一张表。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ArtifactType {
@@ -14,6 +18,64 @@ pub enum ArtifactType {
     Text,
     Json,
     Blob,
+}
+
+impl ArtifactType {
+    /// 全部六型。供全量遍历的用例使用（与 [`PrivacyClass::ALL`] 同形）。
+    ///
+    /// 完整性与数目由 `tests/artifact_type.rs` 的
+    /// `every_artifact_type_round_trips_through_its_encoding` 把关。
+    pub const ALL: [ArtifactType; 6] = [
+        ArtifactType::SourceTree,
+        ArtifactType::Patch,
+        ArtifactType::TestResult,
+        ArtifactType::Text,
+        ArtifactType::Json,
+        ArtifactType::Blob,
+    ];
+
+    /// `§239` 各型的字符串名：小写、多词以 `_` 连接。
+    ///
+    /// **本函数是该编码唯一的产生点**。match 穷尽且无通配臂：加型时本函数编译不过，
+    /// 编码不会漏分支。
+    ///
+    /// 与派生出来的 serde 表示的关系同 [`PrivacyClass::as_str`]：`rename_all =
+    /// "snake_case"` 给出的字符串与本函数逐型相同，故隐患不是「两套表示」而是「两条
+    /// 读写路径」。本 crate 的 `Artifact` serde 派生至今未被用来序列化 `Artifact` 本身
+    /// （只用于其 `metadata` / `provenance` 两个 `Value` 字段），派生本身不在本次改动
+    /// 范围内，据实记录。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::SourceTree => "source_tree",
+            Self::Patch => "patch",
+            Self::TestResult => "test_result",
+            Self::Text => "text",
+            Self::Json => "json",
+            Self::Blob => "blob",
+        }
+    }
+
+    /// [`ArtifactType::as_str`] 的**严格逆**：对 [`ArtifactType::ALL`] 里的每型都有
+    /// `ArtifactType::parse(t.as_str()) == Some(t)`，表外字符串一律 `None`。
+    ///
+    /// `None` 而不是默认型：落库列读出不认识的串说明库里有本版本不认得的类型，取默认
+    /// 会把一份别的东西当成本型处理。调用方据此报错（两处 `persist` 都映射到同一个
+    /// 「未知 ArtifactType」错误）。
+    ///
+    /// 解码侧没有穷尽 match 的保护（来源是 `&str` 而非枚举），故由
+    /// `tests/artifact_type.rs` 的 `every_artifact_type_round_trips_through_its_encoding`
+    /// 遍历 [`ArtifactType::ALL`] 兜住。
+    pub fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "source_tree" => Self::SourceTree,
+            "patch" => Self::Patch,
+            "test_result" => Self::TestResult,
+            "text" => Self::Text,
+            "json" => Self::Json,
+            "blob" => Self::Blob,
+            _ => return None,
+        })
+    }
 }
 
 /// `§243`。

@@ -111,24 +111,51 @@ fn local_branches(dir: &Path) -> Vec<String> {
         .collect()
 }
 
-/// `root` 之下全部条目的相对路径与内容（按路径排序）。
+/// `root` 之下全部条目的相对路径与内容（按路径排序），**含 `.git` 与 `.ai`**。
 ///
 /// 用内容**原文**而不是内容哈希：本文件的仓库只有几个字节级文件，直接比内容比哈希更强，
 /// 也少一层「哈希算得对不对」的疑问。符号链接记其目标路径，目录只用于遍历。
 /// 与 `docs` 的措辞一致（「路径加内容」的集合）。
+///
+/// **不要把它改成一律排除 `.git`**：`view_diff_does_not_write_the_base_when_the_stat_cache_is_stale`
+/// 的对照臂靠观察 Base 的 `.git/worktrees/<intent>/index` 被写回来证明自己造出了那条路径
+/// （`git diff` 的索引写回只落在 `.git` 之内）。排除 `.git` 会让那条断言永远成立、失去判别力。
+/// 需要「什么算 Base 的内容」那一套判据（与产品侧 `tree_digest` 的 `digest_dir` /
+/// `collect_files` 同名）的用例，改用 [`tree_snapshot_content`]。
 fn tree_snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
-    fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+    tree_snapshot_filtered(root, false)
+}
+
+/// 同 [`tree_snapshot`]，但**任意层级上名为 `.git` 或 `.ai` 的条目一概不进**（目录连子树
+/// 一起跳过，文件与符号链接直接跳过）——与产品侧 `tree_digest` 的 `digest_dir` /
+/// `collect_files` 同一套名字判据。
+///
+/// `every_write_operation_refuses_a_stale_approval` 用它：git 的后台维护会开合
+/// `.git/objects/maintenance.lock`，含 `.git` 的快照会在两次取景之间前后不等——一次与集成
+/// 无关的闪烁被报成「被拒的集成动了 Base」。产品侧本来就按名字跳过这两者，这里照抄同一个
+/// 判据，快照才与「什么算 Base 的内容」一致。
+/// （`.ai` 在产品侧是 `AI_DIR`，为 `pub(crate)`，测试 crate 取不到，故写字面量。）
+fn tree_snapshot_content(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+    tree_snapshot_filtered(root, true)
+}
+
+fn tree_snapshot_filtered(root: &Path, skip_internal: bool) -> Vec<(PathBuf, Vec<u8>)> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>, skip_internal: bool) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {
+            let name = entry.file_name();
+            if skip_internal && (name == ".git" || name == ".ai") {
+                continue;
+            }
             let path = entry.path();
             let rel = path.strip_prefix(root).unwrap_or(&path).to_path_buf();
             let Ok(meta) = std::fs::symlink_metadata(&path) else {
                 continue;
             };
             if meta.is_dir() {
-                walk(root, &path, out);
+                walk(root, &path, out, skip_internal);
             } else if meta.file_type().is_symlink() {
                 let target = std::fs::read_link(&path).unwrap_or_default();
                 out.push((rel, target.to_string_lossy().into_owned().into_bytes()));
@@ -138,7 +165,7 @@ fn tree_snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
         }
     }
     let mut out = Vec::new();
-    walk(root, root, &mut out);
+    walk(root, root, &mut out, skip_internal);
     out.sort();
     out
 }
@@ -753,7 +780,9 @@ fn every_write_operation_refuses_a_stale_approval() {
         let approval = approve_integration(&base, &task, backend).unwrap();
         // 铸造之后改 Base：三个操作都必须因此拒绝（改的是 Task 没碰过的那个文件）
         std::fs::write(base_path.join("要删的.txt"), "用户在 Base 上改的\n").unwrap();
-        let before = tree_snapshot(&base_path);
+        // 用内容判据（跳 `.git`/`.ai`）：含 `.git` 的取景会被 git 后台维护锁的
+        // 开合闪到，把一次与集成无关的写入报成「被拒的集成动了 Base」。
+        let before = tree_snapshot_content(&base_path);
 
         let (_db_dir, db) = db();
         let tx = db.begin().unwrap();
@@ -770,7 +799,7 @@ fn every_write_operation_refuses_a_stale_approval() {
             "{operation}：期望 ApprovalMismatch，得到 {err:?}"
         );
         assert_eq!(
-            tree_snapshot(&base_path),
+            tree_snapshot_content(&base_path),
             before,
             "{operation}：被拒的集成动了 Base"
         );

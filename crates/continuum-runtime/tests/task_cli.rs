@@ -1182,9 +1182,14 @@ fn a_failed_command_is_not_integrated_and_the_workspace_is_cleaned() {
 /// 各 `--effect` 在执行**之前**已写入 Journal，且命令看到的状态是 `EXECUTING`。
 ///
 /// 判据（设计第 10 节判据 3）：命令在**自己的第一条指令**上读 Journal 的落库字节，
-/// `executing` 正是 `effect.state` 列的编码（设计第 8 节，小写）。读到才印
-/// `EFFECT-EXECUTING`。命令若在记录写入之前就跑（或只写了 `PLANNED`/`AUTHORIZED`），
-/// 这个标记不会出现。
+/// 读到 `executing` 才印 `EFFECT-EXECUTING`。命令若在记录写入之前就跑（或只写了
+/// `PLANNED`/`AUTHORIZED`），这个标记不会出现。
+///
+/// **观察到的是「库文件里出现了 `executing` 这一串」，比单看状态列宽**：`effect.state`
+/// 列的编码（设计第 8 节，小写）会写它，`journal.rs` 的 `advance` 在写审计 payload 时
+/// 也会写 `"to":"executing"`（`crates/continuum-effect/src/journal.rs`）。`grep` 分不出
+/// 这两处，故本用例的判据不能写成「读到的就是 `effect.state` 列」。**这不削弱它**：
+/// 两处都只在第 4 步写入之后才可能出现，命令若抢在写入之前跑，哪一种都不会有。
 ///
 /// **本用例显式点名 bubblewrap**：Landlock 的只读白名单是 `/usr /lib /lib64 /etc /bin
 /// /sbin`（`continuum-sandbox/src/landlock.rs`），库所在的临时目录不在其中，命令在

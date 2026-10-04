@@ -59,16 +59,17 @@ use thiserror::Error;
 /// 名（`continuum-runtime`）——名字以设计为准，是否改名/加别名不在本 task 内。
 pub const USAGE: &str = "\
 用法：
-  continuum task    --base <目录> --intent <id> --db <路径> --exec <命令> [参数...]
+  continuum task    --base <目录> --intent <id> --db <路径>
                     [--apply] [--approve]
                     [--sandbox <机制>]
                     [--effect <类型>:<目标>]...
+                    --exec <命令> [参数...]        （--exec 必须最后）
   continuum recover --db <路径>
 
 说明：
   --exec 消费其后的全部参数作为命令的 argv（不切分、不经 shell），
          故 --exec 之后的任何 token 都属于该命令，即使它看起来像本驱动的选项。
-         想在命令里用 --apply，请把它写在 --exec 之前。
+         选项一律写在 --exec 之前（见用法行，--exec 排在最后）。
   --sandbox 取 landlock 或 bubblewrap；不给则由装配点按能力自动选。
   --effect 形如 <类型>:<目标>，类型取 EffectType 的封闭枚举，目标按「第一个」冒号切开。
   --base / --intent / --db / --sandbox 各只接受一次，第二次出现即报错。";

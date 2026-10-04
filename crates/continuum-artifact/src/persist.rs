@@ -55,7 +55,7 @@ pub fn save_artifact(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         &[
             Value::text(artifact.id.as_str()),
-            Value::text(type_str(artifact.artifact_type)),
+            Value::text(artifact.artifact_type.as_str()),
             Value::text(artifact.content_hash.as_str()),
             Value::Int(artifact.size as i64),
             match &artifact.producer_node {
@@ -156,30 +156,13 @@ fn int(v: &Value) -> Result<i64, PersistError> {
     }
 }
 
-fn type_str(t: ArtifactType) -> &'static str {
-    match t {
-        ArtifactType::SourceTree => "source_tree",
-        ArtifactType::Patch => "patch",
-        ArtifactType::TestResult => "test_result",
-        ArtifactType::Text => "text",
-        ArtifactType::Json => "json",
-        ArtifactType::Blob => "blob",
-    }
-}
-
+/// 落库列读出的类型串解回枚举。
+///
+/// 编解码本身在 [`ArtifactType::as_str`] / [`ArtifactType::parse`] 上（唯一产生点），
+/// 此处只把 `None` 翻成落库层的错误——两处 `persist` 曾各存一张逐字相同的表，
+/// 已删。错误消息与旧实现逐字相同（`未知 ArtifactType: {other}`），调用方的断言不变。
 fn parse_type(s: &str) -> Result<ArtifactType, PersistError> {
-    Ok(match s {
-        "source_tree" => ArtifactType::SourceTree,
-        "patch" => ArtifactType::Patch,
-        "test_result" => ArtifactType::TestResult,
-        "text" => ArtifactType::Text,
-        "json" => ArtifactType::Json,
-        "blob" => ArtifactType::Blob,
-        other => {
-            return Err(PersistError::Database(format!(
-                "未知 ArtifactType: {other}"
-            )))
-        }
-    })
+    ArtifactType::parse(s)
+        .ok_or_else(|| PersistError::Database(format!("未知 ArtifactType: {s}")))
 }
 

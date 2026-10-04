@@ -241,9 +241,12 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 
 ### 9.2 需要动手改码的既有问题
 
-- **`ArtifactType` 有两份独立的编解码表**（Task 4 复审发现）：
+- ~~**`ArtifactType` 有两份独立的编解码表**（Task 4 复审发现）：
   `crates/continuum-artifact/src/persist.rs` 与 `crates/continuum-graph/src/persist.rs` 各一份，
-  取值逐字相同。**这是活的重复**，与 Task 4 已消除的 `EffectType`/`PrivacyClass` 那一类同形。
+  取值逐字相同。~~ **已履行**（全分支终审后的修复波）：照 `PrivacyClass` 先例把编解码提到
+  `ArtifactType::as_str` / `parse`，两个 `persist` 改为委托，重复的表已删；全变体往返与变体数
+  断言在 `crates/continuum-artifact/tests/artifact_type.rs`。留此行只为记来历——它与
+  Task 4 已消除的 `EffectType`/`PrivacyClass` 那一类同形。
   **订正一处错误的说辞**：这里原写「当时不在该 task 的 diff 内故未动」——**不成立**。
   Task 4 的 commit `16134e1`（「枚举编码提为类型自己的方法」）**编辑的正是
   `crates/continuum-artifact/src/persist.rs`**，把 `PrivacyClass` 的编解码搬到类型上，
@@ -253,11 +256,17 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
   但 `Artifact` 自身派生 `Serialize` 且字段含 `privacy_class`，**单独摘掉会让 `Artifact` 的派生
   编译不过**，故不是可独立移除的。已在该枚举的文档注释里写明「今天无序列化路径，但
   `to_value(&artifact)` 会踩上」。
-- **P2a 用例 `tests/gate.rs::every_write_operation_refuses_a_stale_approval` 的快照判据比摘要宽**
+- ~~**P2a 用例 `tests/gate.rs::every_write_operation_refuses_a_stale_approval` 的快照判据比摘要宽**
   （Task 9）。`tree_snapshot` 什么也不排除，而 `tree_digest` 在任意层级跳 `.git`/`.ai`，
   故 git 的后台维护锁 `.git/objects/maintenance.lock` 的开合会让它偶发失败（加压时一次，44 次
-  重跑 0 次；Task 11 期间**全量并行跑**时又复现过一次，同一支，单跑与紧接的下一次全量均通过）。**方向是改测试侧快照，不动产品代码**；实测已确认那次集成确实被拒（`ApprovalMismatch`
-  断言排在快照断言之前且通过），**不是 fail-open**。
+  重跑 0 次；Task 11 期间**全量并行跑**时又复现过一次，同一支，单跑与紧接的下一次全量均通过）。~~
+  **已履行**（全分支终审后的修复波）：新增 `tree_snapshot_content`，用与 `collect_files` /
+  `digest_dir` 同一套名字判据（任意层级跳 `.git` 与 `.ai`），本用例改用它；`tree_snapshot`
+  本体**保持含 `.git`**——同文件的 `view_diff_does_not_write_the_base_when_the_stat_cache_is_stale`
+  的对照臂要观察 `.git/worktrees/<intent>/index` 的写回，一律排除会让它失去判别力（本波先按
+  「一律排除」改，全量跑时正是这条测试变红，故改为过滤参数）。只动测试不动产品代码。
+  **方向**始终是改测试侧快照；实测已确认那次集成确实被拒（`ApprovalMismatch` 断言排在快照
+  断言之前且通过），**不是 fail-open**。留此行只为记来历。
 
 ### 9.3 需要写进注释或文档的
 
@@ -403,3 +412,23 @@ rustc 1.95 上仍 unstable（E0658），实测「加变体并补 `ordinal` 的�
 `migration_versions_are_unique` 也按设计变红（`[41, 41]`）。
 
 **两条路都是红，但红的不是同一句断言**；只跑「编号撞车」这一种变异会误以为集合比对已被拍过。
+
+### 9.10 全分支终审后的修复波补记（三条）
+
+- **M7 — `load_effect` 无生产调用方，但它没有该接的地方**（`crates/continuum-effect/src/lib.rs`
+  导出，调用方只有测试）。**终审裁定：这不是漏接线。** 它是 Effect 表的**读 API**，而设计没有
+  任何一步要按 id 读回整条记录——§6.5 只要求按键查、第 6 步按同一 `effect_key` 派生 id 之后
+  `advance`。**消费者尚未出现**，故**不要**把它当第二个 `discard` 那样去「补接线」：`discard`
+  是驱动必须走的路径而漏走了（§9.8），`load_effect` 是暂时无人读的读接口——**它没有该接的地方**。
+- **M8 — 设计 §5.6 的 `task_class`「由驱动注入」未兑现**：驱动把它留 `None`，
+  `duration_ms` 同（`crates/continuum-runtime/src/task_cmd.rs` 的 `policy_context`）。
+  方向 fail-closed（少一个事实只会更严、不会放宽裁决），代码里 `policy_context` 的文档有说明，
+  但**设计正文与本节此前都没记**，故补记：这两个事实今天无来源，属「后续阶段有来源时再接」，
+  `task_cmd.rs` 模块文档里「若日后 `duration_ms` 之类被注入则次序要重审」那条同样指向此处。
+- **M9 — `continuum-workspace` 的零使用 `serde` 依赖与两个 derive 仍未决定**
+  （`Cargo.toml`、`src/ids.rs` 的 `IntentId`、`src/backend.rs` 的 `WorkspaceBackend`）：
+  第五节把决定交给下篇（「随下篇一并决定」），下篇未决定、本节此前也没记。本分支在
+  `continuum-effect` 上做过同型处置（commit `bfdb29b`：去掉零消费方的 serde 派生与
+  `continuum-core` 边）——**同一类事在两个 crate 上一做一不做，惯用法会一分为二**。
+  **本波只登记、不改码**：收掉它要核 `IntentId` / `WorkspaceBackend` 的公开面
+  （是否该可序列化，取决于后续阶段会不会把 `IntentId` 写进 CLI 参数或落库），另开一轮。
