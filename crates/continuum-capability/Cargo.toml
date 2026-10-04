@@ -1,0 +1,29 @@
+[package]
+name = "continuum-capability"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 task 的使用点：`capability.rs` 的 `CapabilityKind::for_effect` 取 `EffectType`。
+continuum-effect = { path = "../continuum-effect" }
+# 以下三条是设计第 6 节列出的边，本 task 尚无使用点（与 continuum-runtime 一条同理：
+# `ALLOWED` 是设计第 6 节的允许集合按已存在的 crate 转录，容忍「允许但尚无使用点」的边）。
+# continuum-core：`ToolId` 是 `Tool.id` 与 §3.4 `authorize` 的形参类型，使用点在 Task 3。
+# continuum-events：§3.4 成功授权写一条 `AuditKind::CapabilityGrants`，使用点在 Task 4。
+# continuum-persist：§3.3 的 `tool` 表经 `Tx` 读写，使用点在 Task 3。
+continuum-core = { path = "../continuum-core" }
+continuum-events = { path = "../continuum-events" }
+continuum-persist = { path = "../continuum-persist" }
+# 本 task 尚无使用点：`Capability` 不落库、不序列化（设计第 2.3 节）。
+# 消费方是 Task 3 的 `tool` 表（§3.3：`input_schema` / `output_schema` 是 JSON）。
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# 本 task 尚无使用点：消费方是 Task 2 与 Task 3 的落库用例。
+tempfile = { workspace = true }
+# 本 task 尚无使用点：设计第 8 节要求「能力不可由字符串构造」「`full_access` 写不出来」
+# 等以编译失败为判据的样例，消费方是 Task 2 起。
+trybuild = { workspace = true }

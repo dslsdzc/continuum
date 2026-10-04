@@ -79,6 +79,22 @@ const ALLOWED: &[(&str, &[&str])] = &[
         "continuum-policy",
         &["continuum-artifact", "continuum-effect", "continuum-persist"],
     ),
+    // P3 资源层：Capability 词汇表、Tool/ToolProfile、ToolRegistry 与签发点。
+    // 四条边照设计第 6 节。本 task 只用到 effect（`CapabilityKind::for_effect` 取
+    // `EffectType`，方向写在本 crate 上以免 continuum-effect 反向依赖）；其余三条的
+    // 使用点在后续 task：core 的 `ToolId`（§3.4 `authorize` 的形参）、events 的
+    // `AuditKind::CapabilityGrants`（§3.4 的成功授权审计）、persist 的 `tool` 表（§3.3）。
+    // 与 continuum-runtime 一条同理：本表是设计第 6 节的允许集合按已存在的 crate 转录，
+    // 容忍「允许但尚无使用点」的边；反向边（真依赖却没登记）仍由本文件的断言抓住。
+    (
+        "continuum-capability",
+        &[
+            "continuum-core",
+            "continuum-effect",
+            "continuum-events",
+            "continuum-persist",
+        ],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
