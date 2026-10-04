@@ -2,15 +2,22 @@
 //!
 //! 迁移集合为 P0 内置迁移加 P1、P2 各层迁移；恢复钩子由各层注册。
 
-use continuum_persist::{run_recovery, Db, PersistError, RecoveryRegistry};
+use continuum_persist::{Db, Migration, PersistError, RecoveryRegistry, run_recovery};
 use continuum_runtime::cli::{self, Command};
+use std::ffi::OsString;
 use std::path::Path;
 use std::process::ExitCode;
 
 mod recovery;
+mod sandbox_select;
+mod task_cmd;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // 原始参数另取一份（`OsString`，不经 UTF-8 转换）：`task` 第 2 步要把自身经
+    // `unshare -Urm` 重新执行，转交的必须是**调用方实际写的那串参数**，从解析结果
+    // 重建会丢掉形状（同一个值可以有多种写法）。
+    let raw: Vec<OsString> = std::env::args_os().skip(1).collect();
     match cli::parse(args) {
         Ok(Command::Recover(a)) => match startup(&a.db) {
             Ok(()) => ExitCode::SUCCESS,
@@ -19,14 +26,15 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        // `task` 的实现要到 Task 9–12 才有。此处**不伪造任何行为**：不建工作区、
-        // 不落库、不启动子进程，只声明尚未接线并返回非零退出码。
-        // 替换它的是 **Task 12** 的派发（`task_cmd`）。在那之前，一个「看起来在
-        // 做事」的实现会让调用方以为命令跑过了。
-        Ok(Command::Task(_)) => {
-            eprintln!("「task」子命令尚未接线（由 Task 12 接入）");
-            ExitCode::FAILURE
-        }
+        // 第 1–6 步与第 8 步已接线；第 7 步（`--apply`）与效应的 Journal 写入分别由
+        // Task 10、Task 11 接入，在那之前给了对应选项即报错（见 `task_cmd`）。
+        Ok(Command::Task(a)) => match task_cmd::run(&a, &raw) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("任务失败: {e}");
+                ExitCode::FAILURE
+            }
+        },
         Err(e) => {
             eprintln!("参数错误：{e}");
             eprintln!("{}", cli::USAGE);
@@ -35,18 +43,26 @@ fn main() -> ExitCode {
     }
 }
 
+/// 本驱动全量注册的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace）。
+///
+/// `recover` 与 `task` 共用同一份，两处各写一份清单会让「注册的集合」有两个来源：
+/// `task` 要 `workspace` 表（设计第 4.2 节第 3 步落库），若它那份少一条，症状要到
+/// 落库时以「表不存在」的形式出现，而不是在装配处。
+pub(crate) fn runtime_migrations() -> Vec<Migration> {
+    let mut migrations = continuum_persist::builtin_migrations();
+    migrations.extend(continuum_artifact::p1_artifact_migrations());
+    migrations.extend(continuum_graph::p1_graph_migrations());
+    migrations.extend(continuum_workspace::p2_workspace_migrations());
+    migrations
+}
+
 /// `recover` 子命令的实现：打开数据库、应用迁移、执行 §319 恢复五阶段。
 ///
 /// **这是今天的全部实现，不是终态**：Task 12 会在别处补上本子项目的恢复装配
 /// （注册 effect 的恢复钩子、加入 policy 的迁移），那时本函数会被接进 `task_cmd`
 /// 所在的那套派发里。在此之前它已是真实现——三个既有用例正依赖它的产出。
 fn startup(path: &Path) -> Result<(), PersistError> {
-    let mut migrations = continuum_persist::builtin_migrations();
-    migrations.extend(continuum_artifact::p1_artifact_migrations());
-    migrations.extend(continuum_graph::p1_graph_migrations());
-    migrations.extend(continuum_workspace::p2_workspace_migrations());
-
-    let db = Db::open_with(path, migrations)?;
+    let db = Db::open_with(path, runtime_migrations())?;
     let applied = db.migrate()?;
     println!("迁移应用 {applied} 项");
 

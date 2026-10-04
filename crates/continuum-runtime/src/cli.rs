@@ -3,12 +3,15 @@
 //! 用法：
 //!
 //! ```text
-//! continuum task    --base <目录> --intent <id> --exec <命令> [参数...]
+//! continuum task    --base <目录> --intent <id> --db <路径> --exec <命令> [参数...]
 //!                   [--apply] [--approve]
 //!                   [--sandbox <机制>]
 //!                   [--effect <类型>:<目标>]...
 //! continuum recover --db <路径>
 //! ```
+//!
+//! `task` 的 `--db` 是必填项：第 4.2 节第 3 步要 `save_workspace` 落库、第 7 步要按
+//! 落库记录判后端，库路径无从推得。
 //!
 //! 手写解析，不引第三方 CLI 库：本 crate 的参数表很小，且现有依赖里没有这类库。
 //! 口径照 `continuum-policy` 的 `Condition::parse`——**任何一项不符即 `Err`**，
@@ -32,8 +35,9 @@
 //!
 //! # 重复选项
 //!
-//! 带取值的选项（`--base` / `--intent` / `--sandbox` / `--db`）**只接受一次**，
-//! 第二次出现即 `Err`。
+//! 带取值的选项（`task` 的 `--base` / `--intent` / `--db` / `--sandbox`，`recover` 的
+//! `--db`）**只接受一次**，第二次出现即 `Err`。两处 `--db` 是**各自手写的分支**（各子命令
+//! 有自己的选项表），故要有各自的用例，不能抽一个代表。
 //!
 //! **为什么不取「后者胜」**：`--base /a --base /b` 在后者胜下会按 `/b` 跑，而写的人
 //! 若本意是 `/a`（例如把两条命令拼在一起、或复制粘贴时忘了删），他看到的是一次
@@ -55,7 +59,7 @@ use thiserror::Error;
 /// 名（`continuum-runtime`）——名字以设计为准，是否改名/加别名不在本 task 内。
 pub const USAGE: &str = "\
 用法：
-  continuum task    --base <目录> --intent <id> --exec <命令> [参数...]
+  continuum task    --base <目录> --intent <id> --db <路径> --exec <命令> [参数...]
                     [--apply] [--approve]
                     [--sandbox <机制>]
                     [--effect <类型>:<目标>]...
@@ -67,7 +71,7 @@ pub const USAGE: &str = "\
          想在命令里用 --apply，请把它写在 --exec 之前。
   --sandbox 取 landlock 或 bubblewrap；不给则由装配点按能力自动选。
   --effect 形如 <类型>:<目标>，类型取 EffectType 的封闭枚举，目标按「第一个」冒号切开。
-  --base / --intent / --sandbox / --db 各只接受一次，第二次出现即报错。";
+  --base / --intent / --db / --sandbox 各只接受一次，第二次出现即报错。";
 
 /// 一次调用的子命令（设计下篇第 4.1 节）。
 #[derive(Debug, Clone, PartialEq)]
@@ -90,6 +94,12 @@ pub struct TaskArgs {
     /// 命令的 argv，**已按调用方给的边界切好**（见模块文档的 `--exec` 约定）。
     /// 长度至少为 1，第 0 项即命令本身。
     pub exec: Vec<String>,
+    /// 数据库路径。
+    ///
+    /// 第 4.2 节第 3 步要把 Workspace 记录落进 `workspace` 表、第 4.4 节要求后端一律从
+    /// 那张表读回，故库是必填项。设计与计划当初都漏了这条路径的来源，由项目所有者裁定
+    /// 「也加 `--db`，必填」。
+    pub db: PathBuf,
     /// 是否请求集成（设计第 4.2 节第 7 步）。
     pub apply: bool,
     /// 是否给出第 2 级批准（设计第 5.5 节）。
@@ -262,6 +272,7 @@ fn take_value(args: &[String], i: &mut usize, option: &'static str) -> Result<St
 fn parse_task(args: &[String]) -> Result<TaskArgs, CliError> {
     let mut base: Option<PathBuf> = None;
     let mut intent: Option<IntentId> = None;
+    let mut db: Option<PathBuf> = None;
     let mut exec: Option<Vec<String>> = None;
     let mut apply = false;
     let mut approve = false;
@@ -282,6 +293,12 @@ fn parse_task(args: &[String]) -> Result<TaskArgs, CliError> {
                     return Err(CliError::DuplicateOption { option: "--intent" });
                 }
                 intent = Some(IntentId::new(take_value(args, &mut i, "--intent")?));
+            }
+            "--db" => {
+                if db.is_some() {
+                    return Err(CliError::DuplicateOption { option: "--db" });
+                }
+                db = Some(PathBuf::from(take_value(args, &mut i, "--db")?));
             }
             "--apply" => {
                 apply = true;
@@ -328,6 +345,7 @@ fn parse_task(args: &[String]) -> Result<TaskArgs, CliError> {
         base: base.ok_or(CliError::MissingOption { option: "--base" })?,
         intent: intent.ok_or(CliError::MissingOption { option: "--intent" })?,
         exec: exec.ok_or(CliError::MissingOption { option: "--exec" })?,
+        db: db.ok_or(CliError::MissingOption { option: "--db" })?,
         apply,
         approve,
         sandbox,

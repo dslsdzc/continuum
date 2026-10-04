@@ -1,9 +1,12 @@
 //! 驱动的子命令与参数解析（设计下篇第 4.1 节）。
 //!
-//! 这些用例经 `continuum_runtime::cli` 直接看**解析结果**——错误信息点的是哪一个
-//! 选项、效应解出的是哪一型与哪一个目标。经二进制驱动只能看到退出码与 stdout，
-//! 而驱动的 `task` 子命令尚未接线（Task 12 接入前只打印占位并返回非零），
-//! 故那两条判据在端到端一侧观察不到。
+//! 这些用例经 `continuum_runtime::cli` 直接看**解析结果**——各字段解出的是什么、错误是
+//! 哪一个变体、信息里点名了哪个 token。驱动二进制只能看到退出码与 stderr 的文本，
+//! 拿不到解析结果本身。
+//!
+//! `task` 的行为判据（建区、沙箱执行、清理）在 `task_cli.rs` 里经二进制观察；本文件只放
+//! 解析这一层，以及两条「选项尚未接线」的判定——那两条要的是退出码与 stderr，两条路都能走，
+//! 放在这里是为了与它们替换掉的占位用例同处一地。
 
 use continuum_effect::EffectType;
 use continuum_runtime::cli::{self, CliError, Command, EffectSpec, RecoverArgs, SandboxMechanism};
@@ -12,7 +15,7 @@ use std::path::PathBuf;
 
 /// 一条最小合法 `task` 命令的**前置部分**，即 `--exec` 之前的那些 token。
 fn task_prefix() -> Vec<&'static str> {
-    vec!["task", "--base", "/b", "--intent", "i1"]
+    vec!["task", "--base", "/b", "--intent", "i1", "--db", "/db"]
 }
 
 /// 解析并断言落在 `Task` 变体上。
@@ -45,13 +48,29 @@ fn task_with(extra: &[&str]) -> cli::TaskArgs {
 }
 
 #[test]
-fn task_requires_base_intent_and_exec() {
-    // 三个必填项各缺一次。断言的是**具体哪一个**错误变体，不只是「返回了 Err」：
+fn task_requires_base_intent_db_and_exec() {
+    // 四个必填项各缺一次。断言的是**具体哪一个**错误变体，不只是「返回了 Err」：
     // 只报「参数有误」的解析器同样能让「返回了 Err」通过。
-    let cases: [(Vec<&str>, &'static str); 3] = [
-        (vec!["task", "--intent", "i1", "--exec", "true"], "--base"),
-        (vec!["task", "--base", "/b", "--exec", "true"], "--intent"),
-        (vec!["task", "--base", "/b", "--intent", "i1"], "--exec"),
+    //
+    // 四项逐项过，不只抽一两个：四个缺项检查是**各自手写的分支**（`parse_task` 末尾的
+    // 四行），能各自漂移——`--db` 那一行正是本 task 新加的。
+    let cases: [(Vec<&str>, &'static str); 4] = [
+        (
+            vec!["task", "--intent", "i1", "--db", "/db", "--exec", "true"],
+            "--base",
+        ),
+        (
+            vec!["task", "--base", "/b", "--db", "/db", "--exec", "true"],
+            "--intent",
+        ),
+        (
+            vec!["task", "--base", "/b", "--intent", "i1", "--db", "/db"],
+            "--exec",
+        ),
+        (
+            vec!["task", "--base", "/b", "--intent", "i1", "--exec", "true"],
+            "--db",
+        ),
     ];
     for (args, missing) in cases {
         let err = cli::parse(args).expect_err("缺必填项应解析失败");
@@ -65,7 +84,8 @@ fn task_requires_base_intent_and_exec() {
 
     // `--exec` 给了但后面一个 token 都没有：同样是「--exec 少了东西」，但走的是
     // 「有选项、无取值」那一路——两种情形分开断言，免得一条被换成了另一条。
-    let err = cli::parse(["task", "--base", "/b", "--intent", "i1", "--exec"]).unwrap_err();
+    let err = cli::parse(["task", "--base", "/b", "--intent", "i1", "--db", "/db", "--exec"])
+        .unwrap_err();
     assert_eq!(err, CliError::MissingValue { option: "--exec" });
 
     // `recover` 的 `--db` 同样是必填。
@@ -78,6 +98,7 @@ fn the_two_subcommands_are_distinguished() {
     let a = task_with(&[]);
     assert_eq!(a.base, PathBuf::from("/b"));
     assert_eq!(a.intent, IntentId::new("i1"));
+    assert_eq!(a.db, PathBuf::from("/db"));
     assert_eq!(a.exec, vec!["true".to_owned()]);
     // 未给出的开关与可选项落在各自的缺省态，不互相顶替。
     assert!(!a.apply);
@@ -184,6 +205,8 @@ fn exec_takes_every_following_token_verbatim() {
         "/b",
         "--intent",
         "i1",
+        "--db",
+        "/db",
         "--exec",
         "git",
         "commit",
@@ -203,7 +226,7 @@ fn exec_takes_every_following_token_verbatim() {
 
     // 反面：写在 `--exec` **之前**的 `--apply` 才是驱动开关。
     let a = task_args([
-        "task", "--base", "/b", "--intent", "i1", "--apply", "--exec", "true",
+        "task", "--base", "/b", "--intent", "i1", "--db", "/db", "--apply", "--exec", "true",
     ]);
     assert!(a.apply);
     assert_eq!(a.exec, vec!["true".to_owned()]);
@@ -213,27 +236,36 @@ fn exec_takes_every_following_token_verbatim() {
 fn a_duplicate_value_option_is_rejected() {
     // 静默取后一个会让 `--base /a --base /b` 看起来像「指定了 /a」，而实际跑 /b。
     //
-    // **四个带取值的选项逐项过**，不只抽两个：模块文档「# 重复选项」那节写的是
-    // 「`--base` / `--intent` / `--sandbox` / `--db` 只接受一次」，是一项**四点
-    // 枚举上的绝对断言**。只钉住其中两点时，没钉住的那两条分支可以被改成任何东西
-    // 而没有对照片——这正是纪律 2 说的「绝对措辞藏在『A 或 B』的完备性里」。
-    let cases: [(Vec<&str>, &'static str); 4] = [
+    // **五个带取值的分支逐项过**，不只抽两个：模块文档「# 重复选项」那节把两处 `--db`
+    // 也算在内，那是一项**五点枚举上的绝对断言**。只钉住其中几处时，没钉住的那些分支
+    // 可以被改成任何东西而没有对照片——这正是纪律 2 说的「绝对措辞藏在『A 或 B』的
+    // 完备性里」。两处 `--db` 分属两个子命令、各自手写，故各要一张照片。
+    let cases: [(Vec<&str>, &'static str); 5] = [
         (
             vec![
-                "task", "--base", "/a", "--base", "/b", "--intent", "i1", "--exec", "true",
+                "task", "--base", "/a", "--base", "/b", "--intent", "i1", "--db", "/db",
+                "--exec", "true",
             ],
             "--base",
         ),
         (
             vec![
-                "task", "--base", "/b", "--intent", "i1", "--intent", "i2", "--exec", "true",
+                "task", "--base", "/b", "--intent", "i1", "--intent", "i2", "--db", "/db",
+                "--exec", "true",
             ],
             "--intent",
         ),
         (
             vec![
-                "task", "--base", "/b", "--intent", "i1", "--sandbox", "landlock", "--sandbox",
-                "bubblewrap", "--exec", "true",
+                "task", "--base", "/b", "--intent", "i1", "--db", "/a", "--db", "/b", "--exec",
+                "true",
+            ],
+            "--db",
+        ),
+        (
+            vec![
+                "task", "--base", "/b", "--intent", "i1", "--db", "/db", "--sandbox", "landlock",
+                "--sandbox", "bubblewrap", "--exec", "true",
             ],
             "--sandbox",
         ),
@@ -256,6 +288,8 @@ fn a_duplicate_value_option_is_rejected() {
         "/b",
         "--intent",
         "i1",
+        "--db",
+        "/db",
         "--apply",
         "--apply",
         "--exec",
@@ -269,6 +303,8 @@ fn a_duplicate_value_option_is_rejected() {
         "/b",
         "--intent",
         "i1",
+        "--db",
+        "/db",
         "--approve",
         "--approve",
         "--exec",
@@ -282,21 +318,27 @@ fn a_duplicate_value_option_is_rejected() {
 
 /// 带取值的选项在**参数末尾**缺取值时，各自报各自的 `MissingValue`。
 ///
-/// 与 `a_duplicate_value_option_is_rejected` 是同一形态：四处都是各自手写的分支
-/// （`parse_task` 的四个臂 + `parse_recover` 的一个臂），都能各自漂移，故逐项钉住，
-/// 不只抽一个。`--exec` 那一处由 `task_requires_base_intent_and_exec` 覆盖——它缺的
+/// 与 `a_duplicate_value_option_is_rejected` 是同一形态：六处都是各自手写的分支
+/// （`parse_task` 的五个臂 + `parse_recover` 的一个臂），都能各自漂移，故逐项钉住，
+/// 不只抽一个。`--exec` 那一处由 `task_requires_base_intent_db_and_exec` 覆盖——它缺的
 /// 是整条命令，走的是同一个变体。
 #[test]
 fn a_value_option_at_the_end_of_argv_is_rejected() {
-    let cases: [(Vec<&str>, &'static str); 5] = [
+    let cases: [(Vec<&str>, &'static str); 6] = [
         (vec!["task", "--base"], "--base"),
         (vec!["task", "--base", "/b", "--intent"], "--intent"),
         (
-            vec!["task", "--base", "/b", "--intent", "i1", "--sandbox"],
+            vec!["task", "--base", "/b", "--intent", "i1", "--db"],
+            "--db",
+        ),
+        (
+            vec!["task", "--base", "/b", "--intent", "i1", "--db", "/db", "--sandbox"],
             "--sandbox",
         ),
         (
-            vec!["task", "--base", "/b", "--intent", "i1", "--effect"],
+            vec![
+                "task", "--base", "/b", "--intent", "i1", "--db", "/db", "--effect",
+            ],
             "--effect",
         ),
         (vec!["recover", "--db"], "--db"),
@@ -419,22 +461,33 @@ fn an_effect_with_an_empty_target_is_rejected() {
     );
 }
 
-/// `task` 子命令在 Task 12 接入前是一个**声明的**占位：必须返回非零退出码并明说
-/// 尚未接线，不得有任何看起来「跑过了」的输出。
+/// `--effect` 的 Journal 写入要到 Task 11 才接线，故现在给了它必须**报错**，而不是静默
+/// 不记。
 ///
-/// **Task 12 接入 `task_cmd` 时删掉本用例。** 它在这里正是为了挡住「占位悄悄变成
-/// 一个返回 0 的空实现」——那种实现看起来在做事，而没有别的用例会因此变红。
+/// **Task 11 接线时必须删除本用例**（连同 `task_cmd::TaskError::EffectNotWired`）。
+/// 它在这里正是为了挡住「选项被收下、什么也没发生」——那样的驱动看起来在做事，而没有
+/// 别的用例会因此变红。与它替换掉的占位用例（`task` 整个子命令未接线时的那一条）同形：
+/// 非零退出码 + 明说尚未接线 + stdout 为空。
 #[test]
-fn task_is_a_declared_placeholder_until_it_is_wired() {
+fn the_effect_option_is_refused_until_the_journal_is_wired() {
     // 全路径：`Command` 这个名字在本文件里已被 `cli::Command` 占用。
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_continuum-runtime"))
-        .args(["task", "--base", "/b", "--intent", "i1", "--exec", "true"])
+        .args([
+            "task",
+            "--base",
+            "/b",
+            "--intent",
+            "i1",
+            "--db",
+            "/db",
+            "--effect",
+            "push_branch:origin/main",
+            "--exec",
+            "true",
+        ])
         .output()
         .expect("continuum-runtime 无法执行");
-    assert!(
-        !out.status.success(),
-        "尚未接线的子命令必须返回非零退出码"
-    );
+    assert!(!out.status.success(), "尚未接线的选项必须让整条命令返回非零退出码");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         stderr.contains("尚未接线"),
@@ -443,7 +496,44 @@ fn task_is_a_declared_placeholder_until_it_is_wired() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(
         stdout.is_empty(),
-        "占位不得有 stdout 输出（那会看起来像跑过了），实际：{stdout}"
+        "拒掉一条尚未接线的调用不得有 stdout 输出（那会看起来像跑过了），实际：{stdout}"
+    );
+    // 拒绝发生在任何 I/O 之前：`--base /b` 根本不存在，若先判 Base 则报的是另一条错误。
+    assert!(
+        stderr.contains("--effect"),
+        "错误里应点名是哪个选项尚未接线，实际 stderr：{stderr}"
+    );
+}
+
+/// `--apply` 的策略裁决与集成要到 Task 10 才接线，故现在给了它同样必须**报错**。
+///
+/// 不静默忽略的理由比 `--effect` 那条更硬：未接线时唯一能走的收尾路径是「未给
+/// `--apply`」的第 7 步，它会把工作区丢弃——收下 `--apply` 却照旧丢弃，等于既没集成、
+/// 又毁掉了用户的改动。
+///
+/// **Task 10 接线时必须删除本用例**（连同 `task_cmd::TaskError::ApplyNotWired`）。
+#[test]
+fn the_apply_option_is_refused_until_the_integration_is_wired() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_continuum-runtime"))
+        .args([
+            "task", "--base", "/b", "--intent", "i1", "--db", "/db", "--apply", "--exec", "true",
+        ])
+        .output()
+        .expect("continuum-runtime 无法执行");
+    assert!(!out.status.success(), "尚未接线的选项必须让整条命令返回非零退出码");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("尚未接线"),
+        "应明说尚未接线，实际 stderr：{stderr}"
+    );
+    assert!(
+        stderr.contains("--apply"),
+        "错误里应点名是哪个选项尚未接线，实际 stderr：{stderr}"
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.is_empty(),
+        "拒掉一条尚未接线的调用不得有 stdout 输出，实际：{stdout}"
     );
 }
 
@@ -467,9 +557,9 @@ fn an_unknown_subcommand_or_option_is_rejected() {
         }
     );
     assert_eq!(
-        cli::parse(["task", "--db", "/x"]).unwrap_err(),
+        cli::parse(["recover", "--db", "/x", "--base", "/b"]).unwrap_err(),
         CliError::UnknownOption {
-            name: "--db".to_owned()
+            name: "--base".to_owned()
         }
     );
 }

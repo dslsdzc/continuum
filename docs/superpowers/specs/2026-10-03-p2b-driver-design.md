@@ -111,12 +111,15 @@ continuum-runtime  → 全部
 ## 4.1 形态
 
 ```
-continuum task    --base <目录> --intent <id> --exec <命令>
+continuum task    --base <目录> --intent <id> --db <路径> --exec <命令>
                   [--apply] [--approve]
                   [--sandbox <机制>]
                   [--effect <类型>:<目标>]...
 continuum recover --db <路径>
 ```
+
+`task` 也须给出 `--db`，且是必填项：第 4.2 节第 3 步要 `save_workspace` 落库、
+第 7 步要按落库记录判后端，库路径无从推得。本行由项目所有者裁定补齐（原用法行漏了它）。
 
 ## 4.2 `task` 的序列
 
@@ -151,6 +154,11 @@ continuum recover --db <路径>
 
 `--sandbox <机制>` 允许显式指定，用于测试与诊断。这样上篇的 `capabilities()` 与那条
 fail-closed 判定第一次有了真实调用方。
+
+**显式指定与自动选择是两回事**：显式给出的那个机制在本机不可用时**返回 `Err`**，
+不静默改用另一个——「显式指定」的全部意义就是不再自动挑，悄悄换掉会让调用方以为
+自己在测 bubblewrap 而实际测的是 Landlock。自动选择（未给 `--sandbox`）才按上面的
+次序回退。
 
 ## 4.4 后端一律从落库记录取
 
