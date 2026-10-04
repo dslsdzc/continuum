@@ -609,6 +609,8 @@ Landlock 的 ABI 不支持某类访问时，对应字段如实为假。
 
 ```
 continuum task    --base <目录> --intent <id> --exec <命令>
+                  （**订正**：这是当时的用法行。下篇实现时 `task` 也加了必填的 `--db`，
+                  且 `--exec` 排到最后——其后一切都属于该命令；以设计下篇 §4.1 为准。）
                   [--apply] [--approve]
                   [--effect <类型>:<目标>]...
 continuum recover --db <路径>
