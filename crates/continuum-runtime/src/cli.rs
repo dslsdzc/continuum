@@ -3,10 +3,11 @@
 //! 用法：
 //!
 //! ```text
-//! continuum task    --base <目录> --intent <id> --db <路径> --exec <命令> [参数...]
+//! continuum task    --base <目录> --intent <id> --db <路径>
 //!                   [--apply] [--approve]
 //!                   [--sandbox <机制>]
 //!                   [--effect <类型>:<目标>]...
+//!                   --exec <命令> [参数...]        （--exec 必须最后）
 //! continuum recover --db <路径>
 //! ```
 //!

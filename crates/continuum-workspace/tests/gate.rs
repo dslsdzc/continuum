@@ -130,11 +130,17 @@ fn tree_snapshot(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
 /// 一起跳过，文件与符号链接直接跳过）——与产品侧 `tree_digest` 的 `digest_dir` /
 /// `collect_files` 同一套名字判据。
 ///
-/// `every_write_operation_refuses_a_stale_approval` 用它：git 的后台维护会开合
+/// 「拒绝 → Base 未被改动」这一类用例（`every_write_operation_refuses_a_stale_approval`
+/// 与四条摘要失配用例）用它，理由有二：其一，git 的后台维护会开合
 /// `.git/objects/maintenance.lock`，含 `.git` 的快照会在两次取景之间前后不等——一次与集成
-/// 无关的闪烁被报成「被拒的集成动了 Base」。产品侧本来就按名字跳过这两者，这里照抄同一个
-/// 判据，快照才与「什么算 Base 的内容」一致。
+/// 无关的闪烁被报成「被拒的集成动了 Base」；其二，拒绝发生在 `verify_approval`（任何后端
+/// 动作之前），窗口内不跑 git 写，故收窄到内容判据在这些用例上是零代价的。产品侧本来就按
+/// 名字跳过这两者，这里照抄同一个判据，快照才与「什么算 Base 的内容」一致。
 /// （`.ai` 在产品侧是 `AI_DIR`，为 `pub(crate)`，测试 crate 取不到，故写字面量。）
+///
+/// **`view_diff_does_not_modify_the_base*` 那几条不用它**：那些用例要观察的正是包含
+/// `.git`/`.ai` 在内的整棵树有没有被 `view_diff` 碰到（挂载等动作落在 `.ai` 之下），
+/// 排除会削弱它们。
 fn tree_snapshot_content(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
     tree_snapshot_filtered(root, true)
 }
@@ -608,7 +614,9 @@ fn an_approval_for_one_integration_does_not_authorize_another() {
     }
 
     let approval_for_a = approve_integration(&base, &task_a, backend).unwrap();
-    let before = tree_snapshot(&base_path);
+    // 内容判据（跳 `.git`/`.ai`）：拒绝排在 `verify_approval`（任何后端动作
+    // 之前），窗口内不跑 git 写；理由见 [`tree_snapshot_content`]。
+    let before = tree_snapshot_content(&base_path);
 
     let (_db_dir_a, db_a) = db();
     let tx = db_a.begin().unwrap();
@@ -634,7 +642,7 @@ fn an_approval_for_one_integration_does_not_authorize_another() {
         }
         other => panic!("期望 ApprovalMismatch（把 A 的批准值拿去给 B 用），得到 {other:?}"),
     }
-    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert_eq!(tree_snapshot_content(&base_path), before, "被拒的集成动了 Base");
     assert!(
         audit_rows(&tx).is_empty(),
         "被拒的集成写了审计记录（拒绝应当排在任何变更之前）"
@@ -679,7 +687,9 @@ fn changing_the_base_between_approval_and_application_invalidates_it() {
     let approval = approve_integration(&base, &task, backend).unwrap();
     // Task 没碰过的那个文件，在 Base 侧被改动
     std::fs::write(base_path.join("要删的.txt"), "用户在 Base 上改的\n").unwrap();
-    let before = tree_snapshot(&base_path);
+    // 内容判据（跳 `.git`/`.ai`）：拒绝排在 `verify_approval`（任何后端动作
+    // 之前），窗口内不跑 git 写；理由见 [`tree_snapshot_content`]。
+    let before = tree_snapshot_content(&base_path);
 
     let (_db_dir_a, db_a) = db();
     let tx = db_a.begin().unwrap();
@@ -690,7 +700,7 @@ fn changing_the_base_between_approval_and_application_invalidates_it() {
         GateError::ApprovalMismatch { .. } => {}
         other => panic!("期望 ApprovalMismatch（Base 在铸造之后被改动），得到 {other:?}"),
     }
-    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert_eq!(tree_snapshot_content(&base_path), before, "被拒的集成动了 Base");
     assert!(
         audit_rows(&tx).is_empty(),
         "被拒的集成写了审计记录（拒绝应当排在任何变更之前）"
@@ -825,7 +835,9 @@ fn an_approval_minted_for_another_backend_is_refused() {
     std::fs::write(task.root().join("要改的.txt"), "Task 改过\n").unwrap();
 
     let approval = approve_integration(&base, &task, WorkspaceBackend::Overlay).unwrap();
-    let before = tree_snapshot(&base_path);
+    // 内容判据（跳 `.git`/`.ai`）：拒绝排在 `verify_approval`（任何后端动作
+    // 之前），窗口内不跑 git 写；理由见 [`tree_snapshot_content`]。
+    let before = tree_snapshot_content(&base_path);
 
     let (_db_dir_a, db_a) = db();
     let tx = db_a.begin().unwrap();
@@ -836,7 +848,7 @@ fn an_approval_minted_for_another_backend_is_refused() {
         GateError::ApprovalMismatch { .. } => {}
         other => panic!("期望 ApprovalMismatch（批准值的后端与本次不符），得到 {other:?}"),
     }
-    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert_eq!(tree_snapshot_content(&base_path), before, "被拒的集成动了 Base");
     assert!(audit_rows(&tx).is_empty(), "被拒的集成写了审计记录");
     tx.commit().unwrap();
 
@@ -1292,7 +1304,9 @@ fn changing_the_base_between_approval_and_application_invalidates_it_on_the_over
     let approval = approve_integration(&base, &task, backend).unwrap();
     // Task 没碰过的那个文件，在 lower 侧被改动
     std::fs::write(base_path.join("要删的.txt"), "用户在 lower 上改的\n").unwrap();
-    let before = tree_snapshot(&base_path);
+    // 内容判据（跳 `.git`/`.ai`）：拒绝排在 `verify_approval`（任何后端动作
+    // 之前），窗口内不跑 git 写；理由见 [`tree_snapshot_content`]。
+    let before = tree_snapshot_content(&base_path);
 
     let (_db_dir_a, db_a) = db();
     let tx = db_a.begin().unwrap();
@@ -1303,7 +1317,7 @@ fn changing_the_base_between_approval_and_application_invalidates_it_on_the_over
         GateError::ApprovalMismatch { .. } => {}
         other => panic!("期望 ApprovalMismatch（Base 在铸造之后被改动），得到 {other:?}"),
     }
-    assert_eq!(tree_snapshot(&base_path), before, "被拒的集成动了 Base");
+    assert_eq!(tree_snapshot_content(&base_path), before, "被拒的集成动了 Base");
     assert!(
         audit_rows(&tx).is_empty(),
         "被拒的集成写了审计记录（拒绝应当排在任何变更之前）"
