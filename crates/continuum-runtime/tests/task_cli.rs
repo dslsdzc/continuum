@@ -1,5 +1,6 @@
-//! `task` 子命令的端到端用例：建工作区、沙箱执行、`--apply` 的策略裁决与集成、
-//! 未 `--apply`（或命令失败）时的清理（设计下篇第 4.2 节第 1–8 步）。
+//! `task` 子命令的端到端用例：建工作区、沙箱执行、效应声明的 Journal 接线、
+//! `--apply` 的策略裁决与集成、未 `--apply`（或命令失败）时的清理
+//! （设计下篇第 4.2 节第 1–8 步）。
 //!
 //! **本文件的 `--apply` 用例全部受 [`require_auto_selected_sandbox`] 门控**（驱动要真的
 //! 跑起来才谈得上集成）。裁决本身不依赖沙箱，故它的承重断言**不放在这里**：
@@ -18,11 +19,13 @@
 //! 路径一律取 `canonicalize` 之后的值：临时目录可能落在符号链接之下，而子进程报出的
 //! 工作目录（`pwd`）与驱动算出的路径都是规范路径，两侧不规范化会让失败点指向断言。
 
-use continuum_persist::{Db, Value};
+use continuum_effect::MarkExecutingAsUnknown;
+use continuum_persist::{Db, RecoveryRegistry, Value, run_recovery};
 use continuum_policy::{Condition, Decision, Level, Policy, Scope};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_continuum-runtime");
 
@@ -132,6 +135,62 @@ fn workspace_rows(db: &Path) -> Vec<(String, String, String)> {
         .collect();
     tx.commit().unwrap();
     out
+}
+
+/// 库里 `effect` 表的全部行：`(effect_type, target, state)`，按类型与目标排序。
+///
+/// 直接读列而不经 `continuum_effect::load_effect`：本文件要看的正是**落库编码**
+/// （两个枚举列的小写文本），经类型化的读回会把编码这一层盖掉（同 [`workspace_rows`]）。
+fn effect_rows(db: &Path) -> Vec<(String, String, String)> {
+    let db = Db::open(db).expect("打开数据库失败");
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query(
+            "SELECT effect_type, target, state FROM effect ORDER BY effect_type, target",
+            &[],
+        )
+        .expect("读 effect 表失败");
+    let out = rows
+        .iter()
+        .map(|r| {
+            let text = |v: &Value| match v {
+                Value::Text(s) => s.clone(),
+                other => panic!("列应为文本，实际 {other:?}"),
+            };
+            (text(&r[0]), text(&r[1]), text(&r[2]))
+        })
+        .collect();
+    tx.commit().unwrap();
+    out
+}
+
+/// `effect` 表各行的状态列，按 [`effect_rows`] 的次序。
+fn effect_states(db: &Path) -> Vec<String> {
+    effect_rows(db)
+        .into_iter()
+        .map(|(_, _, state)| state)
+        .collect()
+}
+
+/// 目标为 `target` 的那条效应记录的 `authorization` 列（设计第 6.7 节）。
+fn authorization_of(db: &Path, target: &str) -> String {
+    let db = Db::open(db).expect("打开数据库失败");
+    let tx = db.begin().unwrap();
+    let rows = tx
+        .query(
+            "SELECT authorization FROM effect WHERE target = ?1",
+            &[Value::text(target)],
+        )
+        .expect("读 effect 表失败");
+    let value = rows
+        .first()
+        .map(|r| match &r[0] {
+            Value::Text(s) => s.clone(),
+            other => panic!("authorization 列应为文本，实际 {other:?}"),
+        })
+        .unwrap_or_else(|| panic!("没有目标为 {target} 的效应记录"));
+    tx.commit().unwrap();
+    value
 }
 
 /// 一条条件恒真（空合取）的规则：任何 `PolicyContext` 都成立。
@@ -1016,6 +1075,382 @@ fn a_failed_command_is_not_integrated_and_the_workspace_is_cleaned() {
         local_branches(&base),
         vec!["main".to_owned()],
         "命令失败时仍要收尾：分支应被回收"
+    );
+    ran(TEST);
+}
+
+// ── 第 4、6 步：效应声明与 Journal 接线（Task 11）─────────────────────────
+
+/// 各 `--effect` 在执行**之前**已写入 Journal，且命令看到的状态是 `EXECUTING`。
+///
+/// 判据（设计第 10 节判据 3）：命令在**自己的第一条指令**上读 Journal 的落库字节，
+/// `executing` 正是 `effect.state` 列的编码（设计第 8 节，小写）。读到才印
+/// `EFFECT-EXECUTING`。命令若在记录写入之前就跑（或只写了 `PLANNED`/`AUTHORIZED`），
+/// 这个标记不会出现。
+///
+/// **本用例显式点名 bubblewrap**：Landlock 的只读白名单是 `/usr /lib /lib64 /etc /bin
+/// /sbin`（`continuum-sandbox/src/landlock.rs`），库所在的临时目录不在其中，命令在
+/// Landlock 下连库文件都打不开；bubblewrap 的 `--ro-bind / /` 才让库**可读**。
+/// 无 bwrap 的机器上显式跳过（带执行/跳过条数），不静默换一个读不到 Journal 的机制。
+///
+/// 库是 WAL 模式（`continuum-persist` 的 `Db::open_with`），刚提交的状态在 `<库>-wal`
+/// 里，故两个文件都查。
+#[test]
+fn effects_are_recorded_before_the_command_runs() {
+    const TEST: &str = "effects_are_recorded_before_the_command_runs";
+    if !continuum_sandbox::Sandbox::bubblewrap()
+        .capabilities()
+        .restricts_filesystem_writes
+    {
+        skip(
+            TEST,
+            "PATH 中找不到 bwrap：Landlock 下命令读不到 Journal，本判据无法验",
+        );
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--sandbox",
+            "bubblewrap",
+            "--effect",
+            "push_branch:origin/main",
+            "--exec",
+            "sh",
+            "-c",
+            "if grep -q executing \"$PROBE_DB\" \"$PROBE_DB-wal\" 2>/dev/null; \
+             then echo EFFECT-EXECUTING; else echo EFFECT-OTHER; fi",
+        ],
+        &[("PROBE_DB", db.as_os_str())],
+    );
+    assert_success(&out);
+    let stdout = stdout_of(&out);
+    assert!(
+        stdout.contains("EFFECT-EXECUTING"),
+        "命令执行时该效应的状态应已是 EXECUTING（写入早于执行）\n--- stdout ---\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("EFFECT-OTHER"),
+        "两个标记不该同时出现\n--- stdout ---\n{stdout}"
+    );
+    ran(TEST);
+}
+
+/// 命令执行途中驱动被杀：记录停在 `EXECUTING`，恢复把它转成 `UNKNOWN`（**不猜**）。
+///
+/// 判据（设计第 10 节判据 4）：杀的是**驱动进程**——命令阻塞在 `sleep` 上，测试先看到
+/// 命令已开始的标记（故第 4 步的记录已提交），再把驱动杀死。**不是命令自杀**：命令自杀
+/// 时驱动还活着，会照第 6 步写 `FAILED`，那样验不到「崩溃留下 EXECUTING」。
+///
+/// 恢复在**测试进程内**用 `run_recovery` 跑（`recover` 子命令是 Task 12，本 task 不
+/// 依赖它）。断言转 `UNKNOWN` 且**没有**变成 `COMMITTED`/`FAILED`——设计第 6.4 节：
+/// `UNKNOWN` 是「不知道」，不得为了干净并入「确定没成功」。
+#[test]
+fn a_killed_command_leaves_executing_and_recovery_turns_it_unknown() {
+    const TEST: &str = "a_killed_command_leaves_executing_and_recovery_turns_it_unknown";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    // 命令先写「已开始」再长睡。stdio 接到 null：被杀的驱动与仍活着的 `sleep` 子进程
+    // 都会持有管道的写端，接管道会让测试在读取端空等。
+    let mut driver = Command::new(BIN)
+        .args(["task", "--base"])
+        .arg(&base)
+        .args(["--intent", INTENT, "--db"])
+        .arg(&db)
+        .args([
+            "--effect",
+            "charge:acct_1",
+            "--exec",
+            "sh",
+            "-c",
+            "echo started > started.txt; sleep 30",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("continuum-runtime 无法执行");
+
+    let started = worktree_task_root(&base).join("started.txt");
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !started.exists() {
+        if Instant::now() > deadline {
+            let _ = driver.kill();
+            let _ = driver.wait();
+            panic!("命令 20 秒内没有开始：夹具或实现有问题，本判据没验到");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // 此刻驱动阻塞在子进程的 `wait()` 上；杀死它，让记录停在 EXECUTING。
+    driver.kill().expect("无法杀死驱动进程");
+    let status = driver.wait().expect("等待驱动进程失败");
+    assert!(!status.success(), "被杀的驱动不该正常退出，实际 {status:?}");
+
+    // 终态由驱动在命令结束后才写，而命令还在 sleep，故此刻记录必须仍是 EXECUTING。
+    assert_eq!(
+        effect_states(&db),
+        vec!["executing".to_owned()],
+        "驱动在命令执行途中被杀，记录应停在 EXECUTING"
+    );
+
+    // 在测试进程内跑恢复（不经 `recover` 子命令）。
+    {
+        let handle = Db::open(&db).expect("打开数据库失败");
+        let mut registry = RecoveryRegistry::new();
+        registry.register(Box::new(MarkExecutingAsUnknown::new()));
+        run_recovery(&handle, &registry).expect("恢复失败");
+    }
+
+    let states = effect_states(&db);
+    assert_eq!(states.len(), 1, "应恰有一条效应记录，实际 {states:?}");
+    assert_eq!(
+        states[0], "unknown",
+        "EXECUTING 应被恢复转成 UNKNOWN，实际 {states:?}"
+    );
+    // 逐项各断言一次：`UNKNOWN` 不得被并入任一「确定」态（设计第 6.4 节）。
+    assert_ne!(states[0], "committed", "不得把 UNKNOWN 猜成 COMMITTED");
+    assert_ne!(states[0], "failed", "不得把 UNKNOWN 猜成 FAILED");
+    ran(TEST);
+}
+
+/// 同 intent / 类型 / 目标跑第二次：拒绝**整条**命令，且库里仍只有一条记录。
+///
+/// 「命令自身的效应没发生第二次」的判断方法：命令印一个标记到 stdout。未 `--apply` 时
+/// Task 根随后即被清理，写在文件里观察不到；stdout 由子进程继承、直达测试的管道，故
+/// 看得见。第二次的 stdout 里不该有这个标记——**若实现只是静默跳过效应而照跑命令，
+/// 标记就会出现**，这正是本条与「拒绝」的分界。
+#[test]
+fn the_same_idempotency_key_refuses_to_run_again() {
+    const TEST: &str = "the_same_idempotency_key_refuses_to_run_again";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    let after_db = [
+        "--effect",
+        "deploy:prod",
+        "--exec",
+        "sh",
+        "-c",
+        "echo COMMAND-RAN",
+    ];
+
+    let first = run_task(&base, &db, &after_db, &[]);
+    assert_success(&first);
+    assert!(
+        stdout_of(&first).contains("COMMAND-RAN"),
+        "第一次应真的执行命令\n--- stdout ---\n{}",
+        stdout_of(&first)
+    );
+    assert_eq!(effect_states(&db), vec!["committed".to_owned()]);
+
+    let second = run_task(&base, &db, &after_db, &[]);
+    assert!(
+        !second.status.success(),
+        "同键的第二次必须拒绝整条命令\n--- stdout ---\n{}",
+        stdout_of(&second)
+    );
+    let stderr = stderr_of(&second);
+    assert!(
+        stderr.contains("幂等键"),
+        "应点名幂等键冲突，实际 stderr：{stderr}"
+    );
+    assert!(
+        !stdout_of(&second).contains("COMMAND-RAN"),
+        "被拒的命令不得执行（命令自身的效应不该发生第二次）\n--- stdout ---\n{}",
+        stdout_of(&second)
+    );
+    assert_eq!(
+        effect_states(&db),
+        vec!["committed".to_owned()],
+        "库里仍应只有一条记录"
+    );
+    // 被拒之后工作区与记录照第 8 步清理：`save_workspace` 是裸 INSERT，留着会让同一个
+    // Intent 再也创建不了。
+    assert!(
+        workspace_rows(&db).is_empty(),
+        "被拒后应清理工作区记录，实际 {:?}",
+        workspace_rows(&db)
+    );
+    ran(TEST);
+}
+
+/// 退出码 0：**每一条**声明都被写成 `COMMITTED`。
+///
+/// 逐条断言（类型、目标、状态三者一起），不只看条数：条数对而状态串错、或两条互相
+/// 串了类型/目标，都能让只数条数的断言通过。
+#[test]
+fn a_successful_command_commits_all_declared_effects() {
+    const TEST: &str = "a_successful_command_commits_all_declared_effects";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--effect",
+            "charge:acct_1",
+            "--effect",
+            "deploy:prod",
+            "--exec",
+            "true",
+        ],
+        &[],
+    );
+    assert_success(&out);
+    assert_eq!(
+        effect_rows(&db),
+        vec![
+            (
+                "charge".to_owned(),
+                "acct_1".to_owned(),
+                "committed".to_owned()
+            ),
+            (
+                "deploy".to_owned(),
+                "prod".to_owned(),
+                "committed".to_owned()
+            ),
+        ],
+        "每一条声明的效应都应被写成 COMMITTED"
+    );
+    ran(TEST);
+}
+
+/// 退出码非 0：**每一条**声明都被写成 `FAILED`，且没有一条停在 `EXECUTING`。
+///
+/// 「没有停在 EXECUTING」单独断言一次（设计第 6.4 节）：`FAILED` 是「确定没成功」，
+/// 与 `UNKNOWN` 的「不知道」是两回事；一条把命令失败也留在 EXECUTING 的实现会让恢复
+/// 钩子后来把它误转成 UNKNOWN。
+#[test]
+fn a_failing_command_fails_all_declared_effects() {
+    const TEST: &str = "a_failing_command_fails_all_declared_effects";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    let out = run_task(
+        &base,
+        &db,
+        &[
+            "--effect",
+            "charge:acct_1",
+            "--effect",
+            "deploy:prod",
+            "--exec",
+            "sh",
+            "-c",
+            "exit 3",
+        ],
+        &[],
+    );
+    assert!(!out.status.success(), "命令失败时整条命令必须报失败");
+    // 断言到**哪一种**失败：命令自己以退出码 3 结束，不是别的错误。
+    assert!(
+        stderr_of(&out).contains("以退出码 3"),
+        "期望「命令以退出码 3 失败」，实际 stderr：{}",
+        stderr_of(&out)
+    );
+    assert_eq!(
+        effect_rows(&db),
+        vec![
+            (
+                "charge".to_owned(),
+                "acct_1".to_owned(),
+                "failed".to_owned()
+            ),
+            ("deploy".to_owned(), "prod".to_owned(), "failed".to_owned()),
+        ],
+        "每一条声明的效应都应被写成 FAILED"
+    );
+    for state in effect_states(&db) {
+        assert_ne!(
+            state, "executing",
+            "失败的命令不得让记录停在 EXECUTING（设计第 6.4 节）"
+        );
+    }
+    ran(TEST);
+}
+
+/// `authorization` 列写下「`--approve` 是否给出」与「策略的裁决结果」两件事
+/// （设计第 6.7 节）。
+///
+/// **三种裁决各一张照片**，加上 `--approve` 的两个取值——枚举式的要求不能抽一个代表：
+/// 只测 `deny` 一种的话，把 `Decision::as_str` 的三条分支串错（例如
+/// `require_approval` 与 `deny` 对调）不会有任何用例变红。期望值**手写字面量**，
+/// 不调 `Decision::as_str` 去拼：拼出来的期望值会跟着实现一起漂移，钉不住格式。
+///
+/// 三次调用只有裁决那一路不同：先无规则（默认 `Deny`），再放一条第 3 级
+/// `RequireApproval`（不传 `--approve` → `RequireApproval`），最后传 `--approve`
+/// （第 2 级越过第 3 级 → `Allow`）。三次用不同的目标，避免撞上幂等键。
+#[test]
+fn the_authorization_field_records_the_flag_and_the_verdict() {
+    const TEST: &str = "the_authorization_field_records_the_flag_and_the_verdict";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    // 一：库里一条规则都没有 → 默认 Deny；未给 --approve。
+    assert_success(&run_task(
+        &base,
+        &db,
+        &["--effect", "charge:a1", "--exec", "true"],
+        &[],
+    ));
+    assert_eq!(
+        authorization_of(&db, "a1"),
+        "approve=false;policy=deny",
+        "无匹配默认 Deny 应连同「未给 --approve」一起写进 authorization"
+    );
+
+    // 二：第 3 级 RequireApproval，未给 --approve → RequireApproval。
+    seed_policies(&db, &[("r1", Level::UserPersistent, Decision::RequireApproval)]);
+    assert_success(&run_task(
+        &base,
+        &db,
+        &["--effect", "charge:a2", "--exec", "true"],
+        &[],
+    ));
+    assert_eq!(
+        authorization_of(&db, "a2"),
+        "approve=false;policy=require_approval",
+        "RequireApproval 的编码应逐字写进 authorization"
+    );
+
+    // 三：同一条规则，给出 --approve → 第 2 级的 Allow 越过第 3 级。
+    assert_success(&run_task(
+        &base,
+        &db,
+        &["--effect", "charge:a3", "--approve", "--exec", "true"],
+        &[],
+    ));
+    assert_eq!(
+        authorization_of(&db, "a3"),
+        "approve=true;policy=allow",
+        "给出 --approve 时裁决为 Allow，两个事实都要写进 authorization"
     );
     ran(TEST);
 }

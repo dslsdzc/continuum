@@ -461,50 +461,6 @@ fn an_effect_with_an_empty_target_is_rejected() {
     );
 }
 
-/// `--effect` 的 Journal 写入要到 Task 11 才接线，故现在给了它必须**报错**，而不是静默
-/// 不记。
-///
-/// **Task 11 接线时必须删除本用例**（连同 `task_cmd::TaskError::EffectNotWired`）。
-/// 它在这里正是为了挡住「选项被收下、什么也没发生」——那样的驱动看起来在做事，而没有
-/// 别的用例会因此变红。与它替换掉的占位用例（`task` 整个子命令未接线时的那一条）同形：
-/// 非零退出码 + 明说尚未接线 + stdout 为空。
-#[test]
-fn the_effect_option_is_refused_until_the_journal_is_wired() {
-    // 全路径：`Command` 这个名字在本文件里已被 `cli::Command` 占用。
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_continuum-runtime"))
-        .args([
-            "task",
-            "--base",
-            "/b",
-            "--intent",
-            "i1",
-            "--db",
-            "/db",
-            "--effect",
-            "push_branch:origin/main",
-            "--exec",
-            "true",
-        ])
-        .output()
-        .expect("continuum-runtime 无法执行");
-    assert!(!out.status.success(), "尚未接线的选项必须让整条命令返回非零退出码");
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("尚未接线"),
-        "应明说尚未接线，实际 stderr：{stderr}"
-    );
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        stdout.is_empty(),
-        "拒掉一条尚未接线的调用不得有 stdout 输出（那会看起来像跑过了），实际：{stdout}"
-    );
-    // 拒绝发生在任何 I/O 之前：`--base /b` 根本不存在，若先判 Base 则报的是另一条错误。
-    assert!(
-        stderr.contains("--effect"),
-        "错误里应点名是哪个选项尚未接线，实际 stderr：{stderr}"
-    );
-}
-
 #[test]
 fn an_unknown_subcommand_or_option_is_rejected() {
     assert_eq!(

@@ -1,9 +1,5 @@
 //! `task` 子命令的实现（设计下篇第 4.2 节第 1–8 步）。
 //!
-//! 效应记录的写入（第 4 步与第 6 步的 Journal 部分）是 Task 11，**尚未接线**，故给了
-//! `--effect` 即 `Err`，不静默忽略——一个不出声地不记账的驱动看起来像在做事，而调用方
-//! 以为自己的意图已被采纳（同 `cli` 模块的立论）。
-//!
 //! # 序列（设计第 4.2 节）
 //!
 //! 1. `detect_backend`；
@@ -11,13 +7,52 @@
 //!    环境变量 [`IN_NAMESPACE_ENV`] 标识已进入以防递归。**这一步排在创建任何东西之前**，
 //!    否则会建出一个子进程看不见的工作区（设计上篇第 5 节）；
 //! 3. `create_task_workspace` → `WorkspaceRecord::from_workspaces` → `save_workspace`；
-//! 4. 效应记录的写入次序在 Task 11，本 task 不做任何 Journal 操作；
+//! 4. **查一次策略**，再对每个 `--effect` 写 `PLANNED → AUTHORIZED → EXECUTING`
+//!    （[`record_declared_effects`]）。全部**提交之后**才执行命令（`§268`：执行前写入）；
 //! 5. `Sandbox::spawn` 跑 `--exec`，工作目录由 `spawn` 设为 Task 根；
-//! 6. 命令退出码非 0 → 仍是失败；
-//! 7. **命令成功且给了 `--apply`**：[`arbitrate`] 查策略 → 按 [`mints`] 决定是否铸造
-//!    批准值 → 经 Gate 应用。**这一支不清理工作区**（见下）；
+//! 6. 按命令的退出形态写终态：退出码 0 → `COMMITTED`，非 0 → `FAILED`
+//!    （[`finish_declared_effects`]）；
+//! 7. **命令成功且给了 `--apply`**：按第 4 步那次裁决决定是否铸造批准值
+//!    （[`mints`]）→ 经 Gate 应用。**这一支不清理工作区**（见下）；
 //! 8. **未给 `--apply`，或命令退出码非 0**：`discard_task_workspace` 成功之后再
 //!    `remove_workspace`，失败则不删记录。
+//!
+//! # 策略只查一次，排在写效应之前
+//!
+//! 设计第 6.7 节要求 `authorization` 写入「批准值是否给出、以及策略的裁决结果」，
+//! 第 6.3 节把写 `PLANNED`（含 `authorization`）排在第 4 步，而第 4.2 节把「查策略」
+//! 排在第 7 步（命令之后）——三处里第 4.2 节的第 7 步是孤立者。**本实现以第 6.3 节
+//! 为准**：裁决在 [`record_declared_effects`] 里做一次，第 7 步复用同一个 [`Decision`]，
+//! 不再第二次查。两条理由：
+//!
+//! - `AUTHORIZED` 这个状态名应当真的意味着「策略已授权」，而不是「稍后会授权」；
+//! - **单一来源**——查两次会让同一个裁决有两个产生点，两处可以各自漂移。
+//!
+//! **故策略裁决早于命令执行。** 今天这没有可观察的差别：`PolicyContext` 除
+//! `explicit_current` 外全是 `None`（设计第 5.6 节），早查与晚查给出同一结果。**将来若
+//! `duration_ms` 之类真的被注入，这一点要重新审视**——命令的时长只有跑完才知道，那样的
+//! 裁决必须晚于命令，本节、第 6.3 节与第 4.2 节随之重写。
+//!
+//! # `authorization` 只记录、不校验（设计第 6.7 节）
+//!
+//! 见 [`authorization_field`]。**此边界在此显式声明**，否则该字段会被读成「此处已强制」。
+//!
+//! # `--effect` 的落库取值
+//!
+//! - `Effect.id` 与 `idempotency_key` **同源**：同一三元组（意图 id / 类型 / 目标）、
+//!   同一个函数 [`effect_key`]，不是一个字段各派一次。设计第 6.5 节只规定幂等键由该
+//!   三元组派生；`id` 是表的主键（第 8 节），同样用它派生，不给「这条记录是谁」再立
+//!   第二个来源；
+//! - `parameters` 填 `{}`：设计第 6.1 节只说它是 JSON，**未规定内容，故本子项目不填**，
+//!   不编造值；
+//! - `planned_at` / `updated_at` 取驱动自取的 [`now_millis`]——effect crate 不收时钟
+//!   （`continuum_effect::recovery` 的 `now` 同样由调用方给），这一刻由驱动给。
+//!
+//! # 幂等键先查、已存在即拒绝整条命令
+//!
+//! 执行任何命令之前先查键（第 6.5 节）。**拒绝而非静默跳过**：静默跳过会让调用方以为
+//! 命令执行了。任意一条 `--effect` 的键已存在即拒绝**整条**命令——不是只跳过那一条。
+//! 拒绝时命令一步都没跑，工作区与记录按第 8 步的次序清理，否则同一个 Intent 再也创建不了。
 //!
 //! # 第 7、8 步的两种收尾**不能类推**（设计第 4.2 节）
 //!
@@ -28,8 +63,8 @@
 //!   保留记录会让**同一个 Intent 再也创建不了**，用户得手工删记录与分支才能重试。
 //!   故「保留工作区」的代价不止一个目录，只在「改动完整且未被批准」那一支才值得付。
 //!
-//! 同理，**命令退出码非 0 时不做集成**（第 7 步不走）：第 6 步把各 Effect 记 `FAILED`
-//! （Task 11），与「同一件事既记为失败、又把它的文件系统结果收进 Base」自相矛盾。
+//! 同理，**命令退出码非 0 时不做集成**（第 7 步不走）：第 6 步把各 Effect 记 `FAILED`，
+//! 与「同一件事既记为失败、又把它的文件系统结果收进 Base」自相矛盾。
 //!
 //! # 后端的取用点（设计第 4.4 节）
 //!
@@ -61,12 +96,15 @@
 
 use crate::runtime_migrations;
 use crate::sandbox_select::{self, SandboxSelectError};
+use continuum_effect::{
+    Effect, EffectId, EffectState, advance, find_by_idempotency_key, record_planned,
+};
 use continuum_persist::{Db, PersistError};
 use continuum_policy::{
     Condition, Decision, ExplicitApproval, Level, Policy, PolicyContext, Scope, decide,
     load_policies,
 };
-use continuum_runtime::cli::TaskArgs;
+use continuum_runtime::cli::{EffectSpec, TaskArgs};
 use continuum_sandbox::{Sandbox, SandboxError};
 use continuum_workspace::{
     BaseWorkspace, GateError, IntegrationGate, IntentId, TaskWorkspace, WorkspaceBackend,
@@ -88,14 +126,6 @@ pub const IN_NAMESPACE_ENV: &str = "CONTINUUM_IN_NAMESPACE";
 /// 从解析结果重建命令行会丢掉调用方实际写的形状（同一个值可以有多种写法），而 re-exec
 /// 要的正是「把这一模一样的调用再跑一遍，只是换进命名空间里」。
 pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
-    // 尚未接线的选项先挡掉：给了就报错，不静默忽略（见模块文档）。判定排在任何 I/O 与
-    // re-exec 之前——一条注定要失败的调用不该先建库、先起进程。
-    if !args.effects.is_empty() {
-        return Err(TaskError::EffectNotWired {
-            count: args.effects.len(),
-        });
-    }
-
     // 第 1 步：判后端。
     let base = BaseWorkspace::new(args.base.clone())?;
     let backend = detect_backend(&base);
@@ -125,28 +155,63 @@ pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
         });
     }
 
-    // 第 4 步：`--effect` 的 Journal 写入在 Task 11；上面已把带 `--effect` 的调用拒掉，
-    // 故此处不做任何 Journal 操作。
+    // 第 4 步：查一次策略，再写各效应的 `PLANNED → AUTHORIZED → EXECUTING`。
+    // 失败（幂等键已存在、库层错误）时命令一步都没跑，故工作区与记录按第 8 步的次序
+    // 清理——留着记录会让同一个 Intent 再也创建不了（`save_workspace` 是裸 `INSERT`）。
+    let decision = match record_declared_effects(&db, args) {
+        Ok(decision) => decision,
+        Err(e) => {
+            return Err(match discard_recorded_workspace(&db, &args.intent) {
+                Ok(()) => e,
+                Err(cleanup) => TaskError::Context {
+                    context: format!("第 4 步（效应登记）失败（{e}）之后，清理工作区也失败"),
+                    source: Box::new(cleanup),
+                },
+            });
+        }
+    };
 
     // 第 5 步：在沙箱内执行。选中的机制不另作报告——驱动不在正常路径上写 stdout/stderr，
     // 子进程自己的输出即是调用方看到的东西；返回它只为装配与纯函数的答案能相互核对。
     //
-    // 机制选择失败也算「执行没成」，走同一条收尾：工作区与记录都不留。留下的代价不只是
-    // 一个目录——`save_workspace` 不覆盖同名记录，同一 Intent 会因此再也创建不了。
+    // 机制选择失败也算「执行没成」（第 6 步据此记 `FAILED`），走同一条收尾：工作区与
+    // 记录都不留。留下的代价不只是一个目录——`save_workspace` 不覆盖同名记录，同一
+    // Intent 会因此再也创建不了。
     let execution = match sandbox_select::select_for_this_machine(args.sandbox) {
         Ok((_mechanism, sandbox)) => run_in_sandbox(&sandbox, &task, &args.exec),
         Err(e) => Err(TaskError::from(e)),
     };
 
-    // 第 7 步：命令**成功**且给了 `--apply` → 查策略、集成。**这一支不清理工作区**，
-    // 成功与被拒都不清理（设计第 4.2 节）。命令失败时第 7 步不走（同上）。
+    // 第 6 步：按命令的退出形态写终态（设计第 6.3 节）。三种出口都由退出形态判定，
+    // 不需要知道命令内部做了什么。**写终态排在集成之前**：`COMMITTED` 说的是命令跑成了，
+    // 与第 7 步集不集成是两回事。
+    //
+    // 写终态失败时命令已经跑完，但记录不再可信，故不集成、并按第 8 步收尾，把失败报出去。
+    let terminal = if execution.is_ok() {
+        EffectState::Committed
+    } else {
+        EffectState::Failed
+    };
+    if let Err(e) = finish_declared_effects(&db, args, terminal) {
+        return Err(match discard_recorded_workspace(&db, &args.intent) {
+            Ok(()) => e,
+            Err(cleanup) => TaskError::Context {
+                context: format!("效应记录的终态写入失败（{e}）之后，清理工作区也失败"),
+                source: Box::new(cleanup),
+            },
+        });
+    }
+
+    // 第 7 步：命令**成功**且给了 `--apply` → 按第 4 步那次裁决决定是否集成。
+    // **这一支不清理工作区**，成功与被拒都不清理（设计第 4.2 节）。命令失败时第 7 步
+    // 不走（同上）。
     if args.apply && execution.is_ok() {
         // 这层上下文**只**记「哪一步、哪个 Intent」，不替错误断言工作区还在不在：
         // 第 7 步的错误不都是那一类——[`TaskError::RecordMissing`] 的含义恰恰是
         // **记录已经不在了**，「记录原样保留」对它为假；而 `Gate` 那一支「工作区保留」
         // 成立却没被论证过。确实成立的那一支（裁决不铸造）把保证写在
         // [`TaskError::IntegrationRefused`] 自己的 `Display` 里，更靠近它成立的地方。
-        return apply_recorded_integration(&db, args).map_err(|e| TaskError::Context {
+        return apply_recorded_integration(&db, args, decision).map_err(|e| TaskError::Context {
             context: format!(
                 "第 7 步（策略裁决与集成）失败（Intent {}）",
                 args.intent.as_str()
@@ -190,6 +255,140 @@ fn save_record(db: &Db, record: &WorkspaceRecord) -> Result<(), TaskError> {
     save_workspace(&tx, record)?;
     tx.commit()?;
     Ok(())
+}
+
+/// 第 4 步：查一次策略，再对每个 `--effect` 写 `PLANNED → AUTHORIZED → EXECUTING`。
+///
+/// 返回本次调用**唯一**的那次裁决结果，供第 7 步复用（见模块文档「策略只查一次」）。
+///
+/// # 为什么先查全部键、再写任何一条
+///
+/// 任意一条 `--effect` 的幂等键已存在即拒绝**整条**命令（设计第 6.5 节）。两趟走——
+/// 先全查、后全写——使「拒绝」不依赖回滚来保证「一条也没写」，读代码时不必推演事务。
+///
+/// # 事务在返回前提交
+///
+/// 第 5 步启动子进程前必须结束事务，否则 `BEGIN IMMEDIATE` 会在子进程运行的全程占着
+/// 写锁。更要紧的是**记录要先落盘**：进程若在命令执行中被杀，未提交的事务会随进程
+/// 消失，恢复钩子就看不到那条 `EXECUTING`，`§268` 的「执行前写入」也就无从谈起。
+///
+/// 出错时 `tx` 随作用域析构回滚，调用方（[`run`]）随后清理工作区与记录。
+fn record_declared_effects(db: &Db, args: &TaskArgs) -> Result<Decision, TaskError> {
+    let tx = db.begin()?;
+
+    // 裁决在本步做，不留给第 7 步：`AUTHORIZED` 要真的意味着「策略已授权」，而
+    // `authorization` 字段（第 6.7 节）要写进这个裁决结果。
+    let policies = load_policies(&tx)?;
+    let decision = arbitrate(&policies, &policy_context(args.approve));
+    let authorization = authorization_field(args.approve, decision);
+
+    // 先查全部幂等键，再写任何一条。
+    for spec in &args.effects {
+        let key = effect_key(&args.intent, spec);
+        if find_by_idempotency_key(&tx, &key)?.is_some() {
+            return Err(TaskError::EffectAlreadyRecorded { key });
+        }
+    }
+
+    for spec in &args.effects {
+        let key = effect_key(&args.intent, spec);
+        let now = now_millis();
+        let effect = Effect {
+            // `id` 与 `idempotency_key` 同源：见模块文档「`--effect` 的落库取值」。
+            id: EffectId::new(key.clone()),
+            effect_type: spec.effect_type,
+            target: spec.target.clone(),
+            // 本子项目不填 parameters（设计第 6.1 节未规定内容），故填空对象而不是
+            // 编一个值：编出来的值会变成下游读得懂、而实际无意义的输入。
+            parameters: serde_json::json!({}),
+            authorization: authorization.clone(),
+            idempotency_key: key,
+            state: EffectState::Planned,
+            planned_at: now,
+            updated_at: now,
+        };
+        record_planned(&tx, &effect)?;
+        // 三态一次写完（设计第 6.3 节）。每次 `advance` 在同一事务内追加一条审计。
+        advance(&tx, &effect.id, EffectState::Authorized, now_millis())?;
+        advance(&tx, &effect.id, EffectState::Executing, now_millis())?;
+    }
+
+    tx.commit()?;
+    Ok(decision)
+}
+
+/// 第 6 步：把各效应记为命令退出形态对应的终态。
+///
+/// `to` 只可能是 [`EffectState::Committed`]（退出码 0）或 [`EffectState::Failed`]
+/// （非 0）——由 [`run`] 一处判定。崩溃那一支不走这里：进程都没了，记录停在
+/// `EXECUTING`，由恢复钩子转 `UNKNOWN`（设计第 6.3、6.4 节）。
+///
+/// 没有声明任何 `--effect` 时不碰库：一个空事务没有意义，也会让「无效应的命令」
+/// 凭空多一次写锁。
+fn finish_declared_effects(
+    db: &Db,
+    args: &TaskArgs,
+    to: EffectState,
+) -> Result<(), TaskError> {
+    if args.effects.is_empty() {
+        return Ok(());
+    }
+    let tx = db.begin()?;
+    for spec in &args.effects {
+        // 记录的 `id` 与幂等键同源（[`effect_key`]），故这里由同一次派生取回 id。
+        let id = EffectId::new(effect_key(&args.intent, spec));
+        advance(&tx, &id, to, now_millis())?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// 效应的身份与幂等键（设计第 6.1、6.5 节）：由 意图 id / 类型 / 目标 派生。
+///
+/// **`Effect.id` 与 `idempotency_key` 取同一个值**——同一三元组、同一个函数，
+/// 不是一个字段各派一次。设计第 6.5 节只规定幂等键由该三元组派生；`id` 是表的主键
+/// （第 8 节），本子项目同样用它派生，以免给「这条记录是谁」再立第二个来源。
+///
+/// # 为什么带长度前缀
+///
+/// `intent` 与 `target` 都是自由文本（`IntentId::new` 只收字符串，不做校验），只靠
+/// 分隔符拼接不是单射：`("a", publish, "b:publish:c")` 与 `("a:publish:b", publish, "c")`
+/// 会拼出同一个串，两条不同的声明被当成同一条，第二条被静默拒绝。长度前缀让三段的
+/// 分界可判定——键形如 `<意图字节长>:<意图>:<类型>:<目标>`，类型取自封闭枚举、不含
+/// 冒号，故目标即最后一段的全部。
+fn effect_key(intent: &IntentId, spec: &EffectSpec) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        intent.as_str().len(),
+        intent.as_str(),
+        spec.effect_type.as_str(),
+        spec.target
+    )
+}
+
+/// `authorization` 字段的内容（设计第 6.7 节）：**只记录、不校验**的不透明串。
+///
+/// 写入两件事：`--approve` 是否给出、以及策略的裁决结果。裁决取 [`Decision::as_str`]
+/// 的编码——与 `policy` 表同一份，不在这里手抄字面量。
+///
+/// # 本子项目到此为止
+///
+/// 本字段**不被任何代码读回或校验**。它是留给对账与审计的记录，不是一道强制。
+/// 校验属 Capability（P3）与 Authority（长期）的职责；本驱动既没有 Capability 的输入，
+/// 也没有 Authority 的来源，故它**不**在此处假装检查过什么。**不要把本函数或这个字段
+/// 读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
+fn authorization_field(approved: bool, decision: Decision) -> String {
+    format!("approve={approved};policy={}", decision.as_str())
+}
+
+/// 裁决用的上下文。`--approve` 给没给是唯一有来源的事实；其余五事实本项目暂无来源
+/// （设计第 5.6 节：`task_class` 由驱动注入，但没规定注什么），填 `None` 而不是编一个
+/// 值——编出来的值会让引用它的规则开始匹配，那正是第 5.6 节点名的变更风险。
+fn policy_context(approved: bool) -> PolicyContext {
+    PolicyContext {
+        explicit_current: approved.then_some(ExplicitApproval),
+        ..PolicyContext::default()
+    }
 }
 
 /// 第 5 步：在 Task 根内启动 `--exec` 的命令，等它结束。
@@ -247,7 +446,10 @@ fn discard_recorded_workspace(db: &Db, intent: &IntentId) -> Result<(), TaskErro
     Ok(())
 }
 
-/// 第 7 步：查策略 → 按裁决决定是否铸造批准值 → 经 Gate 应用。
+/// 第 7 步：按第 4 步那次裁决决定是否铸造批准值 → 经 Gate 应用。
+///
+/// **`decision` 由调用方传入，本函数不查策略**：裁决在第 4 步做过一次（理由见模块文档
+/// 「策略只查一次」），这里复用同一个值。再查一次会让同一个裁决有两个产生点。
 ///
 /// **这一支不清理工作区**：成功与被拒都不清理（设计第 4.2 节）。被拒时改动是完整可用的，
 /// 丢弃它会让用户无从恢复；成功时也一样——集成把改动并进 Base 是一条独立的通道，
@@ -259,26 +461,20 @@ fn discard_recorded_workspace(db: &Db, intent: &IntentId) -> Result<(), TaskErro
 /// 铸造出的批准值只对**这一次**集成有效（[`approve_integration`] 的文档）：`apply_patch`
 /// 在动第一个字节之前会重算摘要并比对，故「铸造」与「应用」之间若有人改了 Base 或 Task，
 /// 集成会以 [`GateError::ApprovalMismatch`] 失败而不是把错的改动落下去。
-fn apply_recorded_integration(db: &Db, args: &TaskArgs) -> Result<(), TaskError> {
+fn apply_recorded_integration(
+    db: &Db,
+    args: &TaskArgs,
+    decision: Decision,
+) -> Result<(), TaskError> {
     let tx = db.begin()?;
     let record = load_workspace(&tx, &args.intent)?.ok_or_else(|| TaskError::RecordMissing {
         intent: args.intent.as_str().to_owned(),
     })?;
 
-    // `--approve` 给没给是裁决用的**事实**，也是 [`mints`] 用的**开关**。取一次存在
-    // 局部变量里：两处若各取一次（或一处写成 `true`），「事实」与「开关」就会分岔，
+    // `--approve` 给没给既是第 4 步裁决用的**事实**，也是 [`mints`] 用的**开关**。
+    // 两处取的是同一个 `args.approve`：若一处写成 `true`，「事实」与「开关」就会分岔，
     // 而分岔的两侧都编译得过。
     let approved = args.approve;
-    let policies = load_policies(&tx)?;
-    let ctx = PolicyContext {
-        explicit_current: approved.then_some(ExplicitApproval),
-        // 其余五事实本项目暂无来源（设计第 5.6 节：`task_class` 由驱动注入，但没规定
-        // 注什么）。**填 `None` 而不是编一个值**：编出来的值会让引用它的规则开始匹配，
-        // 而设计第 5.6 节点名这是本层最需要留意的变更风险。
-        ..PolicyContext::default()
-    };
-
-    let decision = arbitrate(&policies, &ctx);
     if !mints(decision, approved) {
         // `tx` 随之析构回滚。此处本就没有写，回滚只是别把写锁留着。
         return Err(TaskError::IntegrationRefused {
@@ -468,13 +664,15 @@ fn now_millis() -> i64 {
 /// `task` 子命令失败的原因。
 #[derive(Debug, Error)]
 pub enum TaskError {
-    /// 给了 `--effect`，而效应记录的写入尚未接线。
+    /// 某条 `--effect` 的幂等键已有记录，拒绝运行**整条**命令（设计第 6.5 节）。
     ///
-    /// **Task 11 接线后在派发处删除本变体与它的用例。**
+    /// **拒绝而非静默跳过**：静默跳过会让调用方以为命令执行了。命令一步都没跑，
+    /// 工作区与记录按第 8 步的次序清理。
     #[error(
-        "效应记录尚未接线（Task 11）：本命令带 {count} 条 --effect，驱动不会写入 Journal，故拒绝运行"
+        "幂等键 {key} 已有记录：拒绝运行整条命令（已存在的记录不静默跳过——\
+         跳过会让调用方以为命令执行了）"
     )]
-    EffectNotWired { count: usize },
+    EffectAlreadyRecorded { key: String },
     /// 策略裁决为「不铸造批准值」，故拒绝集成。
     ///
     /// **工作区与记录原样保留**（设计第 4.2 节）：命令成功了，改动是完整可用的，
@@ -530,6 +728,28 @@ pub enum TaskError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use continuum_effect::EffectType;
+
+    /// 幂等键对三段是**单射**：设计第 6.5 节的键由 意图 id / 类型 / 目标 派生，
+    /// 若拼接有歧义，两条不同的声明会被当成同一条，第二条被静默拒绝。
+    ///
+    /// 用例给出一对**真的会撞**的三元组（`a` + `publish` + `b:publish:c` 与
+    /// `a:publish:b` + `publish` + `c`；`IntentId::new` 不校验，含冒号的意图是收下的）。
+    /// 带长度前缀时两者分得开；去掉长度前缀、改用普通分隔符拼接时本用例变红——
+    /// 这就是 [`effect_key`] 那条「长度前缀使拼接是单射」论据的对照片。
+    #[test]
+    fn the_effect_key_separates_the_intent_from_the_target() {
+        let spec = |target: &str| EffectSpec {
+            effect_type: EffectType::Publish,
+            target: target.to_owned(),
+        };
+        let first = effect_key(&IntentId::new("a"), &spec("b:publish:c"));
+        let second = effect_key(&IntentId::new("a:publish:b"), &spec("c"));
+        assert_ne!(
+            first, second,
+            "两条不同的效应声明派生出同一个幂等键：第二条会被当成已登记而静默拒绝"
+        );
+    }
 
     /// 一条条件恒真（空合取）的规则：任何上下文都成立。
     ///
