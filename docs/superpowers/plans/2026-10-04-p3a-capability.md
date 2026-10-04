@@ -97,23 +97,16 @@ Cargo.toml（workspace）                        members
 
 - [ ] **Step 1: 建 crate 骨架并登记**
 
-`Cargo.toml` 的依赖：**只声明本 task 用得到的**——`continuum-effect`（要用 `EffectType`）。
-`continuum-core` / `continuum-persist` / `continuum-events` / `serde` / `serde_json` / `thiserror`
-与 dev-dep `tempfile` / `trybuild` **由需要它们的 task 增量加**（`ALLOWED` 对叶子 crate 记的是
-**实际依赖**，一次声明齐会让条目在中间若干 task 里说谎；判据同「迁移由用它的 task 注册」）。
+`Cargo.toml` 的依赖：**只声明本 task 用得到的**——`continuum-effect`（要用 `EffectType`）与
+`thiserror`（`error.rs` 的 `CapabilityError` 上有 `Error` 派生，去掉即 `E0433`）。
+`continuum-core` / `continuum-persist` / `continuum-events` / `serde` / `serde_json` 与 dev-dep
+`tempfile` / `trybuild` **由需要它们的 task 增量加**（`ALLOWED` 对叶子 crate 记的是**实际依赖**，
+一次声明齐会让条目在中间若干 task 里说谎；判据同「迁移由用它的 task 注册」）。
 
-`ALLOWED` 加：
+`ALLOWED` 加（**只列本 task 实际有的边**；其余三条由后续 task 各自补）：
 
 ```rust
-    (
-        "continuum-capability",
-        &[
-            "continuum-core",
-            "continuum-effect",
-            "continuum-events",
-            "continuum-persist",
-        ],
-    ),
+    ("continuum-capability", &["continuum-effect"]),
 ```
 
 - [ ] **Step 2: 写用例**
