@@ -26,8 +26,9 @@ use crate::persist::load_tool;
 /// 访问器读，故不需要。
 ///
 /// **只派生 [`Debug`]，且它不是白留的**：`tests/authorize.rs` 的每条用例都经
-/// `Result::unwrap()` / `unwrap_err()` 取用 `authorize` 的返回值，而 `Result::unwrap`
-/// 要求 `T: Debug`——去掉它，整个 `tests/authorize.rs` 编译不过（实测：15 处 E0277）。
+/// `Result::unwrap()` / `unwrap_err()` 取用 `authorize` 的返回值，而 **`Result::unwrap_err`
+/// 要求 `T: Debug`**（`Result::unwrap` 要求的是 `E: Debug`，那个由 [`CapabilityError`] 提供）
+/// ——去掉它，整个 `tests/authorize.rs` 编译不过（实测：15 处 E0277，全部来自 `unwrap_err`）。
 ///
 /// 其余三个曾经派生过的 trait 已删，各有理由：`Clone` 无人克隆，`PartialEq` / `Eq`
 /// 无人比较整个 `AuthorizedTool`（消费方读的是 [`AuthorizedTool::tool_id`] 与
