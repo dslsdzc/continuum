@@ -118,7 +118,6 @@ Cargo.toml（workspace）                        members
 
 - `every_effect_type_has_exactly_one_capability`：对 `EffectType::ALL` 的**每一个**变体，断言 `EffectType::capability_kind(effect)` 给出**恰一个** `CapabilityKind`；六条各断言一次（**逐项有照片**，不抽代表）。
 - `no_capability_kind_maps_to_two_effect_types`：反向查一遍，断言六个 `EffectType` 得到六个**互不相同**的 `CapabilityKind`（单射）。
-- `an_illegal_combination_cannot_be_written`：这一条**不是运行期用例**，而是 Task 2 的 trybuild 样例——此处只留一句注释指向它。
 
 - [ ] **Step 3: 运行，确认失败**
 
@@ -202,6 +201,7 @@ git commit -m "feat(capability): 半封闭词汇表与 EffectType 的对应"
 - `capability_is_not_from_string.rs`：`let c: Capability = "git.push:origin/main".parse().unwrap();` —— 无 `FromStr`。
 - `capability_has_no_full_access.rs`：`CapabilityKind::FullAccess` 不存在（§253 禁止的那个形状**写不出来**）。
 - `capability_fields_are_private.rs`：结构体字面量构造被拒（私有字段）。
+- `an_illegal_combination_cannot_be_written.rs`：`CapabilityKind::Filesystem(FsAction::Push)` 一类组合拼不出——半封闭词汇表的意义就在这里，**判据同样是编译失败**。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -303,7 +303,8 @@ git commit -m "feat(capability): 五要素与三条结构性保证"
 
 - `a_profile_contains_its_tool`：构造一个 `ToolProfile` 后，其 `tool()` 给出的 `id`/`version`/`required_capabilities` 与构造时一致——**钉住「登记项含定义」而不是并列两份**（设计 §3.1）。
 - `effect_class_none_means_no_external_effect`：`effect_class: None` 的工具不携带任何 `EffectType`。
-- `trust_is_not_optional`：`ToolProfile` 构造必须给出 `Trust`（**这条由类型表达，不由用例**——无 `Option<Trust>` 的入口；用例只写一句注释指向类型定义）。
+  （`trust` 必填这一条**没有用例，也不该有**：它由类型表达（无 `Option<Trust>` 的入口），
+  而「某入口不存在」只有 trybuild 能钉——本 task 不为它造，理由写在 `ToolProfile` 的文档注释里。）
 
 - [ ] **Step 2: 运行，确认失败**
 
