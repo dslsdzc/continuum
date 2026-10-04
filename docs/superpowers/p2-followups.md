@@ -272,3 +272,22 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 续第六节：`EffectState::ALL` 的完整性只能靠「加变体时作者记得同步」——`mem::variant_count` 在
 rustc 1.95 上仍 unstable（E0658），实测「加变体并补 `ordinal` 的臂但不加进 `ALL`」**全绿**。
 若某一阶段要引入「由变体清单生成 `ALL`」的形态，几处枚举应一起改。
+
+### 9.5 策略层与驱动：后续阶段要重新审视的两处
+
+- **`mints` 的 `RequireApproval` 支目前只在 API/测试层可达**（Task 10）。协调者曾判定「本接法下
+  `mints(RequireApproval, true)` 不可达」，**该结论是错的**，被实现者驳倒：`decide` 取最高层、
+  同层取更严，而 `--approve` 已给出时第 2 级 `Allow` **只压得过第 3–5 级**的 `RequireApproval`。
+  另有两条路照样返回 `RequireApproval`：**第 1 级 `RequireApproval`**，以及**落库一条与第 2 级
+  同层（`ExplicitCurrent`）的 `RequireApproval`**（同层取更严，压过内建的 `Allow`）。两条都能
+  由公开 API 造出：`Level` 六变体全在封闭集合，`save_policy` **不校验层级来源**。
+  **但本 task 之后能写 `policy` 行的只有 `continuum_policy::save_policy` 这个 API，没有命令行入口**，
+  故那两条路在真实调用里暂时造不出。**若将来加了写策略的 CLI，第 1 级与第 2 级同层规则会成为真实
+  可达路径，届时 `mints` 的 `RequireApproval` 支要重新审视。**
+- **第 5 级 `Runtime Default` 的预置放行规则尚未落地**（Task 10）。设计 §5.3 要求「第 5 级须预置
+  已知安全操作的放行规则，否则系统启动即全拒」。本子项目的各 task 均未预置任何规则（brief 未要求），
+  故**空库且无 `--approve` 时所有集成默认被拒**——这是 fail-closed 的**预期**结果，不是缺陷，
+  但「预置规则由谁在何时落」尚无归属，记此以免被当成已覆盖。
+- **`tests/startup.rs` 的迁移计数断言有一处不该改**（Task 10）：`second_startup_applies_no_migration`
+  断言 `0`——第二次启动确实不再应用迁移，它与「迁移应用 N 项」的那些计数**不是同一类断言**。
+  后来者改迁移集合时不要顺手改它；全仓「迁移应用」相关断言共五处，其中三处随迁移数变化。
