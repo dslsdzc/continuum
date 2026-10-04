@@ -26,6 +26,7 @@
 - `cargo test --workspace --no-fail-fast` 必须全绿，**0 warning**；`cargo build --workspace --all-targets` 同样 0 warning。
 - **不修改用户目录的权限位。** 不在仓库中写入任何凭据。
 - **不要用 `git add -A`，不要 `git commit --amend`。** 执行期间工作区由实现者与协调者共用，只 `git add <显式路径>`。
+  **新增或变更 crate 依赖时 `Cargo.lock` 会随之变化，须一并提交锁文件**——各 task 的显式路径清单只列了源码与清单，锁文件按本行办。
 
 ## 三条已付过代价的纪律
 
