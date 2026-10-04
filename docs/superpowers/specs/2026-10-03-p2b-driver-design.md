@@ -131,9 +131,16 @@ continuum recover --db <路径>
    —— 若幂等键已存在记录，在此拒绝整条命令 ——
 5  在 Sandbox 内运行 --exec，工作目录为 Task 根
 6  命令退出码 0 → 各 Effect 写 COMMITTED；非 0 → 写 FAILED
-7  若给 --apply：查策略 → 按裁决铸造或不铸造批准值 → 经 Gate 应用
-8  若未给 --apply：discard_task_workspace 成功后再 remove_workspace
+7  若给 --apply **且命令退出码为 0**：查策略 → 按裁决铸造或不铸造批准值 → 经 Gate 应用
+8  若未给 --apply **且命令退出码为 0**：discard_task_workspace 成功后再 remove_workspace
 ```
+
+**命令退出码非 0 时一律不集成、也不清理工作区**（第 7、8 步都不走），把命令失败原样
+返回给调用方。原第 7 步的条件只写「若给 `--apply`」，照字面读会**把一条半途失败的命令
+已做出的部分改动打进 Base，而调用方拿到的是非零退出码**——Base 已被改，报告却是失败。
+第 6 步把各 Effect 写成 `FAILED`，与「同一件事既记为失败、又把它的文件系统结果收进
+Base」自相矛盾；两处对齐，失败即不收。工作区保留与「被拒不清理」同理：改动仍在
+Task 里，改好命令后可重跑。
 
 **第 7 步裁决为「不铸造」时（含第 1 级 Deny）：拒绝集成，但保留工作区**——不 `discard`。
 用户的改动仍在 Task 里，给出 `--approve` 后可重跑。丢弃一份未被批准的改动会让用户
