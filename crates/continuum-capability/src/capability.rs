@@ -305,7 +305,8 @@ impl std::fmt::Display for Capability {
 /// 由此，本 crate 里曾经有过的 `Grant` 与 `Verdict` 两个类型**已删除**——去掉重判后
 /// 它们没有任何消费方（`issuer` 恒为本阶段那一条路径，一位信息，[`Issuer`] 已有那个
 /// 变体）。本 crate 对「声明了没有消费方的东西」一贯要么删、要么写明理由，这次是删；
-/// 来历见 `.superpowers/sdd/task-2-report.md` 第 3.3、3.5 节。
+/// 来历见设计 §2.4 的「签发点不重判，故 `Grant` / `Verdict` 已删」一段——**执行期裁定**，
+/// 不是漏实现——与计划 Task 2 Step 3 的同名订正。
 ///
 /// 「只有一个具名的签发点」这条保证由此**不再由类型独家承担**：类型层保证的是
 /// 「crate 外造不出来」（两份 `tests/compile_fail/` 样例），crate 内的第二个产出点由

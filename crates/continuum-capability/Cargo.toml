@@ -17,6 +17,7 @@ trybuild = { workspace = true }
 
 # 其余依赖由需要它们的 task 增量加（设计第 6 节的边表是允许集合，不是一次性声明清单；
 # 叶子 crate 的条目记实际依赖，同理见 continuum-policy 的 Cargo.toml）：
-# continuum-core（`ToolId`，Task 3）、continuum-persist（`tool` 表，Task 3）、
-# continuum-events（`AuditKind::CapabilityGrants`，Task 4）、serde / serde_json（同上）、
-# dev-dep tempfile（落库用例，Task 3）。
+# continuum-core（`ToolId`，Task 3）、continuum-persist（`tool` 表的读写与迁移，Task 4）、
+# continuum-events（`AuditKind::CapabilityGrants`，Task 5 的 `authorize`）、
+# serde_json（`Tool` 的 schema 字段，Task 3；落库序列化，Task 4；本 crate 不在自己的类型上
+# 派生 serde，故不列 serde）、dev-dep tempfile（落库用例，Task 4）。

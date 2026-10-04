@@ -10,7 +10,7 @@
 /// **不含「裁决为 `Deny`」这类变体**：那是**驱动**的判断（`continuum-runtime` 的
 /// `mints` 六格表），本 crate 不复核调用方已经决定过的事——同一个判断有两个产生点，
 /// 正是本项目一贯判为缺陷的那一类。同一条理由，设计第 3.4 节强制点 (1) 的两个拒绝
-/// 方向也留到 Task 4 的 `ToolRegistry::authorize`——那时它们才有产生方。
+/// 方向也留到计划 Task 5 的 `authorize`——那时它们才有产生方。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum CapabilityError {
     /// 作用域为空。
