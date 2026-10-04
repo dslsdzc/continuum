@@ -69,8 +69,10 @@ AuditKind                                       本子项目不再新增变体
 
 1. **`backend` 的来源**：上篇的三层封堵挡住的是「拿着错的 backend 调进来」，挡不住「上层记错了
    后端」。故本子项目的驱动**一律从落库记录取 `backend`，不从命令行取**，且取用点唯一。
-2. **`discard` 与 `remove_workspace` 的次序**：本层不收 `Tx`，两者的一致性由调用方促成。
-   驱动就是那个调用方——**先 `discard` 成功，再删记录**；失败则不删。
+2. **`discard` 与 `remove_workspace` 的次序**：底层 `discard_task_workspace` 不收 `Tx`，
+   两者的一致性由调用方促成。驱动就是那个调用方——**先 `discard` 成功，再删记录**；失败则不删。
+   **驱动须经 `IntegrationGate::discard` 而非直接调底层函数**：上篇 §6.4 要求 `discard` 也写
+   一条审计记录，而补记那条记录的是 Gate 这一层（见第 4.2 节第 8 步的说明）。
 3. **`GateApproval` 是不绑定的 token**：本子项目把它改成绑定到具体一次集成，见第 7 节。
 
 ---
@@ -132,8 +134,13 @@ continuum recover --db <路径>
 5  在 Sandbox 内运行 --exec，工作目录为 Task 根
 6  命令退出码 0 → 各 Effect 写 COMMITTED；非 0 → 写 FAILED
 7  若给 --apply **且命令退出码为 0**：查策略 → 按裁决铸造或不铸造批准值 → 经 Gate 应用
-8  若**未给 --apply，或命令退出码非 0**：discard_task_workspace 成功后再 remove_workspace
+8  若**未给 --apply，或命令退出码非 0**：经 IntegrationGate::discard 成功后再 remove_workspace
 ```
+
+**第 8 步走 Gate 的 `discard`，不是直接调 `discard_task_workspace`。** 两者在回收动作上等价
+（Gate 内部就是调它），但 **Gate 那一层补记审计行**——上篇 §6.4 明写「三种写入 Base 的，
+**以及 `discard`**，各写一条审计记录」。直接调低层那个函数会**静默绕掉那条审计**：
+Task 9 起初正是那么写的（当时的 brief 也那么写），Task 12 的接线审计才发现，已改。
 
 **命令退出码非 0 时一律不集成**（第 7 步不走），把命令失败原样返回给调用方。原第 7 步的
 条件只写「若给 `--apply`」，照字面读会**把一条半途失败的命令已做出的部分改动打进 Base，
