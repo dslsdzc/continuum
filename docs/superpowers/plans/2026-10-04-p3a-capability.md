@@ -96,7 +96,10 @@ Cargo.toml（workspace）                        members
 
 - [ ] **Step 1: 建 crate 骨架并登记**
 
-`Cargo.toml` 的依赖：`continuum-core`、`continuum-effect`、`continuum-persist`、`continuum-events`、`serde`、`serde_json`、`thiserror`；dev-dep `tempfile`、`trybuild`。
+`Cargo.toml` 的依赖：**只声明本 task 用得到的**——`continuum-effect`（要用 `EffectType`）。
+`continuum-core` / `continuum-persist` / `continuum-events` / `serde` / `serde_json` / `thiserror`
+与 dev-dep `tempfile` / `trybuild` **由需要它们的 task 增量加**（`ALLOWED` 对叶子 crate 记的是
+**实际依赖**，一次声明齐会让条目在中间若干 task 里说谎；判据同「迁移由用它的 task 注册」）。
 
 `ALLOWED` 加：
 
@@ -116,7 +119,7 @@ Cargo.toml（workspace）                        members
 
 `tests/vocabulary.rs` 的断言内容：
 
-- `every_effect_type_has_exactly_one_capability`：对 `EffectType::ALL` 的**每一个**变体，断言 `EffectType::capability_kind(effect)` 给出**恰一个** `CapabilityKind`；六条各断言一次（**逐项有照片**，不抽代表）。
+- `every_effect_type_has_exactly_one_capability`：对 `EffectType::ALL` 的**每一个**变体，断言 `CapabilityKind::for_effect(effect)` 给出**恰一个** `CapabilityKind`；六条各断言一次（**逐项有照片**，不抽代表）。**方法写在 `CapabilityKind` 上而非 `EffectType` 上**——反过来会让 `continuum-effect` 反向依赖本 crate。
 - `no_capability_kind_maps_to_two_effect_types`：反向查一遍，断言六个 `EffectType` 得到六个**互不相同**的 `CapabilityKind`（单射）。
 
 - [ ] **Step 3: 运行，确认失败**

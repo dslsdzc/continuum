@@ -89,7 +89,8 @@ pub struct Capability {
 
 **照录**：`Filesystem.Read/Write`、`Git.Read/WorktreeWrite/CommitLocal/Push`、`Github.CreatePr`。
 
-**推导**：`EffectType`（P2 已建的六个外部效应类型，§6.8）余下四个在本表里**没有对应项**，而不对应就会让两个词汇表各走各的——那正是 P2 出过 Critical 的那一类。故按一一对应补齐：
+**推导**：`EffectType`（P2 已建的六个外部效应类型，§6.8）余下的**四个 resource**（其下五个
+`kind`）在本表里**没有对应项**，而不对应就会让两个词汇表各走各的——那正是 P2 出过 Critical 的那一类。故按一一对应补齐：
 
 | `EffectType` | `CapabilityKind` | 来源 |
 |---|---|---|
@@ -100,7 +101,7 @@ pub struct Capability {
 | `charge` | `Payment.Charge` | 推导 |
 | `deploy` | `Environment.Deploy` | 推导 |
 
-**这四条是推导不是照录**，依据是「与 `EffectType` 一一对应」；`tests/effect_mapping.rs` 以逐项有照片的用例钉住这条对应（六个各一条），并断言对应是**全的**（每个 `EffectType` 都有一枚）与**单的**（无一枚对应两个）。
+**这四条是推导不是照录**，依据是「与 `EffectType` 一一对应」；`tests/vocabulary.rs` 以逐项有照片的用例钉住这条对应（六个各一条），并断言对应是**全的**（每个 `EffectType` 都有一枚）与**单的**（无一枚对应两个）。
 
 ## 2.3 三条结构性保证
 
@@ -267,7 +268,13 @@ continuum-secrets      （边界层：密钥运行时）        ← 依赖 conti
 
 **不把边界层的组件塞进资源层的 crate**：《工程》§4.3 写的是「密钥运行时 ← Capability 执行点」，crate 边界按层走，混了会让依赖图说谎。
 
-**新依赖边**（一律进 `dependency_direction.rs` 的 `ALLOWED`，那张表的断言是逐对 `assert_eq!`）：
+**新依赖边**（一律进 `dependency_direction.rs` 的 `ALLOWED`，那张表的断言是逐对 `assert_eq!`）。
+
+**下面列的是终态。边由「需要它的那个 task」增量加上，不在 Task 1 一次声明齐**——
+`ALLOWED` 表对**叶子 crate** 记的是**实际依赖**（`p2-followups` 第四节已记该表两种语义之别），
+而 P2b 为此删过两条零使用的边（`bfdb29b` 与终审修复波各一条）。若一次声明齐，
+本 crate 的条目在中间若干 task 里都在说谎。这与「迁移的注册由用它的那个 task 自己完成」
+是同一条判据。
 
 ```
 continuum-capability → continuum-core, continuum-effect, continuum-persist,
