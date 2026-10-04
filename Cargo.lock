@@ -68,15 +68,8 @@ dependencies = [
 name = "continuum-capability"
 version = "0.1.0"
 dependencies = [
- "continuum-core",
  "continuum-effect",
- "continuum-events",
- "continuum-persist",
- "serde",
- "serde_json",
- "tempfile",
  "thiserror",
- "trybuild",
 ]
 
 [[package]]
