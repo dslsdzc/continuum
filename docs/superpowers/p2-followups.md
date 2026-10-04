@@ -211,3 +211,64 @@ P2 上篇给 runtime 加了 `continuum-sandbox`（在 runtime 内同样零使用
 
 **现状**：本轮只订正了那处把「两侧判据逐项相同」写死的文档措辞，并写明上述 fail-open 与实测。
 代码未改。
+
+---
+
+## 九、下篇实现过程中积累的残余（逐条待处置）
+
+本节是**下篇各 task 评审与实现者报回的残余清单**，按处置所需的前置条件分组。凡是只在
+`.superpowers/sdd/` 的报告或协调者 ledger 里出现过的，都收在这里——那个目录是 gitignore 的，
+**只写在那里的事项会随 branch 消失**。
+
+### 9.1 需要一次设计裁定的
+
+- **`in: []` 是否该在解析期拒绝**（Task 4）。设计 §5.1 只列了三类「不符」（事实名不命中、
+  比较符不在封闭集合、取值类型不符），空集合不属任何一类，故当时**按字面收下**（结构合法、
+  永不匹配），并有用例钉住与写明理由。但 §5.1 的立论正是「不许静默退化为永不匹配」，
+  故「要不要加第四类拒绝」是一次设计裁定，未做。
+- **摘要排除规则要不要按后端分别定**（Task 7，与第八节同源）。第八节记了 worktree 侧那处
+  fail-open 与两条候选规则（「只根层排除」／「两侧都只排 `<base>/.ai`」），待裁定。
+- **「形如选项的取值被当作取值收下」要不要拒绝**（Task 8）。`task --base --intent i1` 会把
+  `base` 吃成 `"--intent"`，随后报 `UnknownOption { name: "i1" }`——**报错指向了错的 token**。
+  方向是 fail-closed、且无注释声称相反。当时**裁定不改行为**：设计没规定这一条，而「拒绝形如
+  选项的取值」是一条**新规则**，将来若有取值合法地以 `-` 开头（路径、正则）会误伤。
+
+### 9.2 需要动手改码的既有问题
+
+- **`ArtifactType` 有两份独立的编解码表**（Task 4 复审发现）：
+  `crates/continuum-artifact/src/persist.rs` 与 `crates/continuum-graph/src/persist.rs` 各一份，
+  取值逐字相同。**这是活的重复**，与 Task 4 已消除的 `EffectType`/`PrivacyClass` 那一类同形，
+  只是当时不在该 task 的 diff 内故未动。
+- **`PrivacyClass` 的 serde 派生未被收掉**（Task 4）。当天查得无消费方，尚未构成第二套表示，
+  但 `Artifact` 自身派生 `Serialize` 且字段含 `privacy_class`，**单独摘掉会让 `Artifact` 的派生
+  编译不过**，故不是可独立移除的。已在该枚举的文档注释里写明「今天无序列化路径，但
+  `to_value(&artifact)` 会踩上」。
+- **P2a 用例 `tests/gate.rs::every_write_operation_refuses_a_stale_approval` 的快照判据比摘要宽**
+  （Task 9）。`tree_snapshot` 什么也不排除，而 `tree_digest` 在任意层级跳 `.git`/`.ai`，
+  故 git 的后台维护锁 `.git/objects/maintenance.lock` 的开合会让它偶发失败（加压时一次，44 次
+  重跑 0 次）。**方向是改测试侧快照，不动产品代码**；实测已确认那次集成确实被拒（`ApprovalMismatch`
+  断言排在快照断言之前且通过），**不是 fail-open**。
+
+### 9.3 需要写进注释或文档的
+
+- **摘要对路径拼写敏感**（Task 7）。`base.root()`／`task.root()` 的原始字节进摘要，故非规范路径、
+  结尾多余斜杠、符号链接拼法、Base 被移动都会使摘要不同。fail-closed、今天无害；但驱动若在
+  **两次独立调用**里用不同拼法铸造与应用，批准值会莫名失效。
+- **`USAGE` 里的程序名取 `continuum`**（Task 8），而实际 bin 名是 `continuum-runtime`。
+  取自设计 §4.1 的用法行。改名或加别名不在该 task 内。
+- **两条删除义务**（Task 9 起）：Task 10 接上集成后须删 `TaskError::ApplyNotWired` 与
+  `the_apply_option_is_refused_until_the_integration_is_wired`；Task 11 接上 Journal 后须删
+  `EffectNotWired` 与 `the_effect_option_is_refused_until_the_journal_is_wired`。
+- **`TaskError::RecordMissing` 是一条没有照片的防御分支**（Task 9）。它要求「本次运行刚写过的
+  记录被别处删掉」，端到端造不出（要靠并发）。方向是 fail-closed（宁可报错也不按猜出来的后端
+  回收），据实记为**未被任何用例覆盖的代码路径**。
+- **两条等价变异体，不要试图为它们补用例**（Task 9）：`IN_NAMESPACE_ENV` 在本机冗余
+  （`unshare -Urm` 之后 `in_user_namespace()` 本就为真；它的真实价值只在探测本身坏掉时作第二道
+  保险）；「Base 与 Task 根也取自记录」那一半**在观察上不可分辨**（记录里的 `base_path` 与命令行
+  给的是同一个路径、`path` 与句柄 `root()` 是同一个规范路径），故只有 `backend` 那一半有对照片。
+
+### 9.4 `ALL` 常量的生成（跨 crate 改进候选）
+
+续第六节：`EffectState::ALL` 的完整性只能靠「加变体时作者记得同步」——`mem::variant_count` 在
+rustc 1.95 上仍 unstable（E0658），实测「加变体并补 `ordinal` 的臂但不加进 `ALL`」**全绿**。
+若某一阶段要引入「由变体清单生成 `ALL`」的形态，几处枚举应一起改。
