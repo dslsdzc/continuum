@@ -192,7 +192,7 @@ git commit -m "feat(capability): 半封闭词汇表与 EffectType 的对应"
 
 - [ ] **Step 1: 写 trybuild 样例**
 
-四个 `compile_fail` 样例，**判据是编译失败且失败原因正确**（每份 `.stderr` 钉住预期报错——否则「因为拼错函数名而编译失败」也会让用例变绿）：
+五个 `compile_fail` 样例（**数一下，别照抄这个数字**——原写「四个」而底下列了五条，是笔误；`FullAccess` 那条不能省，它是 §253 的那张照片），**判据是编译失败且失败原因正确**（每份 `.stderr` 钉住预期报错——否则「因为拼错函数名而编译失败」也会让用例变绿）：
 
 - `capability_has_no_constructor.rs`：`Capability::new(...)` 不存在。
 - `capability_is_not_from_string.rs`：`let c: Capability = "git.push:origin/main".parse().unwrap();` —— 无 `FromStr`。
