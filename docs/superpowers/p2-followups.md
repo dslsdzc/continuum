@@ -425,7 +425,7 @@ rustc 1.95 上仍 unstable（E0658），实测「加变体并补 `ordinal` 的�
   方向 fail-closed（少一个事实只会更严、不会放宽裁决），代码里 `policy_context` 的文档有说明，
   但**设计正文与本节此前都没记**，故补记：这两个事实今天无来源，属「后续阶段有来源时再接」，
   `task_cmd.rs` 模块文档里「若日后 `duration_ms` 之类被注入则次序要重审」那条同样指向此处。
-- **M9 — `continuum-workspace` 的零使用 `serde` 依赖与两个 derive 仍未决定**
+- **M9 — `continuum-workspace` 的 `serde` 依赖与两个 derive 仍未决定**
   （`Cargo.toml`、`src/ids.rs` 的 `IntentId`、`src/backend.rs` 的 `WorkspaceBackend`）：
   第五节把决定交给下篇（「随下篇一并决定」），下篇未决定、本节此前也没记。本分支在
   `continuum-effect` 上做过同型处置（commit `bfdb29b`：去掉零消费方的 serde 派生与
