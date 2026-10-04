@@ -131,7 +131,7 @@ impl CapabilityKind {
     ///
     /// **取值不按一条统一规则拼**，而是逐项有来历——规范自己就是两种形状：
     ///
-    /// - **§88 照录**（`docs/spec/02-positioning.md:909`）：`read`、`worktree.write`、
+    /// - **§88 照录**（`docs/spec/02-positioning.md:909-910`）：`read`、`worktree.write`、
     ///   `commit.local`、`push`。多词用**点号**，因为给例就是这么写的；
     /// - **§253 照录**（`docs/spec/05-normative.md:984-986`）：`read`、`write`
     ///   （给例 `git.write:/task-worktree` 里的动作串）、`create_pr`——多词用
@@ -140,12 +140,28 @@ impl CapabilityKind {
     ///   `delete_remote`、`send`、`publish`、`charge`、`deploy`，
     ///   按本仓编码约定小写、多词以 `_` 连接。
     ///
-    /// 若一律按下划线拼，`git.worktree_write` 这个串在规范里**不存在**——那条不是
-    /// 「编码约定」而是**照录**，本函数的取值以给例为准。
+    /// # 这处不对称是刻意的，不是笔误
+    ///
+    /// `worktree.write` / `commit.local` 用点号而 `create_pr` / `delete_remote` 用
+    /// 下划线，**来源是规范自己不统一**（§88 给例与 §253 给例的两种形状，见上表），
+    /// 不是本 crate 漏了统一。**动手「修」它之前请回去读那两处原文**：
+    ///
+    /// - 若把前两条改成 `worktree_write` / `commit_local`，`Display` 就再也产不出
+    ///   §88 的字面串，而 `git.worktree_write` 这个串**在规范里不存在**；
+    /// - 若把 `create_pr` 改成 `create.pr`，`Display` 就产不出 §253 的字面串
+    ///   `github.create_pr:repo/X`。
+    ///
+    /// 两种改法都是**把规范的给例改掉**去迁就一条本仓的拼写习惯。这条注释留在此处
+    /// 而不是只留在报告里，正是本项目「订正时把错误说法的来历留在原地」的手法：
+    /// 后来者看到不对称会想改，得先看到这段。
+    ///
+    /// 另：这里的串**不是落库编码**——[`Capability`] 不落库（设计 §2.3），本 crate 也
+    /// 没有任何枚举落库编码。它们是 §253 的展示词汇，只经 [`Display`](std::fmt::Display)
+    /// 出、不进。
     ///
     /// match 穷尽且无通配臂：加动作时本函数编译不过，串不会漏分支。逐项取值由
     /// `tests/capability.rs` 的 `resource_and_action_strings_follow_the_spec_examples`
-    /// 钉住。
+    /// 钉住（手工字面量，钉格式）。
     pub fn action(&self) -> &'static str {
         match self {
             Self::Filesystem(FsAction::Read) => "read",
@@ -275,44 +291,67 @@ impl std::fmt::Display for Capability {
 /// 本 crate 不依赖 `continuum-policy`，故用本 crate 自己的类型（依赖方向在本项目
 /// 是逐对断言的硬约束）。
 ///
-/// **可否签发按本仓既有的六格接法**（`continuum-runtime` 的 `mints`，
-/// `crates/continuum-runtime/src/task_cmd.rs:649-654`，设计下篇第 5.7 节的表在本仓
-/// 的接法）：`Allow` 无论有无显式确认皆铸；`RequireApproval` 须有显式确认；`Deny`
-/// 一律不铸。不另发明判定——`Grant` 的两个变体正好承载这张表的两个入参（裁决值与
-/// `--approve` 给没给）。
+/// # 本函数**不重判** `granted`：判定在驱动，本处只记录结果
+///
+/// 六格判定（裁决值 × `--approve` 给没给）的**唯一**落点在驱动：
+/// `continuum-runtime` 的 `mints`（`crates/continuum-runtime/src/task_cmd.rs:649-654`，
+/// 设计下篇第 5.7 节的表在本仓的接法），其照片是那里的
+/// `the_mapping_from_a_decision_to_minting_has_six_cells` 与
+/// `a_system_safety_deny_is_not_overridden_by_the_flag`。
+///
+/// 若本函数也按那六格算一遍，同一个判断就有了**两个产生点**——改一处不会让另一处
+/// 失败，而本项目一贯把这类形状判为缺陷（P2 为此出过 Critical）。故：
+///
+/// - `Grant` / `Verdict` 是**记录**，不是待复核的条件：它们的取值由驱动决定，其内容
+///   （裁决值、是否附显式确认）由驱动在 Effect Journal 的 `authorization` 字段留档
+///   （设计 §2.3），本类型不重复记；
+/// - 本函数只判**它自己**能判的事：`scope` 是否为空（见下）。
+///
+/// 照片：`tests/capability.rs` 的 `mint_does_not_re_judge_the_grant`——六种 `Grant`
+/// 取值**一律铸出**，故日后若有人在此重加重判，该用例变红，回来读这段。
+///
+/// # 真正的失败路径：空 `scope`
+///
+/// §253 的 `scope` 是自由文本，而空作用域的能力**没有任何下游能判断它指的是什么**
+/// （凭据签发、执行点与对账都要读它）。与 P2b 的「效应目标为空在解析期即拒」是同一条
+/// 判据，见 [`CapabilityError::EmptyScope`]。照片：同文件的
+/// `mint_rejects_an_empty_scope`（两侧都有）。
 ///
 /// **本函数不读时钟**（与 [`Capability::is_valid_at`] 同一条约定），故 `expiry` 是否
 /// 已经过去不由它判断：铸得出的能力可以一铸即失效，那由 `is_valid_at` 在调用点拒。
-/// 照片：`tests/capability.rs` 的 `mint_does_not_read_the_clock`。
-///
-/// 六个格子逐个手写、**穷尽且无通配臂**：`Verdict` 加变体时本函数编译不过。
-/// 六格逐格有照片：`tests/capability.rs` 的 `minting_follows_the_six_cell_table`。
+/// 照片：`mint_does_not_read_the_clock`。
 pub fn mint(
     kind: CapabilityKind,
     scope: String,
     expiry: i64,
     granted: Grant,
 ) -> Result<Capability, CapabilityError> {
-    match granted {
-        Grant::Policy(Verdict::Allow) => {}
-        Grant::Policy(Verdict::RequireApproval) => return Err(CapabilityError::ApprovalRequired),
-        Grant::Policy(Verdict::Deny) => return Err(CapabilityError::PolicyDenied),
-        Grant::PolicyWithExplicitApproval(Verdict::Allow) => {}
-        Grant::PolicyWithExplicitApproval(Verdict::RequireApproval) => {}
-        Grant::PolicyWithExplicitApproval(Verdict::Deny) => return Err(CapabilityError::PolicyDenied),
+    if scope.is_empty() {
+        return Err(CapabilityError::EmptyScope);
     }
+
+    // 本阶段的签发来源只有一个（设计 §2.4）：`granted` 的两个臂都落到它。写成一行
+    // 是**刻意**的——本处不按裁决值分支，正是上一条要避免的重判；让「两臂落到同一处」
+    // 这件事在代码里也看得见，比留一个不读的入参诚实。
+    let issuer = match granted {
+        Grant::Policy(_) | Grant::PolicyWithExplicitApproval(_) => {
+            Issuer::PolicyWithExplicitApproval
+        }
+    };
 
     Ok(Capability {
         kind,
         scope,
         expiry,
-        issuer: Issuer::PolicyWithExplicitApproval,
+        issuer,
     })
 }
 
-/// 「什么授权了这一次」。`PolicyWithExplicitApproval` 对应 §5.5 的 `--approve`：
-/// 显式确认**已给出**时用后者，未给出时用前者。两者的差别只有这一处，而它正是
-/// [`mint`] 六格表里 `RequireApproval` 那一行的分岔。
+/// 「什么授权了这一次」的**记录**。`PolicyWithExplicitApproval` 对应 §5.5 的
+/// `--approve`：显式确认**已给出**时用后者，未给出时用前者。
+///
+/// **它是记录，不是待复核的条件**：[`mint`] 不按它分支（判定在驱动的 `mints`，
+/// 理由见那里的文档）。两个变体的取值由驱动给出，本 crate 只据此记签发来源。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Grant {
     Policy(Verdict),
@@ -322,6 +361,8 @@ pub enum Grant {
 /// 策略裁决的结果。与 `continuum_policy::Decision` 的三个取值一一对应
 /// （`Allow` / `Deny` / `RequireApproval`，见 `crates/continuum-policy/src/rule.rs:88-92`）；
 /// 由驱动转换过来（本 crate 不依赖 `continuum-policy`，依赖方向是逐对断言的硬约束）。
+///
+/// **本类型不是本 crate 的判据**：它随 [`Grant`] 一起只是记录，[`mint`] 不读它的值。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Allow,
