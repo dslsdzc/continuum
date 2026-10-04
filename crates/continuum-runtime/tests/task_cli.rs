@@ -384,37 +384,25 @@ fn the_workspace_record_is_written_and_then_removed() {
     ran(TEST);
 }
 
-/// 命令行里没有任何入口能给出**另一个**后端。两个方向各有一条照片：
+/// `--backend` 是一个**不存在**的选项：解析期即被拒，且拒绝发生在任何 I/O 之前。
 ///
-/// - **入口不存在**（本用例前半）：`--backend` 在解析期即被拒，且拒绝发生在任何 I/O
-///   之前（Base 一字未动、库文件都没建）。这条不是形式主义：上篇那条 Critical
-///   （`integrate_overlay` 删光 Base 的 `.git`）之所以打不到，正是因为没有任何入口能给出
-///   一个与记录不符的后端。
-/// - **驱动用的就是记录里那个**：本用例后半走 worktree 方向——放弃若误用 overlay 后端，
-///   `require_layout` 会先拒（那不是 overlay 布局），放弃不成，记录、Task 根与分支都会
-///   留着，下面三条断言随即变红。
+/// 这条是承重断言，不是形式主义：上篇那条 Critical（`integrate_overlay` 删光 Base 的
+/// `.git`）之所以打不到，正是因为没有任何入口能给出一个与记录不符的后端。
 ///
-/// **本用例这一臂单独分不出「取自记录」与「重新探测」**：在「Base 始终是同一个 git 仓库」
-/// 这个前提下，`record.backend` 与现场 `detect_backend` 给出同一个值，两者不可分辨。
-/// 真正把它分开的是 [`a_failed_discard_keeps_the_workspace_record`]（那条能把记录读回来
-/// 看那一列），M5 变红也靠它。唯一能让本臂具备该判别力的装置是「Base 在创建与回收之间
-/// 改变形态」（例如创建后 `git init`），本 task 没有造这个装置。
+/// 它与 [`there_is_no_way_to_override_the_backend_from_the_command_line`] 是同一件事的两半，
+/// 拆开写只有一个原因：**本用例不需要沙箱机制**（拒绝发生在解析期，驱动根本走不到选机制
+/// 那一步），故它在**任何**机器上都跑；那一条要驱动真的跑起来，因而受
+/// [`require_auto_selected_sandbox`] 门控、在没有隔离机制的机器上会跳过。承重的那一半
+/// 不该跟着会跳过的那一半一起被跳过。
 ///
-/// 整条用例都在 [`require_auto_selected_sandbox`] 的门控之下——**包括方向一**（它本身
-/// 不需要机制：`--backend` 在解析期就被拒）。本机没有任何机制时，驱动对**任何** `task`
-/// 调用都拒绝运行，这个文件的前提在那样的机器上不成立，故整条跳过、读数是干净的
-/// 「执行 0、跳过 1」，而不是让方向一单独留下一个半吊子读数。
+/// 它也是「未知选项」这条判据在 `--backend` 这个名字上的**唯一**照片：`tests/cli.rs` 的
+/// `an_unknown_subcommand_or_option_is_rejected` 覆盖的是 `--apply` 与 `--base` 两个名字。
 #[test]
-fn there_is_no_way_to_override_the_backend_from_the_command_line() {
-    const TEST: &str = "there_is_no_way_to_override_the_backend_from_the_command_line";
-    if !require_auto_selected_sandbox(TEST) {
-        return;
-    }
+fn the_backend_option_is_rejected_at_parse_time() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
 
-    // 方向一：`--backend` 不认识。
     let out = run_task(&base, &db, &["--backend", "overlay", "--exec", "true"], &[]);
     assert!(!out.status.success(), "`--backend` 不得被当成有效选项");
     let stderr = stderr_of(&out);
@@ -429,8 +417,32 @@ fn there_is_no_way_to_override_the_backend_from_the_command_line() {
         "被拒的调用在 Base 里建出了 .ai/"
     );
     assert!(!db.exists(), "被拒的调用不该碰数据库");
+}
 
-    // 方向二：正常跑一次，放弃确实按记录里的 worktree 后端走完了。
+/// 驱动放弃工作区时用的就是**落库记录里那个**后端。
+///
+/// 放弃若误用另一个后端：worktree 的工作区交给 overlay 后端会在 `require_layout` 处被拒
+/// （那不是 overlay 布局），放弃不成，记录、Task 根与分支都会留着，下面三条断言随即变红。
+///
+/// **本用例单独分不出「取自记录」与「重新探测」**：在「Base 始终是同一个 git 仓库」这个
+/// 前提下，`record.backend` 与现场 `detect_backend` 给出同一个值，两者不可分辨。真正把它
+/// 分开的是 [`a_failed_discard_keeps_the_workspace_record`]（那条能把记录读回来看那一列），
+/// M5 变红也靠它。唯一能让本臂具备该判别力的装置是「Base 在创建与回收之间改变形态」
+/// （例如创建后 `git init`），本 task 没有造这个装置。
+///
+/// 入口那一半（`--backend` 被拒）在 [`the_backend_option_is_rejected_at_parse_time`]，
+/// 那一条不设门控。
+#[test]
+fn there_is_no_way_to_override_the_backend_from_the_command_line() {
+    const TEST: &str = "there_is_no_way_to_override_the_backend_from_the_command_line";
+    if !require_auto_selected_sandbox(TEST) {
+        return;
+    }
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    // 正常跑一次，放弃确实按记录里的 worktree 后端走完了。
     assert_success(&run_task(&base, &db, &["--exec", "true"], &[]));
     assert!(workspace_rows(&db).is_empty(), "记录应随工作区一并删除");
     assert!(!worktree_task_root(&base).exists(), "Task 根仍在");
