@@ -5,8 +5,16 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# 本 task 的使用点：`capability.rs` 的 `CapabilityKind::for_effect` 取 `EffectType`。
+# Task 3 起的使用点：`tool.rs` 复用 `continuum_core::tool::ToolId`（§252 的 `Tool.id`，
+# §316 的 ToolProvider 接口类型）。**不在本 crate 另建第二个 `ToolId`**——同一件事两个
+# 类型正是本项目一贯判为缺陷的那一类（设计 §3.1）。
+continuum-core = { path = "../continuum-core" }
+# Task 1 起的使用点：`capability.rs` 的 `CapabilityKind::for_effect` 取 `EffectType`；
+# Task 3 起 `tool.rs` 的 `Tool.effect_class` 也取它（设计 §3.2：不发明第二套分类）。
 continuum-effect = { path = "../continuum-effect" }
+# Task 3 起的使用点：`tool.rs` 的 `Tool` 两个 schema 字段取 `serde_json::Value`。
+# 本 crate 不在自己的类型上派生 serde，故不列 serde。
+serde_json = { workspace = true }
 # 本 task 的使用点：`error.rs` 的 `CapabilityError` 派生 `thiserror::Error`。
 thiserror = { workspace = true }
 
@@ -17,7 +25,6 @@ trybuild = { workspace = true }
 
 # 其余依赖由需要它们的 task 增量加（设计第 6 节的边表是允许集合，不是一次性声明清单；
 # 叶子 crate 的条目记实际依赖，同理见 continuum-policy 的 Cargo.toml）：
-# continuum-core（`ToolId`，Task 3）、continuum-persist（`tool` 表的读写与迁移，Task 4）、
+# continuum-persist（`tool` 表的读写与迁移，Task 4）、
 # continuum-events（`AuditKind::CapabilityGrants`，Task 5 的 `authorize`）、
-# serde_json（`Tool` 的 schema 字段，Task 3；落库序列化，Task 4；本 crate 不在自己的类型上
-# 派生 serde，故不列 serde）、dev-dep tempfile（落库用例，Task 4）。
+# dev-dep tempfile（落库用例，Task 4）。

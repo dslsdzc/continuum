@@ -1,8 +1,9 @@
 //! Capability：能力的半封闭词汇表，以及它与 `EffectType` 的对应（设计第 2 节）。
 //!
-//! 分两层：
+//! 分三层：
 //! - [`capability`]：resource 的封闭枚举与各自的动作集、`EffectType` 的对应，
 //!   以及 §253 的五要素 [`Capability`] 与它唯一的签发点 [`mint`]；
+//! - [`tool`]：§252 的工具定义 [`Tool`] 与 §87 的登记项 [`ToolProfile`]；
 //! - [`error`]：本 crate 的错误类型。
 //!
 //! 本 crate 不含 I/O。落库（`tool` 表，设计第 3.3 节）由后续 task 接上，
@@ -14,9 +15,16 @@
 
 pub mod capability;
 pub mod error;
+pub mod tool;
 
 pub use capability::{
     Capability, CapabilityKind, EmailAction, EnvAction, FsAction, GitAction, GithubAction, Issuer,
     PaymentAction, RegistryAction, mint,
 };
 pub use error::CapabilityError;
+pub use tool::{Cost, Latency, Tool, ToolProfile, Trust};
+
+/// §252 的 `Tool.id` 与 §316 的 ToolProvider 接口类型**是同一个类型**：
+/// `ToolId` 定义在 `continuum_core::tool`，本 crate 只**再导出**，不另建
+/// （设计 §3.1：同一件事两个类型正是本项目一贯判为缺陷的那一类）。
+pub use continuum_core::tool::ToolId;

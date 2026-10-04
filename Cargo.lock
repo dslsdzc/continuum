@@ -68,7 +68,9 @@ dependencies = [
 name = "continuum-capability"
 version = "0.1.0"
 dependencies = [
+ "continuum-core",
  "continuum-effect",
+ "serde_json",
  "thiserror",
  "trybuild",
 ]
