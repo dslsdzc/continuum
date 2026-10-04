@@ -50,7 +50,7 @@ crates/continuum-capability/
   src/lib.rs          导出面与 crate 文档
   src/capability.rs   Capability、CapabilityKind、词汇表、Issuer、签发点
   src/tool.rs         Tool、ToolProfile 与各类编码
-  src/registry.rs     ToolRegistry、AuthorizedTool、强制点 (1)
+  src/registry.rs     `authorize`（自由函数）、AuthorizedTool、强制点 (1)
   src/persist.rs      tool 表与读写（与表定义同址）
   src/error.rs        CapabilityError
   tests/vocabulary.rs     半封闭词汇表与 EffectType 的对应
@@ -289,8 +289,16 @@ git commit -m "feat(capability): 五要素与三条结构性保证"
 - Create: `crates/continuum-capability/tests/tool.rs`
 
 **Interfaces:**
-- Consumes: Task 1 的 `CapabilityKind`、Task 2 无
-- Produces: `continuum_capability::{Tool, ToolId, ToolProfile, Trust, Cost, Latency}`
+- Consumes: Task 1 的 `CapabilityKind`；**既有的** `continuum_core::tool::ToolId`（`crates/continuum-core/src/tool.rs`，§316 的 ToolProvider 接口类型，`continuum-provider` 已在用）
+- Produces: `continuum_capability::{Tool, ToolProfile, Trust, Cost, Latency}`（`ToolId` 在本 crate **再导出**，不另建）
+
+> **执行期裁定（Task 3 开工前的预检）：`ToolId` 一律复用 `continuum-core` 那一个，本 task 不新建。**
+> 本节原稿的代码块写了 `pub struct ToolId(String);`——**照抄它会造出第二个 `ToolId`**，而全仓已有
+> 一个（`continuum-core/src/tool.rs:7`，`continuum-provider` 的 `describe_tool` 在用）。同一件事两个
+> 类型正是本项目一贯判为缺陷的那一类（两个词汇表各走各的）。本计划原稿与本条并不矛盾：ALLOWED 里
+> `continuum-capability` 依赖清单的注释原文就是「core 的 `ToolId`……由需要它们的 task 增量补上」
+> （`crates/continuum-runtime/tests/dependency_direction.rs:85`），即本 task 本来就是要**用**它。
+> `continuum-core` 的 `ToolId` 没有 `Display`；**本 task 不给它加**——`as_str()` 够用，等真有消费方再加。
 
 - [ ] **Step 1: 写用例**
 
@@ -308,7 +316,7 @@ cargo test -p continuum-capability --test tool
 - [ ] **Step 3: 实现**
 
 ```rust
-pub struct ToolId(String);   // 同 ArtifactId/IntentId 的既有形态：私有字段 + as_str + Display
+// ToolId 不在本 crate 定义：`use continuum_core::tool::ToolId;`（见上方裁定）。
 
 /// §252。`effect_class` 绑到 `EffectType`（设计 §3.2），**不另造分类**。
 pub struct Tool {
@@ -462,6 +470,8 @@ pub struct AuthorizedTool(/* 私有：工具 id 与它已获准的那些能力 *
 ```
 
 两个方向的拒绝各用一个错误变体（`MissingCapability { kind }` 与 `UndeclaredCapability { kind }`）——**纪律 3：失败路径要断言是哪一种**。
+
+**不建 `ToolRegistry` 类型**（本节原稿与本计划的「文件结构」一处曾这么写，已订正）：本仓的数据库访问一律经 `Tx`（`continuum-core` 不含 I/O），一个自带连接的结构体在本仓无从写出，也没有需要挂在 `self` 上的状态。「Tool Registry」在本子项目指 `tool` 表加 Task 4 的两个读写函数。设计 §3.4 已同步订正。
 
 **审计**：成功授权写一条 `AuditKind::CapabilityGrants`（该变体自 P0 起预留、至今无产生方，在此第一次有）；**拒绝不写**，由调用方处置。
 

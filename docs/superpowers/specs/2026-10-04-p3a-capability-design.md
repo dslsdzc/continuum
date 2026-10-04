@@ -162,6 +162,10 @@ pub struct ToolProfile {
 }
 ```
 
+**`Tool.id` 用既有的 `continuum_core::tool::ToolId`**（`crates/continuum-core/src/tool.rs:7`，§316 的 ToolProvider 接口类型，`continuum-provider` 已在用），**本子项目不另建第二个 `ToolId`**：同一件事两个类型正是本项目一贯判为缺陷的那一类。依赖方向上也顺——本 crate 的边表里本来就有 `continuum-core`（第 6 节）。`continuum-core` 的 `ToolId` 没有 `Display`，本子项目**不给它加**：`as_str()` 够用，等真有消费方再说。
+
+> **与 §316 的 `ToolDescriptor` 的关系（留给子项目 C）**：`continuum-core` 里另有一个 `ToolDescriptor`（`id` + `description` + `input_schema`），是 §316 Provider 中立边界的接口类型。它与 §252 的 `Tool` 不是同一个东西（后者带 `required_capabilities` / `effect_class` / `deterministic`），本子项目**不动它**；两者如何并到一处是子项目 C 的活，记在第 10 节第 8 条。
+
 §87 的 `capabilities` 与 §252 的 `required_capabilities` 是同一件事（工具需要哪些能力），取 `Tool.required_capabilities` 一处；§87 的 `effects` 与 §252 的 `effect_class` 同理，见下。
 
 §87 的 `cost` / `latency` / `trust` 三个画像字段，规范同样只给了名字。本子项目**只定它们的容器形状**（`Option<Cost>`、`Option<Latency>`、`Trust`），取值域留空并在文档里标明——它们服务的是子项目 D 的候选排序，而排序依据要到那时才存在（§250 §84）。**不预先发明度量。** 其中 `trust` 非 `Option`：一个工具登记进 Registry 时必然有信任判定，没有「尚未判定」这一状态。
@@ -187,16 +191,20 @@ pub effect_class: Option<EffectType>   // None = 无外部副作用（纯计算�
 不做成「调用方记得先校验」，而做成**非法状态不可表达**（与 P2 的 `WritablePath` 同形）：
 
 ```rust
-impl ToolRegistry {
-    /// 唯一能把工具交给调用方的路径。
-    pub fn authorize(
-        &self,
-        tool_id: &ToolId,
-        presented: &[Capability],
-        now: i64,
-    ) -> Result<AuthorizedTool<'_>, CapabilityError>;
-}
+/// 唯一能把工具交给调用方的路径。
+pub fn authorize(
+    tx: &Tx<'_>,
+    tool_id: &ToolId,
+    presented: &[Capability],
+    now: i64,
+) -> Result<AuthorizedTool, CapabilityError>;
 ```
+
+**取自由函数、不建 `ToolRegistry` 类型**（计划 Task 5 的 Step 3 即此形，与本段此前写过的 `impl ToolRegistry`
+不一致，以本段为准）：它要的东西全部从参数来——`Tx` 用于读登记项与写审计，没有需要挂在 `self` 上的状态。
+这与 `continuum-workspace` 的 `approve_integration` 同形。**「Tool Registry」在本子项目指的是 `tool` 表
+加 Task 4 的那两个读写函数，不是一个结构体**；本仓的数据库访问一律经 `Tx`（`continuum-core` 不含 I/O），
+故一个自带连接的 `ToolRegistry` 在本仓无从写出。
 
 `AuthorizedTool` 字段私有、无公开构造函数。**拿不到它就无法调用工具**——「忘了校验」这一路径在类型上不存在。
 
@@ -341,3 +349,5 @@ continuum-workspace  → （不变；gate.rs 只订正文档）
 5. **OPEN-003（预算三层无记账模型）**不影响本子项目；它压住的是子项目 D 的 Router 成本决策。
 6. **OPEN-007（Artifact 隐私等级未定义）**不影响本子项目；它整块阻断子项目 E。
 7. **连接器侧的强制点 (2) 由类型承载**（§4.2），其兑现是子项目 B 的义务。B 的设计须显式说明它收了那个值。
+8. **§252 的 `Tool` 与 §316 的 `ToolDescriptor` 并存**：`ToolDescriptor` 是 `continuum-core` 里既有的 Provider 接口类型（`id` + `description` + `input_schema`），本子项目复用了它的 `ToolId` 而**没有**动它本身（§3.1）。两者的合并或分工是**子项目 C**（Provider Adapter / ToolProvider 中立边界）的活；C 的设计须显式处置，否则同一个「工具」在两个层各有一份描述，正是本项目一贯判为缺陷的那一类。
+9. **`cost` / `latency` 的取值域留空，且本阶段可能没有 `Some` 的产生方**：本子项目只定容器形状 `Option<Cost>` / `Option<Latency>`（单位结构体，§3.1）——画像字段服务子项目 D 的候选排序，而排序依据要到那时才存在。**若本阶段无 `Some` 的产生方，`尚未登记` 与 `画像为空` 这两种状态就不可观察**：Task 3 要么给出可达 `Some` 的路径并附上两种状态的照片，要么在类型与用例的文档里**明写它为什么没有照片**（设计第 8 节的那条出路）。两条都可，**不许含糊过去**——静默地留一个不可达的 `Some` 是本条要防的形状。
