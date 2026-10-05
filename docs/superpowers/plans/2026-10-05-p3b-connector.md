@@ -338,9 +338,25 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-connector --test register
 - [ ] **Step 4: 变异与全量验证**
 
 逐条守卫做变异（**每条各写独立日志路径**，改后读源码确认落在目标核对上）：
-- 双向覆盖的两侧各一次（本 task 的对照臂会同时红——它是承重守卫，走全量）；
+- 双向覆盖的两侧各一次（**本 task 的对照臂会同时红**——它是承重守卫，走全量）；
 - 「一一」的比对改成恒 `false`；
 - 服务半边改成**折叠大小写**的比较——预期只有 `the_service_half_is_compared_case_sensitively` 红（**若它不红，说明那条用例的夹具没造对**：折叠大小写正是设计否掉的那个替代）。
+
+> **订正（Task 3 的评审查出，原句照留）**：第一条的预测「**本 task 的对照臂会同时红**」**是错的**。
+> **实测**：声明侧与绑定侧那两条变异**各只 1 FAILED**，`a_fully_bound_connector_registers` **未红**。
+> **错在哪**：那个变异是「`→ if false`」，是**放宽**核对、**不是取反**——放宽之后，
+> 一份**本来就正确**的绑定当然照样通过，故对照臂**不该**红。
+> **判据（此后每处预测都按它先问一遍）：预测「谁会红」之前，先问这个变异是「取反」还是「放宽 / 收紧」。**
+> 取反会同时翻转正反两侧（两边都该红）；**放宽只会让本该被拒的放进来，正例不受影响**；
+> 收紧则相反（正例可能红、反例不红）。照上面那句错预测去判，实现者会以为
+> 「对照臂没红＝变异没生效」，**去查一个不存在的问题**。
+>
+> **同一张表其余两条抽核过**：「一一」的比对改成恒 `false` 是**放宽**（恰与它同名的那条拒绝用例该红；
+> `a_fully_bound_connector_registers` 同样**不该**红，原文未声称它会红，**无误**）；
+> 折叠大小写那条**不是变异而是「换一个比较口径」**——它既放宽了若干对、也收紧了若干对，
+> 故「只有 `the_service_half_is_compared_case_sensitively` 一条红」这个预测成立的前提是
+> **其余用例的夹具里没有只差大小写的服务半边**（本 task 的夹具确实如此：那几个用例的服务半边
+> 要么逐字相等、要么差的不止大小写）。**这一条要真去跑一遍确认，不要照抄预测。**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
@@ -480,8 +496,9 @@ impl ConnectorRegistry {
 
 - [ ] **Step 7: 变异与全量验证**
 
-逐条守卫做变异，**每条独立日志路径**：
-- 第 4 步的 `==` 改成 `!=`（承重守卫，走全量）：预期 `a_presented_capability_of_another_kind_is_rejected` 红，且 `a_push_branch_operation_reaches_the_implementation` 也红（它出示的 kind 与绑定相等，`!=` 会把它一并拦下——**两条一起红才是这两条守卫都在靶上的证据**）；
+逐条守卫做变异，**每条独立日志路径**。**每条先按 Task 3 Step 4 那条订正问一遍：这个变异是「取反」还是「放宽 / 收紧」**——
+取反会同时翻转正反两侧，放宽只让本该被拒的放进来（正例不受影响），收紧则相反：
+- 第 4 步的 `==` 改成 `!=`（**取反**，承重守卫，走全量）：预期 `a_presented_capability_of_another_kind_is_rejected` 红，且 `a_push_branch_operation_reaches_the_implementation` 也红（它出示的 kind 与绑定相等，`!=` 会把它一并拦下——**两条一起红正是「取反」该有的样子，不是变异过宽**）；
 - `issue` 的返回值改成 `material` 之前先丢弃（即把「先签发再取料」改成「只取料」）——**这条预期编译不过，故按纪律 1(c) 不算「变红」，改用**：把 `issue` 收到的那枚能力换成 `authorization.capability()` 之外的某一枚固定 kind 的能力（**等价性先自检**：举不出哪个入参上两版结果不同就换真变异体）；
 - 把适配器改成把 `material` 也塞进 `input`：预期 `the_material_never_leaves_through_the_return_value` 红（**它正是为这一条变异写的**——材料一旦进了 `input`，实现「回显 `input`」就会把它带进返回值）；
 - 把 `ProviderError` 吞成 `Ok(Value::Null)`：预期 `a_backend_error_comes_back_as_provider` 红。
@@ -572,9 +589,10 @@ kind 相符的能力」。**不要把效应臂读成「不可伪造」**（`Auth
 
 - [ ] **Step 4: 变异与全量验证**
 
-- 把第 3 步删掉（改成直接落到第 4 步）：预期 `an_effect_operation_presented_with_a_bare_capability_is_rejected` 红，且红的是**变体不对**（报 `AuthorizationMismatch`）——**这是承重守卫、fail-open 的那一侧，须走全量套件**；
-- 把第 3 步的判据从「绑定 kind 在像里」改成「出示的是效应臂」：预期 `the_reverse_mismatch_is_caught_by_the_fourth_step_not_the_third` 红（两版在**绑定 kind 不在像里而出示效应臂**这个入参上给出不同结果，故不是等价变异体）；
-- `#[from]` 的转出改成手工 `map_err` 丢掉内层：预期 `every_variant_of_secrets_error_survives_the_conversion` 红。
+**每条先按 Task 3 Step 4 的那条订正问一遍：这个变异是「取反」还是「放宽 / 收紧」**（取反同时翻转正反两侧；放宽只让本该被拒的放进来，正例不受影响）。
+- 把第 3 步删掉（改成直接落到第 4 步，**放宽**）：预期 `an_effect_operation_presented_with_a_bare_capability_is_rejected` 红，且红的是**变体不对**（报 `AuthorizationMismatch`）——**这是承重守卫、fail-open 的那一侧，须走全量套件**；**不得**预期那条非效应臂的正例（`a_non_effect_operation_is_reached_with_a_presented_capability`）红——放宽不动正例，**它不红才是对的**（Task 3 的订正已为这类误判付过一次代价）；
+- 把第 3 步的判据从「绑定 kind 在像里」改成「出示的是效应臂」（**换判据，既放宽也收紧**）：预期 `the_reverse_mismatch_is_caught_by_the_fourth_step_not_the_third` 红（两版在**绑定 kind 不在像里而出示效应臂**这个入参上给出不同结果，故不是等价变异体）。**这条有编译风险**：新判据为真时那条 `EffectAuthorizationRequired` 的 `effect` 字段是「由绑定 kind 推出的效应」，而绑定 kind 不在像里时**推不出**——变异版本可能根本编译不过，那时按纪律 1(c) **它不是「变红」**，须**换一个能编译的真变异体**（例如把 `CapabilityKind::effect` 的调用换成恒 `None`）；
+- `#[from]` 的转出改成手工 `map_err` 丢掉内层（**换行为，方向上是收紧**——把「原样转出」变成「一律折成某一个变体」）：预期 `every_variant_of_secrets_error_survives_the_conversion` 红；**它不该让别的用例红**（其余用例断的是具体那一种内层变体，折叠成一个固定变体只会让它们**也**红——**故要逐条看是哪些红**：若红的正是那几条断言内层变体的用例，说明这条变异没有「只打在目标上」，须改成只折掉其中一个变体）。
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
