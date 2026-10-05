@@ -184,6 +184,8 @@
 - Task 7 按裁决 §七.2 登记了 `runtime → secrets` 并落了 `main.rs` 的装配，但那个运行时的**唯一消费者就是第 1 条里那个不接的入口**。
 - 故这条边**按 `cargo tree` 是真依赖、按使用是零消费者**——与「零使用的边即假边」的既有口径**相抵**。
   本计划照裁决落，并在此标出这条相抵供复核。
+- **（Task 8 订正：`crates/continuum-runtime/Cargo.toml` 该依赖处的注释原写「这是它的第一个真消费方」，
+  与本条相抵、是假话——那条边是**声明在**的而**没有使用**（`main.rs` 的绑定带下划线），该句已作废并改写。）**
 - **收件人：协调者。**
 
 ### 3. 「一条操作该绑哪一枚 `CapabilityKind`」**规范未给判据**（设计 §3.4、§11 第 16 条）
@@ -354,6 +356,8 @@
   或给入口一个可注入的时钟源）。
 
 ### 22. **`SecretsError` 的两个变体经 B 的路径没有照片**（Task 7 的实现者报）
+<!-- Task 8 订正：标题的「两个」如今只剩一个——`SourceFormat` 已被判为「B 入口侧产不出」并由启动点照片闭合，
+     `EmptyMaterial` 仍是缺口。标题原话保留，实际口径以下文两条各自的 Task 8 订正为准。 -->
 
 - 设计 §9 那张测试表只要求 `ScopeNotCovered` 一条（本计划已照做），故这不是漏做设计要求，
   而是**本计划的失败面比设计那张表宽**：`ConnectorError::Credentials(#[from] SecretsError)` 是个通配的转出，
@@ -364,11 +368,19 @@
     同一条路径、只换夹具内容，**本计划未写这条用例**（Task 7 的失败臂用的是「文件不存在」那一支 → `SourceIo`）。
     **（Task 8 复核补记：Task 7 评审的 Important 项已补一条 `SourceFormat` 的启动点照片，见提交 `0a65ece`；
     该条缺口在驱动启动点这一侧已闭合，B 入口侧的失败面仍如本段所述。）**
+    **（Task 8 订正：本条**已闭合**，不是「只补了一半」——`SourceFormat` 由**装配期**的 `FileCredentialSource::open`
+    （`crates/continuum-secrets/src/source.rs:96-106`，`open` 内即 `parse`）产生，而 B 的入口只查**已解析的那张表**
+    （同文件 `:122-134` 的 `claimed_expiry` / `fetch` 只看 `entries`、不再解析），故 **B 入口侧根本产不出 `SourceFormat`**：
+    启动点就是它唯一的出现处。上一句「**B 入口侧的失败面仍如本段所述**」**作废**——它留了一个不存在的缺口，
+    会把后继者支去追一个幻影。钉住它的照片是 `crates/continuum-runtime/tests/secrets_assembly.rs:93` 的
+    `a_malformed_credential_file_fails_the_startup`：文件在、读得出来、内容不成条目 → 启动失败。）**
   - **`EmptyMaterial`（环境变量存在但取值为空）——构造得出来，记成缺口，且要换个夹具**：它只能由**环境变量源**产出，
     而 B 现有的入口用例全用文件源。要照它得把注册表的 `SecretsRuntime` 换成 `EnvCredentialSource`、
     并在**进程环境**里把该作用域对应的变量置空——后者要一把进程级互斥锁（`std::env::set_var` 在 edition 2024 是 `unsafe`，
     `continuum-secrets/tests/source_env.rs` 的 `ENV_LOCK` 是既有做法，照它写）。
     **代价说清**：进程环境是共享状态，这条用例会与同 crate 里别的用例争环境，`ENV_LOCK` 必须真的覆盖到。
-- **两条都不是「构造不出来」**，故按纪律记成**缺口**而不是「明写它为什么没有照片」。
-  本计划不补 task（设计没要求），但**不许含糊过去**：谁在后续补 B 的失败面时，这两条是**已知的、可构造的**缺口。
+    **这一条仍开着**（Task 8 订正）：它在**材料期**由环境变量源产出（`source.rs:253` 的 `value_for`，确在入口侧——入口要走 `fetch`），
+    差的就是上面那份换源 + 置空进程环境 + `ENV_LOCK` 的夹具，入口实现本身不改。
+- **（Task 8 订正原「两条都不是构造不出来」这句）**：如今**只剩 `EmptyMaterial` 一条缺口**——`SourceFormat` 已在启动点闭合
+  （见上）。本计划仍不补 task（设计没要求），但**不许含糊过去**：谁在后续补 B 的失败面时，`EmptyMaterial` 是**已知的、可构造的**缺口。
 - **收件人：子项目 B 的实现的后续一轮**（或接管连接器失败面的人）。
