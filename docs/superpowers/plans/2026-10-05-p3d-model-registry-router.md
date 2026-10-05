@@ -83,6 +83,12 @@
 - `Tx::execute(&self, sql: &str, params: &[Value])`、`Tx::query(...) -> Result<Vec<Vec<Value>>, PersistError>`、`Migration::new(version, name, sql)`（`crates/continuum-persist/src/{tx.rs,db.rs}`）——`Migration.name` 与 `sql` 是 `&'static str`。
 - `ModelProfile` 的构造是 **crate 内**的（`pub(crate) fn try_new`）。故**集成测试（`tests/`）构造不出画像**，只能经 `load_profile` 从库拿——这决定了本计划的测试夹具形态（见 Task 3、Task 11），不是实现细节。
 
+**`tests/compile_fail/*.stderr` 的内容与错误码一律取自实跑，不许凭记忆写。** 本项目已为此付过一次代价：
+Task 3 的 brief 把「私有关联函数」的错误码写成 `E0603`，**实测 rustc 1.95 报的是 `E0624`**
+（`E0603` 是「项本身不可见」；私有的关联函数走另一条诊断）。**错误码是记忆最容易失真的一类事实**——
+它与本节开头那条「手写代码块错误率高」同源，只是更隐蔽：正文措辞可以被复核，凭印象敲下的错误码看起来同样像事实。
+故本计划给出的任何错误码都只是**预期值**，落地时以 `trybuild` 实际产出的 `.stderr` 为准。
+
 ---
 
 # 文件结构
@@ -320,7 +326,8 @@ git commit -m "feat(model-registry): §248 九维与 §24 的时间序列观测"
 - Modify: `crates/continuum-model-registry/{Cargo.toml,src/lib.rs}`
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 加 `continuum-capability`、`continuum-core`）
 - Create: `crates/continuum-model-registry/tests/type_level.rs`
-- Create: `crates/continuum-model-registry/tests/compile_fail/*.rs`（各配同名 `.stderr`）
+- Create: `crates/continuum-model-registry/tests/compile_fail/{model_profile_cannot_be_built,
+  model_profile_has_no_constructor,overall_score_cannot_be_read}.rs`（各配同名 `.stderr`）
 
 **Interfaces:**
 - Consumes: Task 1 的 `Ratio`、Task 2 的 `SkillVector`；**既有的** `continuum_core::model::ModelId`（§315）、
@@ -338,9 +345,17 @@ git commit -m "feat(model-registry): §248 九维与 §24 的时间序列观测"
 - `the_confidence_is_a_ratio_and_nothing_else`（crate 内）：`confidence` 是 `Ratio`；`Ratio` 的越界输入在构造期即被拒。
 - `a_profile_has_no_total_score`（crate 内）：**这条没有运行期形态**——它由 `tests/compile_fail/overall_score_cannot_be_read.rs`
   钉住（读 `profile.overall_score()`，判据是**编译失败**）。此条在用例清单里留名，以免被当成漏项（设计 §2.3 第 3 条 (a)）。
-- `tests/compile_fail/model_profile_cannot_be_built.rs`：crate 外构造被拒（无公开构造函数、字段私有）。
-  **判据是编译失败且失败原因正确**——每份 `.stderr` 钉住预期报错，否则「因为拼错函数名而编译失败」也会让用例变绿。
+- `tests/compile_fail/model_profile_cannot_be_built.rs`：**结构体字面量**构造被拒（字段私有）。
+- `tests/compile_fail/model_profile_has_no_constructor.rs`：**关联函数** `ModelProfile::try_new(…)` 在 crate 外
+  被拒——实测 rustc 1.95 报 **`E0624`**（`associated function … is private`，**不是 `E0603`**：
+  后者是「项本身不可见」，私有的关联函数走的是另一条诊断）。
+  **这一份必须与上一份并存，判据是「每条构造通道各占一份样例」**：私有字段与私有构造函数是**两条不同的通道**，
+  只钉「字面量构造」那一份时，把 `try_new` 改成 `pub` **不会有任何用例变红**——**缺的正是 fail-open 的那一侧**
+  （P3A 的 `capability_fields_are_private.rs` 与 `capability_has_no_constructor.rs` 是一对，同一判据）。
 - `tests/compile_fail/overall_score_cannot_be_read.rs`：同法，钉 §248 禁令的形状（§4.4 完成判据的「不依赖单一总分」）。
+- **三份样例的判据都是「编译失败且失败原因正确」**——每份 `.stderr` 钉住预期报错，否则
+  「因为拼错函数名而编译失败」也会让用例变绿。**错误码必须取自实跑**（本节两份已知值：字面量构造走
+  `E0603` 一类「字段私有」，私有构造函数走 `E0624`）——**`.stderr` 不许凭记忆写**，见「关于本计划的代码块」一节。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1337,6 +1352,14 @@ FailureClass 的映射     落在策略一侧、今天形状未定）；**映射
 的 Some                 D 复用的是两个**类型**（落在模型画像上），不读 `ToolProfile`；
                       而 §4.1 里**没有「工具选择」这个组件**。**规范未给判据**。
                       收件人：协调者（在四份之间指派）＋ 规范维护者。
+#[allow(dead_code)]     **本仓首次出现这个豁免，共两处，都在 `crates/continuum-model-registry/src/profile.rs`**：
+的两处豁免             (a) `ModelProfile::try_new` 在非测试构建下无调用方（`load_profile` 要等 Task 7）；
+                      (b) `ModelProfile` 的五个字段无访问器（读数方是 Router，在 Task 11 及之后）。
+                      **接受的理由**：0 warning 是硬约束，而替代方案「提前铺五个访问器」＝**建了没人用的 API**，
+                      那比这条豁免更坏。**但它会永久掩盖「这个字段真的没人读」**——故：
+                      **Task 11 与其后的 router task 把读数接上之后，这两处豁免必须复核并从源码里去掉**；
+                      若到那时仍有字段无人读，那是一个**要处置的发现**（删字段或写明为什么留），不是可以继续压着的事。
+                      **收件人：Task 11 及之后接上读数的那些 task 的实现者。**
 Degraded 的降权判据      §250 的八项 MUST 考虑里，可用性**只写死了「过滤 Unavailable」这一档**
                       （设计 §5.3）：`Healthy` 与 `Degraded` 之间**没有判据**——§250 只说「考虑」、
                       §84 没给这一维的算法。本设计不发明，`Degraded` 原样带进 `reason`。
