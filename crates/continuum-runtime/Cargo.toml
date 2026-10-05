@@ -13,6 +13,9 @@ continuum-core = { path = "../continuum-core" }
 continuum-effect = { path = "../continuum-effect" }
 continuum-events = { path = "../continuum-events" }
 continuum-graph = { path = "../continuum-graph" }
+# Task 5（P3 子项目 D）起：`main.rs` 的装配处注册 `p3d_model_migrations()`
+# （三张模型表由用它的那个 task 注册）。
+continuum-model-registry = { path = "../continuum-model-registry" }
 continuum-persist = { path = "../continuum-persist" }
 # Task 10 起：第 7 步的集成路径要查策略（`load_policies`）并按裁决决定是否铸造批准值
 # （`decide` / `PolicyContext` / `ExplicitApproval`）。

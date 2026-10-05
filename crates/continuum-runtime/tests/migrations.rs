@@ -10,11 +10,12 @@ use continuum_persist::{Db, Migration, Value, builtin_migrations};
 use std::process::Command;
 
 /// 期望的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy、effect）
-/// + P3（capability 的 `tool` 表）。
+/// + P3（capability 的 `tool` 表；子项目 D 的三张模型表）。
 ///
 /// `policy` 由 Task 10 加上（第 7 步的集成路径要读它），`effect` 由 Task 11 加上
-/// （第 4 步要写效应记录），`tool` 由 P3 的 Task 4 加上（Task 5 的 `authorize` 要读它）
-/// ——每张表由「用它的那个 task」注册，见 `main.rs` 装配处的说明。
+/// （第 4 步要写效应记录），`tool` 由 P3 的 Task 4 加上（Task 5 的 `authorize` 要读它），
+/// D 的三张表（`model_registry` / `model_profile` / `model_skill_score`）由 P3 子项目 D
+/// 的 Task 5 加上——每张表由「用它的那个 task」注册，见 `main.rs` 装配处的说明。
 ///
 /// **这是 `main.rs` 装配处的第二份转录**。转录的风险由下面的比对抵掉——
 /// `the_runtime_applies_…` 拿**实际启动后**落在 `schema_migrations` 里的集合与
@@ -33,6 +34,7 @@ fn expected_migrations() -> Vec<Migration> {
     m.extend(continuum_policy::p2_policy_migrations());
     m.extend(continuum_effect::p2_effect_migrations());
     m.extend(continuum_capability::p3_capability_migrations());
+    m.extend(continuum_model_registry::p3d_model_migrations());
     m
 }
 

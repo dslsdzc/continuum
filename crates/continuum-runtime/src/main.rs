@@ -62,7 +62,8 @@ fn main() -> ExitCode {
 }
 
 /// 本驱动全量注册的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy、
-/// effect）+ P3（capability 的 `tool` 表）。
+/// effect）+ P3（capability 的 `tool` 表；子项目 D 的 `model_registry` / `model_profile` /
+/// `model_skill_score` 三张表）。
 ///
 /// `recover` 与 `task` 共用同一份，两处各写一份清单会让「注册的集合」有两个来源：
 /// `task` 要 `workspace` 表（设计第 4.2 节第 3 步落库），若它那份少一条，症状要到
@@ -74,6 +75,11 @@ fn main() -> ExitCode {
 /// `authorize` 要读它）。把它们一次排在装配收尾会让前面的 task 各要一张还没建的表
 /// ——**表要在用它之前建**，这条在端到端测试与真实调用上是同一件事（用户跑
 /// `task --effect …` 同样会撞上「no such table」），不只是测试夹具的问题。
+///
+/// **本子项目（P3 子项目 D）的三张表由 D 自己注册**（「谁的表谁注册」，协调者裁决）：
+/// `model_registry` / `model_profile` / `model_skill_score` 由 §3.1 的一条迁移建出，
+/// 注册在下面这一行里。**它的消费方（子项目 G 的模型调用路径）本轮尚不存在**——
+/// 这一句是给后来者的：这张清单里那三张表没有本轮的使用者，不是漏接了，是使用者还没建。
 pub(crate) fn runtime_migrations() -> Vec<Migration> {
     let mut migrations = continuum_persist::builtin_migrations();
     migrations.extend(continuum_artifact::p1_artifact_migrations());
@@ -82,6 +88,7 @@ pub(crate) fn runtime_migrations() -> Vec<Migration> {
     migrations.extend(continuum_policy::p2_policy_migrations());
     migrations.extend(continuum_effect::p2_effect_migrations());
     migrations.extend(continuum_capability::p3_capability_migrations());
+    migrations.extend(continuum_model_registry::p3d_model_migrations());
     migrations
 }
 

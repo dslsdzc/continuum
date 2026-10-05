@@ -149,6 +149,8 @@ version = "0.1.0"
 dependencies = [
  "continuum-capability",
  "continuum-core",
+ "continuum-persist",
+ "tempfile",
  "thiserror",
  "trybuild",
 ]
@@ -218,6 +220,7 @@ dependencies = [
  "continuum-effect",
  "continuum-events",
  "continuum-graph",
+ "continuum-model-registry",
  "continuum-persist",
  "continuum-policy",
  "continuum-provider",

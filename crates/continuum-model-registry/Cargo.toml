@@ -16,13 +16,15 @@ continuum-core = { path = "../continuum-core" }
 # 「一个成本画像」就有两套词汇表。本层只取这两个类型，**不取能力凭据**——
 # `Capability` / `AuthorizedTool` 在本 crate 里零出现（设计 §8.4）。
 continuum-capability = { path = "../continuum-capability" }
+# Task 5 起的使用点：`persist.rs` 的 `p3d_model_migrations()` 返回 `Vec<Migration>`
+# （设计 §3.3）。后续 task 的行级读写经 `Tx` / `Value` / `PersistError`（设计 §3.2、
+# §8.2）。这条边**由用它的那个 task 登记**（就是本 task），不推给别处。
+continuum-persist = { path = "../continuum-persist" }
 
 [dev-dependencies]
 # Task 3 起的使用点：`tests/type_level.rs` 用编译失败样例钉住「画像 crate 外构造不出来」
 # 与「读不到总分」（设计 §2.1、§2.3）。与 continuum-capability 的用法同形。
 trybuild = { workspace = true }
-
-# 设计 §8.2 的第三条边（`continuum-persist` 的 `Tx` / `Migration` / `Value` /
-# `kind_name` / `PersistError`）**不在这里一次声明齐**：本 task 对它的引用为零，
-# 一次声明齐会让 `dependency_direction.rs` 的 `ALLOWED` 条目在中间若干 task 里说谎。
-# 叶子 crate 的条目记的是**实际依赖**，故那条边由需要它的那个 task（Task 5）增量加。
+# Task 5 起的使用点：`tests/persist.rs` 的夹具在临时目录建库（同 P3A 的
+# `continuum-capability/tests/persist.rs`）。
+tempfile = { workspace = true }

@@ -124,10 +124,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 不取能力凭据）、persist（三张表经 Tx）；边由需要它们的 task 增量加。
     // Task 3 起登记前两条：`profile.rs` 的 `ModelProfile` 同时用到 `ModelId` / `ToolId`
     // 与 `Cost` / `Latency`（设计 §2.1、§2.5）——**数组按字母序**，与 C 的 provider 条目同形。
-    // 第三条（persist）本 task 零引用，故不登记（零使用的边即假边）；它由 Task 5 加。
+    // Task 5 起登记第三条 persist：`persist.rs` 的 `p3d_model_migrations()` 返回
+    // `Vec<Migration>`。**这条边由用它的那个 task 登记**（就是 Task 5），不推给别处。
     (
         "continuum-model-registry",
-        &["continuum-capability", "continuum-core"],
+        &[
+            "continuum-capability",
+            "continuum-core",
+            "continuum-persist",
+        ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
@@ -142,6 +147,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     //
     // P3 的 Task 4 起加上 capability：装配处注册 `p3_capability_migrations()`
     // （`tool` 表由用它的那个 task 注册）。
+    //
+    // P3 子项目 D 的 Task 5 起加上 model-registry：装配处注册 `p3d_model_migrations()`
+    // （三张模型表由用它的那个 task 注册，即 D 自己——「谁的表谁注册」）。
     //
     // P3 子项目 B 的 Task 7 起加上 secrets：`main.rs` 的装配处在分派之前构造并持有
     // 密钥运行时（`src/secrets.rs` 的 `assemble`，设计 §4.1「驱动装配好传进来」、
@@ -161,6 +169,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-effect",
             "continuum-events",
             "continuum-graph",
+            "continuum-model-registry",
             "continuum-persist",
             "continuum-policy",
             "continuum-provider",
