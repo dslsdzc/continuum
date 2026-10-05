@@ -326,7 +326,7 @@
 
 ### 20. **同一个 `ConnectorId` 二次注册是静默覆盖，不报 `Err`**（Task 2 的评审查出，**设计/规范的留白**）
 
-- **现象**：`ConnectorRegistry::register` 末两行（`crates/continuum-connector/src/registry.rs:94-95`）把两张按 id 索引的
+- **现象**：`ConnectorRegistry::register` 末两行（`crates/continuum-connector/src/registry.rs:185-186`）把两张按 id 索引的
   map 各自 `insert` —— 同一个 id 再注册一次，**两条都被替换**，返回 `Ok(())`，**前一条被悄悄丢掉**，
   调用者从返回值上看不出发生过替换。
 - **为什么不是 Task 2 的实现缺陷**：它做的恰是设计写的那四条核对。**四条核对核的是「声明 vs 绑定」两侧**
@@ -345,7 +345,7 @@
 
 ### 21. **「入口内的两次判定共用同一个 `now`」这句话没有照片**（Task 4 的评审查出；**一条没有照片的绝对措辞**）
 
-- **位置**：`crates/continuum-connector/src/entry.rs` 的入口文档注释（约 `:29-32`）——
+- **位置**：`crates/continuum-connector/src/entry.rs` 的入口文档注释（约 `:69-70`）——
   「**入口内的两次判定（`issue` 与 `material`）共用这同一个 `now`，入口自己不取第二个时钟**」。
 - **为什么没有照片**：现有一条过期用例在 `issue` 那一步就断了（`issue` 先判 `Capability::is_valid_at`），
   故 **`material` 那一次判定在现有路径下不会被独立观察到**——不是「测不出」，而是**没有构造得出来的观察点**
@@ -382,7 +382,7 @@
     并在**进程环境**里把该作用域对应的变量置空——后者要一把进程级互斥锁（`std::env::set_var` 在 edition 2024 是 `unsafe`，
     `continuum-secrets/tests/source_env.rs` 的 `ENV_LOCK` 是既有做法，照它写）。
     **代价说清**：进程环境是共享状态，这条用例会与同 crate 里别的用例争环境，`ENV_LOCK` 必须真的覆盖到。
-    **这一条仍开着**（Task 8 订正）：它在**材料期**由环境变量源产出（`source.rs:253` 的 `value_for`，确在入口侧——入口要走 `fetch`），
+    **这一条仍开着**（Task 8 订正）：它在**材料期**由环境变量源产出（`source.rs:250-256` 的 `value_for`，`EmptyMaterial` 那一支在 `:253-256`，确在入口侧——入口要走 `fetch`），
     差的就是上面那份换源 + 置空进程环境 + `ENV_LOCK` 的夹具，入口实现本身不改。
 - **（Task 8 订正原「两条都不是构造不出来」这句）**：如今**只剩 `EmptyMaterial` 一条缺口**——`SourceFormat` 已在启动点闭合
   （见上）。本计划仍不补 task（设计没要求），但**不许含糊过去**：谁在后续补 B 的失败面时，`EmptyMaterial` 是**已知的、可构造的**缺口。
@@ -391,7 +391,7 @@
 ### 23. **同一个 op 给两条绑定时静默后者胜**（整分支终审查出，**设计/规范的留白**；与 §八.20 同形）
 
 - **位置**：`crates/continuum-connector/src/registry.rs` 的 `ConnectorImpl::bindings` 文档
-  （订正前写着「**每个已声明操作恰一条**」）与 `register` 的收尾两行（同文件 `:181-186`）。
+  （订正前写着「**每个已声明操作恰一条**」）与 `register` 的收尾两行（同文件 `:185-186`）。
 - **现象**：`bindings()` 对**同一个 op** 返回两条**不同 kind** 的绑定时，四条核对全过——
   双向覆盖的两次遍历（`any` / `contains`）各命中一次、`DuplicateKindBinding` 因两枚 kind 不同而不撞、
   服务半边也相符；随后 `collect()` 把 `Vec<(op, kind)>` 收进 `HashMap`，**后者胜、返回 `Ok(())`**，
