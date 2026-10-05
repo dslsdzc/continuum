@@ -715,7 +715,33 @@ fn every_variant_of_secrets_error_survives_the_conversion() {
             current: 7,
         },
     ];
-    assert_eq!(variants.len(), 8, "八个变体一个不落");
+    // **穷尽性归编译器**（判据见 Task 8 Step 3b）：下面这个 `match` 逐臂列出 `SecretsError`
+    // 的八个变体，**不留 `_` 通配臂**——`continuum-secrets` 加第九个变体时这里**编译不过**
+    // （`E0004`），编译器的报错就是「八个变体一个不落」这句话的照片。
+    //
+    // **这里原先是一句 `assert_eq!(variants.len(), 8, "八个变体一个不落")`，它是恒真断言**：
+    // `variants` 是**八元素字面量数组**，`len()` 必然是 8，故它钉的是「我写了几行」
+    // 而不是「类型里有几个变体」——`Credentials` 的 `#[from]` 是通配转出，
+    // 新变体不在这张表里不会有任何东西红，那句绝对措辞会**静默漂移**。
+    fn variant_name(e: &SecretsError) -> &'static str {
+        match e {
+            SecretsError::Capability(_) => "Capability",
+            SecretsError::ScopeNotCovered { .. } => "ScopeNotCovered",
+            SecretsError::SourceFormat { .. } => "SourceFormat",
+            SecretsError::SourceIo { .. } => "SourceIo",
+            SecretsError::EmptyMaterial { .. } => "EmptyMaterial",
+            SecretsError::CredentialExpired { .. } => "CredentialExpired",
+            SecretsError::Superseded { .. } => "Superseded",
+            SecretsError::ForeignCredential { .. } => "ForeignCredential",
+        }
+    }
+
+    // 与穷尽性配对的那一半：上面的 `match` 保证类型里恰有八个变体，这里保证**夹具逐变体各碰一次**
+    // ——八个名字互不相同才算「一个不落」（八份同一个变体的夹具会在这里被 `dedup` 掉）。
+    let mut names: Vec<&'static str> = variants.iter().map(variant_name).collect();
+    names.sort_unstable();
+    names.dedup();
+    assert_eq!(names.len(), 8, "八个变体一个不落：夹具应逐变体各来一份");
 
     for original in variants {
         match ConnectorError::from(original.clone()) {
