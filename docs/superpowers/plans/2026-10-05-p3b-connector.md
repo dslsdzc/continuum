@@ -463,6 +463,13 @@ impl ConnectorRegistry {
 `SecretMaterial` 只在 `invoke_with` 的带外参数里出现，**绝不进 `input`**（设计 §4.5 的否决理由：
 `input` 是 `serde_json::Value`，实现可以原样回显到返回值，而返回值会流向 Artifact / Journal / 审计）。
 
+**入口与适配器的注释里要写下轮换的可观察范围与它的限度**（设计 §4.4、§11 第 7 条）：`material` 判的三件事
+（本运行时签出 / 未被轮换取代 / 未到期）**只在取料那一刻**发生；材料一旦取出并交给实现，
+**后续的 `rotate` 不影响这次调用**——本阶段没有「用后即焚」或「调用中途复查」的机构。
+故「轮换使旧凭据失效」在本子项目的可观察范围是**「下一次取料」**，不是「正在进行中的那一次调用」。
+**这一段没有照片，也写不出照片**（一次调用之内没有可插入 `rotate` 的位置，见「遗留」第 5、18 条）——
+按纪律 2，**明写它为什么没有照片**，不要只在报告里说。
+
 **`ConnectorError` 本 task 加五个变体**（各有产生方，见上）：`UnknownConnector` /
 `UndeclaredOperation` / `AuthorizationMismatch` / `Credentials(#[from] SecretsError)` /
 `Provider(#[from] ProviderError)`（**数一下：五个**——设计 §6.1 的十行里，注册期四条已在 Task 2/3 落地，
@@ -493,10 +500,16 @@ git commit -m "feat(connector): 入口的核对、凭据签发与逐次调用的
 - Modify: `crates/continuum-connector/Cargo.toml`（加 `continuum-effect`；**dev 依赖本 task 无新增**——`tokio` / `continuum-persist` / `tempfile` 已在 Task 4 加过）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`continuum-connector` 条目加 `continuum-effect`）
 - Modify: `crates/continuum-connector/tests/invoke.rs`
+- Modify: `crates/continuum-connector/tests/audit.rs`（**本 task 改了入口签名，Task 4 建的那个文件里有一处调用要跟着改**——见 Step 2 末条）
 
 **Interfaces:**
 - Consumes: Task 1 的 `CapabilityKind::effect`、Task 4 的入口
 - Produces: `continuum_connector::ConnectorAuthorization`（两臂）、`ConnectorError::EffectAuthorizationRequired`
+
+> **入口签名一变，`tests/` 下所有调用点都要跟着变**：本 task 把 `invoke` 的入参从 `&AuthorizedEffect`
+> 换成 `ConnectorAuthorization`，而 **Task 4 建的 `tests/audit.rs` 里有一次成功调用**（`a_successful_connector_call_does_not_write_an_audit_row`）。
+> 只改 `tests/invoke.rs` 会让那个文件编译不过——**这是跨 task 的顺序问题，单看任何一个 task 都看不出来**。
+> 故自检不能只跑新改的那个文件，**必须 `cargo build --workspace --all-targets`**（Step 2 已如此写）。
 
 - [ ] **Step 1: 写用例**
 
@@ -511,11 +524,20 @@ git commit -m "feat(connector): 入口的核对、凭据签发与逐次调用的
 - `an_expired_capability_on_the_non_effect_arm_is_rejected`：过期能力经**非效应臂** → `Credentials(SecretsError::Capability(CapabilityError::Expired { .. }))`。**能力已失效这一条两条臂各一次**（设计 §9）。
 - `every_variant_of_secrets_error_survives_the_conversion`：对 `SecretsError` 的八个变体逐项断言 `ConnectorError::from(e)` 之后内层仍是**原来那一个**（`Superseded` / `ForeignCredential` 也在内）。**这条照片的强度要写准**：它钉的是「转出即保留内层变体」，**不是**「入口路径上这八个都出现过」——`Superseded` 与 `ForeignCredential` 经入口**不可达**（见「遗留」第 5 条）。
 
-- [ ] **Step 2: 跑，确认失败**
+- [ ] **Step 2: 改掉 Task 4 那一处调用点，再跑，确认失败**
+
+改 `tests/audit.rs` 的 `a_successful_connector_call_does_not_write_an_audit_row`：把那次调用从
+`invoke(&authorized_effect, …)` 改成 `invoke(&ConnectorAuthorization::Effect(authorized_effect), …)`
+（**只改出示值的构造，断言一个字不动**）。
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-connector --test invoke
+TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 ```
+
+**两条都要跑**：前者确认新用例是红的（第 3 步与两臂都还没实现）；后者是**编译面**的自检——
+本 task 改了公开签名，改漏的调用点不会让 `--test invoke` 报错，只会让**别的**测试目标编译不过。
+**0 warning 也是这一条命令的必要输出**（Global Constraints）。
 
 - [ ] **Step 3: 实现**
 
@@ -555,9 +577,13 @@ kind 相符的能力」。**不要把效应臂读成「不可伪造」**（`Auth
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 git add crates/continuum-connector crates/continuum-runtime/tests/dependency_direction.rs Cargo.lock
 git commit -m "feat(connector): 非效应臂与入口第 3 步"
 ```
+
+`git add` 的路径是**目录** `crates/continuum-connector`，故 `tests/audit.rs` 的那处改动**已含在内**——
+**不要**把路径收窄成 `tests/invoke.rs`（那正是本 task 最容易漏的一处）。
 
 ---
 
@@ -857,4 +883,24 @@ git commit -m "docs: P3 子项目 B 的收尾与复核"
 17. CAPABILITY_LIFETIME_MS 的数值无规范来源（设计 §11 第 6 条），且「铸出 → issue」之间由谁引入间隔未定
     Task 4 的 Expired 用例自己造过期能力（不依赖那个常量），故本计划不押注它的数值。
     收件人：子项目 B 的实现（首次接上生产路径时核这个数）。
+
+18. **设计 §11 第 7 条**：轮换只在下一次取料时可见，进行中的一次调用不受影响
+    **本计划的落点**：Task 4 Step 6 要求把这段限度写进入口与适配器的注释
+    （`material` 的三项判定只在取料那一刻发生；材料交给实现之后 `rotate` 不影响这次调用；
+    可观察范围是「下一次取料」）。**没有照片，也写不出照片**——一次调用之内没有可插入 `rotate` 的位置
+    （与第 5 条同源，但两条说的不是一件事：第 5 条是「`Superseded` 这个变体经入口达不到」，
+    本条是「轮换对**进行中**的调用不起作用」，后者即使入口以后能停在中途也仍成立）。
+    **本阶段的机构边界，不是本子项目没做够**；若要变更，须先有「用后即焚 / 调用中途复查」的机构。
+    收件人：长期阶段（+ 子项目 B 的实现的注释已就地写明）。
+
+19. **设计 §11 第 12 条**：两套串的服务半边对不齐（连接器说 `GitHub`、能力说 `git`）
+    `GitHub.push_branch` 这个**操作**必须绑 `Git(Push)`（resource 是 `git`），今天这不是错——
+    §88 与驱动的铸法都如此。**本计划的落点**：Task 3 的
+    `a_positive_arm_with_the_matching_service_half_registers` 用例注释里写明这条缝
+    （免得后来者当成笔误去「修」）。
+    **未决的一半**：这条缝在 §125 的服务清单（§124 列了六个服务）与 `CapabilityKind` 的 resource 集之间
+    **普遍存在**；若后续出现**第二个服务也需要同一枚 kind**，须重新处置（例如 `GitHub` 与 `GitLab`
+    的 push 都只能绑 `Git(Push)`——一一绑定是**按连接器**判的，故两者各自绑它并不冲突，
+    但两枚能力的作用域与语义会共用一个 kind）。**本计划不预先发明处置方式**。
+    收件人：语义层（服务与 resource 的对应）+ 子项目 B 的实现（遇到第二个服务时回报）。
 ```

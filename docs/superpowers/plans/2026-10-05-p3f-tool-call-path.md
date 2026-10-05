@@ -20,9 +20,14 @@
 `thiserror`、`serde_json`；dev：`tempfile`、**`async-trait`**（见 Global Constraints 的最后一条）。
 
 **设计依据：** `docs/superpowers/specs/2026-10-05-p3f-tool-call-path-design.md`（**唯一事实来源**）。
-配套：共享面 `…p3-bcdf-ownership-and-interfaces.md`、裁决 `…p3-bcdf-set-decisions.md`（**第五节**：删
-`ToolInvocation`）、交接 `docs/superpowers/p3bcdf-followups.md`、接缝图与协调者裁决
-`.superpowers/sdd-p3bcdf/impl-seam-map.md`（**第六节**）。
+配套：共享面 `docs/superpowers/specs/2026-10-05-p3-bcdf-ownership-and-interfaces.md`、裁决
+`docs/superpowers/specs/2026-10-05-p3-bcdf-set-decisions.md`（**第五节**：删 `ToolInvocation`）、
+交接与**接缝裁决** `docs/superpowers/p3bcdf-followups.md`（**§七**：八条接缝裁决的**权威转录**）。
+
+> **本计划的约束来源一律是可入库的文档。** 接缝裁决引 **`p3bcdf-followups.md` §七**，**不要引
+> `.superpowers/sdd-p3bcdf/impl-seam-map.md`**——那是 gitignore 的 scratch，**随时会丢**（本项目为此丢过一次），
+> 引它当约束来源会让指针悬空。承重的几条已逐条抄进本计划正文（Task 1 的注、Task 3 的注、Task 9 的三处条目），
+> 正文自带判据，不依赖任何 gitignore 的文件。
 
 ---
 
@@ -41,7 +46,19 @@
 
 **Task 1–2 不依赖 C**（`save_tool` 不变量、lib 化）；**Task 3 起硬依赖 C**。
 执行者开工前须先确认：`crates/continuum-provider/src/registry.rs` 与 `src/tool.rs` 已存在，
-且 `grep -rn ToolInvocation crates/` **零命中**。
+且**旧请求类型全仓零命中**：
+
+```bash
+cd /home/DslsDZC/Continuum && grep -rnw ToolInvocation crates/   # 预期：无输出，exit 1
+```
+
+**判据必须是词边界匹配（`-w`），不能写成 `grep -rn ToolInvocation crates/`**：C 一落地
+`AuthorizedToolInvocation`，那条无边界的形式**必然命中**（子串包含，`AuthorizedToolInvocation` 里就有
+`ToolInvocation` 八个字母），判据永远不可能绿。`-w` 要求匹配两端都是非词字符，而
+`AuthorizedToolInvocation` 里 `ToolInvocation` 前面是 `d`（词字符），故不命中。**实跑确认**：
+在只有 `AuthorizedToolInvocation<'_>` 与该类型并存的行上，`grep -nw ToolInvocation` 只命中后者。
+**替代写法（等价，任选其一）**：把判据写成 `grep -rn 'core::tool::ToolInvocation' crates/` 零命中——
+它按完整路径匹配，不受子串影响。
 
 B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁移 80/81 与 `main.rs`／
 `tests/migrations.rs`／`tests/startup.rs` 的连带改）**在本计划开工时已经落地**——F 只做收口复核
@@ -73,8 +90,12 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
 - **不修改用户目录的权限位。** 不在仓库中写入任何凭据。
 - **不要用 `git add -A`，不要 `git commit --amend`。** 只 `git add <显式路径>`。
 - **本计划改 `continuum-capability` 的 `src/persist.rs` 与 `tests/persist.rs`（Task 1），不改它的
-  `Cargo.toml`，也不改它的 `ALLOWED` 条目。**（接缝图第六节第 8 条：B 改该 crate 的 `capability.rs`、
-  F 改 `persist.rs`，两者不同文件、无编译冲突。**本计划不改 `capability.rs`。**）
+  `Cargo.toml`，也不改它的 `ALLOWED` 条目。** 判据（`p3bcdf-followups.md` §七第 8 条，**已知非缺陷、
+  不做任何事**）：**同一个 `continuum-capability` 的源码被两个子项目各改一处**——**B** 改
+  `capability.rs`（加 `CapabilityKind::effect` 逆），**F** 改 `persist.rs`（加 `save_tool` 不变量）；
+  两者**不同文件、无编译冲突**，且**都不新增该 crate 的依赖边**（`EffectType` 已是依赖，`for_effect` 同 crate）。
+  同一条还裁了另一件事：**C 的 `FakeTool` 与 F 的库级夹具是同一约定的两份副本，不合并**（两份各有其用，
+  见 Task 3 Step 4）。
 
 ## 三条已付过代价的纪律
 
@@ -120,7 +141,9 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
   - **`continuum-capability`**（本项目无此子项目，只留条目）：登记项不变量落在 `save_tool`（本计划
     Task 1 落地，落地后 `tool` 表才有真正的写入闸）；`tool` 表的登记**至今无生产调用方**。
   - **`continuum-runtime` 的下一轮**：`runtime → secrets` 的边与凭据签发调用点（设计 §14 第 10 条）。
-  - **子项目 C**：注册表里没有任何工具适配器（步骤 6 那一跳在生产里必然 `Unregistered`）。
+  - **F（驱动）自己 / 将来的适配器子项目**：**一个可登记的 `ToolProvider` 实现**——注册表里没有它，
+    故步骤 6 那一跳在生产里必然 `Unregistered`。装配者就是驱动自己（组合根，设计 §10.2），
+    而 C 按中立性规则不会在 `src/` 里放 `impl`（C 设计 §12.4 同此口径）。**这条不指子项目 C。**
   - **后续阶段**：§312 的「tool invoked」落点、`--input` 的落库语义。
   - **规范维护者（本项目无此角色）**：`effect_class` 两轴之问、`trust`、工具侧 `cost` / `latency`。
 
@@ -160,9 +183,14 @@ crates/continuum-capability/
 
 ### Task 1: `save_tool` 的登记期不变量
 
-> **本 task 不依赖 C。** 它关掉的是设计 §5.2 那条「工具做了外部效应却没有效应记录」的洞——
-> 协调者裁决（接缝图第六节第 1 条）把这一步判给 F。**实测今天的 `save_tool` 只是一条裸 `INSERT`，
-> 不变量并未实现**（`crates/continuum-capability/src/persist.rs:64-88`）。**这是真活，不是照录。**
+> **本 task 不依赖 C。** 它关掉的是设计 §5.2 那条「工具做了外部效应却没有效应记录」的洞。
+>
+> **这一步的所有者是 F。** 判据（`p3bcdf-followups.md` §七第 1 条，逐条抄此）：设计侧把这条不变量的
+> 落点定在 `continuum-capability` 的 `save_tool`，而**本轮没有这个子项目**，故**没有任何一份计划会因它而红**；
+> 裁给 F 的理由是——**它正是设计 §5.2 那条洞的唯一关闭点**（「关在唯一入口上」，`save_tool` 是 `tool` 表的
+> 唯一生产写点），而 F 本轮已要改这个 crate。
+> **实测今天的 `save_tool` 只是一条裸 `INSERT`，不变量并未实现**
+> （`crates/continuum-capability/src/persist.rs:64-88`）。**这是真活，不是照录。**
 
 **Files:**
 - Modify: `crates/continuum-capability/src/persist.rs`（`save_tool`）
@@ -495,14 +523,21 @@ pub fn run_tool_call(
 
 `tests/tool_call.rs`：库级用例，夹具适配器经 C 的注册表登记。**夹具的形状照
 `crates/continuum-provider/tests/fake_provider.rs`**（跨 crate 的 `tests/` 目录不可导入，故这是**第二份
-副本**——C 的那一份钉的是「工具级失败走 `Ok(is_error: true)`、provider 级失败走 `Err`」这条约定，F 的
-这一份只服务本路径的用例，**不合并**）。夹具要记两件事：**被调用的次数**与**收到的那份请求**。
+副本**——**两份不合并**，判据见 `p3bcdf-followups.md` §七第 8 条：C 的那一份钉的是「工具级失败走
+`Ok(is_error: true)`、provider 级失败走 `Err`」这条约定，F 的这一份只服务本路径的用例，两份各有其用）。
+夹具要记两件事：**被调用的次数**与**收到的那份请求**。
 
-> **一处措辞要写准**：实现 `continuum_provider::ToolProvider`（`#[async_trait]`）时，`impl` 的签名里**必须
-> 写下**那个请求类型（`AuthorizedToolInvocation<'_>`，C 设计 §7.5）。「F 不构造也不命名那个请求类型」
-> 这句话的射程是**生产调用点**——F 的生产路径把 `&AuthorizedTool` 与 `input` 交给 `invoke_tool`，
-> **不自己 `new` 出请求、也不在别处再出现一个产生点**；夹具的 `impl` 签名是另一回事，记此以免实现者
-> 以为自己违规。
+> **调用点的唯一所有者是 C（判据逐条抄自 `p3bcdf-followups.md` §七第 5 条）**：
+> **`AuthorizedToolInvocation` 的构造点 → 唯一所有者 C（在 `invoke_tool` 之内）。
+> F 只调 `ProviderRegistry::invoke_tool(&AuthorizedTool, input)`，不构造、也不命名那个请求类型。**
+> 出处：「C 设计 §7.5 定的是那个类型**长什么样**，§7.1 定的是**谁构造、经哪条路调**」。
+> 故 F 的**生产路径**只做一件事——把 `&AuthorizedTool` 与 `input` 交给 `invoke_tool`；
+> **不自己 `new` 出请求，也不在别处出现第二个产生点**。
+>
+> **一处措辞要写准（与上条不冲突）**：实现 `continuum_provider::ToolProvider`（`#[async_trait]`）时，
+> `impl` 的签名里**必须写下**那个请求类型（`AuthorizedToolInvocation<'_>`，C 设计 §7.5）——Rust 要求
+> `impl` 侧与 trait 侧同形。上一条的「不命名」管的是**生产调用点**，不是夹具的 `impl` 签名；
+> 记此以免实现者以为自己违规，也以免它被读宽成「夹具不许提这个名字」。
 
 用例：
 
@@ -587,8 +622,9 @@ ToolCall(#[from] ToolCallError),
 
 1. **装配**：`open_db`（`task_cmd.rs:323` 提到 **`pub(crate)`**，两条子命令共用同一份迁移集合——
    两处各写一份清单会让「注册的集合」有两个来源）+ 构造一个 `ProviderRegistry`。**今天的驱动没有任何
-   适配器可登记**，故**装配点是空的**——这一句要写成注释并说明它不是遗留物（是 C 的交付缺口，
-   见 `## 遗留`）。**登记的实参表以 C 的源码为准**，本计划不写死它（设计 §10.2 明写 F 不预先发明）。
+   适配器可登记**，故**装配点是空的**——这一句要写成注释并说明它不是遗留物（缺的是**一个可登记的
+   适配器实现**，而装配者＝驱动自己，收件人是驱动自己／将来的适配器子项目，见 `## 遗留`；
+   **不是 C 的交付缺口**——C 已交付注册表机制，且按中立性规则不可能提供 `impl`）。**登记的实参表以 C 的源码为准**，本计划不写死它（设计 §10.2 明写 F 不预先发明）。
 2. **调 lib**：`continuum_runtime::tool_call::run_tool_call(&db, &registry, &args)`。
 3. **失败映射**：`Err(e)` → `eprintln!("工具调用失败: {e}")` + `ExitCode::FAILURE`。
    **不要把 `ToolResult.output` 在这里打印**——它在 lib 的步骤 7 已经打出（两条路径不能有两个输出点）。
@@ -924,14 +960,34 @@ git commit -m "test(runtime): 强制点 (1) 的射程边界；订正 runtime 依
 ### Task 9: 收口（复核三处合并结果）
 
 > 串行执行序的最后一位做一遍收口（前一阶段 P3A 就是这么收的）。**本 task 只复核、只在发现不一致时改**。
+>
+> **本 task 的判据直接抄自 `docs/superpowers/p3bcdf-followups.md` §七**（接缝裁决的权威转录），
+> 逐条如下——**本 task 不依赖任何 gitignore 的文件**：
+>
+> - **第 7 条**：多写者单文件（`dependency_direction.rs` 的 `ALLOWED`、`main.rs` 的注册、workspace members）
+>   由**每份计划各自登记自己那几条**，不设集中登记 task，串行执行保证不冲突；**F 计划的最后一个 task
+>   是收口**——复核三处的并集并附 `cargo test --workspace` 的证据。
+> - **第 2 条**：`runtime → secrets` 的边与 `SecretsRuntime` 的装配 → **所有者 B**（凭据交付是 B 的
+>   §124 路径）。故 B 在 runtime 条目上加的 `continuum-secrets` 与它在 `main.rs` 的装配**都在本步的复核面内**。
+> - **第 3 条**：`runtime → connector` **本轮无生产消费者 → 落成具名未决，不做 task**。**不加这条边。**
+> - **第 4 条**：D 的迁移注册 → **所有者 D，注册在 `main.rs`**（「谁的表谁注册」；原先记在「用它的那个
+>   task（＝子项目 G，本轮不存在）」名下是一条**空头收件人**）。**迁移号须在 D 的 task 里现场核对该库的空号。**
 
 **Files:**
 - Modify: 视复核结果而定（预期不改任何文件）
 
 - [ ] **Step 1: 复核 `crates/continuum-runtime/tests/dependency_direction.rs` 的并集**
 
-逐条核：B 的 `continuum-connector` 条目与其对 runtime 的边、D 的 `continuum-model-registry` 条目与
-runtime 的边、C 的 `continuum-provider` 条目（三元素）、**F 自己不改 `ALLOWED`**。
+逐条核四件事：① **B 的 `continuum-connector` 自有条目**（B 建这个 crate，故它作**主体**要有一条）；
+② **B 在 runtime 条目上加的 `continuum-secrets`**（§七第 2 条：`runtime → secrets` 的边与
+`SecretsRuntime` 的装配都归 B）；③ D 的 `continuum-model-registry` 自有条目，以及 D 在 runtime 条目上
+加的那条；④ C 的 `continuum-provider` 条目（三元素）。**F 自己不改 `ALLOWED`。**
+
+> **不要把这句读成要加 `runtime → connector`**：**本轮不加这条边。** §七第 3 条已裁「`runtime → connector`
+> 本轮无生产消费者，落成具名未决、不做 task」——B 的 `continuum-connector` 只在 `ALLOWED` 里**作为主体**
+> 有自己的一条，**不作为 runtime 的依赖**出现。若复核时在 runtime 条目里看见 `continuum-connector`，
+> 那是**多登记**，要当场处置。
+
 判据是**逐对 `assert_eq!`**（含 dev 边）。跑：
 
 ```bash
@@ -941,12 +997,22 @@ cd /home/DslsDZC/Continuum && cargo tree -p continuum-runtime --depth 1 --edges 
 
 **逐行比对** `cargo tree` 的输出与 `ALLOWED` 的 runtime 条目，**并集多一条少一条都要当场处置**。
 
+**同时核 `crates/continuum-runtime/Cargo.toml`**：它的 normal 依赖清单必须与 `ALLOWED` 的 runtime 条目
+**精确一致**（那张表的断言是逐对 `assert_eq!`，两处只改一处会红）。**本轮的 normal 新边由 B 与 D 各自
+登记**（B 的 `continuum-secrets`、D 的 `continuum-model-registry`；**`continuum-connector` 不在其中**，
+见上面的引用块），**F 一条 normal 边都不加**；F 只加 dev 边的 `async-trait`，而 dev 边不进 `ALLOWED`
+的 normal 清单（`cargo tree --edges all` 会看到它，但 `async-trait` 是外部 crate，不在 `ALLOWED` 的
+比较域内——比较域是 workspace 成员）。
+
 - [ ] **Step 2: 复核 `main.rs` 的迁移与装配注册**
 
 `runtime_migrations()`（`main.rs:57-66`）里是 **7 处 `extend` + 开头一处 `builtin_migrations()`**
 （`let mut migrations = continuum_persist::builtin_migrations();` **不是 `extend`**）：
 builtin + P1 两条（artifact、graph）+ P2 三条（workspace、policy、effect）+ P3 capability + D 的
 model-registry。**按条数复核时别把 builtin 数成一次 `extend`。**
+**D 的三张表注册在 `main.rs` 是 §七第 4 条的裁定**（「谁的表谁注册」，原先把这一步记在「用它的那个
+task」名下——那等于子项目 G，本轮不存在，是一条空头收件人）；**迁移号由 D 在自己的 task 里现场核对
+该库的空号**，F 只核「注册的集合」这一面。
 与 `tests/migrations.rs` 的 `expected_migrations()` **互为覆盖**；复核 `tests/startup.rs` 的三处计数
 （`:24` / `:90` 的「迁移应用 N 项」与 `:79` 的补应用数）与**行内注释**一致——B/D 各自改过，
 **注释与断言互相打脸是本项目点过名的形状**。
@@ -1009,7 +1075,13 @@ git commit -m "docs: P3 子项目 F 的收口与复核"
 注册表里没有适配器       `ToolProvider` 的唯一实现是测试夹具；组合根登记不出东西，故步骤 6 那一跳
                         在生产路径上**必然**返回 ToolCallError::Unregistered。**这不是遗留物**，
                         它不挡强制点 (1)（authorize 在步骤 4，早于那一跳）。
-                        收件人：子项目 C。
+                        **缺的是哪一步（说准）**：缺的不是注册表的**机制**（C 已交付它），而是
+                        **一个可登记的适配器实现**——而装配者就是**驱动自己**（组合根，设计 §10.2；
+                        C 设计 §12.4 明写「装配者＝驱动」），且 C 按中立性规则**不可能**在 `src/`
+                        里放 `impl`（`continuum-provider` 只定义 trait）。故这条**不指子项目 C**。
+                        收件人：**F（驱动）自己**——准确说是**将来的适配器子项目 / 下一轮驱动**：
+                        由它提供一个 `ToolProvider` 实现、经注册表的登记入口装进组合根。
+                        F 本轮**不做**这一步（设计明写不建适配器），只把它记成具名未决。
 C 的错误文案未冻结       Task 7 的端到端用例只断言退出码与库内行数，**不依赖
                         `ToolCallError::Unregistered` 的 Display 文案**——那段文案是 C 的，
                         F 无权冻结它。后来者若想断言文案，须先与 C 定死它。
@@ -1037,7 +1109,8 @@ granted() 的消费方      按 C 设计 §7.5，是**适配器**（在 invoke �
 凭据签发的接线          若这条调用需要凭据，唯一来源是 continuum_secrets::issue(&cap, now)。
                         本计划**不登记** runtime → secrets 的边、不加调用点（零使用的边即假边）。
                         收件人：continuum-runtime 的下一轮，或按 p3a-followups 第三节末尾的原计划
-                        与 B 的密钥运行时接线一并做（协调者已把那条边的所有者裁给 B）。
+                        与 B 的密钥运行时接线一并做。**该边与 SecretsRuntime 装配的所有者是 B**
+                        （p3bcdf-followups.md §七第 2 条），故本计划不提前登记、也不替它装配。
 tokio 首次真使用         continuum-runtime/Cargo.toml 早已声明 tokio，而 src/ 与 tests/ 至今零引用；
                         本子项目为 block_on 异步的那一跳**第一次真用**它（单次调用用当前线程运行时）。
                         收件人：后续阶段（若驱动整体转异步，这个形状要重做）。
@@ -1050,8 +1123,9 @@ AuthorizedTool 不进       TaskError::Capability 的 Display 只带内层 Capab
 错误上下文              （那些消息里没有作用域）。**这一条没有照片**（关于「驱动没写某句格式化」的
                         否定命题），记此以免后来者顺手加一句 {:?} 而没人发现。
 effect_class 两轴 /      三条义务曾被 D 退件给「子项目 F ＋规范维护者」，而 F 的设计只声明「不读」。
-trust / 工具侧           本计划**不做 task**：四份设计都写明「不发明」，而 §4.1 的组件表里
-cost / latency          **没有「工具选择」这个组件**，故收件人是**规范维护者（本项目无此角色）**。
+trust / 工具侧           本计划**不做 task**（**协调者已裁，见 `p3bcdf-followups.md` §七第 6 条**）：
+cost / latency          四份设计都写明「不发明」，而 §4.1 的组件表里**没有「工具选择」这个组件**，
+                        故收件人是**规范维护者（本项目无此角色）**。
                         **这是「收件人挂了空」的第二次具名**，记此以免它再次无声挂空。
 设计 §3.4 的一处行号错误 §3.4 把 `task` 第 5 步的 `Sandbox::spawn` 记在 `task_cmd.rs:252`；实际 252 是
                         `sandbox_select::select_for_this_machine`，`sandbox.spawn(task, cmd)?` 在 `:588`。

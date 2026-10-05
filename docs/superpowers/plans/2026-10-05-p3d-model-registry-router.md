@@ -511,6 +511,13 @@ git commit -m "feat(model-registry): §249 十态、可路由闸门与迁移表"
 **Interfaces:**
 - Produces: `continuum_model_registry::p3d_model_migrations`
 
+**本 task 起登记 `continuum-persist` 这条边**（Step 4 的 `p3d_model_migrations()` 返回 `Vec<Migration>`，
+Step 2 的夹具用 `Db::open_with` / `builtin_migrations()`）：`crates/continuum-model-registry/Cargo.toml`
+加 `continuum-persist`、dev-dep 加 `tempfile`，`ALLOWED` 的 `continuum-model-registry` 条目由空数组改为
+`["continuum-persist"]`——**两处一起改**（那张表是逐对 `assert_eq!`，只改一处会红）。
+**边由用它的那个 task 登记，而本 task 就是它的使用者**（Global Constraints 的口径）；Task 6 不再新增这条边。
+`continuum-core` 与 `continuum-capability` 两条边在 Task 3 已登记，本 task 不动它们。
+
 - [ ] **Step 1: 现场核实该库的空号（**不许假定**）**
 
 读 `crates/continuum-runtime/src/main.rs` 的 `runtime_migrations()` 与
@@ -666,8 +673,9 @@ pub fn transition_in_tx(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
 **本层只提供迁移表与写入口**：`discovered→unprofiled` 的触发方是登记方，`unprofiled→…→verified` 归 Model
 Onboarding Task（尚未建），`active→stale` 归行为指纹的周期 probe（尚未建）——**本阶段这些产生方一个都不存在**，
 故「谁真的推进了生命周期」只能由测试直接调 `transition_in_tx` 来演（设计 §4.3、§10 第 3 条）。
-`LifecycleError` 本 task 增补 `UnknownModel { id }` 与 `Persist(#[from] PersistError)`，
-`Cargo.toml` 与 `ALLOWED` 加 `continuum-persist`（+dev `tempfile`），**两处一起改**。
+`LifecycleError` 本 task 增补 `UnknownModel { id }` 与 `Persist(#[from] PersistError)`。
+**本 task 不新增任何依赖边**：`continuum-persist`（与 dev `tempfile`）的 `Cargo.toml` 与 `ALLOWED` 登记
+已在 Task 5 随它的使用者一起落地。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -1263,7 +1271,7 @@ git commit -m "docs(model-registry): P3 子项目 D 的收尾与复核"
 
 ## 遗留
 
-**设计定稿时已闭的六条**（本计划初稿曾把它们报为未决，来历留此，免得后来者按旧报告去找）：
+**设计定稿时已闭的七条**（本计划初稿曾把它们报为未决，来历留此，免得后来者按旧报告去找）：
 
 - `RoutingError::Persist` —— 设计 §5.4 已裁**删**该变体（零产生方的死物，且会让人以为本层会写库）。
 - 迁移 `81` —— 设计 §3.3 已删「预留 `81`」（三张表全在 80，只取一个）。
@@ -1271,6 +1279,15 @@ git commit -m "docs(model-registry): P3 子项目 D 的收尾与复核"
 - `ProfileError` 的名字与三枚变体 —— 设计 §2.4 已给出（`NotFinite` / `OutOfRange` / `BadTimeRange`）。
 - `RoutableModel::try_new` 的入参 —— 设计 §2.1 已改收 `LifecycleState` 并留了来历。
 - `EscalationStep` 的落点 —— 设计 §8.1 已列入 `src/escalation.rs`（七个模块）。
+- **C↔D 接缝（设计 §11 第 13 条）—— 已闭，且它那条「未闭」系误读**（据接缝分析 §五.8）：
+  设计把它记为「未闭（收件人：C 的设计）」，要求 C 订正 §4「调用面」与关于 `ALLOWED`「只应含
+  `continuum-provider`」的那句。**判据两条**：(a) **C 的 §6 调用面早已订正**——C 现文写「Router 不调用
+  适配器，调用方是子项目 G」；(b) D 引的 `C:274` 实为 C §4.2 形态 3（**现 `C:303`**），讲的是**未来的
+  `continuum-adapter-*` crate 的 `ALLOWED`**「只应含 `continuum-provider`」——**不是 C 自己的条目**
+  （C 自己的 provider 条目已是三元素）。
+  **故本计划不给它写 task，实现时也不得去「修」`C:303`**——那会改掉一句正确的、关于未来适配器 crate 的约束。
+  （条目标题里的「接缝分析 §五.8」是那次只读复核的编号；**它的判据已逐条抄在上面两句里**，
+  故本条不依赖那份不随仓库版本走的文件。）
 
 ```
 effect_class 两轴之问   D 退件（设计 §11 第 22 条）：本 crate 对 `effect_class` 的引用为零，
@@ -1279,6 +1296,21 @@ effect_class 两轴之问   D 退件（设计 §11 第 22 条）：本 crate 对
 trust                   D 退件（设计 §11 第 23 条）：§247 的十二个字段里没有 trust，§250 的
                       八个 MUST 考虑项里也没有，路由侧没有消费点。**规范未给判据**。
                       收件人：子项目 F ＋ 规范维护者。
+复用 Cost / Latency      **已落**（Task 3：本层取 `continuum_capability` 的两个**类型**，不取能力凭据）。
+的一对类型              残余是设计 §11 第 6 条的那半句：若后续判定模型的 `cost_profile` 与工具的 `cost`
+                      **不是同一轴**，此处要拆、并把 `Cost` / `Latency` 上移到 `continuum-core`
+                      （那会动 P3A 已落地的类型与它的落库编码，超出本子项目范围）。
+                      **规范未给「是不是同一轴」的判据**。收件人：协调者。
+ProviderError →          D **有条件签收**：签收的是**已分类的结果**（`FailureHistory`，§250 的第六个输入，
+FailureClass 的映射     落在策略一侧、今天形状未定）；**映射本身退件**——`ProviderError` 是
+（§11 第 18 条）        `continuum-provider` 的类型，而本设计对那个 crate 的引用为零，搬进来就得登记
+                      一条被裁掉的边。分类发生在**持有 `ProviderError` 的一侧＝子项目 G**。
+                      **`max_attempts >= 2` 与退避参数也不是本层的**：按 §246 它们属
+                      `ExecutionProfile.retry_policy`（归执行层），本层的 `EscalationLadder` 是
+                      「换哪个模型」，与「重试几次」是两个轴——本计划**不接**
+                      `docs/superpowers/p1-followups.md:62-64` 那句「P3 的 Router 必须…」里的
+                      「Router」二字，这是一处与本仓既有 followups 的措辞分歧，明写在此。
+                      **收件人：C 的设计（改指名真正的分类方）＋ 协调者。**
 工具侧 cost / latency   其 `Some` 的「可达路径」在 B/C/D/F 四份设计里无人认领（设计 §11 第 15 条）：
 的 Some                 D 复用的是两个**类型**（落在模型画像上），不读 `ToolProfile`；
                       而 §4.1 里**没有「工具选择」这个组件**。**规范未给判据**。
@@ -1303,6 +1335,7 @@ register_model 的落态     设计 §3.2 的注释写「§21 发现即登记」
                       （§83 Model Failure Modes）。本计划已改用正确出处；
                       **设计那处已由协调者派回设计作者**。
 规范级未决的其余各项     设计 §11 的第 2、3、4、5、7、8、9、10、11、12、16、17、19、21、24 条
+                      （第 6、13、18 条已分别单列于上，不在此列）
                       （探索、Population Feedback、§84 的语义、§333 的单位、三处画像清单不一致、
                       子维度分层、failure_modes 词表、§19 阈值、§249 迁移关系、cost_budget 收紧、
                       初步画像、version vs time_range、上下文长度、Tier 1 Low、Degraded 降权）。

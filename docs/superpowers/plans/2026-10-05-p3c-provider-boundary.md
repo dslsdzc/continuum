@@ -19,7 +19,11 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
 **设计依据：** `docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md`（下称「设计」）。
 前提是共享面 `docs/superpowers/specs/2026-10-05-p3-bcdf-ownership-and-interfaces.md`；裁决在
 `docs/superpowers/specs/2026-10-05-p3-bcdf-set-decisions.md`（**第五节：删 `ToolInvocation`**）；
-接缝裁决在 `.superpowers/sdd-p3bcdf/impl-seam-map.md` **第六节**。
+写计划前的**八条接缝裁决**转录在 `docs/superpowers/p3bcdf-followups.md` **§七**（那一节是**权威转录**；
+原始接缝分析所在的 `.superpowers/sdd-p3bcdf/impl-seam-map.md` 是 gitignore 的 scratch，**随时会丢**，
+故本计划**不引它当约束来源**）。其中**对本计划承重的四条已逐条抄进下面正文**：
+§七 第 5 条（请求类型的构造点唯一归 C）、第 6 条（`effect_class`/`trust`/工具侧 `cost`·`latency` 落遗留）、
+第 7 条（多写者单文件各自登记自己那几条）、第 8 条（C 的 `FakeTool` 与 F 的库级夹具是两份副本，不合并）。
 
 ## Global Constraints
 
@@ -33,19 +37,28 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
   这一条**必须精确一致**——断言是逐对 `assert_eq!`，且 `every_crate_depends_only_on_its_allowed_set`
   跑的是 `cargo tree --edges all`，故 **dev-dependency 也进表**。
   **只加 `Cargo.toml` 不加 `ALLOWED`（或反之）会红**（`p3bcdf-followups.md` §四.1 的硬提醒 1）。
-- **本计划不新建 crate、不建表、不取迁移号**（设计 §10）。迁移编号只对 D 存在（接缝图 §二 #3），
+- **多写者单文件，各自登记自己那几条**（`p3bcdf-followups.md` §七 第 7 条）：
+  `dependency_direction.rs` 的 `ALLOWED`、`main.rs` 的注册、workspace `members` 是**单一文件、多写者**，
+  四份计划都要碰。故**不设集中登记 task**，**每份计划各自登记自己那几条**（照 P3A 的 Tasks 3/4/5 做法），
+  由执行序（`B → D → C → F`，串行）保证不冲突。**C 只改 `continuum-provider` 那一个条目**
+  （Task 3 改成二元素、Task 4 补成三元素），**不碰其余任何条目**。
+- **本计划不新建 crate、不建表、不取迁移号**（设计 §10）。迁移编号只对 D 存在（它的设计 §3.3 取 80、预留 81），
   C 一行都不碰 `runtime_migrations()` / `expected_migrations()` / `tests/startup.rs`。
 - **本计划不改 `continuum-runtime` 的源码。** 对 `continuum-runtime` 的改动**只有一处**：
   `crates/continuum-runtime/tests/dependency_direction.rs` 里 `continuum-provider` 的那个条目。
-  `:121` 那句已成假的注释**由 F 订正**（接缝图 §一 F 表末行），本计划不动。
+  `:121` 那句已成假的注释（「core / events / provider 在 runtime 内至今无任何引用」）**由 F 订正**
+  ——F 首次真引用 `continuum-core` 与 `continuum-provider`，它的设计 §10.1 明写那句必须就地改并把来历留原地；
+  本计划不动。
 - **`continuum-provider` 不引用任何适配器实现类型**（设计 §4.1）。注册表只用
   `std::collections::HashMap` 与 `std::sync::Arc`，引用的类型是 `Arc<dyn ModelProvider>` /
   `Arc<dyn ToolProvider>` / `ModelId` / `ToolId` / `AuthorizedTool`——**无一是实现类型**。
   若注册表引用了任何具体适配器，编译期就会要求一条新边，而那条边必须先写进 `ALLOWED` 才绿。
-- **`ToolId` 一律复用 `continuum_core::tool::ToolId`，本计划不另建第二个**（P3A 设计 §3.1、接缝图 §二）。
+- **`ToolId` 一律复用 `continuum_core::tool::ToolId`，本计划不另建第二个**（P3A 设计 §3.1；
+  共享面 §二「再不要造第二个 `ToolId`」）。本计划只**再导出**。
 - **`Tool`（§252）与 `ToolDescriptor`（§316）并存，不合并**（设计 §8）——本计划不改任何一边的字段。
 - **本计划不接 `save_tool` 的登记期不变量。** 那条不变量（`effect_class == Some(t) ⇒ for_effect(t) ∈ required_capabilities`）
-  约束的是 `tool` 表的**写入**，协调者已裁定**所有者是 F**（接缝图 §六第 1 条）。本计划一行都不写它。
+  约束的是 `tool` 表的**写入**（唯一写点是 `crates/continuum-capability/src/persist.rs` 的 `save_tool`），
+  **裁决：所有者是 F**（`p3bcdf-followups.md` §七 第 1 条）。本计划一行都不写它。
 - **`docs/02-工程.md` §10.3 与共享面 §二（类型清单）由控制器改**（设计 §7.5 落地清单第 4、5 处）。
   本计划**不动那两个文件**，只在报告里点明它们待改。
 - 代码注释、错误信息、测试断言信息用中文。标识符用英文。
@@ -109,11 +122,13 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
   `ModelStream` / `ProviderHealth`；`ToolId` / `ToolDescriptor` / `ToolResult`；`ProviderError`。
 - `continuum-persist`：`Db` / `builtin_migrations` / `Migration` / `Tx` / `Value` / `PersistError`（**dev 用**）。
 
-**不依赖 B、D、F 的任何产物**（接缝图 §三 硬依赖表）。
+**不依赖 B、D、F 的任何产物。** 四份计划之间唯一的硬依赖是 **C → F**（F 的库函数签名要收
+`&ProviderRegistry`、调 `invoke_tool`；C 的 trait 变更与类型删除是 F 编译的前提），而 C 在它之前。
+B、D 与 C 之间没有编译期依赖（B 走 §124，不经 §316；D 只用 P3A 与 `continuum-core`）。
 
 **交给 F（硬前置，F 的编译前提）：** `ProviderRegistry`、`invoke_tool`、`AuthorizedToolInvocation<'_>`、
 `ToolCallError`、`RegistryError`，以及 **`ToolInvocation` 的删除**。
-**F 只调 `invoke_tool`，不构造也不命名请求类型**（协调者接缝裁决第 5 条）。
+**F 只调 `invoke_tool`，不构造也不命名请求类型**（`p3bcdf-followups.md` §七 第 5 条）。
 
 **交给控制器（本计划不动那两个文件）：** 共享面 §二 §316 段的类型清单（删 `ToolInvocation`）、
 `docs/02-工程.md` §10.3 的接口清单（标注请求面已变）——设计 §7.5 落地清单第 4、5 处。
@@ -420,12 +435,19 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 > 变的是 `invoke` 的请求参数。**删 `ToolInvocation` 与它同批做**（裁决 §五），不要拆成两次提交。
 >
 > **完成判据是 `cargo test --workspace` 通过**，不是「改完定义就收工」——删除的引用者全在编译期暴露。
-> 规划时实测 `grep -rn ToolInvocation crates/` 恰五个行号：`crates/continuum-core/src/tool.rs:26`（定义）、
-> `crates/continuum-provider/src/tool.rs:5,12`（trait 的导入与签名）、
-> `crates/continuum-provider/tests/fake_provider.rs:7,109`（夹具）。
+> 规划时实测 `grep -rnw ToolInvocation crates/`（**`-w` 是词边界，见下**）恰五个行号：
+> `crates/continuum-core/src/tool.rs:26`（定义）、`crates/continuum-provider/src/tool.rs:5,12`
+> （trait 的导入与签名）、`crates/continuum-provider/tests/fake_provider.rs:7,109`（夹具）。
 > **但本 task 执行时夹具已经不在那个文件了**：Task 1 把 `FakeModel`、Task 2 把 `FakeTool` 搬进了
 > `crates/continuum-provider/tests/common/mod.rs`，故第三处要改的是**那里**（行号以当时文件为准，
-> 本计划不预先写死）。**改完再 grep 一次，确认零命中。**
+> 本计划不预先写死）。
+>
+> **判据必须用词边界，不能用裸 `grep -rn ToolInvocation`**（整套终审 S-3）：本 task 一落地
+> `AuthorizedToolInvocation`，裸匹配就**必然命中自己**（子串包含），这条判据**永远不可能绿**。
+> 实跑确认（本仓当前字节 + 一个只含 `AuthorizedToolInvocation` 的探针文件）：
+> `grep -rnw ToolInvocation crates/` 在探针存在时**不报探针**，而裸 `grep -rn` 会报——
+> 因为 `AuthorizedToolInvocation` 里 `d` 与 `T` 之间**不是词边界**。
+> **别照抄这句，自己实跑一遍再下判据。**
 >
 > **本 task 不新增任何 dev 依赖**：它没有任何运行用例（理由见下），故 `continuum-persist` / `tempfile`
 > 由**真正用它们的** Task 4 增量加——「边由用它的那个 task 登记」对 dev 边同样成立。
@@ -533,7 +555,7 @@ pub trait ToolProvider: Send + Sync {
 ```bash
 timeout 1500 cargo test --workspace --no-fail-fast
 timeout 900 cargo build --workspace --all-targets
-grep -rn ToolInvocation crates/    # 预期零命中
+grep -rnw ToolInvocation crates/   # 预期零命中。**`-w` 不能省**：裸匹配会被 AuthorizedToolInvocation 子串命中
 git add crates/continuum-core crates/continuum-provider crates/continuum-runtime/tests/dependency_direction.rs
 git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，删 ToolInvocation"
 ```
@@ -615,7 +637,7 @@ impl ProviderRegistry {
     ///
     /// **顺序**：先按 id 路由（未命中即返 `Unregistered`，**适配器一次都没被碰过**），
     /// 构造请求，再调适配器。`AuthorizedToolInvocation` **在本函数内部构造**——调用方（F）
-    /// 只传 `&AuthorizedTool` 与 `input`，不构造也不命名那个类型（协调者接缝裁决第 5 条）。
+    /// 只传 `&AuthorizedTool` 与 `input`，不构造也不命名那个类型（`p3bcdf-followups.md` §七 第 5 条）。
     /// 该类型的构造入口是 `pub(crate)`（Task 3，裁决 C2），故**本函数是全仓唯一的构造点**。
     pub async fn invoke_tool(
         &self,
@@ -818,6 +840,12 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 **为什么不写成三个结构体**：设计 §11 的这一行写的是「用 `FakeTool`」，而一个单元结构体产不出两条失败通道；
 三态化是让那一行字面成立的最小改动。**这是本计划对夹具形状的读数，不是设计给的判据**，见 `## 遗留`。
 
+> **本夹具与 F 的库级夹具是同一约定的两份副本，裁决明写「不合并」**
+> （`p3bcdf-followups.md` §七 第 8 条）。理由：跨 crate 的 `tests/` 目录不可互相导入，F 的库级用例
+> 装进本注册表时只能另写一份（它按本文件的形状写）。**两份各有其用，不要试图抽公共 crate。**
+> 代价据实记：**两者若漂移，「工具级失败走 `Ok(is_error: true)`」这条约定只在本 crate 的用例上红**，
+> F 那份不会。这条不设护栏，靠评审。
+
 - [ ] **Step 2: 写用例**
 
 `tests/contract.rs`（夹具同 Task 4 的 `db()`）：
@@ -1005,6 +1033,16 @@ describe_tool 无        本阶段不加变体（按显式登记，正常路径�
   UnknownTool 变体      适配器不认」会变成可达，届时再定。收件人：F / 本 crate 的后续轮次。
 input_schema 两个产生点  适配器的 ToolDescriptor.input_schema（调用的权威）与 Tool.input_schema（规划的权威）
                        的一致性无可强制。收件人：F（调用侧）+ Planner。
+ExecutionProfile 的      `crates/continuum-graph/src/execution.rs:20-22` 的 model / provider / tool 仍是
+  model/provider/tool  `Option<String>`。设计 §2.2 第五条与 §12 第 9 条判**本轮不做**（要动一张已落库的
+  仍是 Option<String>   表与一个已冻结的 struct，而**没有消费方要求它**：无 G、无 F），收件人写「子项目 G
+                       或 F」。**整套终审 S-7**：那两个具名收件人**都不认领**，四份计划零落点。
+                       **本计划的判定：不属 C** —— 收紧的是 `continuum-graph` 的 `ExecutionProfile`，
+                       而 C 的交付面里没有一个字段是它（C 连 `continuum-graph` 都不依赖）；
+                       「谁先发 invoke 谁收紧」这句话的主语是**模型调用路径**，即**子项目 G**，
+                       而 **G 本轮不设计**（裁决 §一第 1 条）。故本条**明确记为未决**：
+                       **收件人：子项目 G（它尚不存在，此条随它的设计一并处置）；若 G 落地前有人要动它，
+                       由规范维护者裁。** 本计划**不设 task**，也不动那张表。
 ProviderError →         §5.1 那张表是**文档不是代码**（无消费方）。另注：FailureClass 有 Resource，
   FailureClass          而 ProviderError 没有表示「限流 / 配额耗尽」的变体，该类丢掉了。
                        收件人：F（工具路径）+ 子项目 G（模型路径）。
@@ -1016,7 +1054,7 @@ P1 的 Resource 义务     要求「P3 的 Router 必须为 RESOURCE 显式给�
                        归一化之后是同一个拼法）会被红掉；**全限定路径 / 别名 / include! 三种仍全绿**
                        （设计 §4.1 末段；裁决 C7 已把空白变体从逃逸清单里划掉）。
 save_tool 登记期不变量   C 不接（设计 §7.4 接缝二、§12 第 15 条）：它约束的是 tool 表的**写入**，
-                       属 continuum-capability。协调者已裁定**所有者是 F**（接缝图 §六第 1 条）。
+                       属 continuum-capability。**裁决：所有者是 F**（`p3bcdf-followups.md` §七 第 1 条）。
 凭据要不要也交给         设计 §12 第 23 条：本阶段不做；若做，会引入 continuum-provider
   适配器               → continuum-secrets 的边，那是一个**第二个位置**。收件人：控制器（若提出）。
 
