@@ -5,7 +5,9 @@ Model Registry 生命周期（§249）、Router 与候选排序（§250 §84）�
 （`docs/02-工程.md:215-221`）。
 
 本子项目是 P3 分解（A–E：Capability / 连接器 / 工具与 Provider 中立边界 / 模型侧与 Router / 计算节点与放置）中的 **D**，
-次序 A → B → C → D → E（P3A 设计第 1 行）。A 是 D 的前置（`Router ← Model Registry + Capability Token`，§4.3）。
+次序 A → B → C → D → E（P3A 设计第 1 行）。A 是 D 的前置——按 §4.3 的现文，即
+`Router ← Model Registry + continuum-capability 的两个类型（Cost / Latency）`（`docs/02-工程.md:248`；
+该行 2026-10-05 订正，来历见 §8.4）。
 
 **与共享面的关系**：路径归属、已冻结接口、四条横切约束以
 `docs/superpowers/specs/2026-10-05-p3-bcdf-ownership-and-interfaces.md` 为准。**成本输入是预算视图**这一条由 ENG-005 裁决
