@@ -1,0 +1,5 @@
+error[E0609]: no field `effect` on type `OpBinding`
+  --> tests/compile_fail/op_binding_has_no_effect_field.rs:21:13
+   |
+21 |     binding.effect = None;
+   |             ^^^^^^ unknown field
