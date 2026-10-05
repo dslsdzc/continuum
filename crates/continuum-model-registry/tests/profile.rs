@@ -30,19 +30,26 @@ fn ratio_round_trips_through_its_text_encoding() {
     }
 }
 
-/// `NaN` 与两个越界值，外加 `±∞`：四类「不落在 `[0,1]` 里」的入参各一枚照片。
+/// 两件不同的事各有照片：**非有限**（`NaN` / `±∞`）报 `NotFinite`，
+/// **有限但越界**（`1.5` / `-0.1`）报 `OutOfRange { value }`。
 ///
-/// `NaN` 那一格用 `match` 而非 `assert_eq!`：`NaN != NaN`，等值断言在 `value` 这一格
-/// 恒假，只能按 `is_nan()` 判——但**变体**仍被逐字钉住。
+/// 两类**不共用变体**：同一个 `NaN` 在 `Ratio` 与 `SkillScore` 上必须报同一枚错，
+/// 而 `NaN` 也不是「落在区间之外」的点。故这里**两枚变体各三格**，且互不重叠。
 #[test]
-fn ratio_rejects_nan_and_out_of_range() {
+fn ratio_rejects_non_finite_and_out_of_range() {
+    // 非有限三格：`NaN` 用 `match` 而非 `assert_eq!`——`NaN != NaN`，
+    // 等值断言在 `value` 这一格恒假；但**变体**仍被逐字钉住。
     match Ratio::try_new(f64::NAN) {
-        Err(ProfileError::OutOfRange { value }) => assert!(
-            value.is_nan(),
-            "`value` 应原样带回入参 NaN，实为 {value}"
-        ),
-        other => panic!("NaN 应被拒为 OutOfRange，实为 {other:?}"),
+        Err(ProfileError::NotFinite) => {}
+        other => panic!("NaN 应被拒为 NotFinite，实为 {other:?}"),
     }
+    assert_eq!(Ratio::try_new(f64::INFINITY), Err(ProfileError::NotFinite));
+    assert_eq!(
+        Ratio::try_new(f64::NEG_INFINITY),
+        Err(ProfileError::NotFinite)
+    );
+
+    // 有限越界两格：`value` 是**给的那个数**。
     assert_eq!(
         Ratio::try_new(1.5),
         Err(ProfileError::OutOfRange { value: 1.5 })
@@ -50,18 +57,6 @@ fn ratio_rejects_nan_and_out_of_range() {
     assert_eq!(
         Ratio::try_new(-0.1),
         Err(ProfileError::OutOfRange { value: -0.1 })
-    );
-    assert_eq!(
-        Ratio::try_new(f64::INFINITY),
-        Err(ProfileError::OutOfRange {
-            value: f64::INFINITY
-        })
-    );
-    assert_eq!(
-        Ratio::try_new(f64::NEG_INFINITY),
-        Err(ProfileError::OutOfRange {
-            value: f64::NEG_INFINITY
-        })
     );
 }
 

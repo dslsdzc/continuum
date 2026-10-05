@@ -13,24 +13,27 @@ use crate::error::ProfileError;
 /// `sort_by` 在含 `NaN` 的列表上不是全序——排序结果随实现细节漂移，
 /// 而 §84 的输出要被比对与记录。这不是洁癖，是不确定的排序无法有照片。
 ///
-/// 越界与「不是有限实数」**共用 [`ProfileError::OutOfRange`] 这一枚**：本类型的
-/// 合法域是一个闭区间，判据是「落不落在 `0.0..=1.0` 里」，而不发问的 `NaN` 同样
-/// 不落在其中（设计 §2.4 把 `NaN` 与 `1.5` / `-0.1` 同列为本类型的越界输入）。
-/// 「不是有限实数」那一枚 [`ProfileError::NotFinite`] 的界是**取值域未定义**的
-/// [`SkillScore`]，那里的判据只能止于「有限」。
+/// 两类坏入参各报各的错，**不并成一枚**：`NaN` / `±∞` 报 [`ProfileError::NotFinite`]，
+/// 「有限但落在 `0.0..=1.0` 之外」报 [`ProfileError::OutOfRange`]。判据是**跨类型一致**——
+/// 同一个 `NaN` 不该在 [`Ratio`] 上是一枚错、在 [`SkillScore`] 上是另一枚；
+/// 而 `NaN` 也压根不是「落在区间之外」的点（它不是区间里的点），故
+/// `OutOfRange { value }` 里的 `value` 总是一个有意义的数。
 ///
 /// 字段私有，故**构造期是唯一的入口**，不变式不可能被绕过。
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Ratio(f64);
 
 impl Ratio {
-    /// 构造：非有限（`NaN` / `±∞`）或落在 `0.0..=1.0` 之外即
+    /// 构造：`NaN` / `±∞` → [`ProfileError::NotFinite`]；有限但落在 `0.0..=1.0` 之外 →
     /// [`ProfileError::OutOfRange`]，`value` 原样带回入参。
     pub fn try_new(v: f64) -> Result<Self, ProfileError> {
-        // 三项都是承重的，缺一即漏一类入参：
-        // 去掉 `!v.is_finite()` 会让 `NaN` 从两个大小比较中间穿过去
-        // （`NaN < 0.0` 与 `NaN > 1.0` 都是 false），去掉任一侧的比较会漏掉一侧越界。
-        if !v.is_finite() || v < 0.0 || v > 1.0 {
+        // 两侧都是承重的，缺一即漏一类入参：去掉这一枚守卫会让 `NaN` 从下面两个大小
+        // 比较中间穿过去（`NaN < 0.0` 与 `NaN > 1.0` 都是 false，于是被当成合法值）；
+        // 去掉下面任一侧的比较会漏掉一侧越界。
+        if !v.is_finite() {
+            return Err(ProfileError::NotFinite);
+        }
+        if v < 0.0 || v > 1.0 {
             return Err(ProfileError::OutOfRange { value: v });
         }
         Ok(Self(v))
