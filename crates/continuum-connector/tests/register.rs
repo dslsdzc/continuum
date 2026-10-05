@@ -135,6 +135,31 @@ fn a_fully_bound_connector_registers() {
     assert_eq!(register(fake), Ok(()), "声明与绑定逐项对齐时应注册成功");
 }
 
+/// **「一一」那条核对的另一侧**：声明并绑定**两条操作、两枚不同 kind** → `Ok(())`。
+///
+/// 加上这条之前，全仓**没有任何注册成功的连接器声明 ≥2 条操作**，故
+/// `two_operations_bound_to_the_same_kind_are_rejected` 只钉住「拒」的那一侧：
+/// 把那处核对改成「≥2 条绑定即拒」时，那条拒的用例与本文件里只声明 1 条操作的
+/// `a_fully_bound_connector_registers` **都仍绿**。**本用例钉的是「只在该拒时拒」**，
+/// 与设计 §9 对服务半边要求的正例（`a_positive_arm_with_the_matching_service_half_registers`）同形。
+#[test]
+fn two_operations_bound_to_two_kinds_register() {
+    let fake = FakeConnector::new(
+        "GitHub",
+        &["GitHub.read_repo", "GitHub.push_branch"],
+        &[
+            ("GitHub.read_repo", CapabilityKind::Git(GitAction::Read)),
+            ("GitHub.push_branch", CapabilityKind::Git(GitAction::Push)),
+        ],
+    );
+
+    assert_eq!(
+        register(fake),
+        Ok(()),
+        "两条操作各绑一枚不同 kind、服务半边都对得上时应注册成功"
+    );
+}
+
 /// 两条操作绑同一枚 kind → `DuplicateKindBinding`（设计 §3.2 第 3 条，「一一」）。
 ///
 /// 「一一」的理由是 §125 的意图——「`GitHub.merge` 能单独不授」：两条操作绑同一枚
@@ -256,3 +281,4 @@ fn a_mis_bound_operation_still_registers() {
         "「配得对不对」无人判：绑错了也注册成功（设计 §3.4 照片 2）"
     );
 }
+

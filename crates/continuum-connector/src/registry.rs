@@ -24,8 +24,16 @@ pub trait ConnectorImpl: Send + Sync {
     /// **复用 §124 的 `ConnectorDescriptor`，不另建第二个描述类型**（设计 §3.2.1）。
     fn descriptor(&self) -> ConnectorDescriptor;
 
-    /// 每个已声明操作恰一条。**这就是绑定的产生点**，唯一产生点是
-    /// [`ConnectorRegistry::register`]。
+    /// **声明集与绑定集的键集相等**——这是四条核对实际保证的。**这就是绑定的产生点**，
+    /// 唯一产生点是 [`ConnectorRegistry::register`]。
+    ///
+    /// **（订正，原话照留）**：这里原写着「每个已声明操作恰一条」——那句话**超出了四条
+    /// 核对实际保证的**。四条核对保证的是「声明集 ≡ 绑定集的**键集**」（双向覆盖的两侧、
+    /// 一一、服务半边相符），**不保证**「同一个 op 只有一条绑定」：同一个 op 给两条
+    /// **不同 kind** 的绑定时四条全过，随后 `register` 收进 `HashMap` 时**后者胜且静默**
+    /// （仍返回 `Ok`），入口取到哪一条取决于 `Vec` 的顺序。设计 §3.2.1 的四条核对与
+    /// §6.1 的十个错误变体里都没有对应判据，故本 crate 不新增核对、不造变体
+    /// （`docs/superpowers/p3bcdf-followups.md` §八.23）。
     fn bindings(&self) -> Vec<OpBinding>;
 
     /// 比 §124 的 `invoke` 多一个材料入参（决定 B-4）：调用实现之前，入口按出示的
@@ -41,6 +49,8 @@ pub trait ConnectorImpl: Send + Sync {
 /// 操作串的**服务半边**：第一个 `.` 之前的子串（设计 §3.2.1 末段）。
 ///
 /// 入口第 1 步（Task 4）也按它解析连接器，注册期的服务半边核对是那次解析唯一性的来源。
+/// **但那条唯一性论证还依赖 `ConnectorId` 在表里唯一**——同一个 id 二次注册会静默覆盖
+/// （`docs/superpowers/p3bcdf-followups.md` §八.20），那时服务半边只能解析到最后一条。
 ///
 /// 比较是**逐字比较、不折叠大小写**——被否掉的替代是折叠大小写：折叠只到
 /// 「modulo ASCII 大小写」，会让 `github` 与 `GitHub` 被判为同一个服务。

@@ -536,8 +536,13 @@ async fn a_non_effect_operation_is_reached_with_a_presented_capability() {
 ///
 /// **出示的 kind 必须恰好等于绑定的 kind**（`Email(Send)`）：否则第 4 步会先拦下来，
 /// 本变体就拿不到照片（设计 §5.3 的两行表）。这一点与下面 Step 4 的第一条变异配合
-/// ——删掉第 3 步后本条应红在**变体不对**（报 `AuthorizationMismatch`），那正是它是
-/// 承重守卫的证据。
+/// ——删掉第 3 步后**本条应红**，那正是它是承重守卫的证据（**报的是哪一种 `Err` 不在
+/// 这条判据里**）。
+///
+/// **（订正，原话照留）**：这里原写着「删掉第 3 步后本条应红在**变体不对**（报
+/// `AuthorizationMismatch`）」——**那半句是假的**。该用例出示的 kind **恰好等于**绑定的
+/// kind（这正是它为绕开第 4 步而刻意造的），故删掉第 3 步后第 4 步必放行，路径继续
+/// 走到凭据那一步，实测实得 `Credentials(ScopeNotCovered)`。见计划 Task 5 Step 4 的订正。
 #[tokio::test]
 async fn an_effect_operation_presented_with_a_bare_capability_is_rejected() {
     let fx = fixture(&[], Reply::Fixed(Value::Null));

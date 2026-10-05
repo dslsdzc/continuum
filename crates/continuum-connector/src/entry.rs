@@ -88,6 +88,10 @@ impl ConnectorRegistry {
         // 第 1 步：按操作串的服务半边解析连接器。解析之所以唯一，靠的是注册期那条
         // 「服务半边 == 连接器 id」的核对（设计 §3.2 第 5 条）——没有它，一个连接器
         // 可以声明不属于自己的操作，而那条操作在这里永远解析不到。
+        //
+        // **那条唯一性还依赖 `ConnectorId` 在表里唯一**，而这一条无人核：同一个 id
+        // 二次注册会静默覆盖，此时这里只能解析到最后一条
+        // （`docs/superpowers/p3bcdf-followups.md` §八.20）。
         let id = ConnectorId::new(service_half(op));
         let connector = self
             .connector(&id)
