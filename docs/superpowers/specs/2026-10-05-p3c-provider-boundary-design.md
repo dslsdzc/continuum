@@ -16,6 +16,12 @@ C 管 `ModelProvider` / `ToolProvider`（§315/§316，模型与工具）。
 **带 confidence / alternatives / reason 的排序候选**（§250 §84），是**判断**，不是**执行**；
 它把「当前可用性」作为**值**接收，且**不登记 `continuum-provider`**，以保持排序是**纯函数**
 （`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md` §1.2 §8.2）。
+
+**D 的 crate 名**：D 的 Router（与 Model Registry）所在的 crate 定名 **`continuum-model-registry`**
+（D 的设计 §8.1 定义它，并解释为何**不**叫 `continuum-model`）。**订正来历**：本文初稿在 §4.2 形态 3 里
+称它 `continuum-router`——**那个名字是错的，来自本文初稿**；订正来自 D 的设计 §8.1 与交叉复审
+（`.superpowers/sdd-p3bcdf/review-c.md` 需修改处第 3 条）。全文一律用 D 的名字。
+
 `docs/02-工程.md` §4.3 的「`Provider Adapter → 被 Router 调用，接口中立」在**层间依赖**那一章，
 说的是**组合与依赖方向**（Router 是这条中立接口的消费方），**不是**「Router 自己发 `invoke`」。
 **今天这个执行侧调用方尚不存在**（§6、§12 第 12 条）。F（驱动侧工具调用路径）是 `ToolProvider` 的
@@ -376,10 +382,11 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 
 # 6. 与 D 的关系：Router **不**调用适配器，调用方是执行侧
 
-**订正（2026-10-05）**：本节初稿给出一套「D 的 Router 按序调 `model_for` → `invoke`」的调用面，
-**那是错的**。D 的设计明确不让 Router 直接调用适配器：Router 消费「当前可用性」作为一个**值**
-（由调用方取好后传入），并**不登记 `continuum-provider`**，以保持排序是**纯函数**
-（`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md` §1.2 §8.2）。理由是 §250/§84
+**订正（2026-10-05）**：本节初稿给出一套「D 的 Router（`continuum-model-registry`，名字来历见 §1 订正段）
+按序调 `model_for` → `invoke`」的调用面，**那是错的**。D 的设计明确不让 Router 直接调用适配器：
+Router 消费「当前可用性」作为一个**值**（由调用方取好后传入），并**不登记 `continuum-provider`**，
+以保持排序是**纯函数**（`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md` §1.2 §8.2）。
+理由是 §250/§84
 把 Router 的交付物定为**排序候选**（带 confidence / alternatives / reason）——那是**判断**，
 不是**执行**；纯排序才让它对打分的推迟是可测的。
 

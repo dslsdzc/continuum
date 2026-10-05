@@ -145,9 +145,9 @@
 
 | # | 本路径 | 与命令路径的关系 |
 |---|---|---|
-| 1 | 打开库并应用迁移（`open_db` / `runtime_migrations`，`main.rs:57`） | 同 `task` 第 3 步开库那一处，**同一份迁移集合**（两处各写一份清单会让「注册的集合」有两个来源） |
+| 1 | 打开库并应用迁移：`open_db`（`task_cmd.rs:323`，**私有**）＋ `runtime_migrations`（`main.rs:57`） | 与 `task` 共用**同一份迁移集合**（两处各写一份清单会让「注册的集合」有两个来源）。**但 `open_db` 今天不可直接复用**——见 §3.5 |
 | 2 | 读策略表一次；对每条 `--effect` 查幂等键，任一已存在即拒整条 | 同 `task` 第 4 步的头两段（同一函数 `record_declared_effects` 的形状），**次序也照旧**：幂等键检查排在强制点之前 |
-| 3 | **强制点 (2)**：逐条 `--effect` 用 `policy_context_for_effect` 裁决一次，据 `mints` 铸能力并配成 `AuthorizedEffect`；任一条铸不出即拒整条 | 逐字复用 `authorize_declared_effects`（`task_cmd.rs:442`）的判定与产物 |
+| 3 | **强制点 (2)**：逐条 `--effect` 用 `policy_context_for_effect` 裁决一次，据 `mints` 铸能力并配成 `AuthorizedEffect`；任一条铸不出即拒整条 | 调**提取出来的共享函数**（见 §3.2），**不是**照抄 `authorize_declared_effects` |
 | 4 | **强制点 (1)**：`authorize(tx, &tool_id, &presented, now)` | 命令路径没有这一步（命令路径没有工具 id）。**排在写效应行之前**，理由见 §3.1 |
 | 5 | 对每条效应写 `PLANNED → AUTHORIZED → EXECUTING`，**提交** | 同 `task` 第 4 步的尾段；`§268` 的「执行前写入」在此兑现 |
 | 6 | 调 `ProviderRegistry::invoke_tool(&authorized, input)`（**C 的注册表**，§6.1）；失败（含「该 id 未登记」）→ 把各效应记 `FAILED` | 同 `task` 第 5 步的 `Sandbox::spawn`：真正做事的那一下。**门禁在注册表那一跳**（§6.2），驱动不自己开入口 |
@@ -175,12 +175,42 @@ Task 工作区、不经 Integration Gate。** 依据是 §1.2 第三条（工具
 **由此得到一条可观察的性质**：一次被强制点 (1) 拒掉的工具调用，库里**一条效应记录也没有**，
 工具也**一次都没被调用**。这句话两侧都有照片（第 9 节）。
 
-## 3.2 `authorize` 与效应行在**同一次提交**里
+## 3.2 决定 F5：提取一个**无事务**的共享函数，本路径自己持有事务
 
-步骤 4 与 5 用同一个事务，一次 `commit`。故「工具已获准」的审计行与「效应已在执行」的
-`EXECUTING` 行**要么都在、要么都不在**：不存在「审计说授权了、日志说没开始」的中间态。这条性质的
-照片是一条断言：被拒时 `audit_log` 的 `capability grants` 行数为 0（`authorize` 拒绝不写审计，
-P3A 设计 §3.4），且 `effect` 行数为 0。
+**问题（交叉复审指出的两处）**：本路径既要「复用命令路径的铸币判定」（§5.1：不另设判定点），又要
+`authorize` 与效应行**同一次提交**（下面的性质）；而今天的 `authorize_declared_effects`
+（`task_cmd.rs:442-471`）**把 `arbitrate` 出来的 `Decision` 丢掉**（§7.2 要它去填 `authorization`），
+且它是 `record_declared_effects`（`task_cmd.rs:364-413`）的**内部调用**，而后者**自己开事务、自己
+commit**。故「原样复用」与这两条要求**三者不能同时成立**——原稿写「逐字复用」，那句话是**假的**。
+
+**决定**：把该函数**提取并加宽**成一个**无事务**的共享函数，两条路径同调它：
+
+```rust
+/// 强制点 (2) 的铸币判定。**不收事务**——判定与铸币都是纯的（读的是已取出的策略表），
+/// 故调用方自己决定在哪个事务里用它（本路径要用它把结果与 `authorize`、效应行同事务提交）。
+fn mint_declared_effects(
+    policies: &[Policy],
+    effects: &[EffectSpec],
+    approve: bool,
+) -> Result<Vec<(AuthorizedEffect, Decision)>, TaskError>;
+```
+
+- **返回 `(AuthorizedEffect, Decision)` 成对**：`Decision` 不再被丢掉——本路径要用它填
+  `effect.authorization`（§7.2 那条「填这条效应自己那次裁决」），而**本路径不第二次调 `arbitrate`**
+  （那正是 §5.1 禁止的第二个判定点）。**这解决复审第 3 条**：把复用面写准，而不是声称「逐字复用」。
+- **无事务**：`record_planned` / `advance` / `authorize` 才需要 `Tx`，判定与 `mint` 都不需要
+  （`mint` 不读时钟、不读库）。**这解决复审第 4 条**：本路径自己 `db.begin()`，把步骤 4 与 5 放进
+  这**一个**事务。
+- **命令路径不受影响**：`record_declared_effects` 仍然自己开事务、自己 commit，其内部改调这个共享
+  函数即可；它今天丢弃 `Decision` 的那一处照旧（它要的是集成那次裁决，另有来源）。
+
+**由此得到一条「承重」性质**（原稿即有，现在才真的成立）：步骤 4 与 5 用**同一个事务**，一次 `commit`。
+故「工具已获准」的审计行与「效应已在执行」的 `EXECUTING` 行**要么都在、要么都不在**：不存在
+「审计说授权了、日志说没开始」的中间态。这条性质的照片是一条断言：被拒时 `audit_log` 的
+`capability grants` 行数为 0（`authorize` 拒绝不写审计，P3A 设计 §3.4），且 `effect` 行数为 0。
+
+**这处提取是一件要落地的实现步骤**（写进实现计划），不是措辞调整：不提取而照旧调
+`authorize_declared_effects` 的话，上面那条承重性质**不成立**（两个事务），本设计就是错的。
 
 ## 3.3 决定 F7：工具调用的结果由驱动打到 stdout
 
@@ -213,6 +243,21 @@ P3A 设计 §3.4），且 `effect` 行数为 0。
 一致（`task_cmd.rs:250-255` 走第 6 步记终态）。两条路径在「机制没拿到 / 做事那一下失败」这一格上
 给同一个答案。
 
+## 3.5 一处要顺带提取的私有函数：`open_db`
+
+**问题**：`open_db`（`crates/continuum-runtime/src/task_cmd.rs:323`）是 **bin 目标里的私有函数**
+（`src/lib.rs` 只导出 `cli`），两条子命令要共用它，今天**拿不到**。原稿把它写成「`open_db` /
+`runtime_migrations`，`main.rs:57`」，那两个引用**都不对**：`runtime_migrations` 在 `main.rs:57`
+（`pub(crate)`，可用），`open_db` 在 `task_cmd.rs`（私有）。
+
+**决定**：把 `open_db` 提到 **`pub(crate)`**（它已经与 `runtime_migrations` 同在一份迁移集合上，
+`task_cmd.rs:319-327` 的文档也写明「两处各写一份清单会让『注册的集合』有两个来源」）。两条子命令
+都是 bin 的模块，`pub(crate)` 即够；**不必**把它搬进 lib（它做的事与 CLI 的库面无关）。
+**这是实现计划里的一步**，写在此以免实现者照着原稿那句去 `main.rs` 里找一个不存在的函数。
+
+**它与 §6.4 的分工**：工具调用路径的**库函数**收的是**已经打开**的 `&Db`；开库由 bin 侧的
+`tool_cmd` 做（经上面那个 `pub(crate)` 的 `open_db`）。故「谁开库」只有一个产生点。
+
 ---
 
 # 4. 强制点 (1) 的落点
@@ -244,16 +289,19 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 - **持有**：它是 `run` 的局部变量，活到步骤 7 结束、随作用域析构。**它是调用工具的唯一凭据**
   （类型保证见第 7 节）。
 - **它不被序列化到任何地方**：不进 `ToolInvocation.input`，不进 stdout，不进命令行环境，不进
-  `effect.parameters`（后者本路径照 `task` 的先例写 `{}`，见第 8.2 节）。**这一条与 §51 的禁止同源**：
+  `effect.parameters`（后者本路径照 `task` 的先例写 `{}`，见 §7.2）。**这一条与 §51 的禁止同源**：
   命令路径上驱动不得把 `AuthorizedEffect` 或其内容塞进命令的环境（`task_cmd.rs:46-52`），
   工具路径上驱动同样不得把 `AuthorizedTool` 塞进工具的输入。
 - **它不进审计 payload**：审计行由 `authorize` 自己写（`registry.rs:133-140`），内容是工具 id 与每枚
-  已获准能力的 kind / scope。驱动**不补写第二条**（第 8.1 节）。
-- **它的 `granted()` 在本路径上今天没有第二个消费方**：驱动只把整个 `AuthorizedTool` 交给
-  `invoke_tool`（§6.1），而那一跳只读 `tool_id()` 去路由。**这是据实的**：`granted()` 的消费方是
-  「谁需要知道准了哪些能力」，本阶段那个位置在连接器侧（子项目 B，`p3a-followups.md` 第一节
-  「B 的义务」第 3 条）。故本子项目**不删除、也不使用** `granted()`，并在第 14 节第 3 条把这份缺口
-  记给 B/C。
+  已获准能力的 kind / scope。驱动**不补写第二条**（§7.1）。
+- **它的 `granted()` 今天在本路径上没有消费方，也不在别处**：驱动只把整个 `AuthorizedTool` 交给
+  `invoke_tool`（§6.1），而那一跳**只读 `tool_id()`** 去路由（C 设计 §7.1）；B 消费的是
+  `AuthorizedEffect::capability()`（B 设计 §234-244 一带），**不是** `AuthorizedTool`。
+  **故本子项目不做「将来 B 会用 `granted()`」这个说法**——按三份设计的现状，它**没有任何产生方之外的
+  消费方**。本子项目**不删除、也不使用** `granted()`（删它是 P3A 那个 crate 的事），
+  并把这件事按「悬空」而不是「已指派」记在第 14 节第 3 条。
+  **原稿在此处写的是「本阶段那个位置在连接器侧（子项目 B）」**——**那句话没有依据**（三份设计的
+  grep 里 B 不含 `granted`），订正留此。
 
 ## 4.3 本路径**不**判作用域（据实写明的限度）
 
@@ -264,9 +312,19 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 
 这条**不是本子项目的缺陷，是本层边界的既有形状**：作用域的强制落在凭据签发（§51、P3A 设计 §5.2：
 凭据的作用域不超出所给的能力）与执行点（子项目 B）。**本路径的作用是把这个 scope 原样带进
-`AuthorizedTool`**，不是替下游判它够不够。**本路径对此没有照片**（可观察的只有「scope 原样进了审计
-与 `granted()`」，那由 capability crate 自己的用例钉，见 `tests/authorize.rs` 的 payload 断言）。
-记在第 14 节第 5 条，收件人 B。
+`AuthorizedTool`**，不是替下游判它够不够。
+
+**照片要分成两半说，原稿把那两半混成了一句「没有照片」，那句话过强**：
+
+- **作用域的「判定」没有照片，本路径也不该有**（本路径不判它）；
+- **作用域的「原样带出」有照片，而且就在本路径手里**：步骤 3 用 `spec.target` 作 scope 铸能力
+  （`task_cmd.rs:459-463`），这枚 scope 随已获准的能力进 `authorize` 写的审计 payload 的
+  `capabilities[].scope`（`registry.rs:153-164`）。**一条端到端断言「审计 payload 里各
+  `capabilities[].scope` 逐个等于对应的 `--effect` 目标」（P-18）就把本路径这半边钉住了。**
+  原稿把这半边整份推给 capability 自己的用例，**那是不成立的**：那个 crate 的用例钉的是
+  「`authorize` 把收到的 scope 原样写进 payload」，**钉不了「驱动传进去的是 `spec.target`」**。
+
+记在第 14 节第 5 条，收件人 B（作用域的**判定**那一半）。
 
 ---
 
@@ -474,9 +532,12 @@ P3A 设计 §8）。注册表的 `invoke_tool` **只收它**，且注册表不�
 - **`id` 与 `idempotency_key` 同源**：复用 `effect_key(intent, spec)`（`task_cmd.rs:512`），
   **不在本路径另派一次**（理由与 `task_cmd.rs:499-504` 逐字相同：不给「这条记录是谁」立第二个来源）。
 - **`authorization` 字段**：复用同一编码形状 `approve=<bool>;policy=<裁决名>`
-  （`authorization_field`，`task_cmd.rs:537`），但**填的是这条效应自己的那次裁决**（步骤 3 中铸出它
-  的那一次），而不是像 `task` 那样填集成那次裁决——**因为工具调用没有集成裁决这一回事**，
-  凭空造一次（`effect_type` 缺省的裁决）就是一次没有意义的判定。**这是一处与命令路径的刻意不同**，
+  （`authorization_field`，`task_cmd.rs:537`），但**填的是这条效应自己的那次裁决**——即 §3.2 那个共享
+  函数**成对返回**的 `Decision`（`(AuthorizedEffect, Decision)` 的后一项），而不是像 `task` 那样填集成
+  那次裁决：**工具调用没有集成裁决这一回事**，凭空造一次（`effect_type` 缺省的裁决）就是一次没有意义
+  的判定。**它也不是本路径第二次 `arbitrate` 出来的**——那正是 §5.1 禁止的第二个判定点；
+  本路径**只**用共享函数返回的那一个（原稿写「逐字复用 `authorize_declared_effects`」，而那个函数
+  把 `Decision` 丢掉，**那句话是假的**，见 §3.2）。**这是一处与命令路径的刻意不同**，
   记在此处与第 14 节第 6 条：两条路径写同一个字段的口径由此分岔，而该字段**只记录、不校验**
   （`task_cmd.rs:81-85`），今天没有任何生产代码读回它。
 - **`parameters` 照 `task` 的先例写 `{}`**：§6.1 只说它是 JSON，**未规定内容**，本子项目不发明。
@@ -559,6 +620,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | P-15 | **审计行的总数与构成** | 读 `audit_log.kind` 列，k=1 时 multiset 恰 `{capability grants×1, external effects×4}`（`record_planned` 一条 + `advance` 三条，同 `continuum-effect/tests/persist.rs:252` 的既有计数），共五条；k=0 时恰一条 |
 | P-16 | 零 `--effect` 的工具调用跑得通、不碰 `effect` 表 | 登记项声明空能力表；断言 `effect` 零行、`audit_log` 一条 |
 | P-17 | 零效应的正向对照：同一条调用在策略放行时**真的被调用** | 与 P-1 同一夹具，只差库里有没有那条 `Allow`（互为对照臂，与 `capability_gate.rs` 的既有手法同形） |
+| P-18 | **作用域原样带出**（§4.3 的后半句） | 端到端：声明两条 `--effect`（目标各不相同），跑通后读 `audit_log` 的 `capability grants` 行，解析 payload，断言 `capabilities[].scope` 的 multiset **逐个等于**各 `--effect` 的目标。**把 `spec.target` 换成常量、或换成 `effect_type` 的字面串，本条即红** |
 
 **变异须真落到实现体**（本仓既有纪律）：P-1 的目标断言是**调用次数为 0**，故把「拒绝」的变异体
 放在铸造之后、那一跳之前——若把变异体放在 `authorize` 之后（例如把 `presented` 换成空集），
@@ -624,9 +686,9 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
 
 | 子项目 | 本设计要它做的 |
 |---|---|
-| **C** | ① **工具侧唯一的调用入口**（`ProviderRegistry::invoke_tool(&AuthorizedTool, input)`，且不交出适配器）由 C 维持——**F 调用它，不再自建入口**（§6.1、§6.2）；② 登记一条工具时强制第 5.2 节的不变量（`effect_class` 的 kind ⊆ `required_capabilities`）；③ `ToolDescriptor`（§316）与 `Tool`（§252）的合并（P3A 设计 §10 第 8 条）——本路径**读的是 `tool` 表**，故合并的产物要能落到那张表里；④ 注册表的**登记入口**（组合根用它把适配器登记进去，§10.2）与 `ToolCallError` 的两个臂（§8 的 P-9 / P-10 依赖它们） |
-| **B** | ① 按能力**逐枚**签发凭据（§51、P3A 设计 §5）：作用域的强制**在那一侧**，本路径只把 scope 原样带进 `AuthorizedTool`（§4.3）；② 说清它凭什么认为收到的 `AuthorizedEffect` 经过了校验（P3A 设计 §10 第 10 条）；③ `granted()` 的消费方式由 B 定（P3A 的交接：按出示顺序照录、含重复项，B 要唯一化就在 B 层做） |
-| **D** | 与 F 无直接接线。`ToolProfile` 的 `cost` / `latency` / `trust` 服务 D 的候选排序（P3A 设计 §3.1）；本路径**不读**这三个字段 |
+| **C** | ① **工具侧唯一的调用入口**（`ProviderRegistry::invoke_tool(&AuthorizedTool, input)`，且不交出适配器）由 C 维持——**F 调用它，不再自建入口**（§6.1、§6.2）；② 登记一条工具时强制第 5.2 节的不变量（`effect_class` 的 kind ⊆ `required_capabilities`）；③ **`Tool`（§252）与 `ToolDescriptor`（§316）并存，不合并**（C 设计 §8）——本路径**读 `tool` 表**、适配器另出 `ToolDescriptor`，两者靠共用的 `ToolId` 绑定；`input_schema` 有两个产生点一事按 C §8 的裁定处置（**调用的权威是适配器的 `ToolDescriptor.input_schema`**，`Tool.input_schema` 是规划快照），本路径**不消费**其中任何一个；④ 注册表的**登记入口**（组合根用它把适配器登记进去，§10.2）与 `ToolCallError` 的两个臂（§8 的 P-9 / P-10 依赖它们） |
+| **B** | ① 按能力**逐枚**签发凭据（§51、P3A 设计 §5）：作用域的强制**在那一侧**，本路径只把 scope 原样带进 `AuthorizedTool`（§4.3）；② 说清它凭什么认为收到的 `AuthorizedEffect` 经过了校验（P3A 设计 §10 第 10 条）；③ **`AuthorizedTool::granted()` 今天没有任何消费方**（本路径只读 `tool_id()`，C 的 `invoke_tool` 也只读它，B 消费的是 `AuthorizedEffect::capability()`）——见第 14 节第 3 条，**不要**把它当成已指派给 B |
+| **D** | **一处未决的接缝，记在此（原稿写「与 F 无直接接线」，那句话不完整）**：D 的设计两处把驱动职责记到「子项目 F」名下——`ProviderHealth`「由调用方（驱动，子项目 F）取好后作为值传入」（D 设计 `:39`）与「失败检测与升级触发……那是驱动/执行层的活（子项目 F）」（D 设计 `:611`）。**本子项目的范围是工具调用路径，不含任何模型侧路径**：模型调用的驱动路径今天**不存在**（`task` 跑的是命令，`tool` 跑的是工具）。故这两条要么落在将来那条**模型调用路径**上，要么需要一个具名收件人；**收件人：D 与协调者**（本子项目不认领，也不改 D）。<br>另：`ToolProfile` 的 `cost` / `latency` / `trust` 服务 D 的候选排序（P3A 设计 §3.1），本路径**不读**这三个字段 |
 
 ---
 
@@ -649,6 +711,17 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
 以免后来者顺手把两步对调。**这条判据的限度**：它说的是「步骤 2、3 不先拒时会走到」，
 不是「每次调用都走到」——第 2、3 步各自的拒绝路径（P-1 / P-2）本就在强制点之前。
 
+## 12.1 强制点 (1) 的**射程边界**（免得上面那段被读成全称）
+
+上面说的是「**工具调用**这条路径上，调用前校验落地了」。**它不是「任何会造成外部效应的驱动行为
+都要过强制点 (1)」**：`continuum task --exec git push …` 仍然是一条能造成**同一个**外部效应
+（推一个分支）的路径，而它**只过强制点 (2)**（`task_cmd.rs` 第 4 步逐条 `--effect` 铸能力），
+**不过强制点 (1)**——它根本没有工具 id，没有可交给 `authorize` 的东西。
+**这不是缺陷**：命令不是工具调用（§87 管的是「Agent 调用工具」，而命令是调用方给的 argv），
+两者由**不同的**强制点覆盖（§4.2 的三个强制点里，命令路径走 (2)，工具路径走 (1)+(2)）。
+把这条边界写出来，是因为不写的话 §12 会被读成「所有外部效应都已过 (1)」，而那是假的。
+**它没有照片**（是关于「另一条路径不经过某道检查」的否定命题）；据实写在正文里。
+
 ---
 
 # 13. 不能拍照片的东西（集中列出）
@@ -656,7 +729,8 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
 1. §6.3 的两条**限度**（装配者手里有裸适配器，可以直接调 `invoke`；适配器可以无视收到的 id）：
    关于「别处能写出什么」的命题，本仓用例证明不了。**「唯一入口」那条保证的照片在 C 那边**
    （C 设计 §7.1），F 不重复。
-2. §4.3 的**作用域不判**：本路径不产生任何可观察的作用域判定，故没有属于本路径的照片。
+2. §4.3 的**作用域**：**判定**那一半本路径不产生任何可观察量，故没有照片；**原样带出**那一半
+   **有**照片（P-18）——这条不许再被读成「§4.3 整节没有照片」。
 3. §4.1 的「`presented` 与 `AuthorizedEffect` 同源」：构造点的选择，只由评审维持。
 4. §8.1 的两条没有照片的失败路径（`Expired` 经本路径不可达、终态写入失败不可造）。
 5. §5.2 的**登记项不变量**：它今天没有强制点（登记路径不存在），故也没有照片。
@@ -671,17 +745,26 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
 
 1. **工具登记今天没有生产调用方**：全仓 `save_tool` 只在 `continuum-capability` 的测试里被调
    （`tests/authorize.rs`、`tests/persist.rs`），生产代码零调用。故 `tool` 表在真实库里是空的，
-   `tool` 子命令对任何 id 都报 `UnknownTool`，**除非先经 `save_tool` 登记**。登记要等
-   §316 的 `ToolDescriptor` 与 §252 的 `Tool` 合并（P3A 设计 §10 第 8 条），故本子项目**不发明**
-   一个登记用的 CLI。**收件人：子项目 C。**
+   `tool` 子命令对任何 id 都报 `UnknownTool`，**除非先经 `save_tool` 登记**。**登记项落 `tool` 表、
+   `ToolDescriptor` 由适配器另出、两者靠共用的 `ToolId` 绑定**（C 设计 §8 判**不合并**——合并会把
+   `required_capabilities` / `effect_class` 这些治理数据交给被治理方，是强制点 (1) 的语义反转）。
+   **原稿在此处写「登记要等 §316 的 `ToolDescriptor` 与 §252 的 `Tool` 合并」，那句话与 C 的裁定
+   相反，已按 C 订正**，本子项目**不发明**一个登记用的 CLI。**收件人：子项目 C**（登记入口，
+   含 C §8 记的那处 `input_schema` 双产生点——**调用的权威是适配器的 `ToolDescriptor.input_schema`**，
+   C 设计 §12 第 5 条把这条一致性缺口的收件人记为 F/D，**本路径不消费任何一份 `input_schema`**，
+   故此处只登记、不认领）。
 2. **注册表里没有任何工具适配器**：`ToolProvider` 的唯一实现是
    `crates/continuum-provider/tests/fake_provider.rs` 里的夹具，生产代码一个都没有。故组合根
    （§10.2）登记不出东西，步骤 6 那一跳在生产里必然返回 `ToolCallError::Unregistered`
    （§3.4、第 13 节第 6 条）。**收件人：子项目 C。**
-3. **`AuthorizedTool::granted()` 在本路径上没有消费方**：本路径只读 `tool_id()`（§4.2）。
-   「准了哪些能力」的消费方在连接器侧。**收件人：子项目 B（消费方式）与 C（若适配器需要）**，
-   并见 P3A 设计 §10 与 `p3a-followups.md` 第一节「B 的义务」第 3 条（**不要回头改**
-   「按出示顺序照录、保留重复项」这条既决）。
+3. **`AuthorizedTool::granted()` 今天没有任何消费方**（据实记为**悬空**，不是「已指派给谁」）：
+   本路径只读 `tool_id()`（§4.2）；C 的 `invoke_tool` 也只读 `tool_id()` 去路由（C 设计 §7.1）；
+   B 消费的是 `AuthorizedEffect::capability()`，**不是** `AuthorizedTool`（B 设计 `:234-244` 一带）。
+   **原稿把它指派给 B，那句没有依据**（三份设计的 grep 里 B 不含 `granted`），已订正。
+   **本子项目不删除它**（那是 `continuum-capability` 那个 crate 的公开面，且 P3A 对它的取舍已写在
+   `registry.rs:54-56` 的文档里），也**不消费它**。**收件人：P3A 的后续与协调者**——按 P3A 自己那条
+   「声明了没有消费方的东西要么删、要么写明理由」的判据，它今天处在**两边都不占**的位置；
+   （P3A 那条既决「按出示顺序照录、保留重复项」**不受本条影响**，谁将来消费它都**不要回头改**。）
 4. **六个 kind 没有策略事实**（`Filesystem(Read|Write)`、`Git(Read|WorktreeWrite|CommitLocal)`、
    `Github(CreatePr)`）：`PolicyContext.effect_type` 只有 `EffectType`，故驱动**铸不出**这六种能力，
    含它们的工具在本路径上**一律** `MissingCapability`（§5.3）。要开这条路，须给 `PolicyContext` 加一条
@@ -690,8 +773,9 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
    而它**永远调不动**；本设计**只在正文写明、不在登记期拦**（理由见 §5.3：登记入口是 C 的，在别人的
    入口上装本层的闸会造出一条只有本层知道的口径）。**收件人：策略层（`PolicyContext` 的事实集合）与
    子项目 D（能力需求侧的来源）；「登记期是否要拦」另属子项目 C。**
-5. **本路径不判作用域**（§4.3）：`authorize` 只比 kind，作用域随能力原样带出。这是本层的既有边界，
-   强制落在凭据签发（§51）与执行点。**收件人：子项目 B。**
+5. **本路径不判作用域**（§4.3）：`authorize` 只比 kind，作用域随能力原样带出（**带出**那一半有照片，
+   P-18；**判定**那一半没有）。这是本层的既有边界，强制落在凭据签发（§51）与执行点。
+   **收件人：子项目 B**（作用域的**判定**）。
 6. **两处与命令路径的刻意分岔**，都记在此以免后来者按 `task` 的写法「顺手统一」：
    (a) `effect.authorization` 字段在本路径上写**这条效应自己那次裁决**，而 `task` 写的是**集成那次**
    裁决（§7.2）——因为工具调用没有集成裁决；(b) 本路径的**工具调用输入（`--input`）不落库**：
