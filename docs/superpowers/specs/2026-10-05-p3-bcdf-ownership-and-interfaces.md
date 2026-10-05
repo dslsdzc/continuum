@@ -55,6 +55,11 @@ list_tools / describe_tool / invoke / cancel
 
 类型在 `crates/continuum-core/src/tool.rs`：`ToolId`、`ToolDescriptor`、`ToolInvocation`、`ToolResult`。
 
+**订正（2026-10-05，裁决 §五）**：`ToolInvocation` **删除**——`invoke` 的请求侧被 C 设计 §7.5 的新请求类型
+（`AuthorizedToolInvocation`）取代，旧类型不再有生产调用方，留着就是**同一个概念两个类型**。
+删在 §7.5 那次改动里同批做，**连测试夹具 `crates/continuum-provider/tests/fake_provider.rs` 一起**。
+`ToolId` / `ToolDescriptor` / `ToolResult` 三个**不动**。
+
 **注意一处既有事实**：`ToolId` **同时**是 §252 的 `Tool.id`——P3 子项目 A 判为同一个类型并**复用它**
 （`crates/continuum-capability/src/lib.rs:40` 有说明）。**再不要造第二个 `ToolId`。**
 
