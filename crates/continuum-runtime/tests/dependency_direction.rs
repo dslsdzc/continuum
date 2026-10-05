@@ -119,6 +119,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-secrets",
         ],
     ),
+    // P3 资源层（子项目 D）：模型画像、Model Registry 与 Router。本子项目自 Task 1 起
+    // 只依赖 core（ModelId / ToolId / ProviderHealth）、capability（Cost / Latency 两个
+    // **类型**，不取能力凭据）、persist（三张表经 Tx）。三条边由需要它们的 task 增量加。
+    ("continuum-model-registry", &[]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

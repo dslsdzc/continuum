@@ -1,0 +1,16 @@
+[package]
+name = "continuum-model-registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`error.rs` 的 `ProfileError` 派生 `thiserror::Error`。
+# 这是本 task 唯一声明的依赖。
+#
+# 设计 §8.2 的另外三条边（`continuum-core` 的 `ModelId` / `ToolId` / `ProviderHealth`、
+# `continuum-capability` 的 `Cost` / `Latency`、`continuum-persist` 的 `Tx` / `Migration` /
+# `Value` / `kind_name` / `PersistError`）**不在这里一次声明齐**：本 task 对内部 crate 的
+# 引用为零，一次声明齐会让 `dependency_direction.rs` 的 `ALLOWED` 条目在中间若干 task 里
+# 说谎。叶子 crate 的条目记的是**实际依赖**，故三条边各由需要它的那个 task 增量加。
+thiserror = { workspace = true }
