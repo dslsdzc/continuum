@@ -36,7 +36,7 @@ Model Registry 生命周期（§249）、Router 与候选排序（§250 §84）�
 
 `docs/02-工程.md:250` 写 `Provider Adapter → 被 Router 调用，接口中立`。本设计**不让 Router 直接调用适配器**：
 Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
-（`crates/continuum-core/src/model.rs:83`），由调用方（驱动，子项目 F）取好后作为**值**传入。
+（`crates/continuum-core/src/model.rs:83`），由调用方（**执行侧，今天尚未指名**，见 §11 第 20 条）取好后作为**值**传入。
 理由有二，都不是偏好：
 
 1. 排序因此是**同步纯函数**——没有 I/O、没有 `.await`，可以在表驱动用例里穷举；
@@ -44,7 +44,7 @@ Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
 
 **本子项目的交付物是一个「判断」，不是一次执行。** §250 的输出是 `RankedExecutionCandidates`、§84 要的是
 `confidence` / `alternatives` / `reason`——两处要的都是**排序后的候选与理由**。故 **`ModelProvider::invoke` /
-`stream` 的调用方不在本层**：那是**执行侧**（驱动，子项目 F）拿着一张 `RankedExecutionCandidates` 去做的下一步，
+`stream` 的调用方不在本层**：那是**执行侧**（今天尚未指名，见 §11 第 20 条）拿着一张 `RankedExecutionCandidates` 去做的下一步，
 本层既不持有 `CallId`，也不消费 `ModelStream`。**本设计对 `continuum-provider` 的引用为零**（§8.2），
 `invoke` / `stream` 在本 crate 里一次都不出现。
 
@@ -52,11 +52,26 @@ Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
 C 的设计须指名真正的调用方（`RankedExecutionCandidates` 的消费者）并记明**今天没有这个调用方**。
 此交界记在 §11 第 13 条。
 
+### 调用方**按角色**指名，**不记在子项目 F 名下**（本轮裁定）
+
+本设计先前的措辞是「调用方（驱动，**子项目 F**）」——**那句是错的，已订正**（错误说法的来历留在此段）。
+判据是 **F 的范围**：F 是**工具调用路径**（`authorize` → `ToolProvider::invoke`），
+而这里是**模型调用路径**（`ModelProvider::invoke` / `stream`）——**两条不同的路径**，
+F 自己的设计（共享面第五节的范围表）也把它限定在工具路径上，故把模型侧的两件事记在 F 名下是错的。
+
+订正后的写法：
+
+- **按角色指名**：调用方是「**执行侧**」，即 `RankedExecutionCandidates` 的消费者——
+  它取 `ProviderHealth` 快照（§1.2 首段）、并拿着候选去发起 `invoke` / `stream`。
+- **记明今天不存在**：**模型调用路径今天没有实现方**。本设计不把它指给任何子项目；
+  谁接由协调者指派（§11 第 20 条）。这条与「C 侧须指名真正的调用方」是同一件事的两面——
+  它因此是 C 与 D 之间的**第三条记录在案的接缝**（前两条：调用面、`ALLOWED` 条目，见 §11 第 13 条）。
+
 ---
 
 # 2. `ModelProfile` 与 `SkillVector`（§247 §248）
 
-## 2.1 §247 的十一个字段逐项处置
+## 2.1 §247 的十二个字段逐项处置
 
 规范 §247（`docs/spec/05-normative.md:802-824`）给的是字段名与分组，**未给任何字段的类型、取值域或单位**。
 下表逐项写明本设计的处置，**不发明度量**：
@@ -80,6 +95,57 @@ C 的设计须指名真正的调用方（`RankedExecutionCandidates` 的消费�
 `provider / model_id / revision / deployment / capability fingerprint` 五项，而 §247 的 `ModelProfile` 只有
 `provider` 与 `model_revision`，**没有 deployment 与 capability fingerprint**。本设计**不擅自补两个 §247 没有的字段**
 （「不预先发明」），把这个不一致记在 §11 第 7 条。
+
+**同一类不一致还有第三处**：§22 的「Profile 记录」清单（`docs/spec/01-concepts.md:1047-1064`）列的是
+`modalities / context / tool use / reasoning / coding / vision / audio / spatial / instruction following /
+constraint adherence / latency / cost / failure modes / known quirks`——它既有 §247 没有的项
+（`context`、`known quirks`、`audio`、`instruction following`、`constraint adherence`），又不含 §248 的
+`planning` 与 `verification` 两维。本设计按 §247／§248 这对**规范层**的条目办，三处不一致一并记在 §11 第 7 条。
+
+### `ModelProfile` 的类型与**唯一产生点**
+
+```rust
+/// §247 的模型画像。字段私有，**无公开构造函数**。
+pub struct ModelProfile {
+    id: ModelId,
+    version: String,
+    provider: String,
+    model_revision: String,
+    modalities: Vec<String>,
+    tools: Vec<ToolId>,
+    skill_vector: SkillVector,
+    failure_modes: Vec<String>,
+    latency_profile: Option<Latency>,
+    cost_profile: Option<Cost>,
+    evidence_count: u64,
+    confidence: Ratio,
+}
+
+impl ModelProfile {
+    pub fn id(&self) -> &ModelId;
+    pub fn skill_vector(&self) -> &SkillVector;
+    pub fn confidence(&self) -> Ratio;
+    pub fn evidence_count(&self) -> u64;
+    pub fn modalities(&self) -> &[String];
+    pub fn tools(&self) -> &[ToolId];
+    pub fn failure_modes(&self) -> &[String];
+    // 其余字段的访问器按消费方需要增补，不预先铺开
+}
+```
+
+**crate 外没有构造入口；crate 内有两个产生点**——`continuum_model_registry::persist::load_profile`
+（从库读，**唯一的生产路径**）与 `try_new`（`load_profile` 与测试用）。这不是洁癖，
+是 §4.2 那条「没有画像就没有候选」的第二条腿——**它必须与 `RoutableModel` 同为结构性保证，
+否则那条腿是纸的**：
+
+- 若 `ModelProfile` 能在内存里自由构造，则 `RoutableModel::try_new(自造画像, RoutableState::Discovered)`
+  就能把一个**从未落库、从未过画像流水线**的模型送进 `rank`。那样 §21 的「新增模型不能直接进入自动 Router」
+  就退化成「Router 记得只收真画像」，而 §4.2 那半边的保证随之失效。
+- 照片两张，与 P3A 的 `AuthorizedTool` 同形：`tests/compile_fail/model_profile_cannot_be_built.rs`
+  的编译失败样例（crate 外无公开构造），以及一条用例断言**该 profile 的 id 在库里不存在**时
+  `load_profile` 返回 `Ok(None)`——即「画像必须来自库」这条路的反例。
+- **措辞与保证等强**：被挡住的是 **crate 外构造**；crate 内 `try_new` 是公开的（`load_profile` 要用它）。
+  若写成「唯一产生点」就过头了——**它是「crate 外无入口」，不是「全仓只有一个构造点」**。
 
 ## 2.2 `SkillVector` 与「评分是时间序列，不是常数」
 
@@ -176,7 +242,8 @@ pub struct Ratio(f64);             // 构造时拒 NaN / ±∞，且须落在 0.
   `&'static str`，因为它是封闭枚举、字面量固定；`SkillScore` / `Ratio` 的域不是封闭枚举，`as_str` 返回
   `String`。**契约不变**：`parse(as_str(x)) == Some(x)` 逐值成立（用例钉往返），
   且 `parse` 对表外取值（非数值、越界、NaN）一律 `None`，由 `persist.rs` 转成具体 `Err`，**不取默认值**。
-  浮点的往返用 Rust `{}` 的最短表示（`format!("{}", x)`），它对 `f64` 是**精确往返**的；这一点有用例钉住，
+  浮点的往返用 `format!("{}", x)`——Rust 的 `Display` 对 `f64` 保证的是**可精确往返**（不是**最短长度**：
+  `1e300` 会打出三百多个字符）。**被用例钉住的是往返**，故这里只声称往返；这一点有用例钉住，
   因为「浮点存文本会丢精度」是这里最容易想当然的地方。
 - **`SkillDimension` / `LifecycleState` 落库一律小写、多词以 `_` 连接**（本项目既有约定，
   P3A 计划第 22 行）。九维因此写成 `reasoning` / `coding` / `vision` / `planning` / `tool_use` /
@@ -273,7 +340,7 @@ pub fn load_skill_series(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension)
 pub fn register_model(tx: &Tx<'_>, id: &ModelId) -> Result<(), PersistError>;  // §21 发现即登记
 pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState>, PersistError>;
 pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
-                  -> Result<LifecycleState, RegistryError>;                    // §4.3
+                  -> Result<LifecycleState, LifecycleError>;                    // §4.3
 ```
 
 `load_skill_series` 的消费方是 §82 的行为指纹（「如果表现突然变化」，`docs/spec/02-positioning.md:736-764`）
@@ -309,8 +376,24 @@ pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
 
 §249（`docs/spec/05-normative.md:856-884`）给十个状态名，**未给迁移关系**——与 §237 的情形相同
 （`crates/continuum-graph/src/state.rs:1-2` 的原话：「规范只给出十三个状态名，未定义迁移关系；本表由 P1 设计
-第 9 节确定」）。故本设计定一张迁移表，落成 `transition(from, to) -> Result<LifecycleState, RegistryError>`，
+第 9 节确定」）。故本设计定一张迁移表，落成 `transition(from, to) -> Result<LifecycleState, LifecycleError>`，
 与 `continuum-graph` 的同名函数同形（含 `Illegal { from, to }` 这一具体 `Err`）：
+
+```rust
+/// 本 crate 的生命周期错误。**不叫 `RegistryError`**——C 的设计在 `continuum-provider` 里
+/// 已有一个同名不同物的 `RegistryError`（`NotFound` / `Duplicate`，是适配器注册表的错误）。
+/// 两件事一个名字会让调用方与后来者混淆，与「同一件事两个词汇表」是同一种病灶的两面。
+pub enum LifecycleError {
+    /// 迁移对不在 §4.1 的表里。`from` / `to` 原样带出（形状取自 `continuum-graph` 的同名变体）。
+    Illegal { from: LifecycleState, to: LifecycleState },
+    /// `save_profile` 时登记项的当前状态尚未产出正式画像（§4.3）。
+    ProfileBeforeVerified { state: LifecycleState },
+    /// 登记项不存在。
+    UnknownModel { id: ModelId },
+    /// 读写出错。
+    Persist(#[from] PersistError),
+}
+```
 
 ```
 正常阶梯（线性、单调，§21 §22）:
@@ -410,9 +493,12 @@ pub struct RoutableModel { profile: ModelProfile, state: RoutableState }
 本设计因此只保证**闸门与迁移表可用、可拍**；「谁真的推进了生命周期」在本阶段只能由测试直接调 `transition` 来演。
 这一条写在 §10 的「拍不到的照片」里。
 
-**画像在 `probed → verified` 时才产生**（一个产生点）：`save_profile` 读登记项，若当前状态不在
+**画像在 `probed → verified` 时才产生**（一个产生点）。这是一个**十项枚举**：允许集是
+`{verified, active, stale, degraded, quarantined, disabled}`（画像已产出，异常态只是改了它的可用性），
+拒绝集是 `{discovered, unprofiled, researched, probed}`（画像流水线尚未走完）。§9 按本项目纪律**逐项**钉
+（十态各一条，四拒各断言是哪一枚），不只钉 `researched` 一条。`save_profile` 读登记项，若当前状态不在
 `{verified, active, stale, degraded, quarantined, disabled}` 之内，返回
-`Err(RegistryError::ProfileBeforeVerified { state })`。依据是 §22 的流水线顺序——「生成初步画像 → 执行 Active Probe
+`Err(LifecycleError::ProfileBeforeVerified { state })`。依据是 §22 的流水线顺序——「生成初步画像 → 执行 Active Probe
 → Verifier → **生成正式 Profile**」，正式画像在 Verifier 之后。
 
 **§22 的「初步画像」是一个被**刻意丢弃**的中间物，本设计不落它。** 这一句必须写明，否则读了 §22
@@ -440,15 +526,73 @@ pub struct RoutableModel { profile: ModelProfile, state: RoutableState }
 
 | §250 输入 | 处置 | 说明 |
 |---|---|---|
-| `TaskSkillRequirement` | **本设计定义类型**：`Vec<SkillDimension>` | 规范只给名字、未给形状。本设计的形状是「这个任务需要哪几个 §248 维度」，依据是 §250 的「能力匹配」以 §248 的向量为基准。**不带权重、不带阈值**——两者都是规范没有的数，加了就是发明。见 §11 第 4 条 |
+| `TaskSkillRequirement` | **本设计定义类型**：**非空**的 §248 维度集合（`try_new` 拒空） | 规范只给名字、未给形状。本设计的形状是「这个任务需要哪几个 §248 维度」，依据是 §250 的「能力匹配」以 §248 的向量为基准。**不带权重、不带阈值**——两者都是规范没有的数，加了就是发明。**非空是决定**，理由见下文「空需求」一段 |
 | `ModelProfile` | **已有类型**（§2） | 经 `RoutableModel` 传入，见 §4.2 |
 | `CostPolicy` | **不定义形状**，落在排序策略接口之后（§5.3） | 规范只给名字。见 §11 第 5 条 |
 | `LatencyPolicy` | 同上 | 同上 |
 | `FamilyPreference` | **本设计定义类型**：§19 的五项照录（`Auto` / `OpenAiPreferred` / `ClaudePreferred` / `LocalPreferred` / `Custom`，`docs/spec/01-concepts.md:933-960`），落库小写 `_` 连接（本阶段它不落库，只作输入） | §19 给的是**封闭清单**，可照录。`Custom` 在 §19 里不带载荷，本设计也不给它加。§19 的「明显收益足够高时才跨 family」**没有阈值**，见 §11 第 10 条 |
 | `FailureHistory` | **不定义形状**，落在排序策略接口之后 | 规范只给名字，且**它的产生方也没有指定** |
 
-另有两项输入不在 §250 的清单里、但 §250 的「最终选择 MUST 考虑」里点名了：
-**当前可用性**（取 §315 既有的 `ProviderHealth`，一个**值**；见 §1.2）与**预算视图**（ENG-005，见 §6）。
+### 请求与策略的分界（六个输入各落在哪一边）
+
+```rust
+/// 一次自动路由的请求。**纯数据，无 I/O**。
+pub struct RoutingRequest {
+    pub requirements: TaskSkillRequirement,   // §250 #1
+    pub family: FamilyPreference,             // §250 #5
+    pub availability: Vec<(ModelId, ProviderHealth)>,  // §250 的「当前可用性」
+    pub budget: BudgetView,                   // ENG-005：**必填，不是 Option**
+}
+
+/// 非空的需求维度集合。空集合被构造期拒绝。
+pub struct TaskSkillRequirement { dimensions: Vec<SkillDimension> }  // 字段私有
+
+impl TaskSkillRequirement {
+    pub fn try_new(dims: Vec<SkillDimension>) -> Result<Self, RequirementError>;  // 空 → Err
+    pub fn dimensions(&self) -> &[SkillDimension];
+}
+
+pub enum RequirementError {
+    /// 一个需求维度都没有。**具体是哪一种 `Err`，有用例。**
+    RequirementEmpty,
+}
+```
+
+| §250 的输入 | 落在 | 理由 |
+|---|---|---|
+| `TaskSkillRequirement` | **请求** | 每次路由都不同，且是排序的输入 |
+| `ModelProfile` | **请求**的间接成分（经 `&[RoutableModel]` 传入，不在 `RoutingRequest` 里） | 它是**候选集**，不是单次请求的参数 |
+| `CostPolicy` | **策略** | 它的形状规范未定义（§5.1 表），且它是「怎么算」而不是「算什么」 |
+| `LatencyPolicy` | **策略** | 同上 |
+| `FamilyPreference` | **请求** | §19 的封闭清单，纯数据 |
+| `FailureHistory` | **策略**（今天不定义形状） | 同上；见 §11 第 18 条的签收与退件 |
+
+**请求是纯数据、策略是可替换实现，这条分界是刻意的**：请求进得去表驱动用例，策略可以换一份重跑同一组用例。
+
+### 空需求：为什么做成非空类型
+
+`compatibility = matched / required` 在 `required` 为空时是 `0/0`。而 `CandidateScore.compatibility: Ratio`
+**拒绝 NaN**（§2.4），`evaluate` 又**不返回 `Result`**——于是实现者只剩两条路：panic，或编一个值（如 1.0）。
+**两条都能过 §9 的原有全套用例**，这正是本设计要堵的形状。选非空类型，被否掉的替代方案是
+「规定空需求时 `compatibility = 1.0`」：那要为一个规范没定义的状态发明一个语义值，而「一次不需要任何能力的任务」
+是不是一个合法的任务，规范没有说——**类型层拒掉它比替它选一个数诚实**。照片：`try_new(vec![])` 返回
+`Err(RequirementEmpty)`（断言是哪一种），外加一条 trybuild 样例钉「字段私有、无 `From<Vec<_>>`」。
+
+### §250 的「最终选择 MUST 考虑」八项，逐项
+
+| MUST 考虑项 | 本设计 | 出处 / 处置 |
+|---|---|---|
+| 能力匹配 | 有 | §248 的 `SkillVector` ＋ 请求里的 `TaskSkillRequirement` |
+| 失败模式 | **有字段、无因子** | §247 `failure_modes[]` 已存；**匹配规则无词表**，策略暂不用它。见 §11 第 9 条 |
+| 成本 | **有输入、不可计算** | §250 点名的是**成本**；ENG-005 把它的输入定为**预算视图**（§6）。量纲无单位，故不可计算。见 §11 第 5 条 |
+| 延迟 | **有输入、不可计算** | 同上：`latency_profile` 是空取值域的单位结构体（§2.5） |
+| **上下文长度** | **无输入** | **§247 的十二个字段里没有它，§250 的六个输入里也没有。** §22 的 Profile 清单有 `context`（`docs/spec/01-concepts.md:1049`），§315 的 `ModelDescriptor` 有 `context_window`（`crates/continuum-core/src/model.rs:25`）。本设计**不擅自加一个 §247 没有的字段**，故该因子**未实现**。见 §11 第 19 条 |
+| 模态 | 有字段，策略可读 | §247 `modalities[]`；`ModelProfile::modalities()` 是显式给出的访问器（§2.1） |
+| 工具支持 | 有字段，策略可读 | §247 `tools[]`（`ToolId`）；`ModelProfile::tools()` 同上 |
+| 当前可用性 | 有 | `RoutingRequest.availability`，取 §315 的 `ProviderHealth`（§1.2） |
+
+**这一表是为了堵一处漏项**：本设计先前只为 `failure_modes` 写了「该因子未实现」，却对**同属 §250 MUST 考虑、
+同样没有输入的 `上下文长度`** 一字未提——枚举式断言漏了一项。
 
 ## 5.2 输出：`RankedExecutionCandidates`
 
@@ -482,6 +626,24 @@ pub struct RoutingReason {
 }
 ```
 
+**`ExecutionCandidate` 必须开访问器，这是接口冻结处的必需品，不是提前铺开的 API。**
+`selected()` 是要**交给消费者**的，而消费者下一步就是拿着 `model` 去（在它自己那一层）调 provider——
+拿不到 `ModelId` 这一步就走不下去。故下列访问器各有具名消费方（执行侧），**不是「将来可能有人用」**：
+
+```rust
+impl ExecutionCandidate {
+    pub fn model(&self) -> &ModelId;         // 消费方据此发起调用
+    pub fn state(&self) -> RoutableState;    // 消费方据此决定是否降权／重试
+    pub fn compatibility(&self) -> Ratio;    // §84
+    pub fn confidence(&self) -> Ratio;       // §84
+    pub fn reason(&self) -> &RoutingReason;  // §84
+}
+```
+
+`RoutingReason` 同样开 `family()` / `matched()` / `missing()` / `notes()` 四个访问器，但**它们今天没有具名消费方**——
+本设计只声称它们「供后续对账取用」（§84 要求输出 reason 本身即是消费方）。**这句话刻意写得比上面弱**：
+五个 `ExecutionCandidate` 访问器是**必需的**，四个 `RoutingReason` 访问器是**§84 要输出的内容的读口**。
+
 三条断言，都问过「它在每个产生方上都为真吗」：
 
 - **`candidates` 非空**：`rank` 在任何情况下都不返回空列表——无候选时返回
@@ -514,12 +676,20 @@ pub trait RankingPolicy {
     fn evaluate(&self, request: &RoutingRequest, model: &RoutableModel) -> CandidateScore;
     /// 全序比较：`Ordering::Less` 表示 `a` 排在 `b` 前面。
     /// 缺省实现按 (compatibility, confidence) 降序，再按 family、model id 兜底。
-    fn compare(&self, a: &Scored, b: &Scored) -> Ordering { /* 缺省 */ }
+    ///
+    /// 操作数就是 [`ExecutionCandidate`]——**不另立一个 `Scored` 类型**：
+    /// 打分完的候选本来就要装成它，再立一个「已打分候选」类型就是同一件事的第二个落点。
+    /// 缺省实现经 §5.2 的访问器读数，不动私有字段。
+    fn compare(&self, a: &ExecutionCandidate, b: &ExecutionCandidate) -> Ordering { /* 缺省 */ }
 }
 ```
 
-`rank` 的骨架：过闸门的候选逐个 `evaluate` → `sort_by(policy.compare)` → 取头。**排序是全序且确定的**：
-`compare` 的兜底一档按 `ModelId` 升序，使同分候选的次序不随输入顺序漂移（用例钉：打乱输入顺序，输出不变）。
+`rank` 的骨架：过闸门的候选逐个 `evaluate` → 装成 `ExecutionCandidate` → `sort_by(policy.compare)` → 取头。
+**排序是全序且确定的**：`compare` 的兜底一档按 `ModelId` 升序，使同分候选的次序不随输入顺序漂移
+（用例钉：打乱输入顺序，输出不变）。**「全序」是本层的一个断言，故须逐条落实**：`Ratio` 拒 NaN 保证前两档可比，
+`ModelId` 升序保证兜底档是**全序的最后兜底**（`ModelId` 两两可比且无相等），故 `compare` 的总序成立；
+若两条候选连 `ModelId` 都相同，那它们本就是同一个模型的两次打分——该情形由「候选集来自 `&[RoutableModel]`
+且同一 id 不重复」排除，建候选集时判重，重复即 `Err(RoutingError::DuplicateModelCandidate { id })`。
 
 **第二步（明确推迟）**：具体打分函数的**数值**。推迟的三条依据，每条都有出处，不是「以后再说」：
 
@@ -558,6 +728,9 @@ pub enum RoutingError {
     NotRoutable { state: LifecycleState },
     /// 一个候选都没有（含「全部被闸门挡下」与「一个模型都没登记」两种情形）。
     NoEligibleCandidate,
+    /// 候选集里同一个模型出现了两次。**它是 `compare` 的「全序」这条断言的守门人**：
+    /// 两条 `ModelId` 相同的候选无从定序，`ModelId` 兜底档也就兜不住。
+    DuplicateModelCandidate { id: ModelId },
     /// 画像读失败。
     Persist(#[from] PersistError),
 }
@@ -566,25 +739,44 @@ pub enum RoutingError {
 每条各有用例断言**具体是哪一枚**。`NoEligibleCandidate` **不合并**进 `NotRoutable`：前者是「没有可用的」，
 后者是「有一枚被点名挡下了」，调用方（§110 的流程）对两者的处置不同。
 
+**`RequirementError` 不出现在这里，且这是刻意的**：空需求在 `TaskSkillRequirement::try_new` 就被拒，
+而 `RoutingRequest` 装的是一个**已构造的** `TaskSkillRequirement`，故「空需求」这条路径**到不了 `rank`**。
+若给 `RoutingError` 加一个 `Requirement(#[from] RequirementError)`，它就是一个**没有产生方**的变体——
+本仓对这类变体的处置是删或写明理由。
+
 ---
 
 # 6. 成本输入 = 预算视图（ENG-005）
 
-## 6.1 接口：一个过渡的投影类型，归属地是语义层
+## 6.1 接口：本层定义只读投影，驱动把它投影出来
 
 ENG-005 裁决：D 的成本输入是**预算视图**（剩余额度，不是「一个数」），它来自**语义层**，而语义层尚未建
 （`docs/superpowers/specs/2026-10-05-eng-005-budget-accounting.md` 第五节；共享面第三节）。
 §9.1 的层间方向是 **`语义层 (2) → 资源层 (4)`**（`docs/02-工程.md:560-579`，「依赖方向单向，无环」）。
 
 **先定方向，因为它决定这个类型最终归谁。** §9.1 的箭头读**被依赖者 → 依赖者**（判据见 §6.3 那段订正：
-§2.1 说「语义层……**本层不依赖任何下层**」，`docs/02-工程.md:75`，而 §9.1 画了 `语义层 (2) → 执行层 (3)`／`→ 资源层 (4)`
-——只有一种读法能让这两处同时成立）。故 `语义层 (2) → 资源层 (4)` 说的是**资源层依赖语义层**：
-**这个视图类型的归属地最终是语义层，本层是消费者，方向正是 §9.1 已画的那条。**
+§2.1 说「语义层……**本层不依赖任何下层**」，`docs/02-工程.md:72`，而 §9.1 画了 `语义层 (2) → 执行层 (3)`／`→ 资源层 (4)`
+——只有一种读法能让这两处同时成立）。故 `语义层 (2) → 资源层 (4)` 说的是**资源层依赖语义层**，
+本层是**消费者**。方向定下来之后，剩下的是「本层消费谁」——**答案不是「消费语义层的类型」**，
+因为语义层未建；见下。
 
-**但语义层尚未建，本层无法引用一个不存在的 crate。** 故本设计**在本层定义这个过渡类型**，
-把契约写在类型的文档上；**语义层落地后它迁到语义层**，本层改为依赖它——那时走的正是已画的那条方向，
-**不是反向边**。这条搬迁义务以两件东西固定，而不靠一句将来时：类型文档里的一段，与 §11 第 5 条。
-（本项目的教训：只写在文档里的将来时会烂，故凡能承载于类型的，不留成文字。）
+**但语义层尚未建，本层无法引用一个不存在的 crate，故本层先定义这个类型。**
+
+**投影由驱动做，不由语义层做——这一条决定了过渡期也不出现反向边。** 本设计先前的措辞是
+「过渡期后语义层来生产它」，**那句是错的，已订正**（错误说法的来历留在此段）：若语义层去「造一个资源层的类型」，
+在它落地的那一刻就写出了 `语义层 → 资源层`，而类型搬迁写在「落地**之后**」——**生产者出现与类型搬迁之间有一个窗口，
+那个窗口里正是本节声称避免的反向边**。订正后的分工：
+
+- **语义层产出它自己的 `Budget`（§333 的分配对象）**，那是它本来就有的东西；
+- **驱动把它投影成 `BudgetView`** 传进 `RoutingRequest`。驱动**本来就同时依赖两侧**（它装配迁移、组装
+  `RoutingRequest`），故这条投影不新增任何边；**这与「驱动把可用性快照传进来」是同一个形状**（§1.2）。
+- 本层的 `BudgetView` 因此**不需要任何一方来「实现」它**，只需要驱动构造它——**过渡期没有生产者依赖本层**，
+  `语义层 → 资源层` 这条反向边在任何时刻都不出现。
+
+**类型的归属**：`BudgetView` 是资源层的类型（它描述的是本层排序要用的输入形状），保留在本层；
+语义层的 `Budget` 是另一个类型（含分配与预留），两者**不是同一件事的两个词汇表**——
+一个是**记账对象**，一个是**只读投影**。若复审判定二者应合一，那是把投影塞进记账对象里，
+本设计不同意，但记在 §11 第 5 条供推翻。
 
 ```rust
 /// §333 Budget 的**只读投影**：该任务当前可用的剩余额度。
@@ -605,11 +797,11 @@ pub struct BudgetView {
 
 **路由器是纯函数，它不「调用」语义层**：`BudgetView` 由调用方（驱动）从语义层取好后作为值传入。
 
-**共享面第三节要求「把这个视图写成**一个待实现的接口**」，本设计的兑现方式是一个类型，不是一个 trait。**
-`BudgetView` 就是那个接口：语义层要做的正是「造出它」。**不定义 trait 是刻意的**——
-一个没有实现者、且唯一的实现者尚未存在的 trait 是**假接口**，而本仓对「声明了没有产生方的东西」
-一贯的处置是删或写明理由，此处按同一条办。若语义层落地后确实需要多态（例如「剩余」有两种取法），
-那时再抽 trait，并同时补照片。
+**共享面第三节要求「把这个视图写成**一个待实现的接口**」，本设计的兑现方式是**一个类型、加一个构造方**，
+不是一个 trait：`BudgetView` 的字段是 `pub` 的（它是一个**纯数据投影**，没有需要靠私有性守的不变量），
+**驱动直接构造它**。**不定义 trait 是刻意的**——一个没有实现者的 trait 是**假接口**，
+而本仓对「声明了没有产生方的东西」一贯的处置是删或写明理由，此处按同一条办。
+若语义层落地后确实需要多态（例如「剩余」有两种取法），那时再抽 trait，并同时补照片。
 
 ## 6.2 可以假设什么、绝不自己算什么
 
@@ -666,14 +858,36 @@ ENG-005 第五节把「`execution_profile.cost_budget` 的类型收紧」列为�
 《工程》§4.1 把「升级与降级」列在资源层。本设计把它的**数据形状**建在本层，把**触发**留给别处：
 
 ```rust
-/// §251 的阶梯（照录）：Tier1 → Tier2 → Tier2High → CrossFamily → Specialized。
+/// §251 的阶梯五档，**逐档照录**（`docs/spec/05-normative.md:922-944`）。
+/// `Tier2High` 是 §251 的原词：按 §17／§18「能力档位与推理强度分离」，
+/// 它对应的是「Tier2 ＋ 高推理强度」这个**组合**，不是第六档能力。
+/// 本类型**不另建** `Tier` / `ReasoningEffort` 两个枚举：本层没有消费者需要按轴拆分，
+/// 拆了就是给两个没有产生方的类型建形状（「不预先发明」）。
+pub enum EscalationStep {
+    Tier1,
+    Tier2,
+    Tier2High,
+    CrossFamily,
+    Specialized,
+}
+
+/// §251 的阶梯（照录其**顺序**）：Tier1 → Tier2 → Tier2High → CrossFamily → Specialized。
 pub struct EscalationLadder { steps: Vec<EscalationStep> }
 ```
 
 **本层建**：阶梯的**有序步骤**，以及「下一档」这个纯函数 `next_step(cur) -> Option<EscalationStep>`。
+
+**§86 的 `Tier 1 Low` 不在这五档里，且这是规范自身的不一致。** §86 的降级例写「复杂规划 → Tier 2 High，
+随后 400 个机械文件检查 → **Tier 1 Low**」（`docs/spec/02-positioning.md:847-867`），而 §251 的阶梯五档里
+没有 `Low` 这一档——「Low」是 §18 的**推理强度**取值，不是 §17 的 Tier。本设计的处理是：
+**§86 说的那一档对应「Tier1 ＋ 低推理强度」，本设计不为它加第六个成员**（§7 的 `EscalationStep`
+是 §251 阶梯的照录，加一个不在阶梯里的成员会让「照录」这句话变假）。
+这条不一致记在 §11 第 21 条。它在本层不致命：降级走「第二次调用 `rank`」，**不经过 `next_step`**（§7.1 末段）。
+
 **本层不建**：
 
-- **失败检测与升级触发**——它要读一次执行的失败（§309 的 `FailureClass`），那是驱动/执行层的活（子项目 F）；
+- **失败检测与升级触发**——它要读一次执行的失败（§309 的 `FailureClass`），那是**执行侧（驱动）**的活；
+  **不记在子项目 F 名下**：F 是工具调用路径，与这里要读的模型调用失败不是同一条路径（§1.2 末段）；
 - **§251 的前提检查「仍满足 Contract 和 Budget」**——按 §110，判预算是 **Budget Validator**（语义层）；
 - **降级（§86）的调度**——「400 个机械文件检查降回 Tier 1 Low」是**任务级**的模型再选择，
   即用一个新的 `TaskSkillRequirement` 再调一次 `rank`。**本设计不为它建任何新机构**：
@@ -715,7 +929,7 @@ crates/continuum-model-registry/
   src/persist.rs      三张表的迁移与读写（与表定义同址）
   src/router.rs       RoutingRequest、RankedExecutionCandidates、RankingPolicy、BaselineRankingPolicy
   src/budget.rs       BudgetView（§333 的只读投影）
-  src/error.rs        RegistryError、RoutingError
+  src/error.rs        LifecycleError、RoutingError
   tests/{profile,lifecycle,persist,router,budget}.rs
   tests/compile_fail/*.rs
 ```
@@ -779,7 +993,9 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 | `overall_score` 读不到 | trybuild 样例；另：`SELECT overall_score FROM model_profile` 得到具体 `Err` |
 | `ModelProfile` 无总分 | 断言 `model_profile` 的列清单**逐列**（加一列即红） |
 | 生命周期迁移表 | 合法对逐条 `Ok`；**未列出的对**给若干条 `Err(Illegal { from, to })`；自环非法 |
-| 画像早于 `verified` | `save_profile` 在 `researched` 上返回具体 `Err(ProfileBeforeVerified { state })` |
+| 画像早于 `verified` | **十态逐项**：`save_profile` 在六态 `Ok`、四态 `Err(ProfileBeforeVerified { state })` 并断言是哪一枚 |
+| 「画像必须来自库」 | `load_profile` 对库里不存在的 id 返回 `Ok(None)`；`ModelProfile` crate 外不可构造（trybuild） |
+| 空需求 | `TaskSkillRequirement::try_new(vec![])` 返回具体 `Err(RequirementEmpty)` |
 | 编码纪律 | 直接查表：`lifecycle_state` / `dimension` 列是小写、多词 `_` 连接——**不是** `Debug` 表示 |
 | 表外取值 | 裸 SQL 写入表外取值，读回返回具体 `Err`（枚举列、`Ratio` 越界、`score` 非数值各一条） |
 | 浮点往返 | `parse(as_str(x)) == Some(x)` 逐值（含 1.0、0.5、`9.2`、极小/极大有限值） |
@@ -787,7 +1003,9 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 | §24 的「时间序列」 | 同维度存三个 `score_version`，`load_skill_series` 返回三条且升序；**同 `(id, dim, version)` 二次写入被主键拒且原行不变**（裸 `INSERT`） |
 | 「缺席不是 0」 | 某维度无观测时 `SkillVector` 该维为 `None`；九维各断言一次（枚举式，逐项） |
 | 路由排序确定 | 打乱输入顺序，输出逐项相同；同分候选按 `ModelId` 升序 |
+| 候选集判重 | 同一 `ModelId` 两次 → `Err(DuplicateModelCandidate { id })`（断言是哪一枚） |
 | 无候选 | 空输入与「全部被闸门挡下」各一条，各得 `Err(NoEligibleCandidate)` |
+| 候选访问器 | 五个访问器各一条（`model()` 的照片是「它给出的 id 正是输入那个模型的 id」） |
 | §84 的三样输出 | `selected()` / `alternatives()` / `reason` 各有用例；`alternatives` 是表尾（不是第二份数据） |
 | 基线策略只用已定义的输入 | 改 `SkillScore` 的**数值**（保持有无不变）→ 排序**不变**；改「有无」→ 排序变 |
 | 预算是必填输入 | 签名层面（无 `Option`）；**没有运行期用例**——见 §10 第 2 条 |
@@ -843,15 +1061,17 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
    **需要复审明确表态**——它与 §248 的禁令能否并存，取决于这一读法。**收件人：复审者 → 规范维护者**。
 5. **§333 的五个量纲没有单位，§87 的 `Cost` / `Latency` 没有取值域**（§2.5、§6），
    故 §250 的「考虑成本」与「考虑延迟」**无法计算**。本设计只把它们做成**不可省略的输入**。
-   **`BudgetView` 现在住在资源层是过渡**（§6.1）：语义层落地后它迁到语义层，本层改为依赖它
-   （方向即 §9.1 已画的 `语义层 (2) → 资源层 (4)`，读作资源层依赖语义层）。搬迁时本层删掉本地定义，
-   **不留第二份**——留两份就是「同一件事两个词汇表」。
+   **`BudgetView` 住在资源层，投影由驱动做**（§6.1，已订正）：语义层产出它自己的 `Budget`，
+   驱动投影成 `BudgetView` 传进来——故**任何时刻都不出现 `语义层 → 资源层`**。
+   若复审判定 `BudgetView` 与语义层的 `Budget` 该合一，那是把只读投影塞进记账对象，本设计不同意。
    **收件人：语义层设计 + 规范维护者**。
 6. **复用 `continuum_capability::{Cost, Latency}` 是一个决定**（§2.5）：若后续判定模型的
    `cost_profile` 与工具的 `cost` 不是同一轴，此处要拆，并把 `Cost` / `Latency` 上移到 `continuum-core`。
    **收件人：协调者**。
-7. **§81 与 §247 的模型身份字段不一致**（§2.1）：§81 多 `deployment` 与 `capability fingerprint`，
-   §247 没有。本设计不擅自补。**收件人：规范维护者**。
+7. **三处画像清单互不一致**（§2.1）：§81 的身份五项比 §247 多 `deployment` 与 `capability fingerprint`；
+   §22 的「Profile 记录」清单（`docs/spec/01-concepts.md:1047-1064`）既有 §247 没有的项（`context`、`known quirks`、
+   `audio`、`instruction following`、`constraint adherence`），又不含 §248 的 `planning` 与 `verification`。
+   本设计按 §247／§248 这对**规范层**的条目办，不擅自补。**收件人：规范维护者**。
 8. **§248 的「每个维度 MAY 继续分层」未建**（§2.2）：子维度的词表与聚合规则规范都没有（§23 的树是概念层的例）。
    **收件人：规范维护者**。
 9. **§83 的 `failure_modes` 没有封闭词表**（§2.1）：§250 要求 Router「考虑失败模式」、§83 说「Router 可针对任务
@@ -869,10 +1089,16 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 13. **C↔D 的交界：已裁定，本设计的读法胜出**（§1.2、§8.4）。协调者裁定：§4.3 的
     「`Provider Adapter → 被 Router 调用`」属**层间依赖**一章，说的是组成与依赖方向，**不是调用次序**；
     §250/§84 要的是一份**判断**（带 confidence / alternatives / reason 的候选排序），不是一次执行。
-    故 Router 不调适配器，`invoke` / `stream` 的调用方在**执行侧**（子项目 F）。
+    故 Router 不调适配器，`invoke` / `stream` 的调用方在**执行侧**（**按角色指名，不是子项目 F**——
+    F 是工具调用路径；见 §1.2 末段与第 20 条）。**C↔D 至今共三条记录在案的接缝**：调用面、
+    `ALLOWED` 条目、以及「模型调用路径今天不存在」。
     **C 侧须指名真正的调用方并记明今天不存在。** 剩下的待办：《工程》§4.3 那一行与 §4.3 的
     `Router ← … Capability Token`（§8.4 第 1 条，含义是 `Cost`/`Latency` 而非 token）**文档层面的订正**。
-    **收件人：《工程》文档维护者**。
+    **另：C 的 §4「调用面」与它关于 `ALLOWED`「只应含 `continuum-provider`」的那句（C:274）都须照样订正**——
+    同一处矛盾在 C 那边也有一份，两处不一致就还是没收敛。**这一条由 C 改，D 不改。**
+    **再另：B 的设计也要求改《工程》§4.3 的同一张图**（B 抱怨图里没有 Connector）——
+    **两处改动应由同一个人一次做完**，别各改一半。
+    **收件人：《工程》文档维护者 ＋ C 的设计**。
 14. **迁移编号 `80` / 预留 `81`（号段已裁定，核对未做）**：协调者已裁定一号段一子项目（A 50、B 60、C 70、D 80、E 90），
     但**每一档取用前仍须核对该档未占用**——本设计只核了 `80` 在 `runtime_migrations()` 的集合里未占用。
     实现时最后核一次。**收件人：实现者（D 的第一个 task）**。
@@ -880,9 +1106,41 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     （D 是消费者，但不是给出尺度的那个，§2.5），`Cost` / `Latency` 的 `Some` 也仍然只表示「画像已登记」。
     **收件人：复审者**（P3A 要求「要么给出可达 `Some` 的路径并附照片，要么明写为什么没有」；
     本设计选了后者，且给的是**更明确的理由**：三个相关量纲都没有单位）。
+    **本设计只答了模型侧**：P3A 那对落在 `ToolProfile` 上的 `tool.cost` / `tool.latency` 的 `Some`，
+    **在 B/C/D/F 四份设计里至今无人认领**（F 明写本路径不读它们，D 复用的是类型而非 `ToolProfile`）。
+    这一条不能靠 D 再答一次，须由协调者在四份之间指派。**收件人：协调者**。
 16. **§22 的「初步画像」是否算 §247 的 `ModelProfile` 未定义**（§4.3）：本设计按 §22 的流水线顺序取「不算」，
     并把初步画像作为**刻意不落库的中间物**写明（它的效果折进 §247 的 `evidence_count` / `confidence`），
     从而使 §21 的「新增模型不能直接进入自动 Router」成立。若判定「算」，
     则 `discovered` / `researched` / `probed` 三态将获得可路由性。**收件人：规范维护者**。
 17. **「当前观测」的判据取 `version` 最大而非 `time_range` 最晚**（§2.2）：§24 未定义二者冲突时的优先。
     **收件人：复审者**。
+18. **C 交给 D 的 `ProviderError → FailureClass` 映射：D 有条件签收，映射本身退件。**（`ProviderError`、
+    `FailureClass::Resource`、`max_attempts` 在全篇此前**零命中**，这条交接确实挂空过。）分工如下：
+    - **映射不可能落在 D**：`ProviderError` 是 `continuum-provider` 的类型，而本设计对那个 crate 的引用为零
+      （§1.2、§8.2，交界已由协调者裁定）。把映射搬进来，就得登记一条被裁掉的边。
+    - **D 签收的是已分类的结果**：`FailureHistory`（§250 的第六个输入，今天形状未定，落在策略一侧，§5.1）。
+      分类发生在**持有 `ProviderError` 的一侧**（执行侧）。
+    - **`max_attempts >= 2` 与退避参数不是本层的**：`docs/superpowers/p1-followups.md:62-64` 的原话是
+      「**P3 的 Router** 必须为 RESOURCE 显式给出 `max_attempts >= 2` 与退避参数」——
+      **本设计不接这句话里的「Router」二字**：按 §246，重试参数属 `ExecutionProfile.retry_policy`，
+      归**执行层**（它的产生方是节点配置，不是路由）；本层的 `EscalationLadder`（§7.1）是「换哪个模型」，
+      与「重试几次」是两个轴。**这是一处与本仓既有 followups 的措辞分歧，明写在此**，
+      由协调者指派，别让它第二次挂空。
+    - **今天 `FailureClass::Resource` 从 `ProviderError` 不可达**（该枚举无限流／配额变体），
+      故 §251 的前提检查里 RESOURCE 那一格**无产生方**——这是「未实现的因子」，不是「本设计漏了」。
+    **收件人：C 的设计（改指名真正的分类方）＋ 协调者**。
+19. **§250 的八个 MUST 考虑项里，`上下文长度` 在本层没有任何输入**（§5.1 的表）：§247 的十二个字段没有它，
+    §250 的六个输入也没有。§22 的 Profile 清单有 `context`、§315 的 `ModelDescriptor` 有 `context_window`，
+    但两者都不是本层能凭空取用的。本设计不擅自加字段，**该因子因此未实现**。
+    **收件人：规范维护者**（是否把上下文长度补进 §247 的 `ModelProfile`，或补进 §250 的输入清单）。
+20. **模型调用路径今天没有实现方——调用方按角色指名，不记在任何子项目名下**（§1.2）。
+    本设计的两件事（取 `ProviderHealth` 快照、消费 `RankedExecutionCandidates` 去发起 `invoke` / `stream`）
+    都落在「**执行侧**」这个**角色**上。**不记在子项目 F 名下**：F 是**工具调用路径**，
+    与模型调用路径是两条路径（本轮裁定）。**「模型调用路径今天不存在」这条须与 C 的同一句一致**——
+    它构成 C↔D 的**第三条接缝**。**收件人：协调者**（指派实现方；这不是 D 或 C 能自行决定的）。
+21. **§86 的 `Tier 1 Low` 不在 §251 的阶梯五档里**（§7.1）：两者是规范自身的不一致
+    （`docs/spec/02-positioning.md:847-867` vs `docs/spec/05-normative.md:922-944`）。
+    本设计按 §17／§18 的「档位与推理强度分离」读成「Tier1 ＋ 低推理强度」，**不给
+    `EscalationStep` 加第六个成员**。若判定该加，本层的「照录 §251」这句话就要改。
+    **收件人：规范维护者**。

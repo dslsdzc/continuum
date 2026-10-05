@@ -186,8 +186,13 @@ commit**。故「原样复用」与这两条要求**三者不能同时成立**�
 **决定**：把该函数**提取并加宽**成一个**无事务**的共享函数，两条路径同调它：
 
 ```rust
-/// 强制点 (2) 的铸币判定。**不收事务**——判定与铸币都是纯的（读的是已取出的策略表），
-/// 故调用方自己决定在哪个事务里用它（本路径要用它把结果与 `authorize`、效应行同事务提交）。
+/// 强制点 (2) 的铸币判定。**不收事务**——它**不碰库**：裁决读的是已取出的策略表、
+/// `mint` 不读库（`task_cmd.rs:459-463`），故调用方自己决定在哪个事务里用它
+/// （本路径要用它把结果与 `authorize`、效应行同事务提交）。
+///
+/// **它并不「纯」**：`mint` 的 `expiry` 取 `now_millis() + CAPABILITY_LIFETIME_MS`，
+/// 而 `now_millis()` **读时钟**（`task_cmd.rs:867-872`）。要说准的是「不碰库」——
+/// 写成绝对措辞「纯的」，它的反例就在同一个文件里。
 fn mint_declared_effects(
     policies: &[Policy],
     effects: &[EffectSpec],
@@ -198,19 +203,36 @@ fn mint_declared_effects(
 - **返回 `(AuthorizedEffect, Decision)` 成对**：`Decision` 不再被丢掉——本路径要用它填
   `effect.authorization`（§7.2 那条「填这条效应自己那次裁决」），而**本路径不第二次调 `arbitrate`**
   （那正是 §5.1 禁止的第二个判定点）。**这解决复审第 3 条**：把复用面写准，而不是声称「逐字复用」。
-- **无事务**：`record_planned` / `advance` / `authorize` 才需要 `Tx`，判定与 `mint` 都不需要
-  （`mint` 不读时钟、不读库）。**这解决复审第 4 条**：本路径自己 `db.begin()`，把步骤 4 与 5 放进
+- **无事务**：`record_planned` / `advance` / `authorize` 才需要 `Tx`；裁决与铸币都不需要
+  （`mint` 自己既不读时钟也不读库，见其文档——**但本函数要算 `expiry`，故它读时钟**，
+  见上面那段文档注释）。**这解决复审第 4 条**：本路径自己 `db.begin()`，把步骤 4 与 5 放进
   这**一个**事务。
 - **命令路径不受影响**：`record_declared_effects` 仍然自己开事务、自己 commit，其内部改调这个共享
   函数即可；它今天丢弃 `Decision` 的那一处照旧（它要的是集成那次裁决，另有来源）。
+
+**它落在哪个 crate——`TaskError` 随之移进 lib（N-1 的处置）**：这个共享函数**必须在 lib 里**
+（§6.4：工具调用路径是 lib 函数，lib 调不到 bin 的模块），而它的返回类型里有 `TaskError`——
+`TaskError` 今天定义在 **bin 的** `task_cmd.rs:876`，`src/lib.rs` 只导出 `cli`。**三者不能同时成立**
+（共享函数在 bin ⇒ lib 调不到；共享函数在 lib 而返回 `TaskError` ⇒ lib 叫不出这个名字）。
+**决定：把 `TaskError` 从 `task_cmd.rs` 移进 lib**（新增一个 lib 模块，经 `lib.rs` 再导出），
+`task_cmd.rs` 与 `main.rs` 改为 `use continuum_runtime::TaskError;`。
+- **为什么不另建一个 lib 侧的 `ToolCallPathError`**（另一条可选处置）：那会给同一批失败造出**第二个
+  错误类型**，两条路径各报一套，且 bin 还要写一层逐变体映射——正是本项目判为 Critical 的「同一件事
+  两个类型」。**搬家是一步机械动作，造第二套词汇是一个长期的坑。**
+- **变体一个不改**：§8 的失败面表**逐行照旧**（只是这些变体的定义位置从 bin 挪到 lib）。
+- **`TaskError` 的 `#[from]` 目标**（`GateError` / `SandboxSelectError` / `WorkspaceError` /
+  `SandboxError` / `PersistError`）全部来自 lib 已依赖的 crate，故这一步**不动 `Cargo.toml`**
+  （§10.1 的「不新增任何 crate 边」仍成立）。
 
 **由此得到一条「承重」性质**（原稿即有，现在才真的成立）：步骤 4 与 5 用**同一个事务**，一次 `commit`。
 故「工具已获准」的审计行与「效应已在执行」的 `EXECUTING` 行**要么都在、要么都不在**：不存在
 「审计说授权了、日志说没开始」的中间态。这条性质的照片是一条断言：被拒时 `audit_log` 的
 `capability grants` 行数为 0（`authorize` 拒绝不写审计，P3A 设计 §3.4），且 `effect` 行数为 0。
+**事务由谁开**：由 §6.4 那个 lib 函数自己开（它收 `&Db`），故「同一次提交」的范围完整地落在
+lib 内的一处，不需要跨 crate 传递事务。
 
-**这处提取是一件要落地的实现步骤**（写进实现计划），不是措辞调整：不提取而照旧调
-`authorize_declared_effects` 的话，上面那条承重性质**不成立**（两个事务），本设计就是错的。
+**这处提取与 `TaskError` 的搬家都是要落地的实现步骤**（写进实现计划），不是措辞调整：不提取而照旧
+调 `authorize_declared_effects` 的话，上面那条承重性质**不成立**（两个事务），本设计就是错的。
 
 ## 3.3 决定 F7：工具调用的结果由驱动打到 stdout
 
@@ -419,17 +441,31 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 ProviderRegistry::invoke_tool(&self, authorized: &AuthorizedTool, input: Value)
     -> Result<ToolResult, ToolCallError>;
 
-pub enum ToolCallError {                 // C 设计 §3
+pub enum ToolCallError {                 // C 设计 §3.5（定义）与 §7.1（用于 invoke_tool）
     Unregistered { id: ToolId },         // 这个 id 没有适配器（路由）
     Provider(ProviderError),             // 适配器自己失败
 }
 ```
 
-驱动**不持有适配器、也不自己开第二个调用入口**（见 §6.2）：它在步骤 4 经 `authorize` 拿到
+**一处要提名的作者风险（跨设计接缝 2）**：`ToolCallError` 的**定义**在 C 设计 §3.5
+（`…p3c-…:228-229`），用在 `invoke_tool` 上的**签名**在 §7.1（`…p3c-…:474`）；而 §3.1 一带
+（`…p3c-…:139`，该节讲注册表的暴露面）只写了入口的名字、没写返回类型，**更早的 C 修订版**在那一处
+曾把失败写成 `ProviderError`。**若读到的版本里 §3.1 与该入口的返回类型不一致，以 §3.5 + §7.1 为准**
+（`ProviderError` 描述的是**一次 provider 调用**的失败，`ToolCallError::Unregistered` 描述的是
+**路由未命中**，C 自己的 §5.2 把这两者分开的理由写得很清楚）。**本设计按 `ToolCallError` 写**
+（§8 的 P-9 / P-10 逐臂断言它），并把这条不一致**摆出来**而不是静默取一个——实现者读到旧文本时
+要知道该按哪一处。
+
+**工具调用路径不持有适配器、也不自己开第二个调用入口**（见 §6.2）：它在步骤 4 经 `authorize` 拿到
 `AuthorizedTool` 之后，把 `&authorized` 与输入交给注册表的 `invoke_tool`。工具 id 由 `invoke_tool`
 **只从 `AuthorizedTool` 取**（C 设计 §7.1 末段：「工具 id 只有这一个来源」），故「授权 t1、调用 t2」
 在这条入口上写不出来——这是**配对**，与 `AuthorizedEffect` 的保护落在配对上同一个手法
 （P3A 设计 §4.2 的执行期订正：能保护的不是「外部构造不出来」，而是配对）。
+
+**「不持有」的范围要说准（原稿在此处写的是「驱动**不持有**适配器」，那句话在本设计自己的另一条
+路径上为假）**：**驱动**（组合根，§10.2）在装配期**确实**构造并登记适配器，它手里那一份是裸的
+（C 设计 §7.1 末段记的同一限度）；「不持有」说的是**工具调用路径**——它只拿 `&ProviderRegistry`，
+拿不到 `Arc<dyn ToolProvider>`。两句话不矛盾，但混成一句就是假的，故分开写。
 
 ## 6.2 为什么门禁在 C 的注册表、不在驱动（原稿在此处被推翻，来历留此）
 
@@ -490,8 +526,10 @@ P3A 设计 §8）。注册表的 `invoke_tool` **只收它**，且注册表不�
 随 §6.2 的改调，「唯一入口」在 C 的 crate 里，那条编译失败样例归 C；F 的库级用例只钉
 「**F 确实经注册表调用、且被拒时零调用**」（第 9 节 P-1 / P-7）。
 
-**代价**：bin 侧的 `tool_cmd` 要调 lib 的公开面；`TaskError` 仍在 bin（它是驱动的 CLI 错误类型）。
-这条代价是装配上的，不是语义上的。
+**代价**：bin 侧的 `tool_cmd` 要调 lib 的公开面；**`TaskError` 随之从 bin 移进 lib**（§3.2 的
+「N-1 的处置」：共享函数与这个函数都要返回它，而 lib 叫不出 bin 的名字）。**原稿在此处写
+「`TaskError` 仍在 bin」，那句话与本设计自己的 lib 化要求冲突，已订正**——变体一个不改，
+只是定义位置搬家。这条代价是装配上的，不是语义上的。
 
 ---
 
@@ -604,7 +642,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | 编号 | 验什么 | 怎么验 |
 |---|---|---|
 | P-1 | 铸不出能力 ⇒ **工具一次都没被调用**、零效应行、零审计 | 空策略表；夹具适配器断言调用次数为 0；读 `effect` 与 `audit_log` 行数 |
-| P-2 | 幂等键已存在 ⇒ 拒整条、零新行 | 先跑一次成功调用，再跑同一条声明 |
+| P-2 | 幂等键已存在 ⇒ 拒整条、零新行；**且第一条调用的记录里读得回它给的 `--intent`** | 先跑一次成功调用（带 `--intent i1`），再跑同一条声明；**读回第一条的 `effect.idempotency_key`，断言它以 `effect_key` 的前缀形含 `i1`**（长度前缀 `<意图字节长>:<意图>:`，`task_cmd.rs:512-520`）。**这一读是 §2.2 那条「`--intent` 可观察」的照片**：没有它，「条件必填」的理由就只是一句话 |
 | P-3 | 未登记的工具 ⇒ `UnknownTool`，工具未被调用 | 库里有 `tool` 表但无该 id |
 | P-4 | 出示了未声明的能力 ⇒ `UndeclaredCapability` | 登记项声明能力 A，声明 `--effect` 铸出能力 B |
 | P-5 | 缺声明的能力 ⇒ `MissingCapability` | 登记项声明 A+B，只声明铸出 A 的那条 `--effect` |
@@ -621,6 +659,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | P-16 | 零 `--effect` 的工具调用跑得通、不碰 `effect` 表 | 登记项声明空能力表；断言 `effect` 零行、`audit_log` 一条 |
 | P-17 | 零效应的正向对照：同一条调用在策略放行时**真的被调用** | 与 P-1 同一夹具，只差库里有没有那条 `Allow`（互为对照臂，与 `capability_gate.rs` 的既有手法同形） |
 | P-18 | **作用域原样带出**（§4.3 的后半句） | 端到端：声明两条 `--effect`（目标各不相同），跑通后读 `audit_log` 的 `capability grants` 行，解析 payload，断言 `capabilities[].scope` 的 multiset **逐个等于**各 `--effect` 的目标。**把 `spec.target` 换成常量、或换成 `effect_type` 的字面串，本条即红** |
+| P-19 | **射程边界**（§12.1）：命令路径不过强制点 (1) | **端到端，跑在 `task` 子命令上**：`task --effect charge:x --exec true`（策略放行、退出码 0）之后，断言 `SELECT COUNT(*) FROM audit_log WHERE kind = 'capability grants'` 为 **0**。**把强制点 (1) 接到命令路径上，本条即红**。这是本表唯一一条跑在**另一条子命令**上的用例——它钉的正是那条边界 |
 
 **变异须真落到实现体**（本仓既有纪律）：P-1 的目标断言是**调用次数为 0**，故把「拒绝」的变异体
 放在铸造之后、那一跳之前——若把变异体放在 `authorize` 之后（例如把 `presented` 换成空集），
@@ -667,11 +706,17 @@ payload 用例覆盖，本路径不重复。
 **C 的注册表的登记入口**：组合根（就是驱动自己——C 设计 §7.1 末段点名的 composition root）
 在启动时把适配器登记进去。
 
-```rust
-// C 的注册表（continuum-provider::registry）；登记入口的形状由 C 定（C 设计 §7.1）
-let mut registry = ProviderRegistry::new();
-registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有**这一句
-```
+**登记入口的形状（照 C 的契约，不自己发明签名）**：C 设计 §3.1 定的是「**按 id 显式登记**，
+装配期填装」——**id 由登记方给出，注册表不去问适配器**；注册表内部持
+`ToolId → Arc<dyn ToolProvider>`（C 设计 §3.1）。故驱动侧的那一句形如
+「**把这一组 id 登记给这个适配器**」，适配器以 `Arc` 交出。**本设计不写出具体函数名与实参表**：
+C 尚未冻结那个方法的签名（C §12 第 9 条把它记为待定），本子项目**不预先发明**——写死的签名一旦与
+C 不一致，就是同一件事的第二个形状。
+
+**原稿在此处给过一个具体 sketch**（`registry.register_tool(Box::new(MyAdapter::new()))`），
+**它有两处不符 C 的契约**，已删除并把来历留此：**(a)** 没有给出工具 id（C 要求 id 由登记方显式
+给出，注册表不询问适配器）；**(b)** 用的是 `Box<dyn ToolProvider>`，而注册表内部持
+`Arc<dyn ToolProvider>`。**今天的驱动没有这一句**（没有任何适配器可登记）。
 
 - **今天没有任何适配器可登记**：注册表是空的，故步骤 6 那一跳返回
   `ToolCallError::Unregistered`。**这不是遗留物**——它是 C 的交付缺口，记在第 14 节第 2 条。
@@ -720,7 +765,14 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
 **这不是缺陷**：命令不是工具调用（§87 管的是「Agent 调用工具」，而命令是调用方给的 argv），
 两者由**不同的**强制点覆盖（§4.2 的三个强制点里，命令路径走 (2)，工具路径走 (1)+(2)）。
 把这条边界写出来，是因为不写的话 §12 会被读成「所有外部效应都已过 (1)」，而那是假的。
-**它没有照片**（是关于「另一条路径不经过某道检查」的否定命题）；据实写在正文里。
+
+**它有一张否定式照片（P-19），原稿写「没有照片」是错的**，订正来历留此：否定命题在本仓有可拍的
+形态——**行数不变量**。`capability grants` 这个 `AuditKind` 的**唯一产生方是 `authorize`**
+（§7.1 的表：本路径不补写，命令路径不写它），故「命令路径不经过强制点 (1)」可以拍成：
+跑 `task --effect charge:x --exec true`（策略放行、命令成功），断言
+`SELECT COUNT(*) FROM audit_log WHERE kind = 'capability grants'` 为 **0**。
+**把强制点 (1) 接到命令路径上，这条即红。** B 的「不写审计」照片（`…p3b-…`）是同一形状
+（行数不变量），本仓接受这种拍法。
 
 ---
 
@@ -747,7 +799,7 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
    （`tests/authorize.rs`、`tests/persist.rs`），生产代码零调用。故 `tool` 表在真实库里是空的，
    `tool` 子命令对任何 id 都报 `UnknownTool`，**除非先经 `save_tool` 登记**。**登记项落 `tool` 表、
    `ToolDescriptor` 由适配器另出、两者靠共用的 `ToolId` 绑定**（C 设计 §8 判**不合并**——合并会把
-   `required_capabilities` / `effect_class` 这些治理数据交给被治理方，是强制点 (1) 的语义反转）。
+   `required_capabilities` / `effect_class` 这些治理数据交给被治理方，那是强制点 (1) 的语义反转）。
    **原稿在此处写「登记要等 §316 的 `ToolDescriptor` 与 §252 的 `Tool` 合并」，那句话与 C 的裁定
    相反，已按 C 订正**，本子项目**不发明**一个登记用的 CLI。**收件人：子项目 C**（登记入口，
    含 C §8 记的那处 `input_schema` 双产生点——**调用的权威是适配器的 `ToolDescriptor.input_schema`**，
@@ -814,10 +866,11 @@ registry.register_tool(Box::new(MyAdapter::new()));   // 今天的驱动**没有
     本子项目第一次为 `block_on` 异步的 `invoke` 真的用它（§10.1）。**收件人：后续阶段**（若驱动整体
     转异步，这个「在同步路径里开一个当前线程运行时」的形状要重做）。
 12. **`--input` 省略即 `{}`**（§2.1）与 **`--intent` / `--approve` 与 `--effect` 同进同出**（§2.2）
-    都是本设计的**决定**，规范未规定。**两条已由协调者本轮裁定接受**：`{}` 的理由按 `task` 对
-    `parameters` 的既有先例写（§2.1 已引原文），条件必填 `--intent` 的理由按**可观察性**写
-    （§2.2 已写明：零效应时该取值不落任何地方、读者无从验证）。**不再悬置**；若用户日后要对称性
-    （恒必填 `--intent`），改动只在这两处与 P-13。
+    都是本设计的**决定**，规范未规定。**两条由协调者本轮拍板接受**（拍板于本子项目的本轮派发，
+    不是本子项目自评）：`{}` 的理由按 `task` 对 `parameters` 的既有先例写（§2.1 已引原文），
+    条件必填 `--intent` 的理由按**可观察性**写（§2.2 已写明：零效应时该取值不落任何地方、
+    读者无从验证），**该可观察性已由 P-2 的第二半拍下来**（读回 `idempotency_key` 断言含该 intent）。
+    **不再悬置**；若用户日后要对称性（恒必填 `--intent`），改动只在这两处与 P-13。
 13. **`AuthorizedTool` 派生 `Debug`**（P3A 设计 §10 第 10 条）：把整枚 `AuthorizedTool` 格式化进
     错误上下文会把已获准能力的**作用域**打出来。本路径**不这样做**——`TaskError::Capability` 的
     `Display` 只带内层 `CapabilityError` 的消息（那些消息里没有作用域；`MissingCapability` /
