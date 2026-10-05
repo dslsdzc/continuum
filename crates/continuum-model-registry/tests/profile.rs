@@ -41,7 +41,7 @@ fn ratio_round_trips_through_its_text_encoding() {
 /// **有限但越界**（`1.5` / `-0.1`）报 `OutOfRange { value }`。
 ///
 /// 两类**不共用变体**：同一个 `NaN` 在 `Ratio` 与 `SkillScore` 上必须报同一枚错，
-/// 而 `NaN` 也不是「落在区间之外」的点。故这里**两枚变体各三格**，且互不重叠。
+/// 而 `NaN` 也不是「落在区间之外」的点。故这里**非有限三格、越界两格**，且互不重叠。
 #[test]
 fn ratio_rejects_non_finite_and_out_of_range() {
     // 非有限三格：`NaN` 用 `match` 而非 `assert_eq!`——`NaN != NaN`，
