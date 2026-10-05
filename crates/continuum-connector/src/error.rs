@@ -1,12 +1,13 @@
 //! 连接器边界上的错误类型（设计 §6.1）。
 //!
-//! **没有产生方的变体不建**：本 task 只建注册期双向覆盖的那两条，它们各自在
-//! [`crate::ConnectorRegistry::register`] 里有真实产生方。其余八条由后续 task
-//! 在**用到它的那个 task**里增量加——`DuplicateKindBinding` / `OperationServiceMismatch`
-//! 在 Task 3，`UnknownConnector` / `UndeclaredOperation` / `AuthorizationMismatch` 在
-//! Task 4，`EffectAuthorizationRequired` 在 Task 5，转出型的 `Credentials` / `Provider`
-//! 在 Task 4（设计 §6.1 的表共十行，本 task 落地其中两行）。
+//! **没有产生方的变体不建**：已建的四条注册期变体各自在
+//! [`crate::ConnectorRegistry::register`] 里有真实产生方。其余六条由后续 task
+//! 在**用到它的那个 task**里增量加——`UnknownConnector` / `UndeclaredOperation` /
+//! `AuthorizationMismatch` 在 Task 4，`EffectAuthorizationRequired` 在 Task 5，
+//! 转出型的 `Credentials` / `Provider` 在 Task 4（设计 §6.1 的表共十行，
+//! 截至本 task 落地其中四行）。
 
+use continuum_capability::CapabilityKind;
 use continuum_core::connector::{ConnectorId, ConnectorOp};
 
 /// 连接器注册与调用边界上的错误。
@@ -29,6 +30,37 @@ pub enum ConnectorError {
         op.as_str()
     )]
     UndeclaredBoundOperation {
+        connector: ConnectorId,
+        op: ConnectorOp,
+    },
+    /// 同一个连接器内，一枚 `CapabilityKind` 被两条操作绑定——「一一」被破坏
+    /// （设计 §3.2 第 3 条）。
+    ///
+    /// 理由（设计 §3.3）：绑定的粒度存在，正是为了让 §125 的每条操作**能单独不授**
+    /// （「`GitHub.merge` 能单独不授」）。两条操作绑同一枚 kind，则授权其一即授权另一，
+    /// 粒度退回服务级——那正是 §125 禁止的形态。
+    ///
+    /// 照片：`tests/register.rs` 的 `two_operations_bound_to_the_same_kind_are_rejected`。
+    #[error("连接器 {} 的两条操作绑定了同一枚能力 {}", connector.as_str(), kind.as_str())]
+    DuplicateKindBinding {
+        connector: ConnectorId,
+        kind: CapabilityKind,
+    },
+    /// 操作串的服务半边不等于本连接器的 id（设计 §3.2 第 5 条）。
+    ///
+    /// `ConnectorOp` 只要求串里有一个 `.`，不保证操作属于哪个服务。服务半边对不上的
+    /// 操作**永不可达**——入口第 1 步按服务半边解析连接器，永远解析不到它——故这条
+    /// 核对把它挡在注册期。
+    ///
+    /// 照片：`tests/register.rs` 的
+    /// `an_operation_whose_service_half_is_not_this_connector_is_rejected` 与
+    /// `the_service_half_is_compared_case_sensitively`（后者钉「逐字比较、不折叠大小写」）。
+    #[error(
+        "连接器 {} 不能声明服务半边不是自己的操作 {}",
+        connector.as_str(),
+        op.as_str()
+    )]
+    OperationServiceMismatch {
         connector: ConnectorId,
         op: ConnectorOp,
     },

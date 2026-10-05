@@ -1,12 +1,13 @@
-//! 注册期双向覆盖的用例（设计 §3.2.1 第 2 条、§9）。
+//! 注册期四条核对的用例（设计 §3.2.1、§9）：双向覆盖、一一、服务半边相符，
+//! 外加设计 §3.4 的两张照片。
 //!
-//! 每条用例**只触发一条核对**：构造时避开会同时触发另一条（或 Task 3 的两条）的情形，
+//! 每条用例**只触发一条核对**：构造时避开会同时触发另一条的情形，
 //! 故注册期核对的**先后次序在用例上不可观察**——次序由实现定死，不为它写用例。
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use async_trait::async_trait;
-use continuum_capability::{CapabilityKind, EmailAction, FsAction};
+use continuum_capability::{CapabilityKind, EmailAction, FsAction, GitAction, GithubAction};
 use continuum_connector::{ConnectorError, ConnectorImpl, ConnectorRegistry, OpBinding};
 use continuum_core::connector::{ConnectorDescriptor, ConnectorId, ConnectorOp};
 use continuum_core::ProviderError;
@@ -126,4 +127,126 @@ fn a_fully_bound_connector_registers() {
     );
 
     assert_eq!(register(fake), Ok(()), "声明与绑定逐项对齐时应注册成功");
+}
+
+/// 两条操作绑同一枚 kind → `DuplicateKindBinding`（设计 §3.2 第 3 条，「一一」）。
+///
+/// 「一一」的理由是 §125 的意图——「`GitHub.merge` 能单独不授」：两条操作绑同一枚
+/// kind 会让授权其一即授权另一（设计 §3.3）。
+#[test]
+fn two_operations_bound_to_the_same_kind_are_rejected() {
+    let fake = FakeConnector::new(
+        "Email",
+        &["Email.send", "Email.draft"],
+        &[
+            ("Email.send", CapabilityKind::Email(EmailAction::Send)),
+            ("Email.draft", CapabilityKind::Email(EmailAction::Send)),
+        ],
+    );
+
+    match register(fake) {
+        Err(ConnectorError::DuplicateKindBinding { connector, kind }) => {
+            assert_eq!(connector.as_str(), "Email", "connector 应是本连接器的 id");
+            assert_eq!(
+                kind,
+                CapabilityKind::Email(EmailAction::Send),
+                "kind 应是被两条操作共绑的那一枚"
+            );
+        }
+        other => panic!("期望 DuplicateKindBinding，实得 {other:?}"),
+    }
+}
+
+/// 操作的服务半边不是本连接器的 id → `OperationServiceMismatch`（设计 §3.2 第 5 条）。
+///
+/// 这类操作**永不可达**（入口第 1 步按服务半边解析，永远解析不到它），故挡在注册期。
+#[test]
+fn an_operation_whose_service_half_is_not_this_connector_is_rejected() {
+    let fake = FakeConnector::new(
+        "GitHub",
+        &["Email.send"],
+        &[("Email.send", CapabilityKind::Email(EmailAction::Send))],
+    );
+
+    match register(fake) {
+        Err(ConnectorError::OperationServiceMismatch { connector, op }) => {
+            assert_eq!(connector.as_str(), "GitHub", "connector 应是本连接器的 id");
+            assert_eq!(op.as_str(), "Email.send", "op 应是服务半边对不上的那一条");
+        }
+        other => panic!("期望 OperationServiceMismatch{{ op: Email.send }}，实得 {other:?}"),
+    }
+}
+
+/// 服务半边**逐字比较、不折叠大小写**（设计 §3.2.1 末段）。
+///
+/// 被否掉的替代正是**折叠大小写**：折叠只到「modulo ASCII 大小写」，会让 `github` 与
+/// `GitHub` 被判为同一个服务。本用例的夹具就是把 id 写成 `GitHub`、操作服务半边写成
+/// `github`——**这是本判据唯一的守卫**，夹具若退化（两串大小写一致）它就恒绿地骗人。
+#[test]
+fn the_service_half_is_compared_case_sensitively() {
+    let fake = FakeConnector::new(
+        "GitHub",
+        &["github.push_branch"],
+        &[("github.push_branch", CapabilityKind::Git(GitAction::Push))],
+    );
+
+    match register(fake) {
+        Err(ConnectorError::OperationServiceMismatch { connector, op }) => {
+            assert_eq!(connector.as_str(), "GitHub", "connector 应是本连接器的 id");
+            assert_eq!(
+                op.as_str(),
+                "github.push_branch",
+                "op 应是大小写不同的那一条"
+            );
+        }
+        other => panic!(
+            "期望 OperationServiceMismatch（逐字比较：github 与 GitHub 是两个服务），实得 {other:?}"
+        ),
+    }
+}
+
+/// 服务半边与 id 逐字相等 → `Ok(())`。**这条同时是设计 §3.4 照片 1 的一半**
+/// （另一半「一次成功调用」由 Task 4 补）。
+///
+/// 注意这条缝：`GitHub.push_branch` 这个**操作**绑的 kind 是 `Git(Push)`——
+/// **resource 是 `git` 不是 `github`**（设计 §11 第 12 条）。**这不是笔误，别把它
+/// 「修」成 `Github`**：§88 规定 `git.push` 是一枚能力，驱动为 `--effect push_branch`
+/// 铸的正是它，连接器若不绑它，`AuthorizedEffect` 就配不上。
+#[test]
+fn a_positive_arm_with_the_matching_service_half_registers() {
+    let fake = FakeConnector::new(
+        "GitHub",
+        &["GitHub.push_branch"],
+        &[("GitHub.push_branch", CapabilityKind::Git(GitAction::Push))],
+    );
+
+    assert_eq!(
+        register(fake),
+        Ok(()),
+        "服务半边逐字相等且绑定一一时应注册成功"
+    );
+}
+
+/// **设计 §3.4 照片 2——本设计初稿写反的那一侧**：绑错了 kind **照样注册成功**。
+///
+/// **规范没有「一条操作该绑哪一枚 kind」的判据**，故这里断言的是 **`Ok`**，不是 `Err`。
+/// 注册期的四条核对没有一条查这个（设计 §3.4、§11 第 16 条）：作者把 `GitHub.merge`
+/// 绑到 `Github(CreatePr)` 上，核对全过、注册成功，而没有任何东西会红。
+/// **没有这张照片，本节就是在替规范声称一条它没有的判据。**
+#[test]
+fn a_mis_bound_operation_still_registers() {
+    let fake = FakeConnector::new(
+        "GitHub",
+        &["GitHub.merge"],
+        &[(
+            "GitHub.merge",
+            CapabilityKind::Github(GithubAction::CreatePr),
+        )],
+    );
+
+    assert_eq!(
+        register(fake),
+        Ok(()),
+        "「配得对不对」无人判：绑错了也注册成功（设计 §3.4 照片 2）"
+    );
 }

@@ -8,12 +8,12 @@
 //!   [`ConnectorRegistry`]——注册期全部核对的唯一产生点，也是绑定的唯一产生点；
 //! - [`error`]：本 crate 的错误类型 [`ConnectorError`]。
 //!
-//! # 本 task 的范围
+//! # 已落地的范围
 //!
-//! 本轮只到注册期的四条核对中的**前两条**（声明集 ↔ 绑定集的双向覆盖）。
-//! 「一一」（`DuplicateKindBinding`）与「操作的服务半边相符」（`OperationServiceMismatch`）
-//! 由 Task 3 增量加；调用入口（四步核对、凭据的逐次签发与取料）自 Task 4 起。
-//! 故 `ConnectorRegistry` 目前**只写不读**：登记下来的连接器与绑定由 Task 4 的入口读取。
+//! 注册期的**四条核对已齐**：声明集 ↔ 绑定集的双向覆盖、一一（`DuplicateKindBinding`）、
+//! 以及操作的服务半边相符（`OperationServiceMismatch`）。调用入口（四步核对、凭据的
+//! 逐次签发与取料）自 Task 4 起。故 `ConnectorRegistry` 目前**只写不读**：
+//! 登记下来的连接器与绑定由 Task 4 的入口读取。
 //!
 //! 本 crate **不**决定、也不产出授权：连接器是能力的持有者与行使者，不是来源
 //! （§124 定性，设计 §3.1 的读法）。
