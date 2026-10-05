@@ -67,7 +67,7 @@
    **对本计划的适用性核对**：本计划里带绝对措辞的注释集中在四处——`OpBinding` 的「两个字段」、`register` 的「四条核对」、入口的「四步」、`CapabilityKind::effect` 的「十二臂穷尽」。**四处都必须逐项有照片，不抽代表**：十二条 kind 各一张（Task 1）、四条注册期核对各一对（正反两侧，Task 2/3）、四步入口核对各一张（Task 4/5）。Task 3 那条「绑错了照样注册成功」是**刻意照出来的反例**，它的注释必须写明「规范没有『配得对不对』的判据，故这条照片断言的是 `Ok`」——否则它就是一句会被读反的绝对措辞。
 3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。
 
-   **对本计划的适用性核对**：本计划的失败面有 **11 种** `ConnectorError` 变体（注册期 4 ＋ 调用期 4 ＋ 两个 `#[from]` ＋ 未注册），每种各要断言**具体变体**（用 `matches!` 或逐字段比对；`ProviderError` 与 `SecretsError` 都派生 `PartialEq`，故内层变体可逐字段比）。**本条不因「外层是 `#[from]`」而放松**：`ConnectorError::Provider(_)` 与 `Credentials(_)` 两条路径必须分别断言**内层是哪一个变体**。
+   **对本计划的适用性核对**：本计划的失败面有 **10 种** `ConnectorError` 变体（设计 §6.1 的表恰好十行：注册期 4 ＝ `UnboundOperation` / `UndeclaredBoundOperation` / `DuplicateKindBinding` / `OperationServiceMismatch`，调用期 4 ＝ `UnknownConnector` / `UndeclaredOperation` / `EffectAuthorizationRequired` / `AuthorizationMismatch`，加两个 `#[from]` ＝ `Credentials` / `Provider`），每种各要断言**具体变体**（用 `matches!` 或逐字段比对；`ProviderError` 与 `SecretsError` 都派生 `PartialEq`，故内层变体可逐字段比）。**本条不因「外层是 `#[from]`」而放松**：`ConnectorError::Provider(_)` 与 `Credentials(_)` 两条路径必须分别断言**内层是哪一个变体**。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），**命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志——`pgrep "cargo|rustc"` 看不见卡在 `D` 状态的测试二进制。受能力门控的用例要给执行/跳过条数，**承重断言不要放在门控之内**。
 
@@ -139,8 +139,10 @@ Cargo.toml（workspace）                                   members（Task 2）
 `tests/vocabulary.rs` 加三条，**逐项有照片、不抽代表**：
 
 - `the_inverse_of_for_effect_returns_the_same_effect_for_every_effect_type`：对 `EffectType::ALL` 的**每一个**变体，断言 `CapabilityKind::for_effect(e).effect() == Some(e)`。**六条各断言一次**（用例里的 `EffectType` 值来自 `ALL` 的遍历，钉的是**路径**）。
-- `every_kind_outside_the_image_has_no_effect`：逐项断言下面**六枚** kind 的 `effect()` 是 `None`——`Filesystem(FsAction::Read)`、`Filesystem(FsAction::Write)`、`Git(GitAction::Read)`、`Git(GitAction::WorktreeWrite)`、`Git(GitAction::CommitLocal)`、`Github(GithubAction::CreatePr)`。**六条各断言一次**（这里的 kind 字面量是**手工写的**，钉的是「非像的那六枚是哪些」这个事实本身——设计 §3.3 第 2 条列举时只写了五枚，漏了 `Filesystem(Write)`，见「遗留」第 10 条；**本计划按十二枚的全集写，不照抄那五枚**）。
-- `the_two_lists_cover_every_kind`：把上面两条的域并起来必须覆盖**全部十二枚** kind。十二条 kind 的全集由 `CapabilityKind` 的 `as_str` 给出的十二个串经 `parse` 反解得到（**全部字面量取自被测函数**，钉的是路径）；断言「十二枚里 `effect()` 为 `Some` 的恰是 `for_effect` 的像那六枚，且两者无交集、并集为全集」。**没有这一条，前两条各自正确而漏掉一枚也不会红。**
+- `every_kind_outside_the_image_has_no_effect`：逐项断言下面**六枚** kind 的 `effect()` 是 `None`——`Filesystem(FsAction::Read)`、`Filesystem(FsAction::Write)`、`Git(GitAction::Read)`、`Git(GitAction::WorktreeWrite)`、`Git(GitAction::CommitLocal)`、`Github(GithubAction::CreatePr)`。**六条各断言一次**（这里的 kind 字面量是**手工写的**，钉的是「非像的那六枚是哪些」这个事实本身）。设计 §3.3 第 2 条的**初稿**只写了五枚、漏了 `Filesystem(Write)`，**现已逐枚列全**（裁决文件 B1 裁为设计改，见「遗留」第 10 条）；本计划按那六枚写，与设计现文一致。
+- `the_two_lists_are_disjoint`：把上面两条的域并起来比对——**像那六枚**由 `EffectType::ALL` 遍历经 `for_effect` 得到（**被测函数返回的值**，钉路径），**非像那六枚**是上一条里**手工写的字面量**（钉「有哪六枚」这个事实）——断言两组**互不相同**（并起来是十二枚互异的 kind）。它钉的是「那份手工清单里没有混进像里的那一枚」。
+
+  **「十二枚就是全部 kind」这一半是编译期保证，不是运行期用例**——**不要**写「由 `as_str` 经 `parse` 反解出全集」那种写法：`CapabilityKind` 上**没有 `ALL`**，`as_str` 又是**实例方法**（`crates/continuum-capability/src/capability.rs:205` 的签名是 `pub fn as_str(&self)`），要拿到十二个串得先有十二个实例，**这是循环**（P3A 的 `tests/persist.rs` 遇到同一个限制，用的是手工清单）。取代它的是 [`CapabilityKind::effect`] 的 `match` **穷尽且无通配臂**：加第 13 枚 kind 时它编译不过，实现者必须补一个臂；**但那个新臂该给 `Some` 还是 `None`，编译器判不了**，只能由人在上面两张清单里补一项。**这一半没有运行期照片，据实标明**（纪律 2「写不出的就明写它为什么没有照片」）。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -158,8 +160,10 @@ impl CapabilityKind {
     /// 同址（同一 impl 块、紧邻）。`for_effect` 是单射而**不是满射**，故返回 `Option`。
     ///
     /// 十二个臂**逐个手写、穷尽且无通配臂**：加 kind 时本函数编译不过，逆不会漏分支。
-    /// 「穷尽」有两层：`match` 的穷尽由编译器保证；**「该给 `Some` 的恰是像那六枚」
-    /// 由 `tests/vocabulary.rs` 的三条用例钉**（编译器看不出把 `Some` 写成 `None` 的臂）。
+    /// 「该给 `Some` 的恰是像那六枚」由 `tests/vocabulary.rs` 的三条用例钉（前两条逐项、
+    /// 第三条钉两份清单互斥）；**编译器看不出把 `Some` 写成 `None` 的臂**。
+    /// **而「kind 一共十二枚」这一半是编译期保证，不是运行期用例**——本 crate 没有
+    /// `CapabilityKind::ALL`，且 `as_str` 是实例方法，运行期遍历不出全集（见该用例的说明）。
     pub fn effect(&self) -> Option<EffectType> { /* 十二个臂，逐臂写明 */ }
 }
 ```
@@ -168,9 +172,10 @@ impl CapabilityKind {
 
 - [ ] **Step 4: 变异与全量验证**
 
-对 `effect` 做两条**各不相同**的守卫的变异，各写独立日志路径：
+对 `effect` 做**三条**变异，各写独立日志路径（前两条改实现、第三条改夹具，第三条在验前两条的证据是否落在靶上）：
 - 把某一臂的 `Some(...)` 改成 `Some(另一条效应)`（**锚点不唯一，改后必须读源码确认落在目标臂上**）；预期 `the_inverse_of_for_effect_returns_the_same_effect_for_every_effect_type` 红；
-- 把某个非像臂的 `None` 改成 `Some(某效应)`；预期 `every_kind_outside_the_image_has_no_effect` **与** `the_two_lists_cover_every_kind` 同时红（后者是跨列表的那条守卫，**这一对是承重守卫，须走全量套件**）。
+- 把某个非像臂的 `None` 改成 `Some(某效应)`；预期 `every_kind_outside_the_image_has_no_effect` 红。**`the_two_lists_are_disjoint` 这条不红，且这不是它的漏**——它比的是 kind 的集合，不读 `effect()`，域与这条变异不相交（**不要把「它没红」读成夹具没造对**）；
+- 把**非像清单**里的某一枚换成像里的一枚（例如把 `Github(GithubAction::CreatePr)` 写成 `Email(EmailAction::Send)`）；预期 `the_two_lists_are_disjoint` 红。**这一条才是那条用例的守卫**（前一条变异打不到它）。**这三条里第二条是承重守卫（「该给 `None` 的臂」那一侧），须走全量套件。**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
@@ -208,8 +213,9 @@ dev-dep `tokio` / `trybuild` / `continuum-persist` / `tempfile` **由需要它�
     ("continuum-connector", &["continuum-capability", "continuum-core", "continuum-secrets"]),
 ```
 
-workspace 的 `members` 加 `"crates/continuum-connector"`。**`continuum-provider`（Task 4）与
-`continuum-effect`（Task 5）以及 dev 边（Task 5）都不在本步登记。**
+workspace 的 `members` 加 `"crates/continuum-connector"`。**`continuum-provider`、`continuum-effect`
+与三条 dev 边（`tokio` / `continuum-persist` / `tempfile`）都不在本步登记**——它们分别由 Task 4
+（provider ＋ tokio ＋ persist ＋ tempfile）与 Task 5（effect）各自登记，**登记在用到它的那个 task 里，不提前也不推后**。
 
 - [ ] **Step 2: 写用例**
 
@@ -237,6 +243,13 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-connector --test register
 /// 字段**只有这两个**：没有 `EffectType`——效应是**推出来的**（由 `CapabilityKind::effect`
 /// 给出），不是声明的（设计 §3.2 第 4 条）。这条「写不出来」由 Task 6 的编译失败样例钉。
 pub struct OpBinding { op: ConnectorOp, kind: CapabilityKind }
+
+impl OpBinding {
+    /// **必须有这个公开构造入口**：连接器作者（以及本 crate 的集成测试，它们在 crate 外）
+    /// 要在 `bindings()` 里造出绑定，而字段私有、无构造函数会让 `ConnectorImpl` 实现不了。
+    /// 没有可校验的东西（两个入参各自的构造期校验已在它们自己的类型上做过），故不返回 `Result`。
+    pub fn new(op: ConnectorOp, kind: CapabilityKind) -> Self;
+}
 
 /// 连接器作者实现的是本 trait（§4.5 有它为什么不是 §124 那个）。`Send + Sync` 与 §124 的
 /// `Connector` 同要求，因为适配器要把实现放进一个满足 `Connector` 的类型里。
@@ -271,7 +284,10 @@ impl ConnectorRegistry {
 ```
 
 本 task 的 `ConnectorError` **只有本 task 有产生方的那两个变体**（`UnboundOperation` /
-`UndeclaredBoundOperation`）——**没有产生方的变体不建**（设计 §6.1）；其余六条由后续 task 增量加。
+`UndeclaredBoundOperation`）——**没有产生方的变体不建**（设计 §6.1）；**其余八条**（`DuplicateKindBinding` /
+`OperationServiceMismatch` 在 Task 3，`UnknownConnector` / `UndeclaredOperation` / `AuthorizationMismatch` /
+`Credentials` / `Provider` 在 Task 4，`EffectAuthorizationRequired` 在 Task 5）由后续 task 增量加。
+**这个数是设计 §6.1 那十行减去本 task 的两行**，改一处要跟着扫这里。
 
 **绑定的存放**：`ConnectorOp` 只有 `Hash` / `Eq`，**没有 `Ord`**（`crates/continuum-core/src/connector.rs:26`），
 故存放容器用 `HashMap`（或按注册顺序的 `Vec`），**不要**写 `BTreeMap`。
@@ -338,9 +354,9 @@ git commit -m "feat(connector): 一一绑定与服务半边相符"
 **Files:**
 - Create: `crates/continuum-connector/src/{entry.rs,adapter.rs}`
 - Modify: `crates/continuum-connector/src/{lib.rs,error.rs,registry.rs}`
-- Modify: `crates/continuum-connector/Cargo.toml`（加 `continuum-provider`）
-- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-connector` 条目加 `continuum-provider`）
-- Create: `crates/continuum-connector/tests/invoke.rs`
+- Modify: `crates/continuum-connector/Cargo.toml`（加 `continuum-provider`；dev 加 `tokio`、`continuum-persist`、`tempfile`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-connector` 条目加 `continuum-provider`、`continuum-persist`）
+- Create: `crates/continuum-connector/tests/{invoke.rs,audit.rs}`
 
 **Interfaces:**
 - Consumes: Task 2/3 的 `ConnectorRegistry`、Task 1 的 `CapabilityKind::effect`、既有的 `continuum_secrets::{SecretsRuntime, SecretsError, SecretMaterial}`、`continuum_capability::AuthorizedEffect`、`continuum_provider::Connector`
@@ -350,29 +366,50 @@ git commit -m "feat(connector): 一一绑定与服务半边相符"
 
 - [ ] **Step 1: 加依赖边**
 
-`Cargo.toml` 加 `continuum-provider`（适配器实现 §124 的 `Connector`）；dev-dep 加 `tokio`（`#[tokio::test]`）。
-`ALLOWED` 的 `continuum-connector` 条目加 `"continuum-provider"`。**两处一起改**——那张表的断言是逐对 `assert_eq!`。
+`Cargo.toml` 加 `continuum-provider`（适配器实现 §124 的 `Connector`）；dev-dep 加 `tokio`（`#[tokio::test]`）、
+`continuum-persist` 与 `tempfile`（**Step 4 的 `tests/audit.rs` 要用它们开库、读 `audit_log`**）。
+`ALLOWED` 的 `continuum-connector` 条目加 `"continuum-provider"` 与 `"continuum-persist"`。
+**两处一起改**——那张表的断言是逐对 `assert_eq!`。
 
-- [ ] **Step 2: 写用例（第一组：拒绝面）**
+> **dev 边必须在用到它的那个 task 里加，不能推给后面的 task**：Step 5 就要跑 `--test audit`，
+> 少了这条边那一步**编译不过**（不是「断言红」，是压根跑不起来）。`cargo tree --edges all`
+> 把 dev 边算进依赖，故 `ALLOWED` 也要同时登记（设计 §7.3 已写明「但有一条 dev 边必须有：
+> `continuum-connector → continuum-persist`」，理由与 C 的 `persist` dev 边同）。
 
-- `an_unregistered_connector_is_rejected`：请求一个没有注册的服务半边 → `ConnectorError::UnknownConnector { connector }`。
-- `an_undeclared_operation_is_rejected`：假连接器声明 `{Email.send}`，请求 `Email.draft` → `UndeclaredOperation { connector, op }`。
-- `a_presented_capability_of_another_kind_is_rejected`：绑定 `Email(Send)`，出示 `Filesystem(Read)` 的那枚能力经 `AuthorizedEffect` 包好 → `AuthorizationMismatch { op, bound, presented }`（三个字段逐字比）。
-- **上三条各自都要断言「实现未被调用」**：假实现记录 `invoke_with` 的调用次数，断言为 `0`（设计 §9、§10：四步都在**调用实现之前**）。
+- [ ] **Step 2: 写夹具与用例（第一组：拒绝面）**
+
+**夹具（两个连接器注册进同一个注册表）**——服务半边必须与连接器自己的 id 相等（Task 3 的核对），
+故两个操作分属两个服务时**不能塞进同一个连接器**：
+
+| id | 声明并绑定 | 用途 |
+|---|---|---|
+| `GitHub` | `GitHub.push_branch` → `Git(GitAction::Push)` | 成功臂 ＋ 设计 §3.4 照片 1 的那一对（`GitHub.push_branch` 绑的是 `Git(Push)`——resource 是 `git` 不是 `github`，**这不是错**，注释要写明） |
+| `Email` | `Email.send` → `Email(EmailAction::Send)` | kind 不符、能力已失效、`EffectAuthorizationRequired`（Task 5）几条 |
+
+两个假实现各记录 `invoke_with` 的调用次数。
+
+- `an_unregistered_connector_is_rejected`：请求一个没有注册的服务半边（如 `Slack.post`）→ `ConnectorError::UnknownConnector { connector }`。
+- `an_undeclared_operation_is_rejected`：`Email` 声明 `{Email.send}`，请求 `Email.draft` → `UndeclaredOperation { connector, op }`。
+- `a_presented_capability_of_another_kind_is_rejected`：`Email` 那条的绑定是 `Email(Send)`，出示**另一条真在像里的效应**包出的 `AuthorizedEffect` → `AuthorizationMismatch { op, bound, presented }`（三个字段逐字比）。
+  **出示值必须是一枚真包得进 `AuthorizedEffect` 的能力**：`AuthorizedEffect::new` 会核对 `capability.kind() == for_effect(effect)`（`crates/continuum-capability/src/effect.rs:55-65`），而 `for_effect` 的像里**没有 `Filesystem(Read)`**——故「出示一枚 `Filesystem(Read)` 的能力」那种写法**构造不出来**。本例取 `Charge` → `Payment(PaymentAction::Charge)`（在像里、且与 `Email(Send)` 不等），断言 `presented == Payment(Charge)`、`bound == Email(Send)`。
+- **上三条各自都要断言「实现未被调用」**：两个假实现的调用次数都断言为 `0`（设计 §9、§10：四步都在**调用实现之前**）。
 
 - [ ] **Step 3: 写用例（第二组：成功路径与凭据）**
 
-- `a_bound_operation_with_the_matching_capability_reaches_the_implementation`：**对照臂**——实现被调用**恰一次**，返回值就是实现给出的那个 `Value`。
-- `the_credential_carries_the_scope_of_the_presented_capability`：出示能力的 scope 是 `repo/X` → 实现收到的材料的来源作用域就是 `repo/X`。**做法**：凭据源是文件源，只登记 `repo/X` 一条；**另加一条对照**——把出示能力的作用域改成 `repo/Y`（源不覆盖）→ `Credentials(SecretsError::ScopeNotCovered { .. })`（**断言是这一种**）。
+- `a_push_branch_operation_reaches_the_implementation`：**对照臂**——`GitHub.push_branch` 出示 `for_effect(PushBranch)` 包出的 `AuthorizedEffect` → 实现被调用**恰一次**，返回值就是实现给出的那个 `Value`。**这条同时补上设计 §3.4 照片 1 的「一次成功调用」那一半**（Task 3 只落了它的注册那一半；另一半此前没有落点，见「遗留」第 16 条）。
+- `the_credential_carries_the_scope_of_the_presented_capability`（**效应臂**；非效应臂的同形用例在 Task 5）：出示能力的 scope 是 `repo/X` → 实现收到的材料取自 `repo/X`（文件源只登记这一条）。**另加一条对照**：把出示能力的作用域改成 `repo/Y`（源不覆盖）→ `Credentials(SecretsError::ScopeNotCovered { .. })`（**断言是这一种**）。
 - `an_expired_capability_cannot_reach_the_implementation`：`expiry` 已过的能力（经 `AuthorizedEffect::new` 包好——它不读时钟）→ `Credentials(SecretsError::Capability(CapabilityError::Expired { .. }))`，且**实现未被调用**。**对照臂**：`expiry - 1` 照常到达（边界的那一格）。
-- `the_material_never_enters_the_input`（设计 §9 末行、§4.5 的否决理由）：假实现把收到的 `material.expose()` 原样回显成返回值的字符串 → 断言**返回值里就是它**（实现可以回显），**而入口交给实现的那个 `input` 里不含它**——假实现把收到的 `input` 也回显，断言两份对不上（材料只在**带外参数**里）。这条钉的是「适配器不把材料放进 `input`」。
+- `the_material_never_leaves_through_the_return_value`（设计 §9 末行；本计划按 §4.5 的口径定写，订正记入「遗留」第 15 条）：假实现把**它收到的 `input`** 原样回显成返回值 → 断言 **B 的返回值里不含材料**（材料从不进 `input`，故「回显 `input`」的返回值里也没有它）。
+  **必须带一条对照臂**：假实现**主动**把 `material.expose()` 写进返回值 → 断言材料**出现在返回值里**——**B 不拦这一步**：设计 §4.5 明确否决了「在出口扫材料」那条「手工校验层」（§1.2 点名的最易失效位置）。**没有这条对照臂，上面那条在「适配器把材料塞进了 `input` 而实现没回显」时也会绿。**
 - `a_backend_error_comes_back_as_provider`：假实现返回 `ProviderError::Unavailable("...")` → `ConnectorError::Provider(ProviderError::Unavailable(...))`（**内层变体逐字段断言**，不只断言 `Err`）。
 
 - [ ] **Step 4: 写用例（第三组：否定照片——不写审计）**
 
 `tests/audit.rs`（**与 `tests/invoke.rs` 分开**：它要一个真数据库，其余用例不要）：
-- 起一个临时库（`builtin_migrations()`，`audit_log` 表来自那里），记下 `SELECT COUNT(*) FROM audit_log`；跑一次**成功**的连接器调用；再记一次——**两次相同**。
-- 对照臂：走一次会写审计的既有路径（`continuum_capability::authorize` 的成功分支——它写一条 `AuditKind::CapabilityGrants`），断言行数**加一**。**没有这条对照臂，上面那条在「表根本没建起来」时也会绿。**
+- `a_successful_connector_call_does_not_write_an_audit_row`：起一个临时库（`builtin_migrations()`，`audit_log` 表来自那里），记下 `SELECT COUNT(*) FROM audit_log`；跑一次**成功**的连接器调用；再记一次——**两次相同**。
+- `the_control_arm_writes_exactly_one_audit_row`：**对照臂**——走一次会写审计的既有路径（`continuum_capability::authorize` 的成功分支，它写一条 `AuditKind::CapabilityGrants`），断言行数**恰加一**。
+  **这条对照臂的库要多带一件东西**：`p3_capability_migrations()`（`tool` 表）＋ 一条 `save_tool` 登记项 ＋ 与它相配的出示能力——少了这些，`authorize` 会报 `UnknownTool`（不写审计行），**对照臂就以「行数没变」的方式绿了**，而它恰恰是来证「这里本来写得进一行」的。夹具照 `crates/continuum-capability/tests/authorize.rs` 的 `db()` / `profile()` 写。
+  **没有这条对照臂，上面那条在「表根本没建起来」时也会绿。**
 
 > **这条照片的强度要写准**：B 的入口**没有任何数据库句柄**（`ConnectorRegistry` 不持有 `Tx`、`Db`），故行数不变是**结构性的**，不是「本可以用另一条路径写而这次没写」。它的价值在于把「B 不重记 §313 的两项」这条**决定 B-5** 钉成一个可执行判据（设计 §6.2）。
 
@@ -409,10 +446,11 @@ impl ConnectorRegistry {
 }
 ```
 
-**`now` 为什么是入参**：`issue` 与 `material` 都要它（`crates/continuum-secrets/src/runtime.rs:176`、`:238`），
+**`now` 是入参，且入口内的两次判定共用同一个 `now`**（设计 §5.1 现已如此写，裁决 B2）：
+`issue` 与 `material` 都要它（`crates/continuum-secrets/src/runtime.rs:176`、`:238`），
 而本项目的既有约定是「核不收时钟、`now` 由调用方给」（`Capability::is_valid_at` 的文档；
-`continuum-secrets` 的 `CredentialSource` 同）。**设计 §5.1 的形状示意里没有它**——那是示意块，
-本节按既有约定补上，并记入「遗留」第 14 条供复核。
+`continuum-secrets` 的 `CredentialSource` 同）。**入口自己不取第二个时钟**——两次判定各取一次，
+「签发时未过期、取料时已过期」那一格就会被抹掉，而它正是 §103 与 §51 要看得见的那一格。
 
 **凭据路径**（设计 §4.1）：核对全过 → `SecretsRuntime::issue(出示的那枚能力, now)` →
 `SecretsRuntime::material(&cred, now)` → 构造**逐次存活的适配器** → 对它调用 §124 的 `Connector::invoke`。
@@ -425,18 +463,19 @@ impl ConnectorRegistry {
 `SecretMaterial` 只在 `invoke_with` 的带外参数里出现，**绝不进 `input`**（设计 §4.5 的否决理由：
 `input` 是 `serde_json::Value`，实现可以原样回显到返回值，而返回值会流向 Artifact / Journal / 审计）。
 
-**`ConnectorError` 本 task 加四个变体**（各有产生方，见上）：`UnknownConnector` /
+**`ConnectorError` 本 task 加五个变体**（各有产生方，见上）：`UnknownConnector` /
 `UndeclaredOperation` / `AuthorizationMismatch` / `Credentials(#[from] SecretsError)` /
-`Provider(#[from] ProviderError)`。**`Provider` 独立于 `Credentials`**：后端不可用与凭据拿不到是两回事，
+`Provider(#[from] ProviderError)`（**数一下：五个**——设计 §6.1 的十行里，注册期四条已在 Task 2/3 落地，
+`EffectAuthorizationRequired` 在 Task 5 落地，余下五条在此）。**`Provider` 独立于 `Credentials`**：后端不可用与凭据拿不到是两回事，
 并成一个变体会让「凭据被拒」这条路径上的消息说一件不真的事（设计 §6.1）。`Credentials` **不展开**
 `SecretsError` 的八个变体（再抄一层就会与它漂移），「是哪一种失败」由内层变体给出。
 
 - [ ] **Step 7: 变异与全量验证**
 
 逐条守卫做变异，**每条独立日志路径**：
-- 第 4 步的 `==` 改成 `!=`（承重守卫，走全量）：预期 `a_presented_capability_of_another_kind_is_rejected` 红；
+- 第 4 步的 `==` 改成 `!=`（承重守卫，走全量）：预期 `a_presented_capability_of_another_kind_is_rejected` 红，且 `a_push_branch_operation_reaches_the_implementation` 也红（它出示的 kind 与绑定相等，`!=` 会把它一并拦下——**两条一起红才是这两条守卫都在靶上的证据**）；
 - `issue` 的返回值改成 `material` 之前先丢弃（即把「先签发再取料」改成「只取料」）——**这条预期编译不过，故按纪律 1(c) 不算「变红」，改用**：把 `issue` 收到的那枚能力换成 `authorization.capability()` 之外的某一枚固定 kind 的能力（**等价性先自检**：举不出哪个入参上两版结果不同就换真变异体）；
-- 把适配器改成把 `material` 也塞进 `input`：预期 `the_material_never_enters_the_input` 红；
+- 把适配器改成把 `material` 也塞进 `input`：预期 `the_material_never_leaves_through_the_return_value` 红（**它正是为这一条变异写的**——材料一旦进了 `input`，实现「回显 `input`」就会把它带进返回值）；
 - 把 `ProviderError` 吞成 `Ok(Value::Null)`：预期 `a_backend_error_comes_back_as_provider` 红。
 
 ```bash
@@ -451,8 +490,8 @@ git commit -m "feat(connector): 入口的核对、凭据签发与逐次调用的
 
 **Files:**
 - Modify: `crates/continuum-connector/src/{error.rs,entry.rs,lib.rs}`
-- Modify: `crates/continuum-connector/Cargo.toml`（加 `continuum-effect`；dev 加 `continuum-persist`、`tempfile`）
-- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`continuum-connector` 条目加 `continuum-effect`、`continuum-persist`）
+- Modify: `crates/continuum-connector/Cargo.toml`（加 `continuum-effect`；**dev 依赖本 task 无新增**——`tokio` / `continuum-persist` / `tempfile` 已在 Task 4 加过）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`continuum-connector` 条目加 `continuum-effect`）
 - Modify: `crates/continuum-connector/tests/invoke.rs`
 
 **Interfaces:**
@@ -461,9 +500,14 @@ git commit -m "feat(connector): 入口的核对、凭据签发与逐次调用的
 
 - [ ] **Step 1: 写用例**
 
-- `a_non_effect_operation_is_reached_with_a_presented_capability`：假连接器有一个**非效应**操作（绑 `Filesystem(FsAction::Read)`）→ 出示该 kind 的裸 `Capability` → 实现被调用。**这条证明的是臂的机制**，**不是**「§125 的读操作已经被表达」——词汇表里今天**没有**与 `GitHub.read_repo` 语义相配的 kind（设计 §3.4、§11 第 3 条），用例注释要写明这一点。
+**夹具**：在 Task 4 那两个连接器（`GitHub` / `Email`）之外再加**第三个**——id `Filesystem`、
+声明并绑定 `Filesystem.read` → `Filesystem(FsAction::Read)`（**服务半边必须等于连接器 id**，
+这是 Task 3 的核对；绑一枚不在 `for_effect` 像里的 kind 才拿得到非效应臂）。下面前三条用它。
+
+- `a_non_effect_operation_is_reached_with_a_presented_capability`：出示该 kind 的裸 `Capability` → 实现被调用。**这条证明的是臂的机制**，**不是**「§125 的读操作已经被表达」——词汇表里今天**没有**与 `GitHub.read_repo` 语义相配的 kind（设计 §3.4、§11 第 3 条），用例注释要写明这一点。
 - `an_effect_operation_presented_with_a_bare_capability_is_rejected`（**第 3 步、fail-open 的那一侧**）：绑定 kind 落在 `for_effect` 的像里（如 `Email(Send)`），出示**同一枚 kind** 的非效应臂 → 断言 `ConnectorError::EffectAuthorizationRequired { op, effect }`，`effect` 是 `EffectType::SendEmail`（逐字比），**且实现未被调用**。**注意这条用例必须让出示的 kind 恰好等于绑定的 kind**——否则第 4 步会先拦下来，本变体就拿不到照片（设计 §5.3 的两行表）。
 - `the_reverse_mismatch_is_caught_by_the_fourth_step_not_the_third`（**两个方向各一条**）：绑定 kind **不**在像里（`Filesystem(Read)`），出示效应臂（kind 必在像里）→ 断言 `AuthorizationMismatch`，**而不是** `EffectAuthorizationRequired`——那一条的 `effect` 字段在绑定 kind 不在像里时**没有值可填**（设计 §5.3）。
+- `the_credential_carries_the_scope_of_the_presented_capability_on_the_non_effect_arm`：**非效应臂的作用域照片**（设计 §9 那一行要「**两条臂各一条**」；效应臂那条在 Task 4）——出示的裸 `Capability` 的 scope 是 `repo/X`，断言凭据的作用域（即实现收到的材料所取自的作用域）就是 `repo/X`；**对照臂**：把出示能力的作用域改成源不覆盖的 `repo/Y` → `Credentials(SecretsError::ScopeNotCovered { .. })`。**这条不是重复**：两臂那枚能力的**来源不同**（效应臂由驱动铸、非效应臂由调用方铸），故两条各要自己的照片。
 - `an_expired_capability_on_the_non_effect_arm_is_rejected`：过期能力经**非效应臂** → `Credentials(SecretsError::Capability(CapabilityError::Expired { .. }))`。**能力已失效这一条两条臂各一次**（设计 §9）。
 - `every_variant_of_secrets_error_survives_the_conversion`：对 `SecretsError` 的八个变体逐项断言 `ConnectorError::from(e)` 之后内层仍是**原来那一个**（`Superseded` / `ForeignCredential` 也在内）。**这条照片的强度要写准**：它钉的是「转出即保留内层变体」，**不是**「入口路径上这八个都出现过」——`Superseded` 与 `ForeignCredential` 经入口**不可达**（见「遗留」第 5 条）。
 
@@ -537,8 +581,10 @@ git commit -m "feat(connector): 非效应臂与入口第 3 步"
   **这条样例钉住的是哪一件事，要说准**（设计 §5.1）：它只钉「`Effect` 变体的字段类型是 `AuthorizedEffect`」，
   **钉不住**「效应型操作不得用裸能力驱动」——后者是**运行期**核对（Task 5 第 3 步），
   它的照片是 `EffectAuthorizationRequired` 那一条。**不要把两者混为一谈。**
-- `op_binding_has_no_effect_field.rs`：给 `OpBinding` 指定一个 `effect` 字段 —— **不编译**。
+- `op_binding_has_no_effect_field.rs`：**先 `OpBinding::new(op, kind)` 造出一条绑定，再对它写 `binding.effect = …`** —— **不编译**（`E0609`：`no field \`effect\` on type \`OpBinding\``）。
   这条钉的是「效应是推出来的、不是声明的」（设计 §3.2 第 4 条、§9）。
+
+  **样例的形状是刻意的，判别力不如表面看上去那么强，要写准**：`OpBinding` 的字段是**私有**的，故**任何**外部结构体字面量（`OpBinding { op, kind }`）都编译不过，而 rustc 报的很可能是**隐私错误**（`E0603`，或「cannot construct with struct literal syntax due to private fields」）而不是「没有 `effect` 字段」——那样这条样例就分不出「效应是推出来的」与「外部构造不出 `OpBinding`」，**声称钉住的东西其实没钉住**。故本样例走**字段赋值**那条路（它只碰字段名，不碰可见性），并且 **`.stderr` 必须是 `E0609` / `no field \`effect\``**；**若生成出来的 `.stderr` 是隐私错误，这条样例按现形状不算数**，须换一条不落在可见性上的写法（例如断言 `OpBinding` 的公开构造入口只收两个入参：`OpBinding::new(op, kind, effect)` 报「参数个数不符」）。
 
 `tests/type_level.rs` 用 `trybuild::TestCases::new().compile_fail("tests/compile_fail/*.rs")` 驱动（与 `continuum-capability` / `continuum-secrets` 的 `tests/type_level.rs` 同形——**照那两处写，不要另发明一种驱动方式**）。
 
@@ -549,13 +595,17 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-connector --test type_lev
 ```
 
 首次运行会生成/比对 `.stderr`：**生成出来的那份要人读一遍**（`TRYBUILD=overwrite` 只生成，不校对），
-确认它报的是「类型不符」或「没有这个字段」，而**不是**本 crate 里别的拼写错误。
+确认它报的是**上面逐条指定的那一个**（第一份＝类型不符，第二份＝`E0609` 没有 `effect` 字段），
+而**不是**本 crate 里别的拼写错误或隐私错误。
 
 - [ ] **Step 3: 变异与全量验证**
 
-把 `ConnectorAuthorization::Effect` 的字段类型换成 `Capability`：预期**两份样例的编译结果变化**
-——第一份**不再失败**（用例红），第二份不受影响。**这一条的判据是「编译失败」而不是「test failed」**
-（纪律 1(c)）：读日志时看 `could not compile`。
+- 把 `ConnectorAuthorization::Effect` 的字段类型换成 `Capability`：预期**第一份样例不再失败**（用例红），第二份不受影响；
+- 给 `OpBinding` **加上**一个公开的 `effect: Option<EffectType>` 字段：预期**第二份样例不再失败**（用例红）。
+  **这一条同时是它的判别力自检**——若加了字段它仍「失败」，说明它红在**别的原因**上（隐私、拼写），
+  **那条样例就没在钉它声称的东西**。
+
+**这两条的判据是「编译失败」而不是「test failed」**（纪律 1(c)）：读日志时看 `could not compile`。
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
@@ -749,12 +799,12 @@ git commit -m "docs: P3 子项目 B 的收尾与复核"
    别的仓库」都没有照片。假连接器只能钉门，钉不了门后的东西。
    收件人：长期阶段。
 
-10. 设计 §3.3 第 2 条列举「非像的 kind」时漏了 Filesystem(Write)
-    它列了五枚（Filesystem(Read)、Git(Read)、Git(WorktreeWrite)、Git(CommitLocal)、Github(CreatePr)），
-    而十二枚 kind 里非像的有**六枚**——漏的那一枚是 Filesystem(FsAction::Write)，它在 for_effect 里
-    同样没有对应项（EffectType 六项里没有文件写入）。**本计划按十二枚的全集写 Task 1 的用例**
-    （只列那五枚会让 FileSystem(Write) 的臂漂移而无人发现）。
-    收件人：设计（订正 §3.3 的列举）。
+10. **已闭（裁决 B1）**：设计 §3.3 第 2 条初稿列举「非像的 kind」时只写了五枚、漏了 Filesystem(Write)
+    十二枚 kind 里非像的有**六枚**，漏的那一枚是 Filesystem(FsAction::Write)。**设计现已逐枚列全**
+    （含一句「这一句初稿只列了五枚」的来历），故本条的**现在时陈述与收件人都已不成立**。
+    **本计划按那六枚写 Task 1 的用例**（只列五枚会让 Filesystem(Write) 的臂漂移而无人发现）。
+    留格是为了让「一处数量断言漏项是如何被查出的」可查。
+    收件人：无（已闭）。
 
 11. 空 ConnectorId 与「以 . 开头的操作」这条缝未议
     ConnectorId::new 不拒空串（crates/continuum-core/src/connector.rs:14），而 ConnectorOp::new(".x") 合法
@@ -762,24 +812,49 @@ git commit -m "docs: P3 子项目 B 的收尾与复核"
     并通过服务半边核对。规范未议此情形，**本计划不发明一条核对**，据实记此。
     收件人：规范 / continuum-core（要不要在 ConnectorId 的构造期拒空串）。
 
-12. 设计 §7.3 说「不新增 continuum-connector → continuum-persist」，而 §9 的「不写审计」照片要裸查表
-    那张照片必须读 audit_log 的行数，故本计划加了**dev 边**（continuum-persist ＋ tempfile，Task 5），
-    并登记进 ALLOWED（本仓的 ALLOWED 覆盖 dev 边，followups §四.1）。**normal 边不新增**，
-    与 §7.3 的意图一致；两处字面上的相抵记此。
-    收件人：设计（§7.3 补一句「dev 边除外」）。
+12. **已闭（裁决 B4）**：设计 §7.3 曾写「不新增 continuum-connector → continuum-persist」，
+    而 §9 的「不写审计」照片要裸查 audit_log 的行数
+    那张照片必须读表，故**必须**有一条 dev 边。**设计 §7.3 现已写明**「但有一条 dev 边必须有：
+    `continuum-connector → continuum-persist`（dev-dependency）」，并给了理由（主依赖不落库、
+    测试夹具要读库）、点明 `ALLOWED` 必须覆盖它（`cargo tree --edges all` 含 dev）。
+    **「两处相抵」这个陈述已不成立**；本计划在 **Task 4 Step 1** 登记这条 dev 边与 `ALLOWED` 条目
+    （**登记在用到它的那个 task，不能推后**——Task 4 Step 5 就要跑 `--test audit`）。
+    留格是为了让这处相抵是怎么合的、以及「dev 边也会被 `ALLOWED` 抓」这条判据可查。
+    收件人：无（已闭）。
 
 13. 效应是推出来的、不是声明的这一条，除了 Task 6 的编译失败样例，没有别的照片
     OpBinding 上没有 EffectType 字段可填（编译期），而「连接器声明了 EffectType」这件事在类型上
     根本不存在——故不存在可照的反面。据实标明。
+    （**该样例的判别力有限、形状是刻意的**：字段私有会让**任何**外部字面量都编译不过，
+    故样例走字段赋值那条路，判据是 `.stderr` 报 `E0609` 而非隐私错误，见 Task 6 Step 1。）
     收件人：无。
 
-14. 入口的 now 是入参，而设计 §5.1 的形状示意里没有它
+14. **已闭（裁决 B2；本条由 plan-b 查出）**：入口的 now 曾是入参而设计 §5.1 的签名里没有它
     §4.1 的流程要 issue(cap, now) 与 material(&cred, now)，而本项目的既有约定是「核不收时钟、
-    now 由调用方给」（Capability::is_valid_at 与 CredentialSource 的文档同）。本计划按约定补上入参，
-    并把 §5.1 的示意块视为示意（该块自己写着「形状示意，不是实现」）。
-    收件人：设计（§5.1 的签名补上 now，或明写入口读时钟——后者与既有约定相抵，需理由）。
+    now 由调用方给」（Capability::is_valid_at 与 CredentialSource 的文档同）。
+    **设计 §5.1 现已把 now 写进签名**，并写明「入口不收时钟」与「入口内的两次判定共用同一个 now」
+    （各取一次会抹掉「签发时未过期、取料时已过期」那一格）。本计划 Task 4 Step 6 按那一版写。
+    留格是为了让「计划查出、裁决改设计」这条来往可查。
+    收件人：无（已闭）。
 
-15. CAPABILITY_LIFETIME_MS 的数值无规范来源（设计 §11 第 6 条），且「铸出 → issue」之间由谁引入间隔未定
+15. **设计 §9 末行与 §4.5 相抵，本计划取 §4.5 的口径**（计划侧订正，设计未改）
+    §9 末行写「假实现把收到的材料原样回显 → B 的返回值里**不含**它」；而 §4.5 明确否决
+    「在出口扫材料」（那是 §1.2 点名的「手工校验层」）。两条不可能同时为真：实现若**主动**把材料写进
+    返回值，B 不拦也不该拦。故本计划的照片钉在**可证的那一半**上——**材料不进 `input`**
+    （实现「回显它收到的 `input`」时，返回值里因此不含材料），并带一条对照臂把「实现主动回显」那一侧
+    照出来（Task 4 Step 3 的 the_material_never_leaves_through_the_return_value）。
+    **错误说法的来历留在原地**（纪律：订正时不删原句）。
+    收件人：设计（§9 末行要么按 §4.5 改写，要么说明谁来扫出口）。
+
+16. **设计 §3.4 照片 1 的「一次成功调用」那一半此前没有落点**
+    照片 1 要求 Email.send→Email(Send) 与 GitHub.push_branch→Git(Push)「各一条注册 + **一次成功调用**」；
+    设计 §9 的测试表里只有「两条臂的强度」那一条涉及成功调用，且用的是别的 kind。
+    本计划把成功调用那一半补在 **Task 4 Step 3 的 `a_push_branch_operation_reaches_the_implementation`**
+    （那正是照片 1 的那一对），另由 Task 5 的非效应臂用例覆盖臂的机制。**若设计判定「一对即可」，
+    这条可标为不必补**——本计划不替设计判，据实记此。
+    收件人：设计（照片 1 是否需要两对各自成立）。
+
+17. CAPABILITY_LIFETIME_MS 的数值无规范来源（设计 §11 第 6 条），且「铸出 → issue」之间由谁引入间隔未定
     Task 4 的 Expired 用例自己造过期能力（不依赖那个常量），故本计划不押注它的数值。
     收件人：子项目 B 的实现（首次接上生产路径时核这个数）。
 ```

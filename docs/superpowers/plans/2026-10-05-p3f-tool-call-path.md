@@ -28,7 +28,7 @@
 
 ## 前置：本计划硬依赖子项目 C 的交付
 
-**执行序是串行 `B → D → C → F`，F 在最后。** 下列产物由 **C** 出，**在 C 落地之前本计划从 Task 4 起编不过**：
+**执行序是串行 `B → D → C → F`，F 在最后。** 下列产物由 **C** 出，**在 C 落地之前本计划从 Task 3 起编不过**：
 
 | C 的交付 | 用在哪 |
 |---|---|
@@ -39,13 +39,13 @@
 | `continuum_core::tool::ToolInvocation` **已删**、`crates/continuum-provider/tests/fake_provider.rs` 已同批改 | 全仓不再有第二个请求类型 |
 | `continuum-provider` 的 `ALLOWED` 条目改为三元素 | 与 `Cargo.toml` 精确一致 |
 
-**Task 1–3 不依赖 C**（`save_tool` 不变量、lib 化、CLI 解析面）；**Task 4 起硬依赖 C**。
+**Task 1–2 不依赖 C**（`save_tool` 不变量、lib 化）；**Task 3 起硬依赖 C**。
 执行者开工前须先确认：`crates/continuum-provider/src/registry.rs` 与 `src/tool.rs` 已存在，
 且 `grep -rn ToolInvocation crates/` **零命中**。
 
 B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁移 80/81 与 `main.rs`／
 `tests/migrations.rs`／`tests/startup.rs` 的连带改）**在本计划开工时已经落地**——F 只做收口复核
-（Task 10），不重复它们。
+（Task 9），不重复它们。
 
 ---
 
@@ -61,8 +61,9 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
   夹具适配器要实现 `#[async_trait]` 标注的 `continuum_provider::ToolProvider`，而 Rust 要求 `impl` 侧同样
   标注该宏（`continuum-provider` 自己的 `tests/fake_provider.rs` 就是这么写的）。`async-trait` 是**外部**
   crate，已在 `Cargo.lock` 与 workspace 依赖表里，故 **`ALLOWED` 不受影响、`Cargo.lock` 也不变**。
-  **设计侧「`Cargo.toml` 不动」这句因此有一处例外**，据实记在此处，不假装它没发生。
-- 迁移：**本子项目不建表、不取号。** `runtime_migrations()` 里属于 F 的注册**一条都没有**（Task 10 只复核
+  这条 dev 边已据实记在设计 §3.2 与 §10.1（该处的原文是「`Cargo.toml` 的**内部依赖清单**不动」，
+  与 dev 边的这条例外不冲突）。
+- 迁移：**本子项目不建表、不取号。** `runtime_migrations()` 里属于 F 的注册**一条都没有**（Task 9 只复核
   合并结果）。B/D 已取的号（D 的 80／预留 81）不在本计划里复核——**「未占用」按库判**，且那是 D 的活。
 - `continuum-runtime` 不直接对枚举列写 SQL 字面量；审计 `kind` 列的比较在**用例**里手写字面量
   `"capability grants"` / `"external effects"`（钉格式），生产代码取 `AuditKind::as_str`。
@@ -85,8 +86,8 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
    `error: test failed, to rerun pass …`，故判「编译失败」要用 `could not compile` 或 `error[E….`。
 2. **凡注释写绝对措辞，必须有对应用例**；写不出的就改成名副其实的说法，或**明写它为什么没有照片**。
    **枚举式绝对断言须逐项有照片**——本计划有两处这类断言：设计 §5.3「六个无 `EffectType` 对应的 kind
-   在本路径上**一律** `MissingCapability`」（Task 5 逐项一条）、设计 §12.1「命令路径**不过**强制点 (1)」
-   （Task 9 的 P-19）。**改完一处枚举，通读整段。**
+   在本路径上**一律** `MissingCapability`」（Task 4 逐项一条）、设计 §12.1「命令路径**不过**强制点 (1)」
+   （Task 8 的 P-19）。**改完一处枚举，通读整段。**
 3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。本计划里凡是 `TaskError` 的出口，
    用例一律断言到**变体**（`TaskError::Capability(CapabilityError::UnknownTool { .. })` 这一层）。
 
@@ -104,7 +105,7 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
 
 本项目的既有事实：**手写的计划代码块错误率很高**（P1 出过 20+ 处事实错误），且已确立「**代码块是示意，
 正文的措辞才是约束**」。故本计划只给**签名、错误变体与关键判定**，不给整段可粘贴实现；凡与既有 crate
-交互的签名（`Tx` / `Db` / `audit_log` 列 / `PolicyContext` 字段 / `EffectSpec` / `Advance`／
+交互的签名（`Tx` / `Db` / `audit_log` 列 / `PolicyContext` 字段 / `EffectSpec` / `advance`／
 `record_planned` 的形状），**实现前须先读该 crate 的源码确认**，不符时以源码为准并回报。
 **导入清单是重灾区**：本计划不列 `use` 行，实现者按实际源码补。
 
@@ -131,13 +132,13 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
 crates/continuum-runtime/
   Cargo.toml                 dev-dependencies 加 async-trait（唯一一处改动）
   src/lib.rs                 新增 pub mod error / pub mod tool_call / pub mod sandbox_select，再导出 TaskError
-  src/error.rs               新建（lib）：`TaskError` 从 task_cmd.rs 原样搬来
+  src/error.rs               新建（lib）：`TaskError` 从 task_cmd.rs 原样搬来；Task 3 起加两个包装变体
   src/tool_call.rs           新建（lib）：now_millis、CAPABILITY_LIFETIME_MS、
                              mint_declared_effects（无事务共享函数）、run_tool_call（工具调用路径）
   src/sandbox_select.rs      从 bin 移进 lib（内容不动，`use` 路径随之改）
-  src/main.rs                去掉 `mod sandbox_select;`；分派 `Command::Tool`
+  src/main.rs                去掉 `mod sandbox_select;`；加 `mod tool_cmd;` 与 `Command::Tool` 的分派臂
   src/task_cmd.rs            TaskError 定义移出；authorize_declared_effects 换成共享函数；open_db 提 pub(crate)
-  src/tool_cmd.rs            新建（bin）：`tool` 子命令的解析结果 → 装配 → 调 lib → 失败映射与退出码
+  src/tool_cmd.rs            新建（bin）：`tool` 子命令的装配、调 lib、失败映射与退出码
   src/cli.rs                 `Command::Tool` / `ToolArgs` / 两个新 CliError 变体 / USAGE
   tests/tool_call.rs         新建：库级用例（夹具适配器经 C 的注册表登记）
   tests/tool_cli.rs          新建：端到端（真实二进制）
@@ -160,7 +161,7 @@ crates/continuum-capability/
 ### Task 1: `save_tool` 的登记期不变量
 
 > **本 task 不依赖 C。** 它关掉的是设计 §5.2 那条「工具做了外部效应却没有效应记录」的洞——
-> 协调者裁决（接缝图第六节第 1 条）把这一步判给 F：**实测今天的 `save_tool` 只是一条裸 `INSERT`，
+> 协调者裁决（接缝图第六节第 1 条）把这一步判给 F。**实测今天的 `save_tool` 只是一条裸 `INSERT`，
 > 不变量并未实现**（`crates/continuum-capability/src/persist.rs:64-88`）。**这是真活，不是照录。**
 
 **Files:**
@@ -184,7 +185,7 @@ crates/continuum-capability/
 - `a_declared_effect_class_covered_by_the_capabilities_is_accepted`：`Some(Charge)` + `[Payment(Charge)]`
   → `Ok`，且读得回来。**方向相反的那一半**：缺了它，一个「恒拒绝」的实现也全绿。
 - `a_tool_without_an_effect_class_may_declare_anything`：`None` + `[]` → `Ok`。**这一条钉的是不变量的
-  射程**：它只管 `Some(t)` 那一侧，`None` 的工具不受约束（设计 §5.2 的不变量形如
+  射程**：它只管 `Some(t)` 那一侧，`None` 的工具不受约束（不变量形如
   `effect_class == Some(t) ⇒ …`，前提不成立时无结论）。
 
 **断言到变体**（纪律 3）：`save_tool` 的返回类型是 `Result<(), PersistError>`，本文件的既有约定是
@@ -197,19 +198,23 @@ crates/continuum-capability/
 
 - [ ] **Step 2: 修正既有夹具的连带面（不修就必然红）**
 
-`crates/continuum-capability/tests/persist.rs` 的 `tool(id, required)` 夹具取
-`effect_class: Some(EffectType::DeleteRemote)`，而 `sample()` 给的 `required_capabilities` 是
-`[Filesystem(Read), Git(WorktreeWrite)]`——**它不含 `Git(DeleteRemote)`，故在本 task 之后必然被拒**。
-受影响的是 `tool_round_trips`、`required_capabilities_round_trip`、`saving_the_same_id_twice_is_rejected`。
+`tests/persist.rs` 的 `tool(id, required)` 夹具（`:32-42`）恒取
+`effect_class: Some(EffectType::DeleteRemote)`，而 `sample()`（`:44-52`）给的 `required_capabilities` 是
+`[Filesystem(Read), Git(WorktreeWrite)]`——`for_effect(DeleteRemote) = Git(DeleteRemote)`（`capability.rs:102`），
+**不含**，故凡经 `sample()` 的 `save_tool` 在本 task 之后必然被拒。**受影响的是四处，逐处给处置**：
 
-处置：**保留 `Some` 那一侧的往返照片**（P3A 的 `tool_round_trips` 注释明写「设计 §10 第 9 条禁止让
-`Some` 一侧不可观察」），故**改夹具的 capability 表而不是把 `effect_class` 改成 `None`**——即在
-`sample()` 与 `required_capabilities_round_trip` 的 `kinds` 里补上 `CapabilityKind::Git(GitAction::DeleteRemote)`，
-并同步更新那条**手写的 JSON 串断言**（`["git_push","filesystem_read","payment_charge","git_push"]`）。
-`insert_raw` 直接写 SQL、不经 `save_tool`，不受影响。
+| # | 用例 | 处置 |
+|---|---|---|
+| 1 | `tool_round_trips`（经 `registered("a")` / `unregistered("b")`） | 在 `sample()` 的 capability 表里补 `CapabilityKind::Git(GitAction::DeleteRemote)`——**保留 `Some` 那一侧的往返照片**（该用例的注释明写「设计 §10 第 9 条禁止让 `Some` 一侧不可观察」），故**不把 `effect_class` 改成 `None`** |
+| 2 | `required_capabilities_round_trip`（`:290-338`） | 前半用 `tool("a", kinds)`：`kinds` 补 `Git(DeleteRemote)`，并同步该用例里那条**手写 JSON 断言**（`:316` 一带，`["git_push","filesystem_read","payment_charge","git_push"]`）。**后半的空表支 `tool("b", vec![])`（`:320-321`）另给处置**：该支的对象正是「空列表往返成空列表」，**补能力会把这一支弄没**，故改成**直接构造**（`effect_class: None` + 空表，与 `pure()` 同法），并在原处写明为何这一支与 `sample()` 的处置不同 |
+| 3 | `saving_the_same_id_twice_is_rejected`（经 `registered("a")`） | 随 `sample()` 一起修好，用例本身不动 |
+| 4 | `enum_columns_use_the_lowercase_encoding`（`:201-263`，`:205` 用 `registered("a")`） | 随 `sample()` 一起修好；**但该用例 `:217` 有第二处手写 JSON 断言**（`["filesystem_read","git_worktree_write"]`），**必须同步**，否则它独自变红 |
+
+`insert_raw` 与 `a_column_of_the_wrong_type_is_rejected` 直接写 SQL、不经 `save_tool`，**不受影响**；
+`tests/authorize.rs` 的 `profile()`（`:29-43`）`effect_class` 为 `None`，**也不受影响**。
 
 **做法**：改完之后 `grep -n "save_tool(" crates/continuum-capability/` **逐处**判断该调用点用的是哪一份
-夹具、是否满足不变量；**不要只改报错的那一条**。
+夹具、是否满足不变量；**不要只改报错的那一条**（上面这张表是点名清单，不是替代品）。
 
 - [ ] **Step 3: 跑，确认失败**
 
@@ -219,7 +224,7 @@ cargo test -p continuum-capability --test persist
 
 - [ ] **Step 4: 实现**
 
-在 `save_tool` 的 `INSERT` **之前**判定（设计 §5.2 的不变量）：
+在 `save_tool` 的 `INSERT` **之前**判定：
 
 ```rust
 /// 登记期不变量（设计 §5.2）：声明了 `effect_class == Some(t)` 的工具，
@@ -268,10 +273,7 @@ git commit -m "feat(capability): save_tool 的登记期不变量（effect_class 
 
 ### Task 2: lib 化与共享函数提取
 
-> **本 task 不依赖 C。** 它是纯搬家和一次提取，**行为不变**。三件事在设计的 §3.2 与 §6.4 里都有落点，
-> 但**有一件的代价设计没有算到**：`TaskError::SandboxSelect` 的 `#[from]` 目标是
-> **bin 模块** `src/sandbox_select.rs` 里的 `SandboxSelectError`——设计 §3.2 说它「来自 lib 已依赖的
-> crate」，**那句为假**。处置见 Step 2。
+> **本 task 不依赖 C。** 它是纯搬家和一次提取，**行为不变**。三件事在设计的 §3.2 与 §6.4 里都有落点。
 
 **Files:**
 - Create: `crates/continuum-runtime/src/error.rs`（lib）
@@ -288,23 +290,24 @@ git commit -m "feat(capability): save_tool 的登记期不变量（effect_class 
 
 `task_cmd.rs:874-959` 的 `TaskError` **整块**移进 `src/error.rs`，变体、字段、`#[error(...)]` 文案、
 文档注释**一律照录**。`lib.rs` 加 `pub mod error;` 与 `pub use error::TaskError;`；
-`task_cmd.rs` 与 `main.rs` 改 `use continuum_runtime::TaskError;`。
+`task_cmd.rs` 改 `use continuum_runtime::TaskError;`。**`main.rs` 不需要这个 `use`**
+（`grep -n TaskError crates/continuum-runtime/src` 除 `task_cmd.rs` 外零命中——它只经
+`task_cmd::run` 的返回类型间接用到，不做名字绑定）。
 
 **被否掉的替代**（设计 §3.2，记此免得后来者重提）：另建一个 lib 侧的 `ToolCallPathError` + bin 侧逐变体
 映射——那会给同一批失败造出**第二个错误类型**，正是本项目判为 Critical 的「同一件事两个类型」。
 
-- [ ] **Step 2: 把 `sandbox_select` 一并搬进 lib（设计漏算的一步）**
+- [ ] **Step 2: 把 `sandbox_select` 一并搬进 lib**
 
 `TaskError::SandboxSelect(#[from] SandboxSelectError)` 里的 `SandboxSelectError` 定义在
-**`src/sandbox_select.rs`**，而该模块今天由 `main.rs` 的 `mod sandbox_select;` 声明，**属 bin**。
-故「变体一个不改」要求**该模块整体搬进 lib**：`lib.rs` 加 `pub mod sandbox_select;`，
-`main.rs` 删掉那一行，`task_cmd.rs` 改
+**`src/sandbox_select.rs`**，而该模块今天由 `main.rs` 的 `mod sandbox_select;` 声明，**属 bin**；
+`TaskError` 要搬进 lib 又「变体一个不改」，故**该模块整体搬进 lib**：`lib.rs` 加
+`pub mod sandbox_select;`，`main.rs` 删掉那一行，`task_cmd.rs` 改
 `use continuum_runtime::sandbox_select::{self, SandboxSelectError};`，
 `sandbox_select.rs` 内部的 `use continuum_runtime::cli::SandboxMechanism;` 改成 `use crate::cli::…`。
 
-**代价**：这一步比设计写的「只搬 `TaskError`」大。**替代处置（否掉）**：把变体改成
-`SandboxSelect(String)`——那既违反「变体一个不改」，又把一个带类型的错误降级成字符串。
-**该模块自带 `#[cfg(test)]` 单元用例**，随模块一起搬，用例内容不动。
+**替代处置（否掉）**：把变体改成 `SandboxSelect(String)`——那既违反「变体一个不改」，又把一个带类型的
+错误降级成字符串。**该模块自带 `#[cfg(test)]` 单元用例**，随模块一起搬，用例内容不动。
 
 - [ ] **Step 3: 搬时钟与常量，并提取无事务共享函数**
 
@@ -312,7 +315,7 @@ git commit -m "feat(capability): save_tool 的登记期不变量（effect_class 
 `src/tool_call.rs`，**`pub`**（bin 的 `task_cmd` 还在用 `now_millis`）。两者**只有一份定义**：
 `expiry` 与 `planned_at` 若取自两份不同的时钟读数，那是同一件事两个产生点。
 
-把 `authorize_declared_effects`（`task_cmd.rs:442-471`）**提取并加宽**成：
+把 `authorize_declared_effects`（`task_cmd.rs:442-472`）**提取并加宽**成：
 
 ```rust
 /// 强制点 (2) 的铸币判定（设计 §3.2）。**不收事务**——它不碰库。
@@ -374,19 +377,36 @@ git commit -m "refactor(runtime): TaskError 与 sandbox_select 移进 lib，提�
 
 ---
 
-### Task 3: `tool` 子命令的解析面
+### Task 3: `tool` 子命令的解析面、工具调用路径与 bin 接线
 
-> **本 task 不依赖 C。** 只动 `cli.rs`（lib）与 `tests/cli.rs`。
+> **硬依赖 C**（`ProviderRegistry` / `invoke_tool` / `ToolCallError` / 新请求类型）。
+>
+> **三件事必须同批落地，这是本 task 的硬约束**：`cli.rs` 加 `Command::Tool` 变体之后，`main.rs` 的
+> `match cli::parse(args)`（`main.rs:21-41`，只有 `Recover` / `Task` / `Err` 三臂）**不同步加臂就是
+> `error[E0004]`（非穷尽）**，而 `cargo test --test cli` **单独能过**（它不构 bin）——自检若只跑那一条，
+> 这个缺口会滑过去。**故本 task 的自检含 `cargo build --workspace --all-targets`。**
+> 同理，`tool_cmd` 要调 lib 的 `run_tool_call`，而 `run_tool_call` 要用 `cli::ToolArgs`——三者环环相扣，
+> 拆开必然出现「跑不绿」或「留桩」的中间态。
 
 **Files:**
 - Modify: `crates/continuum-runtime/src/cli.rs`
+- Modify: `crates/continuum-runtime/src/tool_call.rs`
+- Modify: `crates/continuum-runtime/src/error.rs`
+- Modify: `crates/continuum-runtime/src/main.rs`
+- Create: `crates/continuum-runtime/src/tool_cmd.rs`
+- Modify: `crates/continuum-runtime/Cargo.toml`（dev-dependencies 加 `async-trait`）
 - Modify: `crates/continuum-runtime/tests/cli.rs`
+- Create: `crates/continuum-runtime/tests/tool_call.rs`
 
 **Interfaces:**
+- Consumes: `continuum_provider::{ProviderRegistry, ToolCallError, ToolProvider}`、
+  `continuum_capability::{authorize, AuthorizedTool, CapabilityError}`、Task 2 的 `mint_declared_effects`
 - Produces: `continuum_runtime::cli::{Command::Tool, ToolArgs}`、
-  `CliError::{InvalidToolInput, OptionRequiresEffect}`
+  `CliError::{InvalidToolInput, OptionRequiresEffect}`、
+  `continuum_runtime::tool_call::run_tool_call`、
+  `TaskError::{Capability, ToolCall}`
 
-- [ ] **Step 1: 写用例（红）**
+- [ ] **Step 1: 写解析面用例（红）**
 
 `tests/cli.rs` 新增（**四条 `UnknownOption` 各一条，不抽代表**——它们是四条独立分支）：
 
@@ -399,6 +419,9 @@ git commit -m "refactor(runtime): TaskError 与 sandbox_select 移进 lib，提�
   `Err(CliError::OptionRequiresEffect { option: "--intent" })`。
 - `an_intent_or_an_approval_without_an_effect_is_rejected`（P-13 之二）：
   `--intent i1` 无 `--effect` → `option == "--intent"`；`--approve` 无 `--effect` → `option == "--approve"`。
+- `both_options_without_an_effect_report_the_intent`（**次序的那条照片**）：`--intent i1 --approve`
+  **同时给出**、零 `--effect` → `option == "--intent"`。**没有这一条，次序承诺就没有照片**（前一条的
+  两条断言各只给一个选项，钉不住次序）。
 - `a_tool_call_without_any_effect_parses`（**零效应的正常侧**）：`--tool t1`（无 `--effect`/`--intent`/
   `--approve`）→ `Ok`。
 - `tool_rejects_the_task_options`（P-14）：`--base` / `--exec` / `--apply` / `--sandbox` **各一条**，
@@ -407,13 +430,7 @@ git commit -m "refactor(runtime): TaskError 与 sandbox_select 移进 lib，提�
 
 **红的条件**：今天的 `parse` 只有 `task` / `recover` 两个臂，`"tool"` 落到 `UnknownSubcommand`。
 
-- [ ] **Step 2: 跑，确认失败**
-
-```bash
-cargo test -p continuum-runtime --test cli
-```
-
-- [ ] **Step 3: 实现**
+- [ ] **Step 2: 实现解析面**
 
 ```rust
 pub enum Command { Task(TaskArgs), Tool(ToolArgs), Recover(RecoverArgs) }
@@ -450,45 +467,13 @@ InvalidToolInput { value: String, reason: String },
 OptionRequiresEffect { option: &'static str },
 ```
 
-**判定次序写死、并有用例**：零效应时若 `--intent` 与 `--approve` **同时**给出，报的是
-`--intent`（按选项表次序先判）。这一条由 `an_intent_or_an_approval_without_an_effect_is_rejected`
-的两条断言共同钉住。
+**判定次序写死**：零效应时若两个选项**同时**给出，报 `--intent`（按选项表次序先判）——照片是
+`both_options_without_an_effect_report_the_intent`。
 
 `--base` / `--exec` / `--apply` / `--sandbox` **不进 `tool` 的 `match`**，故自然落到既有的
 `UnknownOption` 臂——**不要为它们写专门的臂**（那是同一件事两个产生点）。`USAGE` 同步补 `tool` 的用法行。
 
-- [ ] **Step 4: 跑，确认转绿**
-
-```bash
-cargo test -p continuum-runtime --test cli
-timeout 1500 cargo test --workspace --no-fail-fast
-```
-
-- [ ] **Step 5: 提交**
-
-```bash
-git add crates/continuum-runtime/src/cli.rs crates/continuum-runtime/tests/cli.rs
-git commit -m "feat(runtime): tool 子命令的解析面"
-```
-
----
-
-### Task 4: 库函数 `run_tool_call` 与「那一跳」
-
-> **硬依赖 C**（`ProviderRegistry` / `invoke_tool` / `ToolCallError` / 新请求类型）。本 task 落地设计 §3
-> 的**全部七步**，并把「F 确实经注册表调用」这一格拍下来。
-
-**Files:**
-- Modify: `crates/continuum-runtime/src/tool_call.rs`
-- Modify: `crates/continuum-runtime/Cargo.toml`（dev-dependencies 加 `async-trait`）
-- Create: `crates/continuum-runtime/tests/tool_call.rs`
-
-**Interfaces:**
-- Consumes: `continuum_provider::ProviderRegistry`（含其登记入口——**签名以 C 的源码为准**）、
-  `Task 1-3` 的产物
-- Produces: `continuum_runtime::tool_call::run_tool_call`
-
-- [ ] **Step 1: 定签名，并先读 C 的源码核对**
+- [ ] **Step 3: 定 `run_tool_call` 的签名，并先读 C 的源码核对**
 
 ```rust
 /// 工具调用路径（设计 §6.4）。**收已经打开的 `&Db` 与 `&ProviderRegistry`**：
@@ -506,7 +491,7 @@ pub fn run_tool_call(
 （设计 §10.2 明写 F 不预先发明它）。实现前读 `crates/continuum-provider/src/registry.rs` 与
 `src/tool.rs`：**方法与实参表以源码为准**，不符时在后面各步骤里按源码写并回报。
 
-- [ ] **Step 2: 写用例（红）**
+- [ ] **Step 4: 写库级用例（红）**
 
 `tests/tool_call.rs`：库级用例，夹具适配器经 C 的注册表登记。**夹具的形状照
 `crates/continuum-provider/tests/fake_provider.rs`**（跨 crate 的 `tests/` 目录不可导入，故这是**第二份
@@ -514,39 +499,35 @@ pub fn run_tool_call(
 这一份只服务本路径的用例，**不合并**）。夹具要记两件事：**被调用的次数**与**收到的那份请求**。
 
 > **一处措辞要写准**：实现 `continuum_provider::ToolProvider`（`#[async_trait]`）时，`impl` 的签名里**必须
-> 写下**那个请求类型（`AuthorizedToolInvocation<'_>`，C 设计 §7.5）。设计说「F 不构造也不命名那个请求
-> 类型」，**那句话的射程是生产调用点**——F 的生产路径把 `&AuthorizedTool` 与 `input` 交给
-> `invoke_tool`，**不自己 `new` 出请求、也不在别处再出现一个产生点**。夹具的 `impl` 签名是另一回事，
-> 记此以免实现者以为自己违规。
+> 写下**那个请求类型（`AuthorizedToolInvocation<'_>`，C 设计 §7.5）。「F 不构造也不命名那个请求类型」
+> 这句话的射程是**生产调用点**——F 的生产路径把 `&AuthorizedTool` 与 `input` 交给 `invoke_tool`，
+> **不自己 `new` 出请求、也不在别处再出现一个产生点**；夹具的 `impl` 签名是另一回事，记此以免实现者
+> 以为自己违规。
 
 用例：
 
 - `the_registry_is_the_only_way_the_tool_is_reached`（P-6）：登记夹具后跑一条放行的调用，断言夹具**收到
   一次调用**。**红的条件**：把步骤 6 换成「什么都不做、直接返回 `Ok`」→ 本条红。
-- `the_tool_id_comes_from_the_authorized_proof`（P-7）：断言夹具收到的请求里那枚授权证明的
+- `the_tool_id_comes_from_the_authorized_proof`（P-7）：断言夹具收到的那份请求里，那枚授权证明的
   `tool_id()` **等于** `--tool` 给的那个。**红的条件**：把 `authorize` 的 `tool_id` 实参写成常量即红。
 - `the_input_reaches_the_adapter_verbatim`（P-7 的第二半）：断言夹具收到的 `input` 与 `--input` **逐字相同**。
   **红的条件**：把 `input` 写成 `json!({})` 常量即红。
 - `an_effect_free_call_still_reaches_the_tool`（P-17，**P-6 的对照臂**）：零 `--effect`、登记项声明空能力表、
   策略放行 → 夹具**真的被调用**。**红的条件**：一个「有效应才调用」的实现本条红，而 P-6 仍绿——**两条都
   要在**。
-- `an_unregistered_id_reports_the_routing_failure`（P-9）：**不登记任何适配器** → 
+- `an_unregistered_id_reports_the_routing_failure`（P-9）：**不登记任何适配器** →
   `TaskError::ToolCall(ToolCallError::Unregistered { id })`，`id` 与 `--tool` 相同。**红的条件**：把
   `Unregistered` 吞成 `Ok`、或换成 `Provider(..)` 即红。**断言到内层变体**。
 - `a_provider_failure_is_carried_through`（P-10）：夹具返回 `Err(ProviderError::Transport(..))` →
   `TaskError::ToolCall(ToolCallError::Provider(..))` 原样带出。**红的条件**：把它包装成另一种变体即红。
 
-> **P-7 的措辞与设计 §9 有一处出入**：设计 §9 的表写的断言对象是「收到的 `call.tool`」——那是已删类型
-> `ToolInvocation` 的字段；按 C 设计 §7.5，新请求类型只有「授权证明 + `input`」，**没有 `tool` 字段**。
-> 本计划按 §7.5 写（读授权证明的 `tool_id()`），并把这条出入回报给协调者。
-
-- [ ] **Step 3: 跑，确认失败**
+- [ ] **Step 5: 跑，确认失败**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test tool_call
 ```
 
-- [ ] **Step 4: 实现七步**
+- [ ] **Step 6: 实现 `run_tool_call` 的七步**
 
 次序与设计 §3 的表逐条对齐：
 
@@ -571,42 +552,90 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test tool_call
    换 feature 会动 `Cargo.toml`，与「不动内部依赖清单」相抵。**若确需 `enable_all`，停下来回报**，
    不要就地改 feature。失败（含 `Unregistered`）→ **各效应记 `FAILED`**（与 `task` 第 5 步机制选择失败
    时的处置一致），再把 `TaskError::ToolCall(..)` 报出去。
+   （**一处设计侧的引用勘误**：设计 §3.4 把 `task` 第 5 步的 `Sandbox::spawn` 记在 `task_cmd.rs:252`，
+   实际 252 是 `sandbox_select::select_for_this_machine` 那一行，`sandbox.spawn(task, cmd)?` 在 `:588`。
+   本计划不引 252，实现者按源码找。）
 7. **终态与 stdout**：按 `ToolResult.is_error` 写 `COMMITTED` / `FAILED`；**无论 `is_error` 为何，先把
-   `output` 以 JSON 一行打到 stdout**（设计 §3.3：工具调用**没有子进程**，stdout 是调用方仅有的通道），
-   `is_error == true` 时再返回 `TaskError::ToolReportedError { tool }`（Task 7 落地该变体；**本 task 先只做
-   `is_error == false` 那一支与打印**，`is_error` 那一支在 Task 7 补——见 Task 7 的说明）。
+   `output` 以 JSON 一行打到 stdout**（设计 §3.3：工具调用**没有子进程**，stdout 是调用方仅有的通道）。
+   本 task 先只做 `is_error == false` 那一支与打印；`is_error` 那一支与 `TaskError::ToolReportedError`
+   在 Task 6 补。
+
+**`TaskError` 加两个包装变体（设计 §8 的失败面表要求，本 task 落地）**：
+
+```rust
+/// 强制点 (1) 的失败（工具未登记、出示/缺失能力、能力失效、读登记项或写审计失败）。
+/// **只是包装**：把 `continuum-capability` 的错误原样带出去，不重判、不合并变体。
+#[error("工具授权失败：{0}")]
+Capability(#[from] CapabilityError),
+
+/// 工具侧唯一入口（`ProviderRegistry::invoke_tool`）的失败：路由未命中
+/// （`Unregistered`）或适配器自己报错（`Provider`）。**只是包装**——F 不另立
+/// 「没有适配器」之类的词汇（同一件事两个变体正是本设计在讲的同一类毛病）。
+#[error("工具调用失败：{0}")]
+ToolCall(#[from] ToolCallError),
+```
+
+`error.rs` 因此需要 `continuum_capability::CapabilityError` 与 `continuum_provider::ToolCallError`
+（两者都在 `Cargo.toml` 的既有依赖里，**不动 `Cargo.toml`**）。
 
 **不要做的事**（写了就是发明）：不建 Task 工作区、不经 `Integration Gate`、不写任何审计行、不读
 `Tool::effect_class`、不自己开第二个工具调用入口。
 
-- [ ] **Step 5: 跑，确认转绿；再跑全量**
+- [ ] **Step 7: 写 `tool_cmd.rs` 与 `main.rs` 的分派臂**
+
+`tool_cmd.rs`（bin）只做三件事，**不含路径逻辑**：
+
+1. **装配**：`open_db`（`task_cmd.rs:323` 提到 **`pub(crate)`**，两条子命令共用同一份迁移集合——
+   两处各写一份清单会让「注册的集合」有两个来源）+ 构造一个 `ProviderRegistry`。**今天的驱动没有任何
+   适配器可登记**，故**装配点是空的**——这一句要写成注释并说明它不是遗留物（是 C 的交付缺口，
+   见 `## 遗留`）。**登记的实参表以 C 的源码为准**，本计划不写死它（设计 §10.2 明写 F 不预先发明）。
+2. **调 lib**：`continuum_runtime::tool_call::run_tool_call(&db, &registry, &args)`。
+3. **失败映射**：`Err(e)` → `eprintln!("工具调用失败: {e}")` + `ExitCode::FAILURE`。
+   **不要把 `ToolResult.output` 在这里打印**——它在 lib 的步骤 7 已经打出（两条路径不能有两个输出点）。
+
+`main.rs`：加 `mod tool_cmd;`，并在 `match cli::parse(args)` 里加一个与 `Task` 臂同形的
+`Ok(Command::Tool(a)) => match tool_cmd::run(&a) { … }`。**这一臂与 `cli.rs` 的变体必须同批**（见本 task
+开头的硬约束）。
+
+- [ ] **Step 8: 全量构建（**M1 的守卫，不许只跑 `--test cli`**）**
 
 ```bash
+TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
+```
+
+预期：**0 warning、编译通过**。这一步抓的正是「加了枚举变体没加 `match` 臂」那类**只有构 bin 才暴露**的
+缺口（`--test cli` 单独能过）。
+
+- [ ] **Step 9: 跑测试，确认转绿**
+
+```bash
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test cli
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test tool_call
 timeout 1500 cargo test --workspace --no-fail-fast
 ```
 
-- [ ] **Step 6: 变异**
+- [ ] **Step 10: 变异**
 
 | 变异 | 期望 |
 |---|---|
 | 步骤 6 换成「直接 `Ok(())`」（不调注册表） | P-6 与 P-17 红 |
-| `presented` 换成空集 | P-7 之外，Task 5 的 P-4 / P-5 红（**P-6 仍绿**——两个变异体落在不同用例上，故两组都要在） |
+| `presented` 换成空集 | Task 4 的 P-4 / P-5 红（**P-6 仍绿**——两个变异体落在不同用例上，故两组都要在） |
 | `input` 换成 `json!({})` 常量 | `the_input_reaches_the_adapter_verbatim` 红 |
+| `main.rs` 的 `Command::Tool` 臂删掉 | `cargo build --workspace --all-targets` 报 `E0004`（**这不是「变红」而是编译失败**，记此只为证明 Step 8 的守卫有判别力） |
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 11: 提交**
 
 ```bash
-git add crates/continuum-runtime/src/tool_call.rs crates/continuum-runtime/tests/tool_call.rs \
-        crates/continuum-runtime/Cargo.toml
-git commit -m "feat(runtime): 工具调用路径的库函数与经注册表的那一跳"
+git add crates/continuum-runtime/src crates/continuum-runtime/tests/cli.rs \
+        crates/continuum-runtime/tests/tool_call.rs crates/continuum-runtime/Cargo.toml
+git commit -m "feat(runtime): tool 子命令的解析面、工具调用路径与 bin 接线"
 ```
 
 ---
 
-### Task 5: 强制点 (1) 的照片
+### Task 4: 强制点 (1) 的照片
 
-> 本 task **只加用例与变异**，不改 `run_tool_call` 的语义（它在 Task 4 已经全量落地）。
+> 本 task **只加用例与变异**，不改 `run_tool_call` 的语义（它在 Task 3 已经全量落地）。
 > **红的条件由变异给出**——本仓接受变异为红条件。
 
 **Files:**
@@ -631,6 +660,10 @@ git commit -m "feat(runtime): 工具调用路径的库函数与经注册表的�
   `MissingCapability { kind }` 且 kind 与该工具声明的那枚**相同**：
   `Filesystem(Read)`、`Filesystem(Write)`、`Git(Read)`、`Git(WorktreeWrite)`、`Git(CommitLocal)`、
   `Github(CreatePr)`。**六项逐项断言，不抽代表**（手写分支能各自漂移）。
+
+  **这六条登记项的 `effect_class` 必须取 `None`**：取 `Some(t)` 会与本计划 Task 1 的新不变量相抵
+  （`Some(t)` 而能力表不含 `for_effect(t)` 时 `save_tool` 直接拒），那会让本条在登记期就红，
+  验不到本路径的 `MissingCapability`。
 
 **红的条件（逐条）**：
 - P-1 / P-3 / P-4 / P-5 / P-8：把 `authorize` 那一跳**挪到写效应行之后**（或把它的 `Err` 吞掉继续往下走）
@@ -660,12 +693,10 @@ git commit -m "test(runtime): 强制点 (1) 的两个拒绝方向与零调用的
 
 ---
 
-### Task 6: Journal 与审计的照片
+### Task 5: Journal 与审计的照片
 
 **Files:**
 - Modify: `crates/continuum-runtime/tests/tool_call.rs`
-- Modify: `crates/continuum-runtime/tests/tool_cli.rs`（端到端那两条，**本 task 先建文件的最小骨架**；
-  真正的端到端接线在 Task 8——见下）
 
 - [ ] **Step 1: 写用例**
 
@@ -678,7 +709,7 @@ git commit -m "test(runtime): 强制点 (1) 的两个拒绝方向与零调用的
 - `the_audit_rows_are_exactly_one_grant_plus_four_per_effect`（P-15）：读 `audit_log.kind` **列**，
   k=1 时 multiset 恰为 `{capability grants × 1, external effects × 4}`、共 **5** 条；
   **k=0 时恰 1 条**（`capability grants`）。两处 `kind` 的值**手写字面量**（钉格式）；
-  `4 = 1 次登记 + 3 次推进`（同 `continuum-effect/tests/persist.rs:252` 的既有计数）。
+  `4 = 1 次登记 + 3 次推进`（同 `continuum-effect/tests/persist.rs:252` 的既有注释，`assert_eq!` 在 `:253`）。
 - `an_effect_free_call_touches_neither_the_effect_table_nor_the_mint`（P-16）：零 `--effect` → `effect`
   **0 行**、`audit_log` **恰 1 条**（`capability grants`），**且没有凭据捏造的「tool invoked」之类审计行**
   （§313 的八项是封闭清单，本子项目**不新增 `AuditKind`**）。
@@ -686,9 +717,9 @@ git commit -m "test(runtime): 强制点 (1) 的两个拒绝方向与零调用的
   `--effect`，跑完之后读 `audit_log` 的 `capability grants` 行、解析 payload，断言
   `capabilities[].scope` 的 multiset **逐个等于**各 `--effect` 的目标。
 
-> **P-18 为什么能在端到端跑通（即使注册表是空的）**：审计行由步骤 4 的 `authorize` 写，与效应行在
-> **同一次提交**（步骤 5）里落库——**早于**步骤 6 那一跳。故端到端跑到步骤 6 以 `Unregistered` 失败，
-> 审计行**已经在库里**。P-15 同理（终态那一次 `advance` 也照写）。
+> **P-18 / P-15 为什么在「注册表为空」的世界里也成立**：审计行由步骤 4 的 `authorize` 写，与效应行在
+> **同一次提交**（步骤 5）里落库——**早于**步骤 6 那一跳。故即便那一跳以 `Unregistered` 失败，
+> 审计行与四条 `external effects` 已经在库里。这两条的库级版本在本 task，端到端形态在 Task 7。
 
 **红的条件**：
 - P-2：把 `effect_key` 换成普通分隔符拼接 → 既有单测 `the_effect_key_separates_the_intent_from_the_target` 红；
@@ -717,7 +748,7 @@ git commit -m "test(runtime): 幂等键、审计行数与作用域原样带出�
 
 ---
 
-### Task 7: 剩余失败面与两处刻意分岔
+### Task 6: 剩余失败面与两处刻意分岔
 
 **Files:**
 - Modify: `crates/continuum-runtime/src/error.rs`（加 `ToolReportedError`）
@@ -764,9 +795,9 @@ ToolReportedError { tool: ToolId },
 ```
 
 `run_tool_call` 步骤 7 补 `is_error` 那一支：**先打印 `output`**（与成功支同一句），再写 `FAILED`，
-再返回本变体。**不新增任何别的变体**——尤其**不要**为「没有适配器」另立一个（那是 C 的
-`ToolCallError::Unregistered`，F 包装而不另起词汇），也不要加「裁决为 `Deny`」这类重复既有判断的变体
-（那是 `mints` 的判断）。
+再返回本变体。**不新增任何别的变体**——Task 3 已落的两个包装变体（`Capability` / `ToolCall`）之外
+不再加；尤其**不要**为「没有适配器」另立一个（那是 C 的 `ToolCallError::Unregistered`，F 包装而不另起
+词汇），也不要加「裁决为 `Deny`」这类重复既有判断的变体（那是 `mints` 的判断）。
 
 - [ ] **Step 4: 跑，确认转绿；再跑全量**
 
@@ -792,14 +823,12 @@ git commit -m "feat(runtime): 工具自报失败与 authorization 字段的分�
 
 ---
 
-### Task 8: bin 侧 `tool_cmd`、`main.rs` 分派与端到端
+### Task 7: 端到端（真实二进制）
 
 **Files:**
-- Create: `crates/continuum-runtime/src/tool_cmd.rs`
-- Modify: `crates/continuum-runtime/src/main.rs`（`mod tool_cmd;` + `Ok(Command::Tool(a)) => …`）
-- Create/Modify: `crates/continuum-runtime/tests/tool_cli.rs`
+- Create: `crates/continuum-runtime/tests/tool_cli.rs`
 
-- [ ] **Step 1: 写端到端用例（红）**
+- [ ] **Step 1: 写用例**
 
 `tests/tool_cli.rs` 走 `env!("CARGO_BIN_EXE_continuum-runtime")`（与 `task_cli.rs` 同法）：
 
@@ -809,66 +838,49 @@ git commit -m "feat(runtime): 工具自报失败与 authorization 字段的分�
 - `the_task_only_options_are_unknown_here`（P-14）：`--base` / `--exec` / `--apply` / `--sandbox`
   **四条各一条**。
 - `a_registered_tool_is_still_unrouted_and_the_call_fails_at_the_last_hop`：登记一条工具（经
-  `save_tool`，测试里直接开库写）后跑 `tool` → 退出码非零、stderr 指 `未登记`；**但 `audit_log` 的
-  `capability grants` 已有 1 条**（步骤 4 已提交）——这条同时是「强制点 (1) 在**正常路径上**被执行」的
-  端到端照片，也是设计 §12 那条「有生产调用方」判据的落点。
+  `save_tool`，测试里直接开库写）后跑 `tool` → **退出码非零**，且 **`audit_log` 的 `capability grants`
+  已有 1 条**（步骤 4 已提交）、`effect` 行数等于声明的效应条数。**不要断言 stderr 的具体文案**：
+  那是 C 的 `ToolCallError::Unregistered` 的 `Display`，F 没有冻结它（`F 未冻结它` 这一点记在 `## 遗留`）。
+  这条同时是「强制点 (1) 在**正常路径上**被执行」的端到端照片，也是设计 §12 那条「有生产调用方」判据的落点。
 - `the_declared_scopes_reach_the_audit_payload`（P-18 的端到端形态）：读 `audit_log` 的 payload，
-  逐项断言 `capabilities[].scope`。**本条的库级版本在 Task 6**，此处只钉「真二进制也走这条路」。
+  逐项断言 `capabilities[].scope`。**库级版本在 Task 5**，此处只钉「真二进制也走这条路」。
 
-**红的条件**：`main.rs` 没有 `Command::Tool` 臂 → 这些用例全红（解析成功的调用会落到「未知子命令」或
-不产出任何库文件）。
+**红的条件**：把这些用例跑在 Task 3 之前的字节上（或把 `main.rs` 的分派臂摘掉）→ 全红。
 
-- [ ] **Step 2: 跑，确认失败**
-
-```bash
-TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test tool_cli
-```
-
-- [ ] **Step 3: 实现**
-
-`tool_cmd.rs`（bin）只做三件事，**不含路径逻辑**：
-
-1. **装配**：`open_db`（`task_cmd.rs:323` 提到 **`pub(crate)`**，两条子命令共用同一份迁移集合——
-   两处各写一份清单会让「注册的集合」有两个来源）+ 构造一个 `ProviderRegistry`。**今天的驱动没有任何
-   适配器可登记**，故**装配点是空的**——这一句要写成注释并说明它不是遗留物（是 C 的交付缺口，
-   见 `## 遗留`）。**登记的实参表以 C 的源码为准**，本计划不写死它（设计 §10.2 明写 F 不预先发明）。
-2. **调 lib**：`continuum_runtime::tool_call::run_tool_call(&db, &registry, &args)`。
-3. **失败映射**：`Err(e)` → `eprintln!("工具调用失败: {e}")` + `ExitCode::FAILURE`。
-   **不要把 `ToolResult.output` 在这里打印**——它在 lib 的步骤 7 已经打出（两条路径不能有两个输出点）。
-
-`main.rs` 加一个 `match` 臂，与 `Task` 臂同形。
-
-- [ ] **Step 4: 跑，确认转绿；再跑全量**
+- [ ] **Step 2: 跑，确认转绿**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test tool_cli
 timeout 1500 cargo test --workspace --no-fail-fast
 ```
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 3: 提交**
 
 ```bash
-git add crates/continuum-runtime/src/tool_cmd.rs crates/continuum-runtime/src/main.rs \
-        crates/continuum-runtime/src/task_cmd.rs crates/continuum-runtime/tests/tool_cli.rs
-git commit -m "feat(runtime): tool 子命令的装配、分派与端到端"
+git add crates/continuum-runtime/tests/tool_cli.rs
+git commit -m "test(runtime): tool 子命令的端到端用例"
 ```
 
 ---
 
-### Task 9: 强制点 (1) 的射程边界（P-19）与 `dependency_direction.rs` 注释订正
+### Task 8: 强制点 (1) 的射程边界（P-19）与 `dependency_direction.rs` 注释订正
 
 **Files:**
 - Modify: `crates/continuum-runtime/tests/task_cli.rs`（P-19 的落点）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（**只订正 `:119-121` 的注释**）
 
-- [ ] **Step 1: 写 P-19（否定式照片）**
+- [ ] **Step 1: 写 P-19（否定式照片，**不受沙箱门控**）**
 
 `task_cli.rs` 新增 `the_command_path_never_reaches_the_first_checkpoint`：
 
-跑 `task --effect charge:x --exec true`（策略放行、退出码 0、**受既有的
-`require_auto_selected_sandbox` 门控**——但**承重断言不放在门控之内**：门控只跳过「必须真跑起来」的
-那一半，**库里的行数断言**在门控外照跑，若门控跳过则不静默通过而是显式跳过并报执行/跳过条数），
-随后断言 `SELECT COUNT(*) FROM audit_log WHERE kind = 'capability grants'` 为 **0**。
+跑 `task --effect charge:x --exec true`（策略放行），随后断言
+`SELECT COUNT(*) FROM audit_log WHERE kind = 'capability grants'` 为 **0**。
+
+**为什么不受 `require_auto_selected_sandbox` 门控**：这条断言的承重处只有一处——**库里的行数**，
+而步骤 4（`record_declared_effects`，写效应行之处）**早于**步骤 5 的沙箱选择。故即便本机选不出沙箱、
+`task` 在第 5 步失败，效应行与「若接了强制点 (1) 就会写下的审计行」都已经在库里，行数断言照样有判别力
+（本仓没有删除 `effect` 行的路径，清理路径只回收工作区与记录）。**退出码不作为本条的判据。**
+**跑不到步骤 4 的机器**（例如库根本打不开）用既有的 `skip()` 显式跳过并报执行/跳过条数，不静默通过。
 
 **红的条件**：把强制点 (1) 接到命令路径上（例如在 `record_declared_effects` 里也调一次 `authorize`）
 → 本条红。**这是本计划唯一一条跑在另一条子命令上的用例**——它钉的正是设计 §12.1 那条边界。
@@ -909,7 +921,7 @@ git commit -m "test(runtime): 强制点 (1) 的射程边界；订正 runtime 依
 
 ---
 
-### Task 10: 收口（复核三处合并结果）
+### Task 9: 收口（复核三处合并结果）
 
 > 串行执行序的最后一位做一遍收口（前一阶段 P3A 就是这么收的）。**本 task 只复核、只在发现不一致时改**。
 
@@ -931,10 +943,17 @@ cd /home/DslsDZC/Continuum && cargo tree -p continuum-runtime --depth 1 --edges 
 
 - [ ] **Step 2: 复核 `main.rs` 的迁移与装配注册**
 
-逐条核 `runtime_migrations()` 里的八处 `extend`（P0 内置 + P1 两条 + P2 三条 + P3 的 capability + D 的
-model-registry），与 `tests/migrations.rs` 的 `expected_migrations()` **互为覆盖**；
-复核 `tests/startup.rs` 的三处计数（`:24` / `:90` 的「迁移应用 N 项」与 `:79` 的补应用数）与
-**行内注释**一致——B/D 各自改过，**注释与断言互相打脸是本项目点过名的形状**。
+`runtime_migrations()`（`main.rs:57-66`）里是 **7 处 `extend` + 开头一处 `builtin_migrations()`**
+（`let mut migrations = continuum_persist::builtin_migrations();` **不是 `extend`**）：
+builtin + P1 两条（artifact、graph）+ P2 三条（workspace、policy、effect）+ P3 capability + D 的
+model-registry。**按条数复核时别把 builtin 数成一次 `extend`。**
+与 `tests/migrations.rs` 的 `expected_migrations()` **互为覆盖**；复核 `tests/startup.rs` 的三处计数
+（`:24` / `:90` 的「迁移应用 N 项」与 `:79` 的补应用数）与**行内注释**一致——B/D 各自改过，
+**注释与断言互相打脸是本项目点过名的形状**。
+
+**装配面同样在本步的射程内**（标题含「装配注册」就要真覆盖它）：`main.rs` 里除迁移外还有
+**B 装配的 `SecretsRuntime`**（B 计划 Task 7）与 **F 的 `tool_cmd` 分派臂**。逐条核它们在
+`main.rs` 里都到位、且 `mod` 声明与 `use` 路径正确（B 的装配若坏了，只在 F 的收口才看得出）。
 
 **F 在这一步的期望是「零改动」**：F 不建表、不取号、不新增迁移。
 
@@ -958,7 +977,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 | 判据 | 证据 |
 |---|---|
 | §4.4「工具调用前校验 Capability」 | P-1（拒时零调用）+ P-17 / P-6（放行时真的调用）这对**对照臂** |
-| 强制点 (1) **有生产调用方** | Task 8 的 `a_registered_tool_is_still_unrouted_and_the_call_fails_at_the_last_hop`（真二进制走到步骤 4） |
+| 强制点 (1) **有生产调用方** | Task 7 的 `a_registered_tool_is_still_unrouted_and_the_call_fails_at_the_last_hop`（真二进制走到步骤 4） |
 | 强制点 (1) 的射程边界 | P-19 |
 | 登记项不变量 | Task 1 的两向用例 |
 | Capability 不可与裸字符串互换 | **P3A 已交付**，本子项目**不重复** |
@@ -991,16 +1010,19 @@ git commit -m "docs: P3 子项目 F 的收口与复核"
                         在生产路径上**必然**返回 ToolCallError::Unregistered。**这不是遗留物**，
                         它不挡强制点 (1)（authorize 在步骤 4，早于那一跳）。
                         收件人：子项目 C。
+C 的错误文案未冻结       Task 7 的端到端用例只断言退出码与库内行数，**不依赖
+                        `ToolCallError::Unregistered` 的 Display 文案**——那段文案是 C 的，
+                        F 无权冻结它。后来者若想断言文案，须先与 C 定死它。
 granted() 的消费方      按 C 设计 §7.5，是**适配器**（在 invoke 的实现体内读授权证明、逐枚取
                         Capability::scope() 限定动作范围）。**F 不调它**，只把整枚 AuthorizedTool
                         经 invoke_tool 交出去。无照片（本阶段没有真实适配器）。
 六个 kind 无策略事实     Filesystem(Read|Write)、Git(Read|WorktreeWrite|CommitLocal)、
                         Github(CreatePr) 在 EffectType 里没有对应项，故驱动铸不出它们，
-                        含它们的工具在本路径上**一律** MissingCapability（Task 5 逐项拍了照片）。
+                        含它们的工具在本路径上**一律** MissingCapability（Task 4 逐项拍了照片）。
                         **本路径不在登记期拦**（那会在别人的入口上装一道只有本层知道的口径）。
                         收件人：策略层（PolicyContext 的事实集合）与子项目 D。
 作用域的**判定**        本路径不判作用域（authorize 只比 kind），强制落在凭据签发（§51）与执行点。
-                        **原样带出**那一半有照片（P-18，Task 6/Task 8）。
+                        **原样带出**那一半有照片（P-18，Task 5 / Task 7）。
                         收件人：子项目 B。
 两处与命令路径的刻意分岔 (a) effect.authorization 在本路径上写**这条效应自己那次裁决**，而 task 写的是
                         集成那次——工具调用没有集成裁决；(b) 本路径的 --input **不落库**
@@ -1019,8 +1041,11 @@ granted() 的消费方      按 C 设计 §7.5，是**适配器**（在 invoke �
 tokio 首次真使用         continuum-runtime/Cargo.toml 早已声明 tokio，而 src/ 与 tests/ 至今零引用；
                         本子项目为 block_on 异步的那一跳**第一次真用**它（单次调用用当前线程运行时）。
                         收件人：后续阶段（若驱动整体转异步，这个形状要重做）。
---input 省略即 {} /     两条都是本设计的**决定**，规范未规定，已由协调者本轮拍板接受；
---intent 条件必填        「--intent 可观察」已由 P-2 的第二半（Task 6）拍下来。
+--input 省略即 {} /      两条都是本设计的**决定**，规范未规定，已由协调者本轮拍板接受；
+--intent 条件必填        「--intent 可观察」已由 P-2 的第二半（Task 5）拍下来。
+                        零效应时两选项同时给出的**判定次序**（报 --intent）是本计划定的实现细节，
+                        规范与设计均无此判据，其照片是 Task 3 的
+                        `both_options_without_an_effect_report_the_intent`。
 AuthorizedTool 不进       TaskError::Capability 的 Display 只带内层 CapabilityError 的消息
 错误上下文              （那些消息里没有作用域）。**这一条没有照片**（关于「驱动没写某句格式化」的
                         否定命题），记此以免后来者顺手加一句 {:?} 而没人发现。
@@ -1028,6 +1053,9 @@ effect_class 两轴 /      三条义务曾被 D 退件给「子项目 F ＋规�
 trust / 工具侧           本计划**不做 task**：四份设计都写明「不发明」，而 §4.1 的组件表里
 cost / latency          **没有「工具选择」这个组件**，故收件人是**规范维护者（本项目无此角色）**。
                         **这是「收件人挂了空」的第二次具名**，记此以免它再次无声挂空。
+设计 §3.4 的一处行号错误 §3.4 把 `task` 第 5 步的 `Sandbox::spawn` 记在 `task_cmd.rs:252`；实际 252 是
+                        `sandbox_select::select_for_this_machine`，`sandbox.spawn(task, cmd)?` 在 `:588`。
+                        本计划不引该行号；实现者按源码找，勿照设计的行号去 252 找。
 
 **没有照片的失败路径**（据实，不发明夹具）
 CapabilityError::Expired **F 自己那次 authorize 调用上不可达**（步骤 3 铸出与步骤 4 校验之间没有 I/O，

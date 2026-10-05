@@ -24,7 +24,7 @@
 - **本计划不改 `continuum-capability` 的源码，也不改它的依赖边。** 本层只**消费**它的 `Cost` / `Latency` 两个类型（设计 §2.5）；**不取能力凭据**——`Capability` / `AuthorizedTool` / `authorize` 在本 crate 里零出现（设计 §8.4：`Router ← …` 那条边取的是两个画像容器，不是 Capability Token）。
 - `continuum-core` 不含 I/O。数据库连接对象在 `continuum-persist` 内私有，本 crate 只能经 `Tx` 访问。
 - **枚举列的落库编码一律小写、多词以 `_` 连接，经显式辅助函数读写，不依赖 serde、不用 `Debug`。** 编码挂在其类型上（`as_str` / `parse` 与类型同址），不在 `persist.rs` 里另建表。本 crate 的 `SkillDimension` 与 `LifecycleState` 各要一对。
-- **迁移编号须在 task 里现场核实该库的空号**（不假定）：协调者已定号段（A 50、B 60、C 70、D 80、E 90），本设计取 80、预留 81，但**取用前最后核一次**；「未占用」的判据是**按库**说的，不是按全仓说的（设计 §3.3）。**本计划的三张表全在迁移 80 里，81 本轮不注册**（见 `## 遗留`）。
+- **迁移编号须在 task 里现场核实该库的空号**（不假定）：协调者已定号段（A 50、B 60、C 70、D 80、E 90），本设计取 80、**只取一个**，但**取用前最后核一次**；「未占用」的判据是**按库**说的，不是按全仓说的（设计 §3.3）。**不预留 81**——三张表全在迁移 80 里，本子项目没有第二个建表点（设计 §3.3 已把第一版那句「预留 81」删掉并留了来历）。
 - **迁移的注册由本计划自己完成，注册在 `main.rs`**（协调者裁决 §六.4「谁的表谁注册」，与 P3A 的 Task 4 同一做法）。**不许把它记到「用它的那个 task」（＝ 子项目 G，本轮不存在）名下。**
 - `continuum-runtime` 不直接对枚举列写 SQL 字面量。
 - 代码注释、错误信息、测试断言信息用**中文**。标识符用英文。
@@ -52,8 +52,8 @@
   以及「取 `ProviderHealth` 快照」这一步（设计 §11 第 20 条、接缝图第四节）。
 - **交给协调者**：`effect_class` 两轴之问的退件、`trust` 退件、`ToolProfile` 上工具侧 `cost` / `latency`
   的 `Some` 无人认领（设计 §11 第 15 / 22 / 23 条，均见 `## 遗留`）。
-- **必须自己声明的未决**：迁移号 80/81 的现场复核与 81 的预取未用；`RoutingError::Persist` 在本层
-  无产生方；`transition` 的返回值语义；`ProfileError` 的名字（设计未给）。逐条见 `## 遗留`。
+- **必须自己声明的未决**：迁移号 80 的现场复核；以及一处**计划自定的取名**——落库版的迁移函数
+  取名 `transition_in_tx`（与内存版 `lifecycle::transition` 在 crate 根同名会冲突，见 `## 遗留`）。
 
 ## 三条已付过代价的纪律
 
@@ -109,9 +109,8 @@ crates/continuum-model-registry/
   tests/compile_fail/*.rs   不可构造性样例（各配同名 .stderr）
 ```
 
-**与设计 §8.1 的一处差异（据实写明，不是随手加的）**：设计 §8.1 的文件清单列了
-`profile / lifecycle / persist / router / budget / error` 六个，**§7.1 的 `EscalationStep` / `EscalationLadder`
-没有落点**。本计划把它放在 `src/escalation.rs`（测试同址 `tests/escalation.rs`），记在 `## 遗留` 供复审追认。
+**与设计 §8.1 一致**：本计划的模块划分与设计 §8.1 的清单逐项相同，共七个模块
+（含 `src/escalation.rs`，设计 §8.1 已列入）。测试文件的划分亦同。
 
 **既有的、本计划要改的文件**
 
@@ -165,12 +164,14 @@ crates/continuum-runtime/tests/startup.rs                 三处迁移计数断�
   断言 `Ratio::parse(&r.as_str()) == Some(r)`。**红的条件**：`as_str` 用 `Debug` 或截断格式（如 `{:.2}`）时变红；
   这是设计 §2.4「浮点存文本会丢精度」那句最容易被想当然的地方，故被钉住的是**往返**而非「最短长度」。
 - `ratio_rejects_nan_and_out_of_range`：`NaN`、`1.5`、`-0.1` 三个输入各断言
-  `Err(ProfileError::RatioOutOfDomain { .. })`（**具体是哪一枚**）。红的条件：去掉 `is_finite()` 检查、
+  `Err(ProfileError::OutOfRange { value })`（**具体是哪一枚**，且 `value` 是给的那个数）。红的条件：去掉 `is_finite()` 检查、
   或把上界写成 `< 1.0`（`1.0` 是合法值，`ratio_round_trips…` 与它**两侧对钉**）。
-- `skill_score_round_trips_through_its_text_encoding`：对 `9.2`（§23 的示例值，`docs/spec/01-concepts.md:1068-1104`）、
+- `skill_score_round_trips_through_its_text_encoding`：对 `9.2`（**唯一出处是 `docs/spec/02-positioning.md:773`，
+  §83 Model Failure Modes** 的「不是只有：`coding = 9.2` 还应该有……」；设计 §2.4 把它记成
+  `docs/spec/01-concepts.md:1068-1104`——那里是 §23 的技能树、全文无 `9.2`，该处已由协调者派回设计作者订正）、
   `0.0`、`-3.5`、极大有限值逐个断言往返。**同一对函数，另一侧的守卫**。
 - `skill_score_rejects_nan_and_infinities`：`NaN` / `f64::INFINITY` / `f64::NEG_INFINITY` 各断言
-  `Err(ProfileError::SkillScoreNotFinite { .. })`。
+  `Err(ProfileError::NotFinite)`（**不是有限实数**这一枚）。
 
 - [ ] **Step 3: 运行，确认失败**
 
@@ -203,8 +204,11 @@ pub struct SkillScore(f64);
 **为什么 `Ratio` 要拒 NaN**（实现时写在类型的文档注释里，不是可选说明）：NaN 与任何值的比较都是 false，
 `sort_by` 在含 NaN 的列表上不是全序——排序结果随实现细节漂移，而 §84 的输出要被比对与记录。
 
-`ProfileError` 的**名字是计划取的**（设计给了「各返回具体 `Err`」这个要求，未给类型名），
-记在 `## 遗留`；实现时若复审另有名字，以复审为准。
+`ProfileError` **与它的变体名逐字取自设计 §2.4**（`NotFinite` / `OutOfRange { value: f64 }` /
+`BadTimeRange { start: i64, end: i64 }`；设计第一版只写「各返回具体 `Err`」而没给类型名，
+这一处是计划作者报出后由设计补齐的）。本 task 定义前两枚——第三枚 `BadTimeRange` 的产生方是
+`SkillObservation` 的构造，在 Task 2 落地（**没有产生方的变体不先铺开**）。
+`ProfileError` **不进 `RoutingError`**：`rank` 收到的是构造好的值，构造失败在构造期就被拒（设计 §2.4、§5.4）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
@@ -220,11 +224,13 @@ git commit -m "feat(model-registry): crate 骨架与 Ratio / SkillScore"
 
 **Files:**
 - Modify: `crates/continuum-model-registry/src/profile.rs`
+- Modify: `crates/continuum-model-registry/{src/error.rs,src/lib.rs}`（`ProfileError::BadTimeRange` 与导出）
 - Modify: `crates/continuum-model-registry/tests/profile.rs`
 
 **Interfaces:**
-- Consumes: Task 1 的 `Ratio` / `SkillScore`
+- Consumes: Task 1 的 `Ratio` / `SkillScore` / `ProfileError`
 - Produces: `continuum_model_registry::{SkillDimension, SkillObservation, SkillVector, current_observation}`
+  与 `ProfileError::BadTimeRange { start, end }`
 
 - [ ] **Step 1: 写用例**
 
@@ -243,6 +249,11 @@ git commit -m "feat(model-registry): crate 骨架与 Ratio / SkillScore"
   `spatial` / `media`），并在同一用例里反向 `parse` 回各自的变体。
   红的条件：多词项写成 `toolUse` 或 `tool-use` 即红——**手册写字面量**，故钉的是格式。
 - `an_unknown_dimension_name_is_rejected`：`SkillDimension::parse("visual")` → `None`。
+- `an_observation_whose_time_range_is_reversed_is_rejected`：`time_range = (200, 100)` →
+  `Err(ProfileError::BadTimeRange { start: 200, end: 100 })`，**两个端点值都断言**（设计 §2.4：
+  「外加时间窗反序一条」）。**两侧对钉**：`(100, 200)` 与**退化区间** `(100, 100)` 各返回 `Ok`
+  ——`time_range` 是**闭区间**，`start == end` 是自洽的。红的条件：去掉 `end < start` 判定即红；
+  把判定写成 `end <= start` 则退化区间那一条红。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -258,7 +269,13 @@ pub enum SkillDimension { Reasoning, Coding, Vision, Planning, ToolUse,
                           ConstraintFollowing, Verification, Spatial, Media }
 
 /// §24 的一次观测：score / confidence / sample_count / version / time_range。
+/// **构造期拒不自洽的时间窗**（`end < start`）——错误收在 `ProfileError` 里（设计 §2.4）。
 pub struct SkillObservation { /* 五个字段私有，访问器按消费方需要增补 */ }
+
+impl SkillObservation {
+    pub fn try_new(score: SkillScore, confidence: Ratio, sample_count: u64, version: u32,
+                   time_range: (i64, i64)) -> Result<Self, ProfileError>;   // end < start → BadTimeRange
+}
 
 /// §248 的向量：九维各自**当前**的一次观测。`None` = 该维度尚无观测——**缺席不是 0**。
 pub struct SkillVector { dimensions: [Option<SkillObservation>; 9] }
@@ -401,9 +418,13 @@ git commit -m "feat(model-registry): §247 的 ModelProfile 与两处不可表�
 - `an_unlisted_transition_pair_is_rejected_with_both_ends`：若干条未列出的对（含 `stale→active`、
   `disabled→active`、`quarantined→active`）各断言 `Err(Illegal { from, to })` 且两端**正是给的那一对**。
   红的条件：把 `Illegal` 的两个字段写反、或把未列出的对放行即红。
-- `a_self_transition_is_illegal`：十态**逐项** `x → x` 一律 `Illegal`（自环非法是设计 §4.1 的明文）。
 - `quarantined_and_disabled_are_reachable_from_every_state`：十态**逐项**×两目标共 20 条，
   每条断言 `Ok`（§4.1：事故与人工下线不挑时机，与 P1 的 `INVALIDATED`/`CANCELLED` 同判据）。
+  **这 20 条含两个自环**（`Quarantined → Quarantined`、`Disabled → Disabled`），见下面那条自环专案。
+- `a_self_transition_follows_the_any_state_rule`：**自环的专案照片，不靠上面的矩阵顺带**。
+  十态**逐项** `x → x`：目标是 `Quarantined` 或 `Disabled` 的两条 `Ok`，其余八条
+  `Err(Illegal { from, to })` 且两端**正是给的那一对**。**两侧都钉**——只写「自环一律非法」会与矩阵那 20 条
+  直接打架（至少一条必红），只写「自环一律合法」则会把 `Active → Active` 这种未列出的对放行。
 - `disabling_returns_a_model_to_unprofiled_not_active`：`disabled → unprofiled` 为 `Ok`、
   `disabled → active` 为 `Err(Illegal{..})`。**两侧对钉**：这条钉住 §21 的「重新启用须重走画像流水线」那个方向，
   只写「`→unprofiled` 可以」的话，把出口改成 `active` 不会有任何用例变红。
@@ -447,16 +468,26 @@ impl RoutableModel {
 }
 
 /// §249 未给迁移关系，本表由本设计定（与 §237 落在 P1 的情形相同）。
+/// `from` / `to` 相同不是特例：**自环的合法性由那张表决定**（见上面的执行期裁定），
+/// 故实现里**不加**「`from == to` 一律拒绝」这一臂。
 pub fn transition(from: LifecycleState, to: LifecycleState) -> Result<LifecycleState, LifecycleError>;
 ```
 
-`transition` 的返回值为**迁移前的状态**（信息量非零的那一侧）。设计 §3.2 给了签名但未写明返回哪一个，
-记在 `## 遗留`。
+`transition` 的返回值为**迁移前的状态**（信息量非零的那一侧），与设计 §3.2 的定稿一致。
+
+> **执行期裁定（协调者，2026-10-05）：自环取自「可 Ok」的那一侧。**
+> 设计 §4.1 有两句相抵的话：「`* → quarantined` / `* → disabled` 可由**任意**状态进入」与
+> 「自环（`x → x`）非法」。裁决取前者——即**自环的合法性由那张表决定**：目标是
+> `Quarantined` / `Disabled` 的自环合法，其余自环是未列出的对、一律 `Illegal`。
+> 两条判据：**一条与自己那张表相抵的「一律」正是本项目要消灭的形状**；且 P1 的既有实现
+> `crates/continuum-graph/src/state.rs:17-19`（`if matches!(to, Invalidated | Cancelled) { return Ok(to); }`）
+> **恰恰放行自环**——设计借的正是它那条判据。**设计那处的相抵由设计作者改，本计划不改设计**；
+> 落在这里的是裁决本身。
 
 **`LifecycleError` 不叫 `RegistryError`**：C 的设计在 `continuum-provider` 里已有一个同名不同物的
 `RegistryError`（`NotFound` / `Duplicate`），两件事一个名字会让调用方与后来者混淆（设计 §4.1）。
-本 task 先定义 `Illegal { from, to }`；`UnknownModel` 与 `Persist` 两个变体在 Task 5、`ProfileBeforeVerified`
-在 Task 6 跟随各自的产生方落地（**没有产生方的变体不先铺开**，本仓对这类变体的处置是删或写明理由）。
+本 task 先定义 `Illegal { from, to }`；`UnknownModel` 与 `Persist` 两个变体在 Task 6、`ProfileBeforeVerified`
+在 Task 7 跟随各自的产生方落地（**没有产生方的变体不先铺开**，本仓对这类变体的处置是删或写明理由）。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -490,7 +521,8 @@ git commit -m "feat(model-registry): §249 十态、可路由闸门与迁移表"
 `crates/continuum-persist/tests/recovery.rs` 的探针表 `50` 都在**别的库**里，无害，但也不得据此认为
 「60 / 50 已占」（设计 §3.3）。
 
-**`81` 本轮不注册**：三张表全在迁移 80 里（设计 §3.3 明写「三张表在一条迁移里」），本子项目没有第二个建表点。
+**只取 `80`、不预留 `81`**：三张表全在迁移 80 里（设计 §3.3 明写「三张表在一条迁移里」），
+本子项目没有第二个建表点，而预留一个没有表要建的编号就是留一条死迁移（设计 §3.3 已删第一版那句并留了来历）。
 
 - [ ] **Step 2: 写用例**
 
@@ -859,7 +891,8 @@ git commit -m "feat(model-registry): §333 的只读预算视图"
   并逐项钉落库编码（小写 `_` 连接；本阶段它不落库，但那份编码与类型同址）。
   `Custom` 在 §19 里不带载荷，本类型**也不给它加**。
 - `a_request_carries_availability_as_values`：`Vec<(ModelId, ProviderHealth)>`；含 `Degraded` 与 `Unavailable`
-  两种取值。**用例注释里写明撞名**：这里的 `ProviderHealth::Degraded` 是**供应商侧的可用性**，
+  两种取值。**这两个取值怎么用不在本 task**：过滤与失误路径在 Task 11 的候选集构造里（设计 §5.3）。
+  **用例注释里写明撞名**：这里的 `ProviderHealth::Degraded` 是**供应商侧的可用性**，
   与 `LifecycleState::Degraded`（§249 的模型生命周期异常态）是两个轴上的两个东西，只是名字撞了（设计 §4.2）。
 - `tests/compile_fail/a_requirement_cannot_be_built_from_a_bare_vec.rs`：字段私有、无 `From<Vec<_>>`。
 - `tests/compile_fail/a_routing_request_without_a_budget.rs`：漏掉 `budget` 字段的构造**编译不过**。
@@ -917,7 +950,8 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 **Interfaces:**
 - Consumes: Task 4 的 `RoutableModel` / `RoutableState`、Task 10 的 `RoutingRequest`、Task 7 的 `load_profile`
 - Produces: `continuum_model_registry::{rank, RankingPolicy, CandidateScore, RankedExecutionCandidates,
-  ExecutionCandidate, RoutingReason}` 与 `RoutingError::{NoEligibleCandidate, DuplicateModelCandidate, Persist}`
+  ExecutionCandidate, RoutingReason}` 与 `RoutingError::{NoEligibleCandidate, DuplicateModelCandidate,
+  UnknownAvailability}`
 
 - [ ] **Step 1: 写测试夹具（这是本 task 的第一件事）**
 
@@ -925,6 +959,9 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 故 `tests/router.rs` 需要一个夹具：起临时库 → `register_model` → 迁到 `verified` → `save_profile` →
 `load_profile` → `RoutableModel::try_new`。**夹具的这一步不写出来，本 task 的所有用例都无从下笔**——
 它不是测试技巧，是设计 §2.1 那条保证的直接后果。
+**夹具还必须为每个候选给出一条 `availability` 条目**（`Healthy` 或缺省的那一档）：`rank` 对
+「列表里没有条目」的候选返回 `UnknownAvailability`，故漏给会以 `Err` 的形式而不是断言的形式失败，
+报错位置还会指向被测函数。**这条不是可选项**，用 `unavailable` / `degraded` 两个具名参数让需要它的用例显式覆盖。
 
 - [ ] **Step 2: 写用例**
 
@@ -943,10 +980,24 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 - `the_same_model_twice_is_rejected_with_the_id`：同一个 `ModelId` 的两个候选 →
   `Err(RoutingError::DuplicateModelCandidate { id })`，**断言是哪一枚、id 是哪一个**。
   它是 `compare` 的「全序」这条断言的守门人：两条 `ModelId` 相同的候选无从定序，兜底档也兜不住。
-- `no_eligible_candidate_is_its_own_error`：两条——**空输入**与**全部被闸门挡下**（`RoutableModel` 构造失败，
-  故候选集为空）各得 `Err(RoutingError::NoEligibleCandidate)`。
+- `no_eligible_candidate_is_its_own_error`：三条——**空输入**、**全部被闸门挡下**（`RoutableModel` 构造失败，
+  故候选集为空）、以及**唯一候选不可用**（被下面的可用性过滤清空）各得 `Err(RoutingError::NoEligibleCandidate)`。
   **`NoEligibleCandidate` 不合并进 `NotRoutable`**：前者是「没有可用的」，后者是「有一枚被点名挡下了」，
   调用方（§110 的流程）对两者的处置不同。
+- **「当前可用性」：过滤，且只过滤 `Unavailable`**（设计 §5.3 写死，三条照片）：
+
+  - `an_unavailable_model_is_not_a_candidate`：两个候选，其一 `ProviderHealth::Unavailable` →
+    输出里**没有它**，`selected()` 是另一个。红的条件：去掉这一档过滤即红。
+    **两侧对钉**：把同一个候选由 `Unavailable` 改回 `Healthy` → 它**回到**输出里。
+  - `healthy_and_degraded_both_stay_and_the_order_does_not_change`：两条候选，其一的 `ProviderHealth`
+    在 `Healthy` 与 `Degraded` 之间来回改 → **两次输出逐项相同**。
+    **这一条是「不发明降权判据」的照片**：设计写死只过滤 `Unavailable`，`Degraded` 该不该降权
+    **规范未给判据**（§250 只说「考虑」、§84 没有给这一维的算法），故基线不为它改排序；
+    它原样带进 `reason`（设计 §5.3、§11 第 24 条）。
+  - `a_candidate_missing_from_availability_is_rejected`：候选集里的某个 `ModelId` 在
+    `RoutingRequest::availability` 里**没有条目** → `Err(RoutingError::UnknownAvailability { id })`，
+    **断言是哪一枚、id 是哪一个**。**不当作可用**——按未知放行是 fail-open 的形状（设计 §5.3）。
+    红的条件：把「列表里没有」当成「可用」而放行即红。
 - `a_routable_model_does_come_out_as_the_selected_candidate`：**与闸门那一侧配对的正面照片**——
   一个 `Active` 的模型经 `rank` **确实成为 `selected()`**。只钉「`stale` 被挡」而不钉这一侧，
   整条路由路径可以在「永远返回 `NoEligibleCandidate`」的情况下全绿，而那正是 fail-open 的反面。
@@ -989,10 +1040,25 @@ pub struct ExecutionCandidate { model: ModelId, state: RoutableState,
 pub struct RoutingReason { family: FamilyRelation, matched: Vec<SkillDimension>,
                            missing: Vec<SkillDimension>, notes: Vec<String> }
 
-/// 骨架：过闸门的候选逐个 `evaluate` → 装成 `ExecutionCandidate` → `sort_by(policy.compare)` → 取头。
+/// 骨架：**建候选集**（判重 → 按 `request.availability` 查可用性 → 只滤掉 `Unavailable`）
+/// → 逐个 `evaluate` → 装成 `ExecutionCandidate` → `sort_by(policy.compare)` → 取头。
 pub fn rank(request: &RoutingRequest, models: &[RoutableModel], policy: &dyn RankingPolicy)
     -> Result<RankedExecutionCandidates, RoutingError>;
 ```
+
+**建候选集这一步里有三件事，逐条写死**（设计 §5.3）：
+
+- **`ProviderHealth::Unavailable` 的模型不进候选集**。这不是发明阈值——§250 的输出是
+  `RankedExecutionCandidates`，即**可执行的**候选；一个供应商侧已不可用的模型不是执行候选，
+  把它排进去，「拿它跑」那一步必然失败。**故这一条是「不可用即不是候选」，不是「可用性低就降权」。**
+- **`Healthy` 与 `Degraded` 都进候选集，两者之间没有判据**：`Degraded` 该不该降权、降到什么程度，
+  规范未给判据，故本设计不发明——健康度原样带进 `reason`，让策略自己决定（§11 第 24 条）。
+- **候选在 `availability` 里没有条目**（含候选集里有、列表里无）→
+  `Err(RoutingError::UnknownAvailability { id })`，**不当作可用**：按未知放行是 fail-open 的形状。
+
+**三条 `Err` 的判定次序设计未定，本计划取「判重 → 可用性 → 空判定」（`NotRoutable` 由
+`RoutableModel::try_new` 产出，到不了 `rank`）**，且所有用例都只让一个条件成立——不构造两条 `Err`
+同时可能的输入，故实现换一个次序也不会让哪条用例变绿或变红。这是刻意的：次序没有判据，用例就不该依赖它。
 
 **「全序」须逐条落实**（实现时写进注释，理由是这条断言由三件事合起来成立）：`Ratio` 拒 NaN 保证前两档可比；
 `ModelId` 升序保证兜底档是**全序的最后兜底**（两两可比且无相等）；若两条候选连 `ModelId` 都相同，
@@ -1003,8 +1069,11 @@ pub fn rank(request: &RoutingRequest, models: &[RoutableModel], policy: &dyn Ran
 **今天没有具名消费方**，只是 §84 要输出的内容的读口——**这句话刻意写得比上面弱**（设计 §5.2）。
 
 `RoutingError` 本 task 增补 `NoEligibleCandidate`、`DuplicateModelCandidate { id }` 与
-`Persist(#[from] PersistError)`。**`RequirementError` 不出现在 `RoutingError` 里，且这是刻意的**：
-空需求在 `try_new` 就被拒，`RoutingRequest` 装的是**已构造的** `TaskSkillRequirement`，故「空需求」到不了 `rank`。
+`UnknownAvailability { id }`，**共四枚，到此为止**。**只有 `rank` 真的会产出的变体才收**——
+设计 §5.4 明写三个「没有产生方」的一律不收：**`Persist` 已删**（`rank` 是纯函数、签名里根本没有 `Tx`，
+故它产不出读库失败；留着它会让人以为本层会写库，且它是一个死物）；`Requirement(#[from] RequirementError)`
+不收（空需求在 `try_new` 就被拒，`RoutingRequest` 装的是**已构造的** `TaskSkillRequirement`，到不了 `rank`）；
+`ProfileBeforeVerified` 不收（它是 `LifecycleError` 的变体，产生方是 `save_profile`）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
@@ -1043,8 +1112,10 @@ git commit -m "feat(model-registry): §250 的输出面与 rank 的全序"
   **用例名与注释写明这是「已写明未实现」而不是「忘了读」**：§250 的 MUST 考虑成本在本设计里是
   **结构性地不可省略**（`budget` 是必填参数，忽略它是一次看得见的选择），不是已实现——
   §333 的五个量纲没有单位，量值算不出来（设计 §5.3 末段、§10 第 2 条）。
-- `the_baseline_does_not_read_availability`：同上形态，两次请求只差 `availability` → 排序不变。
-  §5.3 列的基线输入里没有它（见 `## 遗留`）。
+**「当前可用性」在本 task 里没有用例，这是对的**：它落在 **`rank` 的候选集构造**（Task 11 的三条照片），
+不是策略的输入——`RankingPolicy::evaluate` 收到的是已过可用性过滤的候选，
+故一个策略想「按可用性排序」也无从下手。**基线不读它**（§5.3 列的基线输入里没有它），
+`Degraded` 与 `Healthy` 的排序不变就是 Task 11 那条照片立的事实。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1171,6 +1242,7 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 | §4.4「不依赖单一总分」 | Task 3 的 `overall_score` trybuild + Task 5 的列清单 + Task 11 的 `CandidateScore` 无总分子段 |
 | §4.4「未完成画像的模型不会进入自动路由」 | Task 4 的十态闸门 + Task 7 的 `ProfileBeforeVerified`（两件事的合取） |
 | §249 三态 + `stale` 不入自动路由 | Task 4 的 `only_the_six_routable_states_pass_the_gate` 与 `a_stale_model_is_not_routable_while_an_active_one_is` |
+| §250「当前可用性」 | Task 11 的三条照片（`Unavailable` 被排除、`Healthy`/`Degraded` 都在且排序不变、缺条目得 `UnknownAvailability`） |
 | 三张表与迁移计数 | Task 5 的全量跑（跨 crate 才可见） |
 
 **若某条找不到对应证据，不得标注为覆盖**，据实报告缺口。
@@ -1191,6 +1263,15 @@ git commit -m "docs(model-registry): P3 子项目 D 的收尾与复核"
 
 ## 遗留
 
+**设计定稿时已闭的六条**（本计划初稿曾把它们报为未决，来历留此，免得后来者按旧报告去找）：
+
+- `RoutingError::Persist` —— 设计 §5.4 已裁**删**该变体（零产生方的死物，且会让人以为本层会写库）。
+- 迁移 `81` —— 设计 §3.3 已删「预留 `81`」（三张表全在 80，只取一个）。
+- `transition` 的返回值 —— 设计 §3.2 已写明返回**迁移前的旧态**。
+- `ProfileError` 的名字与三枚变体 —— 设计 §2.4 已给出（`NotFinite` / `OutOfRange` / `BadTimeRange`）。
+- `RoutableModel::try_new` 的入参 —— 设计 §2.1 已改收 `LifecycleState` 并留了来历。
+- `EscalationStep` 的落点 —— 设计 §8.1 已列入 `src/escalation.rs`（七个模块）。
+
 ```
 effect_class 两轴之问   D 退件（设计 §11 第 22 条）：本 crate 对 `effect_class` 的引用为零，
                       问句涉及的两侧（Tool Registry 与 Effect Journal）都在工具调用路径上。
@@ -1202,24 +1283,28 @@ trust                   D 退件（设计 §11 第 23 条）：§247 的十二�
 的 Some                 D 复用的是两个**类型**（落在模型画像上），不读 `ToolProfile`；
                       而 §4.1 里**没有「工具选择」这个组件**。**规范未给判据**。
                       收件人：协调者（在四份之间指派）＋ 规范维护者。
-迁移 81                 预取未用：三张表全在 80（设计 §3.3），本子项目没有第二个建表点。
-                      后续 task 若要建表，取 81 并**现场核对**该库的空号。
-RoutingError::Persist   在本层**没有产生方**：`rank` 是纯函数、不接 `Tx`，画像与状态的读在调用方（G）。
-                      §5.4 列了它，§8.1 又声明「Router 的纯由签名保证」——两处相抵。
-                      本计划按设计保留该变体，实现时在文档注释里写明「本层当前无产生方」。
-                      删或留由复审者/协调者裁。
-transition 的返回值      设计 §3.2 给了签名但未写返回哪一个状态；本计划取**迁移前的状态**。
-ProfileError            设计要求「各返回具体 Err」但未给这个错误类型的名字；本计划取 `ProfileError`
-                      （`RatioOutOfDomain { value }` / `SkillScoreNotFinite { value }`）。
-RoutableModel::try_new  设计 §2.1 的示例写 `RoutableState`，§4.2 的十态用例要求收 `LifecycleState`；
-的入参                  **两处相抵**，本计划取 §4.2（它给出了用例）。
-EscalationStep 的落点    设计 §8.1 的文件清单（六个文件）里没有 §7.1 的两个类型；本计划取
-                      `src/escalation.rs`（测试 `tests/escalation.rs`）。
-§250 的「当前可用性」    字段有（§5.1 的「有」），但 §5.3 列的基线输入里没有它——**基线不读它**。
-                      该因子的处置规范未给判据（是否按 `ProviderHealth` 过滤候选）。收件人：规范维护者。
-规范级未决的其余各项     设计 §11 的第 2、3、4、5、7、8、9、10、11、12、16、17、19、21 条
+Degraded 的降权判据      §250 的八项 MUST 考虑里，可用性**只写死了「过滤 Unavailable」这一档**
+                      （设计 §5.3）：`Healthy` 与 `Degraded` 之间**没有判据**——§250 只说「考虑」、
+                      §84 没给这一维的算法。本设计不发明，`Degraded` 原样带进 `reason`。
+                      **收件人：规范维护者。**
+§4.1 自环的两句相抵      「`* → quarantined` / `* → disabled` 可由**任意**状态进入」与「自环（`x → x`）非法」
+                      不能同真。**已裁：取自环可 `Ok` 的那一侧**（目标是这两态的自环合法，其余自环
+                      是未列出的对，`Illegal`）——裁决与判据见 Task 4 的执行期裁定。
+                      **设计那处由设计作者改，本计划不改设计。** 收件人：设计作者 ＋ 协调者。
+transition_in_tx 的取名  落库版迁移函数在本计划里叫 `transition_in_tx`，设计 §3.2 叫 `transition`。
+                      改名理由：内存版 `lifecycle::transition` 已在 crate 根导出，两个同名函数
+                      在同一个导出面里冲突。**属计划自定，记此申报**；若复审要把两处收敛成一个名字，
+                      须同时决定导出面的形状（根上只导内存版、落库版经 `persist::` 调用）。
+register_model 的落态     设计 §3.2 的注释写「§21 发现即登记」，§4.3 的表却把「`discovered → unprofiled`」
+                      的触发方记为登记方（`register_model`）。本计划按 §3.2 取「登记后落在 `discovered`」，
+                      两处的措辞差别记此，**不自行挑一边改设计**。收件人：设计作者 ＋ 复审者。
+§2.4 的 9.2 出处         设计 §2.4 把 `SkillScore` 的示例值 `9.2` 记在 `docs/spec/01-concepts.md:1068-1104`
+                      （那里是 §23 的技能树，全文无 `9.2`）；唯一出处实为 `docs/spec/02-positioning.md:773`
+                      （§83 Model Failure Modes）。本计划已改用正确出处；
+                      **设计那处已由协调者派回设计作者**。
+规范级未决的其余各项     设计 §11 的第 2、3、4、5、7、8、9、10、11、12、16、17、19、21、24 条
                       （探索、Population Feedback、§84 的语义、§333 的单位、三处画像清单不一致、
                       子维度分层、failure_modes 词表、§19 阈值、§249 迁移关系、cost_budget 收紧、
-                      初步画像、version vs time_range、上下文长度、Tier 1 Low）。收件人多为规范维护者；
-                      本计划**一条都不发明**。
+                      初步画像、version vs time_range、上下文长度、Tier 1 Low、Degraded 降权）。
+                      收件人多为规范维护者；本计划**一条都不发明**。
 ```

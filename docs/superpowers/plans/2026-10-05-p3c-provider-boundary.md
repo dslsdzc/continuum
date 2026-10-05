@@ -130,17 +130,17 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
 
 ```
 crates/continuum-provider/
-  Cargo.toml                     normal + continuum-capability；dev + continuum-persist / tempfile / trybuild
+  Cargo.toml                     normal + continuum-capability（Task 3）；dev + continuum-persist / tempfile（Task 4）/ trybuild（Task 6）
   src/lib.rs                     再导出注册表、两个错误类型与新请求类型；模块文档补一句「注册表在、实现仍不在」
   src/registry.rs        （新）   ProviderRegistry、RegistryError、ToolCallError、invoke_tool（唯一受门禁入口）
-  src/tool.rs                     §316 trait + 新请求类型 AuthorizedToolInvocation<'_>；invoke 的请求参数换掉
+  src/tool.rs                     §316 trait + 新请求类型 AuthorizedToolInvocation<'_>（构造入口 pub(crate)）；invoke 的请求参数换掉
   src/model.rs                   不动
   src/connector.rs               不动
   tests/common/mod.rs    （新）   C 侧夹具（FakeModel / FakeTool / OnceStream），由多个测试目标共同 include
   tests/fake_provider.rs         改为 mod common;，FakeTool 的 invoke 换签名
   tests/registry_models.rs （新） 模型侧登记 / 发现 / 重复 / 原子性 / 枚举 / §3.3 代价一
   tests/registry_tools.rs  （新） 工具侧登记 / 只读入口 / 并集 / 适配器失败
-  tests/invoke_tool.rs     （新） invoke_tool 的四条路径 + 门禁内正常路径（真起库）
+  tests/invoke_tool.rs     （新） invoke_tool 的四条路径 + 门禁内正常路径（真起库）；**新请求类型的两条性质也在这里观测**（crate 外构造不出它）
   tests/two_registries.rs  （新） 两个登记点不一致的两向（§3.3 代价三）
   tests/contract.rs        （新） is_error 与 Err 的分流（约定的夹具照片）
   tests/compile_fail/*.rs  （新） 五份不可表达性样例，各配同名 .stderr
@@ -227,12 +227,16 @@ pub enum RegistryError {
     /// [`ToolCallError::Unregistered`]。
     #[error("模型 {} 未登记", id.as_str())]
     NotFound { id: ModelId },
-    /// 同一个 id 被登记第二次（模型侧与工具侧共用）。与
-    /// `crates/continuum-operator/src/registry.rs:20-29` 的 `OperatorError::Duplicate` 同形。
+    /// 同一个 id 被登记第二次（模型侧与工具侧共用）。
     ///
-    /// id 以文本承载：两个登记表各用各的 id 类型（`ModelId` / `ToolId`），本变体为两者共用，
-    /// 收窄到某一种就得为另一种再造一个变体。**是哪一张表**由调用点可知（`register_model` /
-    /// `register_tool`），故不另立字段。
+    /// **与 `crates/continuum-operator/src/registry.rs:10-11` 的 `OperatorError::Duplicate`
+    /// 同的只是「重复登记有一个具名变体」这一取向，不是字段形状**：那里两个字段都是强类型
+    /// （`OperatorId` / `OperatorVersion`），而本注册表有**两个 id 类型**（`ModelId` / `ToolId`），
+    /// 收窄到某一种就得为另一种再造一个变体。
+    ///
+    /// **字段形状规范未给判据**（裁决 C5 明写归遗留）：本计划取「以文本承载 id，
+    /// 是哪一张表由调用点可知（`register_model` / `register_tool`），故不另立字段」，
+    /// 并把它作为**计划的取法**申报在 `## 遗留`（三）。
     #[error("id {id} 已登记")]
     Duplicate { id: String },
 }
@@ -368,6 +372,9 @@ impl ProviderRegistry {
     ///
     /// **并集语义**：同一个 `ToolId` 被多个适配器声明时保留**首次出现**的那一条。
     /// **设计未给判据**，本计划取并集并附照片，见 `## 遗留`。
+    ///
+    /// **它不按 id 查，故本入口上 [`ToolCallError::Unregistered`] 臂不可达**（设计 §3.5 的订正段）。
+    /// 写用例与注释时**不要**声明本入口会报 `Unregistered`。
     pub async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, ToolCallError>;
 
     /// 先按**登记**路由到适配器，再转出它的描述；id 未登记 → [`ToolCallError::Unregistered`]。
@@ -378,10 +385,11 @@ impl ProviderRegistry {
 }
 ```
 
-**只读入口的返回错误类型**：设计 §3.5 说 `ToolCallError` 是「受门禁的 `invoke_tool` 用」，
-而 §3.1 说「未命中：……工具侧返回 `ToolCallError::Unregistered`」。本计划取后者（两个只读入口也返
-`ToolCallError`），因为 `Unregistered` 的语义（「这个 id 没有适配器」）在只读路径上一字不改地成立，
-另造一个错误类型反而会造出两个描述同一件事的类型。**这是设计两处相抵之处**，见 `## 遗留` 与报告。
+**只读入口的返回错误类型——已定案，不要再当作未决**：设计 §3.5 那一行原写「受门禁的 `invoke_tool` 用」，
+与 §3.1「工具侧未命中（**含 `describe_tool`**）返回 `ToolCallError::Unregistered`」曾两说相抵；
+**裁决 C1 取 §3.1，设计 §3.5 已就地订正并在原地留了来历**。故本计划的取法与裁决一致：
+按 id 查的两个工具侧入口（`invoke_tool` 与只读的 `describe_tool`）返 `ToolCallError`；
+`list_tools()` **不按 id 查**，它那条路径上 `Unregistered` 臂不可达。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -399,10 +407,10 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 - Modify: `crates/continuum-provider/src/tool.rs`（新请求类型 + `invoke` 换参）
 - Modify: `crates/continuum-provider/src/lib.rs`（再导出）
 - Modify: `crates/continuum-core/src/tool.rs`（**删 `ToolInvocation`**）
-- Modify: `crates/continuum-provider/Cargo.toml`（normal + `continuum-capability`；dev + `continuum-persist`、`tempfile`）
-- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（**`ALLOWED` 的 provider 条目，唯一一处**）
+- Modify: `crates/continuum-provider/Cargo.toml`（**normal 只加 `continuum-capability`**）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（**`ALLOWED` 的 provider 条目**，
+  本 task 的终值 `["continuum-capability", "continuum-core"]`；`continuum-persist` 由 Task 4 增量加）
 - Modify: `crates/continuum-provider/tests/common/mod.rs`（`FakeTool::invoke` 换参）
-- Create: `crates/continuum-provider/tests/invocation.rs`
 
 **Interfaces:**
 - Consumes: Task 1 的 `ProviderRegistry`；既有的 `continuum_capability::AuthorizedTool`、`continuum_core::ProviderError`
@@ -411,37 +419,45 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 > **这是本计划对**已冻结接口**的唯一一次显式改动**（设计 §7.5、裁决 §一第 2 条）：§316 的四项方法名不变，
 > 变的是 `invoke` 的请求参数。**删 `ToolInvocation` 与它同批做**（裁决 §五），不要拆成两次提交。
 >
-> **完成判据是 `cargo test --workspace` 通过**，不是「改完定义就收工」——删除的引用者全在编译期暴露，
-> 全仓只有三处（五个行号）：`crates/continuum-core/src/tool.rs:26`（定义）、
+> **完成判据是 `cargo test --workspace` 通过**，不是「改完定义就收工」——删除的引用者全在编译期暴露。
+> 规划时实测 `grep -rn ToolInvocation crates/` 恰五个行号：`crates/continuum-core/src/tool.rs:26`（定义）、
 > `crates/continuum-provider/src/tool.rs:5,12`（trait 的导入与签名）、
-> `crates/continuum-provider/tests/fake_provider.rs:7,109`（夹具）——已实测
-> `grep -rn ToolInvocation crates/` 只有这五个行号。**改完再 grep 一次**，确认零命中。
+> `crates/continuum-provider/tests/fake_provider.rs:7,109`（夹具）。
+> **但本 task 执行时夹具已经不在那个文件了**：Task 1 把 `FakeModel`、Task 2 把 `FakeTool` 搬进了
+> `crates/continuum-provider/tests/common/mod.rs`，故第三处要改的是**那里**（行号以当时文件为准，
+> 本计划不预先写死）。**改完再 grep 一次，确认零命中。**
+>
+> **本 task 不新增任何 dev 依赖**：它没有任何运行用例（理由见下），故 `continuum-persist` / `tempfile`
+> 由**真正用它们的** Task 4 增量加——「边由用它的那个 task 登记」对 dev 边同样成立。
 
-- [ ] **Step 1: 写用例**
+> **本 task 没有运行用例，这是设计使然，不是漏了照片。** 构造入口 `pub(crate)`（裁决 C2）之后，
+> **crate 外的集成测试根本构造不出 `AuthorizedToolInvocation`** —— `tests/` 下的目标是独立 crate。
+> 而在 `src/` 里写单元测试就会在 crate 内造出**第二个构造点**（设计 §7.5 把构造点收成
+> `invoke_tool` 一处，正是要避免这件事）。故新请求类型的两条可观察性质**改经 `invoke_tool` 观测**，
+> 落在 **Task 4**：
+> - 「输入被原样带到适配器」→ Task 4 的门禁内正常路径（echo 适配器的 `output == 输入`）；
+> - 「适配器手里那枚授权就是传进去的那一枚」→ Task 4 的
+>   `the_adapter_is_handed_the_authorization_that_was_passed_in`（记录型适配器读
+>   `call.authorization().tool_id()`）。
+>
+> 另两条性质的照片在 **Task 6**：样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate
+> 持一枚真的 `AuthorizedTool` 仍构造不出**，`E0603`）。
+> 本 task 自己的判据是**编译**：Step 1 的消费者先改、Step 2 看它失败、Step 4 看全量绿。
 
-`tests/invocation.rs`。**夹具**照 `crates/continuum-capability/tests/authorize.rs` 的 `db()` 同形
-（`tempfile` + `Db::open_with` + `builtin_migrations()` + `p3_capability_migrations()` + `migrate()`），
-再 `save_tool` 登记一条工具、`mint` 铸一枚能力、`authorize` 取 `AuthorizedTool`。
-**每个测试目标各写自己的一份 `db()`**（本仓既有做法：`continuum-capability` 的 `tests/authorize.rs`
-与 `tests/persist.rs` 各有一份），**不做跨目标的共享夹具**。
+- [ ] **Step 1: 把消费者先改到新形状（写「用例」这一步在本 task 就是改夹具）**
 
-- `the_authorization_is_the_one_that_was_passed_in`：`AuthorizedToolInvocation::new(&auth, json!({}))`
-  的 `authorization()` 给出的 `tool_id()` 与 `auth.tool_id()` 相同。
-- `the_input_is_carried_through`：`input()` 给出构造时那份 `Value`（手工写的字面量比，**钉格式**）。
-- `the_request_carries_no_second_tool_id`：**这一条不写成运行用例**——「不另收 `ToolId`」是关于**签名**的
-  命题，只有编译能钉。它的照片是 Task 6 的样例 3（裸 `ToolId` 传不进 `invoke_tool`），
-  在本文件的模块文档里写明这条去向即可（与设计 §5.3 对 `cancel` 的处置同法：结构事实的照片是类型签名本身）。
-- `the_old_request_shape_is_gone`：**删除的判据是编译**，不是运行用例——本 task 的 Step 2 与 Step 5
-  的 `cargo test --workspace` 就是这条的照片（四处引用者全在编译期暴露）。**不写一条假装在跑期验证它的用例。**
+改 `crates/continuum-provider/tests/common/mod.rs` 里 `FakeTool::invoke` 的签名与导入——
+请求参数写成 `AuthorizedToolInvocation<'_>`，`use continuum_provider::tool::AuthorizedToolInvocation;`。
+`tests/fake_provider.rs` 里若有引用它的地方一并改。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-timeout 300 cargo test -p continuum-provider --test invocation
 timeout 900 cargo build --workspace --all-targets
 ```
 
-第二条此时**应当报错**（`AuthorizedToolInvocation` 不存在），**这就是删除的判据的样子**。
+预期：**E0432 **（`AuthorizedToolInvocation` 尚未定义），且 `ToolInvocation` 那条改动还没做。
+**这就是本 task 的红**——先写消费者、再见它编译不过。
 
 - [ ] **Step 3: 实现**
 
@@ -453,11 +469,19 @@ timeout 900 cargo build --workspace --all-targets
 /// 依据：`docs/superpowers/specs/2026-10-05-p3-bcdf-set-decisions.md` §一第 2 条——
 /// 「改的是请求侧，不是响应侧」（响应在调用完成之后才存在，往那里加位置解决不了问题）。
 ///
+/// **可见性三件套（裁决 C2，2026-10-05；设计 §7.5 的「可见性」段）**：
+/// **类型 `pub`**——它出现在**公开 trait 的方法签名**里，必须 `pub`；
+/// **构造入口 `pub(crate)`**——只有 `continuum-provider` 内的注册表构造它
+/// （[`crate::Registry::invoke_tool`]），crate 外没有第二条；
+/// **字段私有**——`authorization` / `input` 只经访问器读。
+///
 /// 两条性质：
-/// 1. **没有 [`AuthorizedTool`] 就构造不出它**——唯一的公开构造入口 [`Self::new`] 收 `&AuthorizedTool`，
-///    字段私有（照片：`tests/compile_fail/` 的两份样例，Task 6）。
+/// 1. **没有 [`AuthorizedTool`] 就构造不出它**，而 `pub(crate)` 让这条**更强**：**crate 外的代码
+///    即使手里有一枚真的 `AuthorizedTool`，也构造不出这个请求**——它只能把证明交给注册表，
+///    由注册表替它构造。「谁构造」是注册表一个产生点，与「谁持有证明」（F）是两件事。
+///    （照片：Task 6 的样例 4，预期 `E0603`。）
 /// 2. **工具 id 只有一个来源**：授权证明的 `AuthorizedTool::tool_id()`。本类型**不另收 `ToolId`**，
-///    故「出示的 id 与被授权的 id 不是一个」这一种可能**不存在**。
+///    故「出示的 id 与被授权的 id 不是一个」这一种可能**不存在**。（照片：Task 6 的样例 3。）
 ///
 /// **为什么装的是 `&AuthorizedTool`，不是 `Credential`**：这里承载的是**强制点 (1) 的证明**，
 /// 不是密钥材料。凭据是 `continuum-secrets` 的词汇、走连接器路径（设计 §7.5 末段；若将来确需把
@@ -465,14 +489,13 @@ timeout 900 cargo build --workspace --all-targets
 pub struct AuthorizedToolInvocation<'a> { /* authorization: &'a AuthorizedTool, input: Value —— 两者皆私有 */ }
 
 impl<'a> AuthorizedToolInvocation<'a> {
-    /// **唯一的公开构造入口。** 收 `&AuthorizedTool` 而非 `ToolId`——这正是「没有授权就构造不出
-    /// 这次调用」的落点。
+    /// **唯一的构造入口，`pub(crate)`。** 收 `&AuthorizedTool` 而非 `ToolId`——这正是「没有授权就
+    /// 构造不出这次调用」的落点。
     ///
-    /// **它是公开的，且必须公开**：设计 §7.5 的收紧论证是「此前装配者持有裸
-    /// `Arc<dyn ToolProvider>` 就能调 `invoke`，**现在连裸适配器也要求一枚 `AuthorizedTool`**」
-    /// ——若构造入口是 `pub(crate)`，装配者根本调不了 `invoke`，那句话就成了另一回事。
-    /// 公开的代价写在 `## 遗留`（持有一枚真 `AuthorizedTool` 的代码仍可自行构造）。
-    pub fn new(authorization: &'a AuthorizedTool, input: Value) -> Self;
+    /// **为什么不是 `pub`**：构造点是 `ProviderRegistry::invoke_tool` **一处**（设计 §7.5）。
+    /// 若它是 `pub`，任何持有一枚真 `AuthorizedTool` 的代码都能自行拼出请求、直接调裸适配器的
+    /// [`crate::ToolProvider::invoke`]——那就是「同一件事两个产生点」，而两条路**都编译得过**。
+    pub(crate) fn new(authorization: &'a AuthorizedTool, input: Value) -> Self;
 
     /// 这次调用获准了什么。**消费方是工具适配器**（`ToolProvider` 的实现）：它在 `invoke` 的
     /// 实现体内逐枚取 `Capability::scope()`，把这次动作限定在该作用域内。
@@ -496,18 +519,21 @@ pub trait ToolProvider: Send + Sync {
 `ToolResult`）一字不动；文件头的模块文档若提到它，一并改。**不要**给它留 `#[deprecated]` 或注释掉——
 裁决要的是删。
 
-`Cargo.toml`：normal 加 `continuum-capability = { path = "../continuum-capability" }`（理由注释：
-`invoke` 的请求参数要能命名 `AuthorizedTool`，层内边，设计 §4.1 订正段）；
-dev 加 `continuum-persist` 与 `tempfile`（理由注释：`tests/invocation.rs` 等要构造 `Tx` 去调 `authorize`）。
+`Cargo.toml`：**normal 只加** `continuum-capability = { path = "../continuum-capability" }`
+（理由注释：`invoke` 的请求参数要能命名 `AuthorizedTool`，层内边，设计 §4.1 订正段）。
+**dev 边一律不加**——本 task 没有运行用例，用不到 `Tx`。
 
-`dependency_direction.rs:29` 改为本节 Global Constraints 里的三元素条目，并更新其上方注释
-（**照 P3A 各 task 更新注释的写法**，把「Task 3 起加上 capability / dev 加 persist」写清楚）。
+`dependency_direction.rs:29` 改为 `("continuum-provider", &["continuum-capability", "continuum-core"])`，
+并更新其上方注释（照 P3A 各 task 更新注释的写法，写明「Task 3 起加上 capability；persist 是 Task 4
+的 dev 边，届时增量加」）。**这是本 task 的终值**，Global Constraints 里的三元素是**全计划终态**，
+两者不矛盾：中间态必须与当时的 `Cargo.toml` 精确一致，否则逐对断言红。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
 timeout 1500 cargo test --workspace --no-fail-fast
 timeout 900 cargo build --workspace --all-targets
+grep -rn ToolInvocation crates/    # 预期零命中
 git add crates/continuum-core crates/continuum-provider crates/continuum-runtime/tests/dependency_direction.rs
 git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，删 ToolInvocation"
 ```
@@ -521,6 +547,8 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
 
 **Files:**
 - Modify: `crates/continuum-provider/src/registry.rs`、`src/lib.rs`
+- Modify: `crates/continuum-provider/Cargo.toml`（**dev** + `continuum-persist`、`tempfile`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（provider 条目加 `continuum-persist`，补成三元素）
 - Create: `crates/continuum-provider/tests/invoke_tool.rs`
 
 **Interfaces:**
@@ -531,24 +559,37 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
 > **这是本计划交给 F 的硬交付之一**（另一个是 Task 3 的请求类型）。
 > **工具侧唯一的调用入口**：注册表不交出 `Arc<dyn ToolProvider>`，故任何持有注册表的代码都只能经它调到工具
 > （设计 §7.1；F 已据此删掉 `ToolCaller` / `invoke_authorized` / `select_tool_caller`）。
+>
+> **dev 边在这里加，不在 Task 3**：本 task 是第一个真要用 `Tx` 去调 `authorize` 的 task
+> （「边由用它的那个 task 登记」，dev 边同理）。`Cargo.toml` 与 `ALLOWED` **同批改**——
+> 只改一处会红（`p3bcdf-followups.md` §四.1 的硬提醒 1）。改完 `ALLOWED` 的 provider 条目即
+> Global Constraints 里的**三元素终值**。
 
 - [ ] **Step 1: 写用例**
 
-`tests/invoke_tool.rs`（夹具同 Task 3 的 `db()`；适配器用 `common` 里的 `FakeTool`）：
+`tests/invoke_tool.rs`。**夹具**照 `crates/continuum-capability/tests/authorize.rs` 的 `db()` 同形
+（`tempfile` + `Db::open_with` + `builtin_migrations()` + `p3_capability_migrations()` + `migrate()`），
+再 `save_tool` 登记一条工具、`mint` 铸一枚能力、`authorize` 取 `AuthorizedTool`。
+**每个测试目标各写自己的一份 `db()`**（本仓既有做法：`continuum-capability` 的 `tests/authorize.rs`
+与 `tests/persist.rs` 各有一份），**不做跨目标的共享夹具**。
+适配器用 `tests/common/mod.rs` 里的 `FakeTool`。
 
 - `a_registered_tool_is_invoked_and_its_result_returned`：**门禁内正常路径**（设计 §11）——
   起库 + capability 迁移 + `save_tool` + `authorize` 取 `AuthorizedTool` + `register_tool` →
   `invoke_tool(&auth, json!({"x": 1}))` 得 `Ok(ToolResult { output: {"x":1}, is_error: false })`。
   **这一条要真跑通**，不是「用既有夹具即可、不新建夹具」那个量级（设计 §9 已把这条的代价说准）。
+  **它同时是「输入被原样带到适配器」这条性质的照片**（echo 适配器的 `output == 输入`）——
+  Task 3 不再有构造该请求的集成用例，那条性质在这里观测（设计 §7.5）。
 - `an_unregistered_tool_is_not_called_at_all`：注册表里没有这个 id 的适配器 →
   `matches!(_, Err(ToolCallError::Unregistered { .. }))`，**且不是 `Provider(..)`**。
-  **这条只钉路由本身**（不起库、不涉 `authorize`）；「`tool` 表有行、注册表无适配器」那一向
+  **这条只钉路由本身**（本文件的 `db()` 照用，但**不调 `register_tool`**）；「`tool` 表有行、注册表无适配器」那一向
   是**另一个命题**，它在 Task 5，**不在这里重复**。
 - `the_adapter_failure_is_reported_as_provider`：适配器 `invoke` 返 `Err(ProviderError::Transport(..))` →
   `matches!(_, Err(ToolCallError::Provider(_)))`，**且不是 `Unregistered`**。
 - `the_adapter_is_handed_the_authorization_that_was_passed_in`：适配器侧读
-  `call.authorization().tool_id()`，与 `auth.tool_id()` 相同——**证明路由用的 id 与被下传的授权是同一枚**。
-  这条要一个「把收到的 id 记下来」的适配器（`common` 里加一个记录型的 fixture），
+  `call.authorization().tool_id()`，与 `auth.tool_id()` 相同——**证明路由用的 id 与被下传的授权是同一枚**，
+  亦即「工具 id 只有一个来源」这条性质在**调用面**上的照片（设计 §7.5；Task 3 拍不到它，理由见 Task 3）。
+  这条要一个「把收到的授权回吐出来」的适配器（`common` 里加一个记录型 fixture），
   因为**结果里没有任何回执字段可比对**（设计 §7.1 的限度：类型层管住「id 从哪来」，管不住「适配器照着它做」）。
 
 - [ ] **Step 2: 运行，确认失败**
@@ -575,6 +616,7 @@ impl ProviderRegistry {
     /// **顺序**：先按 id 路由（未命中即返 `Unregistered`，**适配器一次都没被碰过**），
     /// 构造请求，再调适配器。`AuthorizedToolInvocation` **在本函数内部构造**——调用方（F）
     /// 只传 `&AuthorizedTool` 与 `input`，不构造也不命名那个类型（协调者接缝裁决第 5 条）。
+    /// 该类型的构造入口是 `pub(crate)`（Task 3，裁决 C2），故**本函数是全仓唯一的构造点**。
     pub async fn invoke_tool(
         &self,
         authorized: &AuthorizedTool,
@@ -589,11 +631,16 @@ provider 没跑成 → `Err(ToolCallError::Provider(e))`；没有适配器 → `
 且**只钉夹具、不钉真实适配器**（设计 §7.1）。本 task 的实现**不替适配器做这个分流**，
 `Ok` / `Err` 一律按适配器给的转出去。
 
+**同批改 `Cargo.toml` 与 `ALLOWED`**：dev 加 `continuum-persist` 与 `tempfile`（理由注释：本文件的用例
+要构造 `Tx` 去调 `authorize`）；`dependency_direction.rs` 的 provider 条目补成
+`["continuum-capability", "continuum-core", "continuum-persist"]`，并更新注释。
+**两处一起改**——逐对断言跑 `--edges all`，dev 边也在内。
+
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
 timeout 1500 cargo test --workspace --no-fail-fast
-git add crates/continuum-provider
+git add crates/continuum-provider crates/continuum-runtime/tests/dependency_direction.rs
 git commit -m "feat(provider): invoke_tool——工具侧唯一受门禁的调用入口"
 ```
 
@@ -615,7 +662,7 @@ git commit -m "feat(provider): invoke_tool——工具侧唯一受门禁的调�
 
 - [ ] **Step 1: 写用例**
 
-`tests/two_registries.rs`（夹具同 Task 3 的 `db()`）：
+`tests/two_registries.rs`（夹具同 Task 4 的 `db()`）：
 
 - `a_tool_in_the_table_without_an_adapter_passes_authorize_then_fails_to_route`（**第一向，fail-open 的那侧**）：
   `save_tool` 登记了、注册表**没**登记 → `authorize` **返回 `Ok`**（拿到 `AuthorizedTool`），
@@ -693,9 +740,23 @@ git commit -m "test(provider): 两个登记点不一致的两向照片"
    `registry.invoke_tool(&continuum_core::tool::ToolId::new("t"), serde_json::json!({}))` ——
    请求侧**只收 `&AuthorizedTool`**，裸 id 传不进去（旧形状 `ToolInvocation` 已删，裁决 §五）。
    **这一份是「删 `ToolInvocation`」在类型面上的照片。**
-4. `authorized_tool_invocation_needs_an_authorization.rs`：
-   `AuthorizedToolInvocation::new(serde_json::json!({}))` —— **唯一的公开构造入口**要一枚
-   `&AuthorizedTool`，没有它就构造不出请求（设计 §7.5 的第一条性质）。
+4. `a_foreign_crate_cannot_build_authorized_tool_invocation.rs`：**外部 crate 手里有一枚真的
+   `AuthorizedTool` 也构造不出这个请求**（裁决 C2；设计 §7.5 的第一条性质、§11 的照片行）——
+   样例写成「把一个 `&AuthorizedTool` **参数**递给构造入口」：
+
+   ```rust
+   use continuum_capability::AuthorizedTool;
+   use continuum_provider::AuthorizedToolInvocation;
+
+   fn build(auth: &AuthorizedTool) -> AuthorizedToolInvocation<'_> {
+       AuthorizedToolInvocation::new(auth, serde_json::json!({}))   // 预期 E0603：`new` 是私有的
+   }
+   fn main() {}
+   ```
+
+   **预期报错是 `E0603`（associated function `new` is private），不是 E0061 / E0308。**
+   这一点是本样例的判据：**「少传一个参数」也能编译失败**，但那是另一回事——
+   本样例要钉的是「**有**授权也构造不出」，故 `.stderr` 必须落在 `E0603` 上。
 5. `authorized_tool_invocation_fields_are_private.rs`：结构体字面量构造（字段名写对时）被拒 ——
    字段私有，绕开构造入口这条路不存在（与 P3A 的 `authorized_tool_cannot_be_built.rs` 同形）。
 
@@ -759,7 +820,7 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 
 - [ ] **Step 2: 写用例**
 
-`tests/contract.rs`（夹具同 Task 3 的 `db()`）：
+`tests/contract.rs`（夹具同 Task 4 的 `db()`）：
 
 - `a_tool_level_failure_is_ok_with_is_error_true`：适配器返工具级失败 →
   `invoke_tool` 得 `Ok(ToolResult { is_error: true, .. })`，**不是 `Err`**。
@@ -814,15 +875,23 @@ git commit -m "test(provider): is_error 与 Err 的分流（夹具约定）"
   （`lib.rs` / `model.rs` / `tool.rs` / `connector.rs` / `registry.rs`）**且拼起来的文本里能找到
   `trait ModelProvider`**。**没有这一条，一个「什么都没读到」的守卫会永远绿**——这正是
   「守卫须两侧都钉」里缺的那一侧。
-- `the_neutral_crate_contains_no_implementation`：同一份文本里**不出现**下面三个字面拼法：
+- `the_guard_folds_whitespace_before_matching`（**归一化自身的照片，必须先有**）：对
+  `impl  ModelProvider for`（**两个空格**）、`impl\tModelProvider for`、`impl\nModelProvider for`
+  三种输入，归一化函数都要折成 `impl ModelProvider for`。**没有这条，归一化写错了也没人知道**
+  ——而它正是裁决 C7 要的那一件事。
+- `the_neutral_crate_contains_no_implementation`：**折叠空白之后**的文本里**不出现**下面三个字面拼法：
   `impl ModelProvider for`、`impl ToolProvider for`、`impl Connector for`。
   断言信息里要**列出命中的文件名与行号**，否则红的时候读不出是哪一处。
 
-文件头**必须逐条写明这条守卫的逃逸面**（设计 §4.1 末段已给三条，本计划另补第四条，见 `## 遗留`）：
-全限定 trait 路径（`impl crate::model::ModelProvider for X`）、`use … as` 别名、`include!`，
-以及**空白变体**（`impl  ModelProvider for`，两个空格）。
-故它是**一个下界，不是封闭判定**；上界要解析 trait 路径（需要 `syn` 之类的新 dev 依赖），
-**本阶段不做**（设计 §12 第 21 条）。
+**归一化是硬要求，不是可选**（裁决 C7，2026-10-05；设计 §4.1 末段：「**必须先做空白归一化**……
+**留一种不归一就是没关严**」）：匹配前**把连续空白（空格 / `\t` / `\n`）折成一个空格**再比对。
+上面那三种写法因此与一个字面拼法**是同一个拼法**，**不再是逃逸面**。
+
+**归一化之后仍逃逸的三种**（它们不是同一个拼法，而是换了写法；设计 §4.1 末段）：
+全限定 trait 路径（`impl crate::model::ModelProvider for DeepSeek`）、`use … as` 别名后实现、
+把实现 `include!` 进来。故归一化后的守卫仍是**一个下界，不是封闭判定**；这三种写法**没有照片**，
+落在评审。上界要解析 trait 路径（需要 `syn` 之类的新 dev 依赖），**本阶段不做**（设计 §12 第 21 条）。
+**文件头要把上面这两段一并写明**：归一化关掉了什么、还剩哪三种。
 
 - [ ] **Step 2: 运行，确认通过（这是本 task 的正常态）**
 
@@ -831,9 +900,11 @@ timeout 300 cargo test -p continuum-provider --test neutrality
 ```
 
 **本 task 的红要这样做**（否则「守卫恒绿」无法与「守卫有效」区分）：
-临时在 `src/` 下加一个 `struct Probe;` 与 `impl ModelProvider for Probe { … }`（**不提交**），
+临时在 `src/` 下加一个 `struct Probe;` 与 **`impl  ModelProvider for Probe { … }`——两个空格**（**不提交**），
 跑 `cargo test -p continuum-provider --test neutrality`，**确认它红且报出文件名与行号**，再删掉。
+**故意用两个空格**：这样这一次红同时是**空白归一化生效**的照片（若归一化漏了，它会假绿）。
 **这次红要留日志路径**（纪律 1：每次变异用独立日志路径）——它是这条守卫唯一的物证。
+若这一步**不红**，先查归一化，**不要**去改字面拼法。
 
 - [ ] **Step 3: 运行全部测试并提交**
 
@@ -870,12 +941,12 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 模型侧登记后按 id 发现 | Task 1 `a_registered_model_is_found_by_id` |
 | 模型侧：登记 id 与 `list_models` 不一致（§3.3 代价一） | Task 1 `a_registered_id_may_be_absent_from_the_adapters_own_list_models` |
 | 工具侧：公开面清单里没有返回裸适配器的入口 | 公开面清单（**评审读**）+ Task 6 样例 1、2 |
-| 工具侧：授权证明进不到该进的地方 | Task 6 样例 3、4、5 |
-| 工具侧：门禁内的正常路径 | Task 4 `a_registered_tool_is_invoked_and_its_result_returned` |
+| 工具侧：授权证明进不到该进的地方 | Task 6 样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate 持真 `AuthorizedTool` 仍构造不出**，`E0603`）、样例 5（字段私有） |
+| 工具侧：门禁内的正常路径 | Task 4 `a_registered_tool_is_invoked_and_its_result_returned`；**新请求类型的两条性质也由它与其兄弟用例观测**（Task 4 的 `the_adapter_is_handed_the_authorization_that_was_passed_in`） |
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | Task 7 两条（**钉夹具，不钉真实适配器**） |
 | 两个登记点不一致，向一 | Task 5 `…passes_authorize_then_fails_to_route` |
 | 两个登记点不一致，向二 | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` |
-| 中立性（模块面，§4.2 形态 4） | Task 8（**下界**，逃逸面写在文件头） |
+| 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，三种换写法的逃逸写在文件头 |
 | 模型侧未登记 id | Task 1 `an_unregistered_model_id_is_reported_as_not_found` |
 | 工具侧未登记 id | Task 2 `an_unregistered_tool_id_is_reported_as_unregistered` |
 | 重复登记同一 id | Task 1 `registering_the_same_id_twice_is_rejected_as_duplicate` |
@@ -941,37 +1012,46 @@ P1 的 Resource 义务     要求「P3 的 Router 必须为 RESOURCE 显式给�
                        而 D 说重试不属本层、F 的工具路径不调 decide_retry、C 把它折进上一条推走。
                        **须点一个所有方**（设计 §12 第 18 条）。收件人：控制器。
 实现被写进中立 crate     §4.2 形态 4 的那条路径**没有行为照片**；守卫是 lib.rs:1 的定位声明
-  内部                   + Task 8 的模块面断言 + 评审。Task 8 之后那三个字面拼法会被红掉，
-                       全限定路径 / 别名 / include! / 空白变体仍全绿。
+  内部                   + Task 8 的模块面断言 + 评审。Task 8 之后那三个字面拼法（**含空白变体**，
+                       归一化之后是同一个拼法）会被红掉；**全限定路径 / 别名 / include! 三种仍全绿**
+                       （设计 §4.1 末段；裁决 C7 已把空白变体从逃逸清单里划掉）。
 save_tool 登记期不变量   C 不接（设计 §7.4 接缝二、§12 第 15 条）：它约束的是 tool 表的**写入**，
                        属 continuum-capability。协调者已裁定**所有者是 F**（接缝图 §六第 1 条）。
 凭据要不要也交给         设计 §12 第 23 条：本阶段不做；若做，会引入 continuum-provider
   适配器               → continuum-secrets 的边，那是一个**第二个位置**。收件人：控制器（若提出）。
 
-（三）实现期新发现：设计未给判据，本计划取了读数（**须复核**）
+（三）实现期读数：设计/裁决未给判据，本计划取了读数（**须复核**）
 
-只读入口的返回错误类型   设计 §3.5 说 ToolCallError 是「受门禁的 invoke_tool 用」，§3.1 却说
-                       「未命中：……工具侧返回 ToolCallError::Unregistered」——**两处相抵**。
-                       本计划取 §3.1：list_tools / describe_tool 也返 ToolCallError。
-                       若不取这个读数，就得为只读路径再造一个描述同一件事的错误类型。
-register_* 的原子性      设计未写「一组 id 中有一个撞车时是否部分登记」。本计划取**先全查后全插**
-                       （一个都不登记），照片在 Task 1。设计若判部分登记可接受，那条用例要改写。
+只读入口的返回错误类型   **已由裁决 C1 定案，不再是未决**：设计 §3.5 那一行原写「受门禁的
+                       invoke_tool 用」，与 §3.1「工具侧未命中（含 describe_tool）返回
+                       ToolCallError::Unregistered」两说相抵；**裁决取 §3.1，设计 §3.5 已就地订正
+                       并在原地留了来历**。本计划的取法与裁决一致（按 id 查的两个工具侧入口返
+                       ToolCallError；list_tools 不按 id 查，其 Unregistered 臂不可达）。
+                       本条列此只为把来历留全，**不需要再裁一次**。
+RegistryError::Duplicate  **裁决 C5 明写归遗留、不发明**：字段形状规范未给判据。本计划取
+  的字段形状            `Duplicate { id: String }`——两个 id 类型（ModelId / ToolId）共用一个变体，
+                       是哪一张表由调用点可知。另：它与 OperatorError::Duplicate
+                       （crates/continuum-operator/src/registry.rs:10-11）**同的只是「有一个具名
+                       Duplicate 变体」这一取向，不是字段形状**（那里两个字段都是强类型）。
+register_* 的原子性      设计未写「一组 id 中有一个撞车时是否部分登记」（裁决 C3 接受计划的取法）。
+                       本计划取**先全查后全插**（一个都不登记），照片在 Task 1。
+                       设计若判部分登记可接受，那条用例要改写。
 model_providers 的        设计只说「另各持一份登记顺序的适配器列表（供枚举）」，未写同一适配器
-  枚举语义              登记给多组 id 时出现几次。本计划取「每次登记调用一项」。
-list_tools 的并集语义    设计只说「并集」，未写同一 ToolId 由多个适配器声明时保留哪一条。
+  枚举语义              登记给多组 id 时出现几次（裁决 C4）。本计划取「每次登记调用一项」。
+list_tools 的并集语义    设计只说「并集」，未写同一 ToolId 由多个适配器声明时保留哪一条（裁决 C4）。
                        本计划取「首次出现者胜」。与上一条同源：都属「注册表枚举的粒度」。
-AuthorizedToolInvocation  **设计 §7.5 说它是「唯一的公开构造入口」**，其收紧论证（「连裸适配器也要求
-  构造入口是公开的     一枚 AuthorizedTool」）也要求公开；而 F 的设计 §6.3 与协调者接缝裁决第 5 条
-                       的措辞（「请求只能由 invoke_tool 构造」）**隐含 pub(crate)**。**两说相抵**。
-                       本计划按 §7.5 取**公开**。残留据实记：**持有一枚真 AuthorizedTool 的代码
-                       仍可自行构造请求、直接调裸适配器的 invoke**——这与设计 §7.5 自己的说法
-                       （保证升到 trait 级，不是「只有注册表能调」）一致。**须设计侧复核。**
 FakeTool 三态化          设计 §11 写「用 FakeTool」，而一个单元结构体产不出两条失败通道。
                        本计划把它改成带失败通道的三态夹具（Task 7）。**是对夹具形状的读数，不是判据。**
-模块面守卫的第四种逃逸    设计 §4.1 末段列了三条逃逸（全限定路径 / 别名 / include!），
-                       **另有空白变体**（`impl  ModelProvider for`，两个空格）照样全绿——
-                       文本匹配对空白敏感。本计划**未**加空白归一化（那会超出设计的判据范围），
-                       据实记此，交设计侧决定要不要扩。
+AuthorizedToolInvocation  裁决 C2 已定：**构造入口 pub(crate)**，crate 外即使持一枚真
+  的构造入口            AuthorizedTool 也构造不出（照片：Task 6 样例 4，E0603）。故它**不是**未决，
+                       也不再有「两条路都编译得过」的残留——设计 §7.5 说的「构造点一处」由此成立。
+                       仍成立的残留只有一条（设计 §7.1）：**适配器照着 id 做**这件事类型层管不住。
+模块面守卫的第四种逃逸    **已由裁决 C7 关掉**：守卫在匹配前折叠空白（空格 / tab / 换行折成一个空格），
+                       `impl  ModelProvider for` 一类空白变体因此**是同一个字面拼法**，不再逃逸。
+                       **仍逃逸的只剩三种**（全限定路径 / 别名 / include!），设计 §4.1 末段列明。
+                       归一化本身的照片在 Task 8 的
+                       `the_guard_folds_whitespace_before_matching`，以及 Step 2 那条
+                       「两个空格」的探针（归一化若漏了，它会假绿）。
 ```
 
 **另有一处本计划**没有**做、且必须点明的**：设计 §7.5 落地清单的第 4、5 处
