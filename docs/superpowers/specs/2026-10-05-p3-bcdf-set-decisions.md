@@ -63,7 +63,8 @@
 | `docs/02-工程.md` §4.1 | 把 Connector 一行移到 §5.1（边界层）；§4.1 的其余组件不动 |
 | `docs/02-工程.md` §5.1 | 加上 Connector 一行（`§124 §125`） |
 | `docs/02-工程.md` §9.1 | **写出箭头的读法**（被依赖者 → 依赖者，判据是 §9.2「入度为零的组件不依赖任何其他组件」）；补上缺的两条边（`资源层 → 边界层`，P3A 的 `secrets → capability` 已在用；以及 Connector 落边界层后它与 capability 的同类边） |
-| `docs/02-工程.md` §4.3 | 补 Connector 一行、补 §316 ToolProvider 一行、订正 D 指出的两条边含义 |
+| `docs/02-工程.md` §4.3 | 订正「Provider Adapter → 被 Router 调用」为「被模型调用路径（子项目 G）调用」；补 `ToolProvider → 被工具调用路径调用` 一行。**Connector 不进本节**——它是资源层的层内图，而 Connector 已归边界层（订正见上一行） |
+| `docs/02-工程.md` §5.3 | 补 `Connector ← 密钥运行时 + 第 4 层 Capability Token`（Connector 落边界层后它该在的图） |
 | `docs/02-工程.md` §10.3 | §316 的接口清单标注请求面将扩（裁决 2） |
 | `docs/superpowers/specs/2026-10-04-p3a-capability-design.md` | §10 第 9 条已订正（cost/latency 的工具侧与 `trust` 无人认领） |
 
