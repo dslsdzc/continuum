@@ -105,13 +105,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `continuum-provider`——`adapter.rs` 的适配器实现 §124 的 `Connector`（决定 B-4）；
     // `continuum-persist`——**dev 边**，`tests/audit.rs` 要起真库读 `audit_log`
     // （设计 §7.3 已写明这条 dev 边必须有）。`cargo tree --edges all` 把 dev 边算进依赖，
-    // 故它与普通边一样登记。`continuum-effect`（Task 5）由用到它的那个 task 自己登记，
-    // 不提前——叶子 crate 的条目记的是实际依赖，一次声明齐会让条目在中间若干 task 里说谎。
+    // 故它与普通边一样登记。`continuum-effect` 由 Task 5 加（那时 `error.rs` 的
+    // `EffectAuthorizationRequired` 才写出 `EffectType` 这个类型名）——不提前，叶子 crate
+    // 的条目记的是实际依赖，一次声明齐会让条目在中间若干 task 里说谎。
     (
         "continuum-connector",
         &[
             "continuum-capability",
             "continuum-core",
+            "continuum-effect",
             "continuum-persist",
             "continuum-provider",
             "continuum-secrets",

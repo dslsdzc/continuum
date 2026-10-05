@@ -29,6 +29,11 @@ thiserror = { workspace = true }
 # 签名放不下凭据（设计 §4.5），故入口在取出材料后构造一个**逐次存活**的适配器，
 # 让它去满足那个 trait。**本 crate 一字不改 §124 的形状**（决定 B-4）。
 continuum-provider = { path = "../continuum-provider" }
+# Task 5 起的使用点：`error.rs` 的 `EffectAuthorizationRequired` 那个变体里
+# `effect: EffectType` 的**字段类型**——入口第 3 步报的是「绑定 kind 推出的那条效应」，
+# 那条对应（`CapabilityKind::effect`）的返回值就是 `EffectType`。Task 4 之所以没加这条边，
+# 是它用 `CapabilityKind::effect()` 推出值、**没有写出 `EffectType` 这个类型名**。
+continuum-effect = { path = "../continuum-effect" }
 
 [dev-dependencies]
 # Task 4 起的使用点：`tests/invoke.rs` 与 `tests/audit.rs` 的 `#[tokio::test]`
@@ -44,5 +49,4 @@ tempfile = { workspace = true }
 
 # 其余依赖由需要它们的 task 增量加（设计第 6 节的边表是允许集合，不是一次性声明清单；
 # 叶子 crate 的 `ALLOWED` 条目记的是**实际依赖**，一次声明齐会让条目在中间若干 task 里说谎）：
-# - `continuum-effect` 由 Task 5 加（当时才有 `EffectType` 的使用点）；
 # - dev 边 `trybuild` 由需要它的那个 task（Task 6）加。

@@ -85,6 +85,7 @@ dependencies = [
  "async-trait",
  "continuum-capability",
  "continuum-core",
+ "continuum-effect",
  "continuum-persist",
  "continuum-provider",
  "continuum-secrets",

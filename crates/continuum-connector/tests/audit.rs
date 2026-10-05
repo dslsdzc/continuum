@@ -15,7 +15,7 @@ use continuum_capability::{
     AuthorizedEffect, Capability, CapabilityKind, GitAction, Tool, ToolId, ToolProfile, Trust,
     authorize, mint, p3_capability_migrations, save_tool,
 };
-use continuum_connector::{ConnectorImpl, ConnectorRegistry, OpBinding};
+use continuum_connector::{ConnectorAuthorization, ConnectorImpl, ConnectorRegistry, OpBinding};
 use continuum_core::connector::{ConnectorDescriptor, ConnectorId, ConnectorOp};
 use continuum_core::ProviderError;
 use continuum_persist::{Db, Migration, Tx, Value, builtin_migrations};
@@ -137,7 +137,12 @@ async fn a_successful_connector_call_does_not_write_an_audit_row() {
     let before = audit_count(&tx);
 
     let returned = registry
-        .invoke(&authorized, &op("GitHub.push_branch"), json!({}), NOW)
+        .invoke(
+            &ConnectorAuthorization::Effect(authorized),
+            &op("GitHub.push_branch"),
+            json!({}),
+            NOW,
+        )
         .await
         .expect("四步全过且凭据取得到材料");
 

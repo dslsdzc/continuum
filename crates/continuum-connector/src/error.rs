@@ -1,10 +1,10 @@
 //! 连接器边界上的错误类型（设计 §6.1）。
 //!
 //! **没有产生方的变体不建**：注册期四条各自在
-//! [`crate::ConnectorRegistry::register`] 里有真实产生方；调用期三条（本文件的下三条）
+//! [`crate::ConnectorRegistry::register`] 里有真实产生方；调用期四条（本文件的下四条）
 //! 各自在入口的对应步上有真实产生方（`src/entry.rs`）。设计 §6.1 的表共十行，
-//! 截至本 task 落地九行——余下 `EffectAuthorizationRequired` 由 Task 5 在
-//! **用到它的那个 task**里增量加。
+//! 截至本 task **十行齐**——最后落地的 `EffectAuthorizationRequired` 由 Task 5
+//! 在入口**第 3 步**加上。
 //!
 //! `Credentials` / `Provider` 是**转出型**的（`#[from]`）：入口不新造凭据侧或后端侧的
 //! 失败，只把 [`SecretsError`] / [`ProviderError`] 原样带出去——「是哪一种失败」永远由
@@ -14,6 +14,7 @@
 use continuum_capability::CapabilityKind;
 use continuum_core::connector::{ConnectorId, ConnectorOp};
 use continuum_core::ProviderError;
+use continuum_effect::EffectType;
 use continuum_secrets::SecretsError;
 
 /// 连接器注册与调用边界上的错误。
@@ -98,10 +99,11 @@ pub enum ConnectorError {
     /// **本条只管一个方向**：绑定 kind 不在 `for_effect` 的像里、却出示了效应臂时，
     /// 效应臂给出的 kind 必在像里（`AuthorizedEffect::new` 保证），两者必不相等，故由本步拦。
     /// 反过来的那个方向（绑定 kind 在像里、却出示非效应臂）是**第 3 步**的事——那是
-    /// `EffectAuthorizationRequired`，Task 5 落。两步不得并成一条（设计 §5.3）。
+    /// [`ConnectorError::EffectAuthorizationRequired`]。两步不得并成一条（设计 §5.3）。
     ///
     /// 照片：`tests/invoke.rs` 的 `a_presented_capability_of_another_kind_is_rejected`
-    /// （三个字段逐字比）。
+    /// （三个字段逐字比）与 `the_reverse_mismatch_is_caught_by_the_fourth_step_not_the_third`
+    /// （后者钉「反过来的那个方向由本步拦，而不是第 3 步」）。
     #[error(
         "操作 {} 绑定的是能力 {}，出示的是 {}",
         op.as_str(),
@@ -112,6 +114,26 @@ pub enum ConnectorError {
         op: ConnectorOp,
         bound: CapabilityKind,
         presented: CapabilityKind,
+    },
+
+    /// 绑定 kind 落在 `for_effect` 的像里（**这条操作有外部效应**）、却没走效应臂
+    /// （入口第 3 步）。
+    ///
+    /// **这是 fail-open 的那一侧**：有外部效应却没走强制点 (2)（设计 §3.5、§5.3）。
+    /// 与 [`ConnectorError::AuthorizationMismatch`] 是**两条不同的核对，不得并成一条**：
+    /// 本条管「有没有走强制点 (2)」，第 4 步管「拿的是不是那一枚动作」。并成一条之后，
+    /// `<正确的 kind> + 错误的臂` 就能过。
+    ///
+    /// `effect` 是**由绑定 kind 推出的**那条效应（[`CapabilityKind::effect`]），不是出示方
+    /// 给的。**反过来的那个方向到不了本变体**：绑定 kind 不在像里时推不出效应，这个字段
+    /// **没有值可填**，那条路径由第 4 步的 `AuthorizationMismatch` 拦（设计 §5.3 的两行表）。
+    ///
+    /// 照片：`tests/invoke.rs` 的 `an_effect_operation_presented_with_a_bare_capability_is_rejected`
+    /// （`effect` 逐字比，且实现未被调用）。
+    #[error("操作 {} 有外部效应（{}），必须出示效应授权", op.as_str(), effect.as_str())]
+    EffectAuthorizationRequired {
+        op: ConnectorOp,
+        effect: EffectType,
     },
 
     /// 凭据这条路失败：**原样转出** [`SecretsError`]，不重编、不吞成一句笼统的话。
@@ -136,3 +158,4 @@ pub enum ConnectorError {
     #[error("连接器实现报错: {0}")]
     Provider(#[from] ProviderError),
 }
+
