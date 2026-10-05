@@ -7,6 +7,13 @@ use continuum_model_registry::{ProfileError, Ratio, SkillScore};
 /// `[0,1]` 闭区间内侧的往返：极小（含最小次正规）与极大（`1.0`，本类型的上界）都在内。
 ///
 /// **被钉住的是往返，不是最短长度**——`1e300` 那类值打出三百多个字符是允许的契约。
+///
+/// **`Debug` 之所以不在红的条件里**（`SkillScore` 那条同一对函数，同理）：Rust 的 `f64` 的
+/// `Debug` 与 `Display` 是**同一套最短精确往返算法**，把 `as_str` 换成 `{:?}` 各取值丢精度 0 格、
+/// 跑全量 `exit=0` 不变红。这**不是等价变异体**——两版输出确实不同（`1e300`：`Display` 三百多个
+/// 字符 vs `Debug` 的 `1e300`），只是**本用例没有观察长度**；而设计 §2.4 只声称**往返**、
+/// 不声称**最短长度**，故**不为它补用例**（补了就是给契约加一句本不存在的绝对措辞）。
+/// 真正红的条件是**截断格式**（如 `{:.2}`）。
 #[test]
 fn ratio_round_trips_through_its_text_encoding() {
     let values = [
@@ -61,6 +68,7 @@ fn ratio_rejects_non_finite_and_out_of_range() {
 }
 
 /// 同一对函数，另一侧的守卫：本类型的域**无界**，故负数与极大值都必须往返。
+/// 红的条件同 `ratio_round_trips_through_its_text_encoding`（截断格式；`Debug` 不变红，见那条的注释）。
 #[test]
 fn skill_score_round_trips_through_its_text_encoding() {
     let values = [
