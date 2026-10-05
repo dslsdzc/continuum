@@ -11,7 +11,7 @@ use continuum_capability::{CapabilityKind, EmailAction, FsAction, GitAction, Git
 use continuum_connector::{ConnectorError, ConnectorImpl, ConnectorRegistry, OpBinding};
 use continuum_core::connector::{ConnectorDescriptor, ConnectorId, ConnectorOp};
 use continuum_core::ProviderError;
-use continuum_secrets::SecretMaterial;
+use continuum_secrets::{EnvCredentialSource, SecretMaterial, SecretsRuntime};
 use serde_json::Value;
 
 /// 夹具：可声明任意描述符与任意绑定，并记录 `invoke_with` 的调用次数。
@@ -74,8 +74,14 @@ impl ConnectorImpl for FakeConnector {
     }
 }
 
+/// 注册表要一枚凭据运行时才构造得出来（入口持有它，设计 §4.1）。注册期用例不碰凭据
+/// 路径，故给一个构造期不读环境、不做 I/O 的环境变量源即可。
+fn secrets() -> SecretsRuntime {
+    SecretsRuntime::new(Box::new(EnvCredentialSource::new("CONTINUUM_TEST_", 60_000)))
+}
+
 fn register(fake: FakeConnector) -> Result<(), ConnectorError> {
-    ConnectorRegistry::new().register(Box::new(fake))
+    ConnectorRegistry::new(secrets()).register(Box::new(fake))
 }
 
 /// 声明集里有一条没绑 → `UnboundOperation`，且 `op` 是**没绑的那一条**（逐字比）。

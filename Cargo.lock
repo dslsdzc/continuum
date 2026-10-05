@@ -85,9 +85,13 @@ dependencies = [
  "async-trait",
  "continuum-capability",
  "continuum-core",
+ "continuum-persist",
+ "continuum-provider",
  "continuum-secrets",
  "serde_json",
+ "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

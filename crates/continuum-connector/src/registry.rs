@@ -1,4 +1,9 @@
-//! 注册入口：绑定与声明的双向覆盖（设计 §3.2.1）。
+//! 注册入口：[`ConnectorRegistry::register`]——**注册期全部四条核对的唯一产生点**
+//! （设计 §3.2.1）。四条是：声明集 ↔ 绑定集的双向覆盖（两侧）、一一
+//! （`DuplicateKindBinding`）、操作的服务半边相符（`OperationServiceMismatch`）。
+//!
+//! 注册表也持有**凭据运行时**（设计 §4.1：驱动装配好传进来），入口
+//! （[`crate::ConnectorRegistry::invoke`]，在 `src/entry.rs`）从它逐次签发凭据。
 
 use std::collections::{HashMap, HashSet};
 
@@ -6,7 +11,7 @@ use async_trait::async_trait;
 use continuum_capability::CapabilityKind;
 use continuum_core::connector::{ConnectorDescriptor, ConnectorId, ConnectorOp};
 use continuum_core::ProviderError;
-use continuum_secrets::SecretMaterial;
+use continuum_secrets::{SecretMaterial, SecretsRuntime};
 use serde_json::Value;
 
 use crate::binding::OpBinding;
@@ -49,7 +54,8 @@ pub(crate) fn service_half(op: &ConnectorOp) -> &str {
         .0
 }
 
-/// **注册期全部核对的唯一产生点**（设计 §3.2.1）。
+/// **注册期全部核对的唯一产生点**（设计 §3.2.1），也是入口
+/// [`ConnectorRegistry::invoke`]（`src/entry.rs`）读取已登记连接器与绑定的地方。
 ///
 /// 四条核对：双向覆盖的两侧（第 2 条）、一一（第 3 条）、服务半边相符（第 5 条）。
 ///
@@ -60,19 +66,55 @@ pub(crate) fn service_half(op: &ConnectorOp) -> &str {
 /// 核对全过、**注册成功**——照片见 `tests/register.rs` 的
 /// `a_mis_bound_operation_still_registers`。这条限度是本 trait 与
 /// `register` 的**口径**，不是本 crate 没做够。
-#[derive(Default)]
 pub struct ConnectorRegistry {
+    /// 密钥运行时：入口按出示的那枚能力**逐次**签发凭据并取料（设计 §4.1、强制点 (3)）。
+    ///
+    /// **由驱动装配好传进来**（[`ConnectorRegistry::new`]）：`SecretsRuntime` 的构造
+    /// 要读凭据源的位置与内容，那是**外部配置**，与驱动的装配处同一职责。连接器自带
+    /// 凭据源会让「凭据从哪来」在装配处看不见（设计 §4.1 取的那种形状）。
+    secrets: SecretsRuntime,
     /// 已注册的连接器本体，按 id 索引。入口（Task 4）从这里取实现。
     connectors: HashMap<ConnectorId, Box<dyn ConnectorImpl>>,
     /// 已注册的连接器各自的绑定，按 id 与操作索引。**`ConnectorOp` 只有 `Hash` / `Eq`、
     /// 没有 `Ord`**（`crates/continuum-core/src/connector.rs:26`），故用 `HashMap`
     /// 而不是 `BTreeMap`。
+    ///
+    /// 注册期的双向覆盖使**本表的键集恰等于该连接器声明的操作集**——入口第 2 步
+    /// （「操作已声明」）与第 4 步（取绑定的 kind）因此共用这一处，不再读第二份声明集。
     bindings: HashMap<ConnectorId, HashMap<ConnectorOp, CapabilityKind>>,
 }
 
 impl ConnectorRegistry {
-    pub fn new() -> Self {
-        Self::default()
+    /// **注册表没有无参构造**：凭据运行时是它的必需的构件，故构造它时一起收下。
+    /// 这**不是**「调用方可以选装」——没有运行时，入口的凭据路径就无路可走。
+    pub fn new(secrets: SecretsRuntime) -> Self {
+        Self {
+            secrets,
+            connectors: HashMap::new(),
+            bindings: HashMap::new(),
+        }
+    }
+
+    /// 入口第 1 步用：按 id 取回已注册的实现。
+    ///
+    /// **不返回 `Option<&Box<…>>` 的里层**：`Box` 是实现细节，入口只要那个 trait 对象。
+    pub(crate) fn connector(&self, id: &ConnectorId) -> Option<&dyn ConnectorImpl> {
+        self.connectors.get(id).map(Box::as_ref)
+    }
+
+    /// 入口第 2、4 步共用：取某连接器的某操作绑定的 kind；没有绑定即该操作未声明
+    /// （注册期的双向覆盖保证「有声明必有绑定」，故本表的键集就是声明集）。
+    pub(crate) fn bound_kind(
+        &self,
+        id: &ConnectorId,
+        op: &ConnectorOp,
+    ) -> Option<CapabilityKind> {
+        self.bindings.get(id)?.get(op).copied()
+    }
+
+    /// 入口的凭据路径用：签发与取料都经它（设计 §4.1）。
+    pub(crate) fn secrets(&self) -> &SecretsRuntime {
+        &self.secrets
     }
 
     /// 收下一个连接器：先从描述符取出声明集、从实现取出绑定集，核过四条核对后才登记。

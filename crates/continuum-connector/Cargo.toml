@@ -25,12 +25,24 @@ serde_json = { workspace = true }
 async-trait = { workspace = true }
 # 本 crate 的使用点：`error.rs` 的 `ConnectorError` 派生 `thiserror::Error`。
 thiserror = { workspace = true }
+# Task 4 起的使用点：`adapter.rs` 的适配器实现 §124 的 `Connector`——§124 的 `invoke`
+# 签名放不下凭据（设计 §4.5），故入口在取出材料后构造一个**逐次存活**的适配器，
+# 让它去满足那个 trait。**本 crate 一字不改 §124 的形状**（决定 B-4）。
+continuum-provider = { path = "../continuum-provider" }
+
+[dev-dependencies]
+# Task 4 起的使用点：`tests/invoke.rs` 与 `tests/audit.rs` 的 `#[tokio::test]`
+# ——入口是 async 方法。
+tokio = { workspace = true }
+# Task 4 起的使用点：`tests/audit.rs` 要起一个真库、读 `audit_log` 表
+# （「一次成功调用不写审计行」那条否定照片与它的对照臂）。**这条 dev 边必须在本 task
+# 登记**：Step 5 就要跑 `--test audit`，少了它那一步编译不过；而 `cargo tree --edges all`
+# 把 dev 边算进依赖，故 `ALLOWED` 也要同时记（设计 §7.3）。
+continuum-persist = { path = "../continuum-persist" }
+# Task 4 起的使用点：上述两个测试各起一个临时目录/临时库。
+tempfile = { workspace = true }
 
 # 其余依赖由需要它们的 task 增量加（设计第 6 节的边表是允许集合，不是一次性声明清单；
 # 叶子 crate 的 `ALLOWED` 条目记的是**实际依赖**，一次声明齐会让条目在中间若干 task 里说谎）：
-# - `continuum-provider` 由 Task 4 加（适配器实现 §124 的 `Connector`）；本 task 用不到它，
-#   而 `ProviderError` 来自 `continuum-core`（`continuum_core::ProviderError`），
-#   故本 task 不为它登记 provider 那条边；
 # - `continuum-effect` 由 Task 5 加（当时才有 `EffectType` 的使用点）；
-# - dev 边 `tokio` / `continuum-persist` / `tempfile` 由 Task 4 加、`trybuild` 由需要它的
-#   那个 task 加。
+# - dev 边 `trybuild` 由需要它的那个 task（Task 6）加。

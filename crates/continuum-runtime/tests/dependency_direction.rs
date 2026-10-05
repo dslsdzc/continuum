@@ -101,18 +101,19 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 无命中），故只登记实际用到的那一条——叶子 crate 的条目记实际依赖，
     // 零使用的边即假边（P2b 为此删过两条）。
     ("continuum-secrets", &["continuum-capability"]),
-    // P3 子项目 B 的连接器边界层（设计 §3.2）。本 task 只登记**本 task 实际有的边**：
-    // core（描述符与操作标识）、capability（`OpBinding` 的 kind）、secrets
-    // （`ConnectorImpl::invoke_with` 的材料入参——公开 trait 签名的一部分，故是真依赖）。
-    // `continuum-provider`（Task 4 的适配器实现 §124 `Connector`）、`continuum-effect`
-    // （Task 5）与三条 dev 边（`tokio` / `continuum-persist` / `tempfile`，Task 4）
-    // **都由用到它的那个 task 自己登记**，不提前——叶子 crate 的条目记的是实际依赖，
-    // 一次声明齐会让条目在中间若干 task 里说谎。
+    // P3 子项目 B 的连接器边界层（设计 §3.2）。Task 4 起加两条：
+    // `continuum-provider`——`adapter.rs` 的适配器实现 §124 的 `Connector`（决定 B-4）；
+    // `continuum-persist`——**dev 边**，`tests/audit.rs` 要起真库读 `audit_log`
+    // （设计 §7.3 已写明这条 dev 边必须有）。`cargo tree --edges all` 把 dev 边算进依赖，
+    // 故它与普通边一样登记。`continuum-effect`（Task 5）由用到它的那个 task 自己登记，
+    // 不提前——叶子 crate 的条目记的是实际依赖，一次声明齐会让条目在中间若干 task 里说谎。
     (
         "continuum-connector",
         &[
             "continuum-capability",
             "continuum-core",
+            "continuum-persist",
+            "continuum-provider",
             "continuum-secrets",
         ],
     ),
