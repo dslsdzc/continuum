@@ -382,9 +382,18 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 来源。本路径的处置是**只让声明（`--effect`）当来源**，并靠下面这条**登记项不变量**让 `effect_class`
 不可能被绕过：
 
-> **登记项不变量（本设计提出，C 在登记时强制）**：登记一条 `effect_class == Some(t)` 的工具时，
-> 其 `required_capabilities` 必须包含 `CapabilityKind::for_effect(t)`
-> （`crates/continuum-capability/src/capability.rs:97`）。
+> **登记项不变量（本设计提出，由 `continuum-capability` 的 `save_tool` 强制）**：
+> 登记一条 `effect_class == Some(t)` 的工具时，其 `required_capabilities` 必须包含
+> `CapabilityKind::for_effect(t)`（`crates/continuum-capability/src/capability.rs:97`）。
+
+**强制点定在 `save_tool`（协调者本轮拍板，原稿记的是「C 在登记时强制」，已订正）**：
+`save_tool`（`crates/continuum-capability/src/persist.rs:64`）是**一条登记项进入 `tool` 表的唯一生产
+写点**——`tool` 表只有它一个写入口（另一个读入口是 `load_tool` / `load_tools`），故把它放在这里，
+这条不变量就在**工具定义进入存储的那一个点**上成立，而不必依赖任何调用方自觉。
+**订正的来历**：本设计原稿把这条义务记给子项目 C（登记入口的实现方）；协调者裁定归
+`continuum-capability`——理由是「谁写库谁把关」，C 那边根本不必知道这条规则。
+**它同时把上文那条洞关在唯一入口上**：`save_tool` 是唯一的写点，故没有第二条路能让一条违反
+不变量的登记项落库。
 
 **这条不变量为什么够**：若某工具有 `effect_class == Some(t)`，则它必然声明了 `for_effect(t)` 这枚能力；
 `authorize` 的两向合取（出示集 ⊆ 声明集 且 声明集 ⊆ 出示集）于是**要求**出示集里有一枚
@@ -392,8 +401,9 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 `for_effect(t)` 的 `--effect`，那条效应遂进 Journal。**「工具做了外部效应却没有效应记录」这条洞
 由此被不变量堵死**，而驱动不必读 `effect_class`。
 
-**为什么这条不变量今天没有强制点**：登记的入口今天不存在（`save_tool` 在生产里零调用，
-见第 14 节第 1 条）。故这是一个**尚未落地的义务**，记在第 14 节第 7 条，收件人 C。**在它落地之前，
+**为什么这条不变量今天仍没有强制点**：`save_tool` 的生产调用方今天**不存在**（全仓只在测试里被调，
+见第 14 节第 1 条），故**实现这一步（在 `save_tool` 里加这条检查）就是要落地的那件事**，
+记在第 14 节第 7 条，**收件人改为 `continuum-capability`**（不再是 C）。**在该检查落地之前，
 「工具做了外部效应却没有效应记录」这条洞是开着的**——本设计不假装它已经关上。
 
 **被否掉的替代**：让驱动读 `effect_class` 并与 `--effect` 的集合比对。否掉的理由：那要么是
@@ -424,11 +434,12 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 而这条登记项**在本路径上永远调不动**（每条调用都停在 `MissingCapability`）。
 
 **本设计对这条后果的处置是「据实写明」，不是「在登记期拦住」**，理由是**登记入口不是本子项目的**：
-它今天不存在于生产代码里（`save_tool` 生产零调用，第 14 节第 1 条），其归属与形状是 C 的活
-（§11 的 C①③④）。**在别人的入口上装一道本层的闸，会把这条限度变成一个只有本层知道的口径**，
-而那正是「同一件事两处各判一次」的形状。故本子项目**不**在登记期拦，只在正文与第 14 节第 4 条把它
-写明；**将来若登记面要拦，那是 C 的决定**，且届时须一并处置「登记项与 `PolicyContext` 的事实集合
-谁先扩」这个次序问题。
+它今天不存在于生产代码里（`save_tool` 生产零调用，第 14 节第 1 条），**其归属是 `continuum-capability`
+的 `save_tool`**（协调者本轮把「登记项的合法性由谁把关」判给写库的那一方，见 §5.2 与 §11 的
+`continuum-capability` 行；原稿在此处写「是 C 的活」，已订正）。**在别人的入口上装一道本层的闸，
+会把这条限度变成一个只有本层知道的口径**，而那正是「同一件事两处各判一次」的形状。故本子项目**不**在
+登记期拦，只在正文与第 14 节第 4 条把它写明；**将来若登记面要拦，那是 `continuum-capability` 的决定**，
+且届时须一并处置「登记项与 `PolicyContext` 的事实集合谁先扩」这个次序问题。
 
 ---
 
@@ -442,6 +453,8 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 // continuum-provider::registry（**子项目 C 建**，见 C 设计 §7.1）
 ProviderRegistry::invoke_tool(&self, authorized: &AuthorizedTool, input: Value)
     -> Result<ToolResult, ToolCallError>;
+    // 裁决 2（§6.5）：**请求侧**将扩一个承载授权/凭据的位置——**位置由 C 设计**，
+    // 故本处不写它的形状（不预先发明接口）。
 
 pub enum ToolCallError {                 // C 设计 §3.5（定义）与 §7.1（用于 invoke_tool）
     Unregistered { id: ToolId },         // 这个 id 没有适配器（路由）
@@ -733,9 +746,14 @@ C 不一致，就是同一件事的第二个形状。
 
 | 子项目 | 本设计要它做的 |
 |---|---|
-| **C** | ① **工具侧唯一的调用入口**（`ProviderRegistry::invoke_tool(&AuthorizedTool, input)`，且不交出适配器）由 C 维持——**F 调用它，不再自建入口**（§6.1、§6.2）；② 登记一条工具时强制第 5.2 节的不变量（`effect_class` 的 kind ⊆ `required_capabilities`）；③ **`Tool`（§252）与 `ToolDescriptor`（§316）并存，不合并**（C 设计 §8）——本路径**读 `tool` 表**、适配器另出 `ToolDescriptor`，两者靠共用的 `ToolId` 绑定；`input_schema` 有两个产生点一事按 C §8 的裁定处置（**调用的权威是适配器的 `ToolDescriptor.input_schema`**，`Tool.input_schema` 是规划快照），本路径**不消费**其中任何一个；④ 注册表的**登记入口**（组合根用它把适配器登记进去，§10.2）与 `ToolCallError` 的两个臂（§8 的 P-9 / P-10 依赖它们） |
+| **C** | ① **工具侧唯一的调用入口**（`ProviderRegistry::invoke_tool(&AuthorizedTool, input)`，且不交出适配器）由 C 维持——**F 调用它，不再自建入口**（§6.1、§6.2）；② **`Tool`（§252）与 `ToolDescriptor`（§316）并存，不合并**（C 设计 §8）——本路径**读 `tool` 表**、适配器另出 `ToolDescriptor`，两者靠共用的 `ToolId` 绑定；`input_schema` 有两个产生点一事按 C §8 的裁定处置（**调用的权威是适配器的 `ToolDescriptor.input_schema`**，`Tool.input_schema` 是规划快照），本路径**不消费**其中任何一个；③ 注册表的**登记入口**（组合根用它把适配器登记进去，§10.2）与 `ToolCallError` 的两个臂（§8 的 P-9 / P-10 依赖它们）。**第 5.2 节的登记项不变量**不在 C 这边——协调者本轮把它判给 `continuum-capability` 的 `save_tool`（「谁写库谁把关」），见 §5.2 与第 14 节第 7 条 |
 | **B** | ① 按能力**逐枚**签发凭据（§51、P3A 设计 §5）：作用域的强制**在那一侧**，本路径只把 scope 原样带进 `AuthorizedTool`（§4.3）；② 说清它凭什么认为收到的 `AuthorizedEffect` 经过了校验（P3A 设计 §10 第 10 条）；③ **`AuthorizedTool::granted()` 今天没有任何消费方**（本路径只读 `tool_id()`，C 的 `invoke_tool` 也只读它，B 消费的是 `AuthorizedEffect::capability()`）——见第 14 节第 3 条，**不要**把它当成已指派给 B |
-| **D** | **一处未决的接缝，记在此（原稿写「与 F 无直接接线」，那句话不完整）**：D 的设计两处把驱动职责记到「子项目 F」名下——`ProviderHealth`「由调用方（驱动，子项目 F）取好后作为值传入」（D 设计 `:39`）与「失败检测与升级触发……那是驱动/执行层的活（子项目 F）」（D 设计 `:611`）。**本子项目的范围是工具调用路径，不含任何模型侧路径**：模型调用的驱动路径今天**不存在**（`task` 跑的是命令，`tool` 跑的是工具）。故这两条要么落在将来那条**模型调用路径**上，要么需要一个具名收件人；**收件人：D 与协调者**（本子项目不认领，也不改 D）。<br>另：`ToolProfile` 的 `cost` / `latency` / `trust` 服务 D 的候选排序（P3A 设计 §3.1），本路径**不读**这三个字段 |
+| **`continuum-capability`** | **登记项的合法性由它把关**：在 `save_tool`（`crates/continuum-capability/src/persist.rs:64`，`tool` 表**唯一**的生产写点）里强制第 5.2 节的不变量 `effect_class == Some(t)` ⇒ `for_effect(t)` ∈ `required_capabilities`。**协调者本轮拍板**（原稿把这条记在 C 名下，已订正）：谁写库谁把关——C 那边不必知道这条规则 |
+
+**D 行已删（原稿在此处有一行，记 D 把驱动职责记到「子项目 F」名下）**：那条所指的 D 文本**已被 D
+自己订正**——D 的 §1.2 现在题为「调用方**按角色**指名，**不记在子项目 F 名下**」，§7.1 同。
+故本设计**不再对 D 提任何要求**（**订正的来历留此**，免得后来者按旧文本再提一次）。
+`ToolProfile` 的 `cost` / `latency` / `trust` 仍服务 D 的候选排序（P3A 设计 §3.1），本路径**不读**。
 
 ---
 
@@ -787,7 +805,8 @@ C 不一致，就是同一件事的第二个形状。
    **有**照片（P-18）——这条不许再被读成「§4.3 整节没有照片」。
 3. §4.1 的「`presented` 与 `AuthorizedEffect` 同源」：构造点的选择，只由评审维持。
 4. §8.1 的两条没有照片的失败路径（`Expired` 经本路径不可达、终态写入失败不可造）。
-5. §5.2 的**登记项不变量**：它今天没有强制点（登记路径不存在），故也没有照片。
+5. §5.2 的**登记项不变量**：它今天没有强制点（`save_tool` 里还没有这条检查、其生产调用方也不存在），
+   故也没有照片；**它的落点已定为 `continuum-capability` 的 `save_tool`**（第 14 节第 7 条）。
 6. **步骤 6 那一跳在生产路径上今天必然失败**（注册表为空 ⇒ `ToolCallError::Unregistered`），
    故「成功调用」在生产里不可达；它的照片全部来自库级用例里经注册表登记的夹具适配器。
 
@@ -803,10 +822,11 @@ C 不一致，就是同一件事的第二个形状。
    `ToolDescriptor` 由适配器另出、两者靠共用的 `ToolId` 绑定**（C 设计 §8 判**不合并**——合并会把
    `required_capabilities` / `effect_class` 这些治理数据交给被治理方，那是强制点 (1) 的语义反转）。
    **原稿在此处写「登记要等 §316 的 `ToolDescriptor` 与 §252 的 `Tool` 合并」，那句话与 C 的裁定
-   相反，已按 C 订正**，本子项目**不发明**一个登记用的 CLI。**收件人：子项目 C**（登记入口，
+   相反，已按 C 订正**，本子项目**不发明**一个登记用的 CLI。**收件人：子项目 C**（登记入口；
    含 C §8 记的那处 `input_schema` 双产生点——**调用的权威是适配器的 `ToolDescriptor.input_schema`**，
    C 设计 §12 第 5 条把这条一致性缺口的收件人记为 F/D，**本路径不消费任何一份 `input_schema`**，
-   故此处只登记、不认领）。
+   故此处只登记、不认领）。**「谁登记」与「登记项的合法性由谁把关」是两件事**：前者是 C 的登记入口，
+   后者（第 5.2 节的不变量）归 **`continuum-capability` 的 `save_tool`**——见第 7 条。
 2. **注册表里没有任何工具适配器**：`ToolProvider` 的唯一实现是
    `crates/continuum-provider/tests/fake_provider.rs` 里的夹具，生产代码一个都没有。故组合根
    （§10.2）登记不出东西，步骤 6 那一跳在生产里必然返回 `ToolCallError::Unregistered`
@@ -824,9 +844,10 @@ C 不一致，就是同一件事的第二个形状。
    含它们的工具在本路径上**一律** `MissingCapability`（§5.3）。要开这条路，须给 `PolicyContext` 加一条
    能力事实并定「非效应类能力由谁判准」——本子项目无权处置。
    **对登记面的后果**：今天**可以**登记一条这样的工具（`required_capabilities` 收十二个 kind 全合法），
-   而它**永远调不动**；本设计**只在正文写明、不在登记期拦**（理由见 §5.3：登记入口是 C 的，在别人的
-   入口上装本层的闸会造出一条只有本层知道的口径）。**收件人：策略层（`PolicyContext` 的事实集合）与
-   子项目 D（能力需求侧的来源）；「登记期是否要拦」另属子项目 C。**
+   而它**永远调不动**；本设计**只在正文写明、不在登记期拦**（理由见 §5.3：本层不该在别人的入口上装闸
+   ——而按第 7 条，那个入口现在是 `continuum-capability` 的 `save_tool`，「是否要拦」同样归它）。
+   **收件人：策略层（`PolicyContext` 的事实集合）与子项目 D（能力需求侧的来源）；
+   「登记期是否要拦」归 `continuum-capability`（第 7 条）。**
 5. **本路径不判作用域**（§4.3）：`authorize` 只比 kind，作用域随能力原样带出（**带出**那一半有照片，
    P-18；**判定**那一半没有）。这是本层的既有边界，强制落在凭据签发（§51）与执行点。
    **收件人：子项目 B**（作用域的**判定**）。
@@ -837,7 +858,10 @@ C 不一致，就是同一件事的第二个形状。
    （与 §312 Execution Trace 的落点一起定，见第 9 条）。
 7. **登记项不变量没有强制点**（§5.2）：`effect_class == Some(t)` ⇒ `for_effect(t)` ∈
    `required_capabilities`。它是堵住「工具做了外部效应却无效应记录」这条洞的那块东西，
-   而登记的入口今天不存在（第 1 条）。**在不变量落地之前，那条洞是开着的。****收件人：子项目 C。**
+   **其落点已由协调者本轮拍板定为 `continuum-capability` 的 `save_tool`**（`tool` 表唯一的
+   生产写点；原稿记的是 C，已订正）；而 `save_tool` 的生产调用方今天不存在（第 1 条），
+   故**这一步的实现就是「在 `save_tool` 里加这条检查」**。**在该检查落地之前，那条洞是开着的。**
+   **收件人：`continuum-capability`**（不再是子项目 C）。
 8. **工具调用不建 Task 工作区**（§3 的决定 F8）：若某个工具**确实需要**一个 Task 工作区，
    §316 的 `ToolInvocation` 里没有把工作区交给适配器的通道。**收件人：子项目 C**（改 §316 的调用面
    是 C 的活），并与第 10 条同源。

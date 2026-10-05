@@ -36,7 +36,7 @@ Model Registry 生命周期（§249）、Router 与候选排序（§250 §84）�
 
 `docs/02-工程.md:250` 写 `Provider Adapter → 被 Router 调用，接口中立`。本设计**不让 Router 直接调用适配器**：
 Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
-（`crates/continuum-core/src/model.rs:83`），由调用方（**执行侧，今天尚未指名**，见 §11 第 20 条）取好后作为**值**传入。
+（`crates/continuum-core/src/model.rs:83`），由调用方**子项目 G（模型调用路径）**取好后作为**值**传入（见 §1.2 末段）。
 理由有二，都不是偏好：
 
 1. 排序因此是**同步纯函数**——没有 I/O、没有 `.await`，可以在表驱动用例里穷举；
@@ -44,7 +44,7 @@ Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
 
 **本子项目的交付物是一个「判断」，不是一次执行。** §250 的输出是 `RankedExecutionCandidates`、§84 要的是
 `confidence` / `alternatives` / `reason`——两处要的都是**排序后的候选与理由**。故 **`ModelProvider::invoke` /
-`stream` 的调用方不在本层**：那是**执行侧**（今天尚未指名，见 §11 第 20 条）拿着一张 `RankedExecutionCandidates` 去做的下一步，
+`stream` 的调用方不在本层**：那是**子项目 G（模型调用路径）**拿着一张 `RankedExecutionCandidates` 去做的下一步，
 本层既不持有 `CallId`，也不消费 `ModelStream`。**本设计对 `continuum-provider` 的引用为零**（§8.2），
 `invoke` / `stream` 在本 crate 里一次都不出现。
 
@@ -254,6 +254,8 @@ pub struct Ratio(f64);             // 构造时拒 NaN / ±∞，且须落在 0.
 P3A 把 §87 的 `cost` / `latency` / `trust` 留成了**单位结构体**（只定容器形状、取值域留空，
 `crates/continuum-capability/src/tool.rs:176-251`），并在 P3A 设计 §10 第 9 条写明「它们服务的是子项目 D 的候选排序」。
 
+**P3A 把三个字段一并判给了 D，本设计只接其中两个——`trust` 明写退件**（理由见本节末，记在 §11 第 23 条）。
+
 **本设计的回答：D 是消费者，但 D 不是给出取值域的那一个。** 具体地：
 
 - `ModelProfile.cost_profile` / `latency_profile` **复用** `continuum_capability::{Cost, Latency}`，
@@ -266,6 +268,26 @@ P3A 把 §87 的 `cost` / `latency` / `trust` 留成了**单位结构体**（只
   `continuum-capability` 的唯一理由**（§8）。被否掉的替代方案是「把 `Cost`/`Latency` 上移到
   `continuum-core` 再两边共用」——它更干净，但要改动 P3A 已落地的类型与它的落库编码，超出本子项目范围；
   记在 §11 第 6 条。
+
+### `trust`：**D 不接，退件**（P3A 把三个字段一并判给 D，本设计只接两个）
+
+P3A 设计 §3.1 把 `cost` / `latency` / `trust` **三个一起**写成「服务子项目 D 的候选排序」
+（`crates/continuum-capability/src/tool.rs:171`、`:229`）。本设计**只接 `Cost` / `Latency`**，`trust` 退件，
+理由三条，都是本设计自己文档里的判据而不是偏好：
+
+1. **§247 的 `ModelProfile` 没有信任字段。** 十二个字段逐项核过（§2.1 的表）：`id`、`version`、`provider`、
+   `model_revision`、`modalities[]`、`tools[]`、`skill_vector`、`failure_modes[]`、`latency_profile`、
+   `cost_profile`、`evidence_count`、`confidence`——**没有 `trust`**。故模型侧**没有地方安放它**，
+   而本设计**不擅自加一个 §247 没有的字段**（同一判据见 §2.1 对 §81 那两项的处置）。
+2. **§250 的「最终选择 MUST 考虑」八项里也没有信任。** 八项逐项列在 §5.1：能力匹配／失败模式／成本／延迟／
+   上下文长度／模态／工具支持／当前可用性——**无一项是 trust**。故路由侧同样没有它的消费点。
+3. **D 不读 `ToolProfile`。** P3A 的 `trust` 是 `ToolProfile` 的字段；本设计复用的是 `Cost` / `Latency`
+   两个**类型**，落在模型画像上，`ToolProfile` 本身在本 crate 里一次都没出现（§8.2 的边表可证）。
+
+**它该去哪儿**：`trust` 的语义是「一个工具登记进 Registry 时必然有信任判定」（P3A §3.1），
+故它的消费方是**决定要不要调这个工具**的那条路径——即工具调用路径（执行侧）；
+若最终判定规范里根本没有它的位置，则由规范维护者处置。**收件人：执行侧（工具调用路径）＋ 规范维护者**，
+记在 §11 第 23 条。**退件不是「悄悄不管」**：本设计对它的处置就是这三条理由加这两个收件人。
 
 ---
 
@@ -1108,7 +1130,8 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     本设计选了后者，且给的是**更明确的理由**：三个相关量纲都没有单位）。
     **本设计只答了模型侧**：P3A 那对落在 `ToolProfile` 上的 `tool.cost` / `tool.latency` 的 `Some`，
     **在 B/C/D/F 四份设计里至今无人认领**（F 明写本路径不读它们，D 复用的是类型而非 `ToolProfile`）。
-    这一条不能靠 D 再答一次，须由协调者在四份之间指派。**收件人：协调者**。
+    这一条不能靠 D 再答一次，须由协调者在四份之间指派。**同一个 `ToolProfile` 上的 `trust` 见第 23 条**
+    （那一个 D 是明确退件，不是留待触发）。**收件人：协调者**。
 16. **§22 的「初步画像」是否算 §247 的 `ModelProfile` 未定义**（§4.3）：本设计按 §22 的流水线顺序取「不算」，
     并把初步画像作为**刻意不落库的中间物**写明（它的效果折进 §247 的 `evidence_count` / `confidence`），
     从而使 §21 的「新增模型不能直接进入自动 Router」成立。若判定「算」，
@@ -1144,3 +1167,19 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     本设计按 §17／§18 的「档位与推理强度分离」读成「Tier1 ＋ 低推理强度」，**不给
     `EscalationStep` 加第六个成员**。若判定该加，本层的「照录 §251」这句话就要改。
     **收件人：规范维护者**。
+22. **C 交给 D 的 `effect_class` 两轴之问：D 明确退件。** C 的 §12 第 11 条把「`Tool.effect_class` 与
+    Journal 的 `EffectType` 是否两个轴」判给 D（它源自 P3A 设计 §10 第 3 条）。本设计**不接**，理由：
+    - **D 对 `effect_class` 的引用为零。** 本 crate 从不出现该字段——§8.2 的边表里没有 `continuum-effect`
+      就是这条的证据；本设计复用 `continuum-capability` 取的是 `Cost` / `Latency` **两个类型**，
+      不读 `ToolProfile`（§2.5 末段同一条判据）。
+    - **问句涉及的两侧都不在模型侧。** `Tool.effect_class` 属 Tool Registry（P3A），
+      `EffectType` 属 Effect Journal（边界层）；判「是不是两个轴」要看的是**策略按哪个裁决**与
+      **工具调用时按哪个判定**——两者都在工具调用路径上，与「选哪个模型」无关。
+    - **D 侧没有触发条件可挂**：本设计不预先发明一个「将来 D 会读 effect_class」的钩子，
+      那正是「不预先发明」禁的形状。故这里不是「留待触发」，是**退件**。
+    **收件人：执行侧（工具调用路径）＋ 规范维护者**（若最终判定规范里二者本就同轴，则由后者销掉此问）。
+23. **`trust`：D 退件，理由与收件人见 §2.5 末段。** P3A §3.1 把 `cost` / `latency` / `trust` 一并判给 D；
+    本设计只接前两个（§247 的 `ModelProfile` 有 `cost_profile` / `latency_profile` 两个字段，
+    **没有 trust**），`trust` 退给**执行侧（工具调用路径）＋ 规范维护者**。
+    协调者已订正 P3A 的设计、记明工具侧的 `cost` / `latency` **与 `trust`** 无人认领——
+    本条是 D 对这一格的正式答复，不是沉默。
