@@ -1,0 +1,5 @@
+error[E0599]: no variant or associated item named `FullAccess` found for enum `CapabilityKind` in the current scope
+ --> tests/compile_fail/capability_has_no_full_access.rs:4:51
+  |
+4 |     let _ = continuum_capability::CapabilityKind::FullAccess;
+  |                                                   ^^^^^^^^^^ variant or associated item not found in `CapabilityKind`

@@ -89,7 +89,8 @@ pub struct Capability {
 
 **照录**：`Filesystem.Read/Write`、`Git.Read/WorktreeWrite/CommitLocal/Push`、`Github.CreatePr`。
 
-**推导**：`EffectType`（P2 已建的六个外部效应类型，§6.8）余下四个在本表里**没有对应项**，而不对应就会让两个词汇表各走各的——那正是 P2 出过 Critical 的那一类。故按一一对应补齐：
+**推导**：`EffectType`（P2 已建的六个外部效应类型，§6.8）余下的**四个 resource**（其下五个
+`kind`）在本表里**没有对应项**，而不对应就会让两个词汇表各走各的——那正是 P2 出过 Critical 的那一类。故按一一对应补齐：
 
 | `EffectType` | `CapabilityKind` | 来源 |
 |---|---|---|
@@ -100,7 +101,7 @@ pub struct Capability {
 | `charge` | `Payment.Charge` | 推导 |
 | `deploy` | `Environment.Deploy` | 推导 |
 
-**这四条是推导不是照录**，依据是「与 `EffectType` 一一对应」；`tests/effect_mapping.rs` 以逐项有照片的用例钉住这条对应（六个各一条），并断言对应是**全的**（每个 `EffectType` 都有一枚）与**单的**（无一枚对应两个）。
+**这四条是推导不是照录**，依据是「与 `EffectType` 一一对应」；`tests/vocabulary.rs` 以逐项有照片的用例钉住这条对应（六个各一条），并断言对应是**全的**（每个 `EffectType` 都有一枚）与**单的**（无一枚对应两个）。
 
 ## 2.3 三条结构性保证
 
@@ -116,7 +117,12 @@ pub struct Capability {
 
 §253 的 `issuer` 字段记签发来源。规范里的终极来源是 Authority Host（§292，长期阶段）；本阶段尚无该宿主。
 
-**本子项目采用**：`Issuer::PolicyWithExplicitApproval`——即**策略裁决 + 显式确认**这条路径，也就是 `continuum-workspace` 的 `gate.rs` 里已经点名的那个位置（其文档原文：「Capability 与 Authority 就位后，其产生点移交给那一处」）。签发点**唯一且具名**，与 P2 的 `GateApproval` 同形。`Issuer` 为封闭枚举，`AuthorityHost` 那一变体在本阶段**不产出**，它标出移交的去向。
+**本子项目采用**：`Issuer::PolicyWithExplicitApproval`——即**策略裁决 + 显式确认**这条路径，也就是 `continuum-workspace` 的 `gate.rs` 里已经点名的那个位置（其文档原文：「Capability 与 Authority 就位后，其产生点移交给那一处」）。**该变体名标的是这条路径的名字，不是「本次附了显式确认」这一位**——这一区别单看名字会读错，下一段即写明。签发点**唯一且具名**，与 P2 的 `GateApproval` 同形。`Issuer` 为封闭枚举，`AuthorityHost` 那一变体在本阶段**不产出**，它标出移交的去向。
+
+**签发点不重判，故 `Grant` / `Verdict` 已删（执行期裁定，记此以免后被当成漏实现）。**
+计划的 Task 2 代码块曾给 `mint` 一个 `granted: Grant` 入参，用来在签发点再算一遍「裁决值 × 是否附了显式确认」的六格表。那会把**同一个判断变成两个产生点**——而那张六格表的唯一落点已在驱动（`continuum-runtime` 的 `mints`）。去掉重判后 `Grant` / `Verdict` 没有任何消费方，连同两个错误变体一并删除，`mint` 的签名为 `mint(kind, scope, expiry)`。
+
+由此，「**什么授权了这一次**」不记在能力上，而由驱动写进 Effect Journal 的 `authorization` 字段（§2.3「凭据不落库」一段即是此意：那里记的是描述，不是凭据本身）。`Issuer` 只记签发的**路径**。故本阶段签发的每一枚能力都记 `PolicyWithExplicitApproval`，**包括未附 `--approve` 的 `Allow`**——它标的是本阶段唯一那条路径的名字，不是「本次附了显式确认」这一位；后者在 Journal 里。这一条**不留给读者自行推断**：`mint` 与 `Issuer` 的文档都写明，且 `tests/capability.rs` 的 `every_minted_capability_records_the_only_issuer_of_this_stage` 逐项钉住。
 
 **移交义务**：Authority Host 就位后，本子项目的签发点移交给它。该义务以两件东西固定，而不是一句将来时——`Issuer` 枚举里那个尚未产出的变体，与本节这段文字。**本项目的教训**：只写在文档里的将来时会烂（P2b 终审查出的「可拒绝后重跑」即是一例），故凡可承载于类型的移交，不留在文字里。
 
@@ -156,6 +162,10 @@ pub struct ToolProfile {
 }
 ```
 
+**`Tool.id` 用既有的 `continuum_core::tool::ToolId`**（`crates/continuum-core/src/tool.rs:7`，§316 的 ToolProvider 接口类型，`continuum-provider` 已在用），**本子项目不另建第二个 `ToolId`**：同一件事两个类型正是本项目一贯判为缺陷的那一类。依赖方向上也顺——本 crate 的边表里本来就有 `continuum-core`（第 6 节）。`continuum-core` 的 `ToolId` 没有 `Display`，本子项目**不给它加**：`as_str()` 够用，等真有消费方再说。
+
+> **与 §316 的 `ToolDescriptor` 的关系（留给子项目 C）**：`continuum-core` 里另有一个 `ToolDescriptor`（`id` + `description` + `input_schema`），是 §316 Provider 中立边界的接口类型。它与 §252 的 `Tool` 不是同一个东西（后者带 `required_capabilities` / `effect_class` / `deterministic`），本子项目**不动它**；两者如何并到一处是子项目 C 的活，记在第 10 节第 8 条。
+
 §87 的 `capabilities` 与 §252 的 `required_capabilities` 是同一件事（工具需要哪些能力），取 `Tool.required_capabilities` 一处；§87 的 `effects` 与 §252 的 `effect_class` 同理，见下。
 
 §87 的 `cost` / `latency` / `trust` 三个画像字段，规范同样只给了名字。本子项目**只定它们的容器形状**（`Option<Cost>`、`Option<Latency>`、`Trust`），取值域留空并在文档里标明——它们服务的是子项目 D 的候选排序，而排序依据要到那时才存在（§250 §84）。**不预先发明度量。** 其中 `trust` 非 `Option`：一个工具登记进 Registry 时必然有信任判定，没有「尚未判定」这一状态。
@@ -181,16 +191,20 @@ pub effect_class: Option<EffectType>   // None = 无外部副作用（纯计算�
 不做成「调用方记得先校验」，而做成**非法状态不可表达**（与 P2 的 `WritablePath` 同形）：
 
 ```rust
-impl ToolRegistry {
-    /// 唯一能把工具交给调用方的路径。
-    pub fn authorize(
-        &self,
-        tool_id: &ToolId,
-        presented: &[Capability],
-        now: i64,
-    ) -> Result<AuthorizedTool<'_>, CapabilityError>;
-}
+/// 唯一能把工具交给调用方的路径。
+pub fn authorize(
+    tx: &Tx<'_>,
+    tool_id: &ToolId,
+    presented: &[Capability],
+    now: i64,
+) -> Result<AuthorizedTool, CapabilityError>;
 ```
+
+**取自由函数、不建 `ToolRegistry` 类型**（计划 Task 5 的 Step 3 即此形，与本段此前写过的 `impl ToolRegistry`
+不一致，以本段为准）：它要的东西全部从参数来——`Tx` 用于读登记项与写审计，没有需要挂在 `self` 上的状态。
+这与 `continuum-workspace` 的 `approve_integration` 同形。**「Tool Registry」在本子项目指的是 `tool` 表
+加 Task 4 的那两个读写函数，不是一个结构体**；本仓的数据库访问一律经 `Tx`（`continuum-core` 不含 I/O），
+故一个自带连接的 `ToolRegistry` 在本仓无从写出。
 
 `AuthorizedTool` 字段私有、无公开构造函数。**拿不到它就无法调用工具**——「忘了校验」这一路径在类型上不存在。
 
@@ -212,7 +226,11 @@ impl ToolRegistry {
 
 真正的副作用最终由 P3 的连接器（子项目 B）执行。故强制点 (2)**两处都落**：驱动侧今天落下，连接器侧留待 B。
 
-**B 不下于文字**：本子项目定义**只有校验路径能产出**的值（与 `AuthorizedTool` 同形），连接器要做副作用就必须收它。若 B 将来绕过，那是**类型上表达得出来的选择**（收的是别的类型），而不是「忘了接线」这种查不出来的漏——**后者正是 P2b 全分支终审花了一整轮才查出来的那一类**（驱动的清理路径绕过 Gate 的 `discard`，于是审计行从未写下）。
+**B 不下于文字**：本子项目定义一个**连接器必须收下才能做副作用**的值（`AuthorizedEffect`），若 B 将来绕过，那是**类型上表达得出来的选择**（收的是别的类型），而不是「忘了接线」这种查不出来的漏——**后者正是 P2b 全分支终审花了一整轮才查出来的那一类**（驱动的清理路径绕过 Gate 的 `discard`，于是审计行从未写下）。
+
+**执行期订正（Task 7）：这个值与 `AuthorizedTool` 「同形」的只是保证，不是构造方式。** 本节原稿写它「**只有校验路径能产出**」——**那句在实现里为假，已订正**。理由：`AuthorizedTool` 的产出函数在本 crate 内，故 crate 外构造不出它（字段私有、无公开构造函数）；而 `AuthorizedEffect` 的产出者是**驱动**（另一个 crate），构造入口因此**必须公开**。能保护的不是「外部构造不出来」，而是**配对**：给入的能力必须正是这条效应对应的那一种（`CapabilityKind::for_effect`），一枚 `filesystem.read` 的能力无法被当作「`charge` 已获准」的凭证。
+
+这**不削弱**它要挡的东西：能构造出 `AuthorizedEffect` 就必然持有 `mint` 铸出、且 kind 与效应相符的能力，而 `mint` 是唯一的签发点（§2.4）。剩下的那条路——调用方自己调 `mint`——是 `mint` 公开本身的性质，与本类型无关。**这处性质差异记在第 10 节第 10 条**，免得后来者按本节原稿那句去期待一个本仓做不到的保证。
 
 ## 4.3 与 `GateApproval` 的关系：并存
 
@@ -267,7 +285,13 @@ continuum-secrets      （边界层：密钥运行时）        ← 依赖 conti
 
 **不把边界层的组件塞进资源层的 crate**：《工程》§4.3 写的是「密钥运行时 ← Capability 执行点」，crate 边界按层走，混了会让依赖图说谎。
 
-**新依赖边**（一律进 `dependency_direction.rs` 的 `ALLOWED`，那张表的断言是逐对 `assert_eq!`）：
+**新依赖边**（一律进 `dependency_direction.rs` 的 `ALLOWED`，那张表的断言是逐对 `assert_eq!`）。
+
+**下面列的是终态。边由「需要它的那个 task」增量加上，不在 Task 1 一次声明齐**——
+`ALLOWED` 表对**叶子 crate** 记的是**实际依赖**（`p2-followups` 第四节已记该表两种语义之别），
+而 P2b 为此删过两条零使用的边（`bfdb29b` 与终审修复波各一条）。若一次声明齐，
+本 crate 的条目在中间若干 task 里都在说谎。这与「迁移的注册由用它的那个 task 自己完成」
+是同一条判据。
 
 ```
 continuum-capability → continuum-core, continuum-effect, continuum-persist,
@@ -329,3 +353,8 @@ continuum-workspace  → （不变；gate.rs 只订正文档）
 5. **OPEN-003（预算三层无记账模型）**不影响本子项目；它压住的是子项目 D 的 Router 成本决策。
 6. **OPEN-007（Artifact 隐私等级未定义）**不影响本子项目；它整块阻断子项目 E。
 7. **连接器侧的强制点 (2) 由类型承载**（§4.2），其兑现是子项目 B 的义务。B 的设计须显式说明它收了那个值。
+8. **§252 的 `Tool` 与 §316 的 `ToolDescriptor` 并存**：`ToolDescriptor` 是 `continuum-core` 里既有的 Provider 接口类型（`id` + `description` + `input_schema`），本子项目复用了它的 `ToolId` 而**没有**动它本身（§3.1）。两者的合并或分工是**子项目 C**（Provider Adapter / ToolProvider 中立边界）的活；C 的设计须显式处置，否则同一个「工具」在两个层各有一份描述，正是本项目一贯判为缺陷的那一类。
+9. **`cost` / `latency` 的取值域留空，且本阶段可能没有 `Some` 的产生方**：本子项目只定容器形状 `Option<Cost>` / `Option<Latency>`（单位结构体，§3.1）——画像字段服务子项目 D 的候选排序，而排序依据要到那时才存在。**若本阶段无 `Some` 的产生方，`尚未登记` 与 `画像为空` 这两种状态就不可观察**：Task 3 要么给出可达 `Some` 的路径并附上两种状态的照片，要么在类型与用例的文档里**明写它为什么没有照片**（设计第 8 节的那条出路）。两条都可，**不许含糊过去**——静默地留一个不可达的 `Some` 是本条要防的形状。
+10. **`AuthorizedEffect` 的构造入口是公开的**（§4.2 的执行期订正）：它的产出者是**驱动**（另一个 crate），故能保护的是「能力与效应的**配对**」而不是「crate 外构造不出来」。本节原稿那句「只有校验路径能产出」在实现里为假，已就地订正。**B 的义务见第 7 条**，并须额外说清它凭什么认为收下的值经过了校验（本阶段那个凭据是**配对**，见 §4.2 的执行期订正）。
+11. **铸造能力的时长没有规范来源**：`CAPABILITY_LIFETIME_MS` 是本阶段的一个具名常量（§51 要求 short-lived，但未给数值）。**它在本阶段不可观察**——驱动不校验能力时效（能力的有效性由 `Capability::is_valid_at` 判，而今天的驱动不读时钟地用它），真正会用到它的是连接器侧（子项目 B）。记此以免后来者以为它是规范给的数。
+12. **强制点 (2) 的实际落点比本节 §4.1 的措辞更早**：实现落在**写效应行之前**（仍在 `Sandbox::spawn` 之前，故 §4.1 成立）。原定的「第 4 步提交之后 + 用既有清理」做不到——全仓**没有** `DELETE FROM effect`，`continuum-effect` 也无删除 API，故那一路会留下 `EXECUTING` 记录、同一 Intent 再也建不出来。「写都不写」严格优于「写了再清」，且不必发明删除机构。**后来者不要按 §4.1 的措辞去把它挪到写之后。**

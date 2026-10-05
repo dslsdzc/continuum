@@ -26,6 +26,7 @@
 - `cargo test --workspace --no-fail-fast` 必须全绿，**0 warning**；`cargo build --workspace --all-targets` 同样 0 warning。
 - **不修改用户目录的权限位。** 不在仓库中写入任何凭据。
 - **不要用 `git add -A`，不要 `git commit --amend`。** 执行期间工作区由实现者与协调者共用，只 `git add <显式路径>`。
+  **新增或变更 crate 依赖时 `Cargo.lock` 会随之变化，须一并提交锁文件**——各 task 的显式路径清单只列了源码与清单，锁文件按本行办。
 
 ## 三条已付过代价的纪律
 
@@ -34,6 +35,18 @@
 3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），**命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志——`pgrep "cargo|rustc"` 看不见卡在 `D` 状态的测试二进制。受能力门控的用例要给执行/跳过条数，**承重断言不要放在门控之内**。
+
+**临时目录的用法（Task 4 实测的坑，后面每个 task 都会踩）**：`TMPDIR` 取**仓库内的 `.tmp/`**（`TMPDIR="$PWD/.tmp"`），不要用系统默认的那个（在 FUSE 挂载上，I/O 曾挂起）。但 `workspace` 的 overlay 用例会在其下留下**权限位 000 的 `work/` 目录**（那是被测对象，不是泄漏），直接 `rm -rf .tmp` 会报 `Permission denied` 而只删掉一半；收工前用 `chmod -R u+rwX .tmp && rm -rf .tmp`。**`.tmp/` 不入库**（它不在 `.gitignore` 里，`git status` 会显示，但只按显式路径 `git add` 就不会误提交）。
+
+**变异日志是证据，必须活到复审结束（Task 5 实测的坑）**：报告里的变异表会引用每条变异的日志路径，而**实现者不得在交活前删掉 `.tmp/`**——Task 5 的实现者按「收工清理」照做，日志与报告引用一起消失，复审只能看到一张没有物证的表格。分工改为：**实现者保留 `.tmp/`，由协调者在复审结束后清理**（并告知实现者这一点）。同理，报告里**不要**引用 `.superpowers/` 之类 gitignore 的路径作为任何东西的唯一来历。
+
+**变异窗口与验证窗口互斥（Task 7 实测的坑，责任在协调者）**：实现者与协调者**共用同一个工作区**，而变异是「改源码 → 跑全量 → 还原」。协调者若在这个窗口里跑 `cargo`（尤其是 `touch` 后强制重编），两件事会同时发生：协调者那份构建/测试产物的源码**可能是被变异过的**，而变异者的全量跑也会与协调者抢 target 锁与产物——**两边的证据互相污染**，且**表面上都像正常结果**。故：**实现者报告完成之前，协调者不得在该工作区里跑 cargo**；协调者的独立重跑**严格排在实现者的终稿之后**。这条不是礼节，是证据有效性的一部分。
+
+**上条的精确定义（Task 8 补充，免得被读得过宽或过窄）**：危险的是**变异**与任何别的东西并行——**改源码**那一刻起，任何并行的构建/测试都在读一份不是终稿的字节。反之，**两份跑在同一份已提交字节上的验证并行是无害的**（各自结果都有效），代价只是互相抢核、变慢，以及**负载可能诱发时序敏感用例**（本仓有 `a_killed_command_leaves_executing_and_recovery_turns_it_unknown` 这类 20 秒截止的夹具）。故「互斥」管的是**变异窗口**，不是「验证之间」。
+
+**变异口径分层（后续 task 起适用）**：变异**条数**按「有多少条**互不相同**的守卫」而非「有多少个分支」定；且按下表分档，**不许把两档混成一句「通过」**：
+- **承重守卫 → 全量套件**：「两侧对钉」的守卫、**fail-open 的那一侧**、失败路径**判别哪一种 `Err`**、以及**跨 crate 才可见**的效果（迁移编号与计数、`ALLOWED` 与实际依赖一致）。
+- **其余分支 → 受影响 crate 的包级套件**，且报告里必须**标明证据强度较低**，并列出**这一条可能漏掉的跨 crate 观察点**。只写「包级通过」即视为未报证据。
 
 ## 关于本计划的代码块
 
@@ -49,7 +62,7 @@ crates/continuum-capability/
   src/lib.rs          导出面与 crate 文档
   src/capability.rs   Capability、CapabilityKind、词汇表、Issuer、签发点
   src/tool.rs         Tool、ToolProfile 与各类编码
-  src/registry.rs     ToolRegistry、AuthorizedTool、强制点 (1)
+  src/registry.rs     `authorize`（自由函数）、AuthorizedTool、强制点 (1)
   src/persist.rs      tool 表与读写（与表定义同址）
   src/error.rs        CapabilityError
   tests/vocabulary.rs     半封闭词汇表与 EffectType 的对应
@@ -96,27 +109,23 @@ Cargo.toml（workspace）                        members
 
 - [ ] **Step 1: 建 crate 骨架并登记**
 
-`Cargo.toml` 的依赖：`continuum-core`、`continuum-effect`、`continuum-persist`、`continuum-events`、`serde`、`serde_json`、`thiserror`；dev-dep `tempfile`、`trybuild`。
+`Cargo.toml` 的依赖：**只声明本 task 用得到的**——`continuum-effect`（要用 `EffectType`）与
+`thiserror`（`error.rs` 的 `CapabilityError` 上有 `Error` 派生，去掉即 `E0433`）。
+`continuum-core` / `continuum-persist` / `continuum-events` / `serde` / `serde_json` 与 dev-dep
+`tempfile` / `trybuild` **由需要它们的 task 增量加**（`ALLOWED` 对叶子 crate 记的是**实际依赖**，
+一次声明齐会让条目在中间若干 task 里说谎；判据同「迁移由用它的 task 注册」）。
 
-`ALLOWED` 加：
+`ALLOWED` 加（**只列本 task 实际有的边**；其余三条由后续 task 各自补）：
 
 ```rust
-    (
-        "continuum-capability",
-        &[
-            "continuum-core",
-            "continuum-effect",
-            "continuum-events",
-            "continuum-persist",
-        ],
-    ),
+    ("continuum-capability", &["continuum-effect"]),
 ```
 
 - [ ] **Step 2: 写用例**
 
 `tests/vocabulary.rs` 的断言内容：
 
-- `every_effect_type_has_exactly_one_capability`：对 `EffectType::ALL` 的**每一个**变体，断言 `EffectType::capability_kind(effect)` 给出**恰一个** `CapabilityKind`；六条各断言一次（**逐项有照片**，不抽代表）。
+- `every_effect_type_has_exactly_one_capability`：对 `EffectType::ALL` 的**每一个**变体，断言 `CapabilityKind::for_effect(effect)` 给出**恰一个** `CapabilityKind`；六条各断言一次（**逐项有照片**，不抽代表）。**方法写在 `CapabilityKind` 上而非 `EffectType` 上**——反过来会让 `continuum-effect` 反向依赖本 crate。
 - `no_capability_kind_maps_to_two_effect_types`：反向查一遍，断言六个 `EffectType` 得到六个**互不相同**的 `CapabilityKind`（单射）。
 
 - [ ] **Step 3: 运行，确认失败**
@@ -195,7 +204,7 @@ git commit -m "feat(capability): 半封闭词汇表与 EffectType 的对应"
 
 - [ ] **Step 1: 写 trybuild 样例**
 
-四个 `compile_fail` 样例，**判据是编译失败且失败原因正确**（每份 `.stderr` 钉住预期报错——否则「因为拼错函数名而编译失败」也会让用例变绿）：
+五个 `compile_fail` 样例（**数一下，别照抄这个数字**——原写「四个」而底下列了五条，是笔误；`FullAccess` 那条不能省，它是 §253 的那张照片），**判据是编译失败且失败原因正确**（每份 `.stderr` 钉住预期报错——否则「因为拼错函数名而编译失败」也会让用例变绿）：
 
 - `capability_has_no_constructor.rs`：`Capability::new(...)` 不存在。
 - `capability_is_not_from_string.rs`：`let c: Capability = "git.push:origin/main".parse().unwrap();` —— 无 `FromStr`。
@@ -223,7 +232,7 @@ pub enum Issuer {
 /// §253 的五要素。字段私有、无公开构造函数：唯一产出路径是 [`crate::mint`]。
 ///
 /// 三条结构性保证（设计 §2.3）：
-/// 1. `full_access` 不存在——不是「禁止作默认」，是没有这个成员；
+/// 1. `full_access` 不存在——不是「禁止作默认」，是没有这个成员、**也没有这个字段**；
 /// 2. `expiry` 必填，无「不过期」的表示（§51 的 short-lived 是结构而非约定）；
 ///    **本类型不读时钟**：校验收 `now`。
 /// 3. 不可与裸字符串互换——无 `From<&str>`、无 `FromStr`，只有单向的 `Display`（供审计与日志）。
@@ -244,7 +253,10 @@ impl Capability {
     /// §253 的二字段形状（`resource` / `action`）。存储与比较用 `kind`，
     /// 故 `Filesystem.Push` 这类组合无从写出。
     pub fn resource(&self) -> &'static str { /* 七个 resource 各自的串 */ }
-    pub fn action(&self) -> &'static str { /* 各 action 的串；encoding 同落库约定 */ }
+    /// 各 action 的串：**照录项按规范原样**（§88 的多词用点号、§253 的多词用下划线），
+    /// **推导项按本仓展示词汇约定**。**不是落库编码**——本 crate 不落库（设计 §2.3），
+    /// 这两个访问器只把 §253 的形状呈现出来，故「encoding 同落库约定」是伪前提，勿照抄。
+    pub fn action(&self) -> &'static str { /* 各 action 的串；逐项来历见实现 */ }
 
     /// 本类型不读时钟：`now` 由调用方给（本项目既有约定）。
     pub fn is_valid_at(&self, now: i64) -> Result<(), CapabilityError> {
@@ -254,23 +266,19 @@ impl Capability {
 
 /// **唯一的签发点**（设计 §2.4）。今天的临时签发方是「策略裁决 + 显式确认」，
 /// 也就是 `continuum-workspace` 的 `gate.rs` 已经点名的那个位置。
-///
-/// `granted` 是「什么授权了这一次」的表示，由调用方（驱动）从策略裁决构造——
-/// 本 crate 不依赖 `continuum-policy`，故用本 crate 自己的类型。
 pub fn mint(
     kind: CapabilityKind,
     scope: String,
     expiry: i64,
-    granted: Grant,
 ) -> Result<Capability, CapabilityError>;
-
-/// 「什么授权了这一次」。`ExplicitApproval` 对应 §5.5 的 `--approve`。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Grant { Policy(Verdict), PolicyWithExplicitApproval(Verdict) }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Verdict { Allow, RequireApproval, Deny }
 ```
+
+**执行期裁定（Task 2）：函数体里不再判「裁决值 × 是否附了显式确认」的六格表。** 本计划原稿给过一个
+`granted: Grant` 入参来做这件事，它会让同一个判断有**两个产生点**——那张六格表的唯一落点已在驱动
+（`continuum-runtime` 的 `mints`）。去掉重判后 `Grant` / `Verdict` 没有消费方，**连同它们的两个错误
+变体一并删除**；「什么授权了这一次」由驱动写进 Effect Journal 的 `authorization` 字段。设计与 §2.4
+已同步记下这条（`Issuer` 只记签发的**路径**）。**这是本节代码块的订正，不是漏实现**——后来者照抄
+上面的签名即可，勿按原稿把 `Grant` 加回来。
 
 `Display` 输出形如 `git.push:origin/main`（§253 的例子形状），**只出不进**。
 
@@ -293,11 +301,25 @@ git commit -m "feat(capability): 五要素与三条结构性保证"
 **Files:**
 - Create: `crates/continuum-capability/src/tool.rs`
 - Modify: `crates/continuum-capability/src/{lib.rs,error.rs}`
+- Modify: `crates/continuum-capability/Cargo.toml`（加 `continuum-core`、`serde_json`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-capability` 条目加 `continuum-core`）
 - Create: `crates/continuum-capability/tests/tool.rs`
 
+> **依赖边与 `ALLOWED` 必须同步改**（本条是计划原稿的漏项）：本 task 起用 `continuum-core` 的 `ToolId`，
+> 故 `Cargo.toml` 与 `ALLOWED` 各加一条。那张表的断言是逐对 `assert_eq!`，只改一处会红——**两处一起改**。
+> 同一漏项在 Task 4（`continuum-persist`）与 Task 5（`continuum-events`）各有一份，已一并补进那两节。
+
 **Interfaces:**
-- Consumes: Task 1 的 `CapabilityKind`、Task 2 无
-- Produces: `continuum_capability::{Tool, ToolId, ToolProfile, Trust, Cost, Latency}`
+- Consumes: Task 1 的 `CapabilityKind`；**既有的** `continuum_core::tool::ToolId`（`crates/continuum-core/src/tool.rs`，§316 的 ToolProvider 接口类型，`continuum-provider` 已在用）
+- Produces: `continuum_capability::{Tool, ToolProfile, Trust, Cost, Latency}`（`ToolId` 在本 crate **再导出**，不另建）
+
+> **执行期裁定（Task 3 开工前的预检）：`ToolId` 一律复用 `continuum-core` 那一个，本 task 不新建。**
+> 本节原稿的代码块写了 `pub struct ToolId(String);`——**照抄它会造出第二个 `ToolId`**，而全仓已有
+> 一个（`continuum-core/src/tool.rs:7`，`continuum-provider` 的 `describe_tool` 在用）。同一件事两个
+> 类型正是本项目一贯判为缺陷的那一类（两个词汇表各走各的）。本计划原稿与本条并不矛盾：ALLOWED 里
+> `continuum-capability` 依赖清单的注释原文就是「core 的 `ToolId`……由需要它们的 task 增量补上」
+> （`crates/continuum-runtime/tests/dependency_direction.rs:85`），即本 task 本来就是要**用**它。
+> `continuum-core` 的 `ToolId` 没有 `Display`；**本 task 不给它加**——`as_str()` 够用，等真有消费方再加。
 
 - [ ] **Step 1: 写用例**
 
@@ -315,7 +337,7 @@ cargo test -p continuum-capability --test tool
 - [ ] **Step 3: 实现**
 
 ```rust
-pub struct ToolId(String);   // 同 ArtifactId/IntentId 的既有形态：私有字段 + as_str + Display
+// ToolId 不在本 crate 定义：`use continuum_core::tool::ToolId;`（见上方裁定）。
 
 /// §252。`effect_class` 绑到 `EffectType`（设计 §3.2），**不另造分类**。
 pub struct Tool {
@@ -358,6 +380,8 @@ git commit -m "feat(capability): Tool 与 ToolProfile"
 **Files:**
 - Create: `crates/continuum-capability/src/persist.rs`
 - Modify: `crates/continuum-capability/src/{lib.rs,error.rs}`
+- Modify: `crates/continuum-capability/Cargo.toml`（加 `continuum-persist`；dev-dep `tempfile`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-capability` 条目加 `continuum-persist`）
 - Create: `crates/continuum-capability/tests/persist.rs`
 - Modify: `crates/continuum-runtime/src/main.rs`（迁移装配）
 - Modify: `crates/continuum-runtime/tests/{migrations.rs,startup.rs}`（连带断言）
@@ -413,6 +437,12 @@ pub fn load_tools(tx: &Tx<'_>) -> Result<Vec<ToolProfile>, PersistError>;
 
 `runtime_migrations()` 加 `continuum_capability::p3_capability_migrations()`。**全仓搜「迁移应用」与迁移计数断言，逐条确认新值**；注意 `tests/startup.rs` 的 `second_startup_applies_no_migration` 断言 `0`，它与「迁移应用 N 项」**不是同一类断言**，不要改。
 
+**协调者开工前预检到的具体位置与数值**（**先自己核一遍再照着改**，尤其版本号；这一节是计划正文，照抄前须对源）：
+- 已占用的迁移编号：`1`、`2`（P0 内置）、`10`（artifact）、`20`（graph）、`30`（workspace）、`40`（effect）、`41`（policy）——共 7 条。P3 取哪一号由你按未占用值定（前几位是十位一档，`50` 是自然取法，但**判据是「未占用」不是「好看」**）。
+- 迁移集合有**第二份转录**：`crates/continuum-runtime/tests/migrations.rs` 的 `expected_migrations()` 必须同步 extend——该文件的注释说明了为什么它是这个形态，以及为什么两处都在不是重复。
+- 迁移计数断言的**三处要改、一处不要改**（`crates/continuum-runtime/tests/startup.rs`）：`:24`（`7` → `8`）、`:90`（`7` → `8`）、`:79`（`5` → `6`，那个用例的 `Db::open` 只带 P0 内置迁移，故启动时补的是 P1+P2+P3）；`:43` 的 `0` **不要动**——它断的是「第二次启动不再应用」，与总数无关。三处的行内注释（「P0 两条 + P1 两条 + P2 三条」那类）**一并更新**，否则注释会与断言互相打脸。
+- `Cargo.lock` 随依赖变化一并提交（本项目既有约定）。
+
 - [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
@@ -428,6 +458,8 @@ git commit -m "feat(capability): tool 表与读写"
 **Files:**
 - Create: `crates/continuum-capability/src/registry.rs`
 - Modify: `crates/continuum-capability/src/{lib.rs,error.rs}`
+- Modify: `crates/continuum-capability/Cargo.toml`（加 `continuum-events`）
+- Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-capability` 条目加 `continuum-events`）
 - Create: `crates/continuum-capability/tests/authorize.rs`
 
 **Interfaces:**
@@ -469,6 +501,8 @@ pub struct AuthorizedTool(/* 私有：工具 id 与它已获准的那些能力 *
 ```
 
 两个方向的拒绝各用一个错误变体（`MissingCapability { kind }` 与 `UndeclaredCapability { kind }`）——**纪律 3：失败路径要断言是哪一种**。
+
+**不建 `ToolRegistry` 类型**（本节原稿与本计划的「文件结构」一处曾这么写，已订正）：本仓的数据库访问一律经 `Tx`（`continuum-core` 不含 I/O），一个自带连接的结构体在本仓无从写出，也没有需要挂在 `self` 上的状态。「Tool Registry」在本子项目指 `tool` 表加 Task 4 的两个读写函数。设计 §3.4 已同步订正。
 
 **审计**：成功授权写一条 `AuditKind::CapabilityGrants`（该变体自 P0 起预留、至今无产生方，在此第一次有）；**拒绝不写**，由调用方处置。
 
@@ -572,7 +606,9 @@ cargo test -p continuum-runtime --test capability_gate
 
 **这与 P2 的「策略只查一次」不冲突，但必须写清楚，否则会被读成冲突**：P2 那条裁定的对象是**集成**的裁决（`--apply` 那一支，第 7 步复用第 4 步的那一次），而这里是**逐条效应**的裁决——问的是不同的问题（「这条效应准不准」vs「这次集成准不准」），上下文里填的字段也不同。两处各自查一次，互不复用。
 
-**裁决到 `Verdict` 的映射**（`continuum-capability` 不依赖 `continuum-policy`，故在驱动侧转）：`Decision::Allow → Verdict::Allow`、`RequireApproval → Verdict::RequireApproval`、`Deny → Verdict::Deny`；给了 `--approve` 时用 `Grant::PolicyWithExplicitApproval`，否则 `Grant::Policy`。**三个臂逐条写，不抽代表**（枚举式断言逐项有照片）。
+**裁决到「铸不铸得出能力」的映射**（`continuum-capability` 不依赖 `continuum-policy`，故三臂的判定在驱动侧写）：`Decision::Allow` → 铸；`Decision::RequireApproval` → 给了 `--approve` 才铸；`Decision::Deny` → 不铸。**三个臂逐条写，不抽代表**（枚举式断言逐项有照片）。这与驱动的 `mints`（`task_cmd.rs:649-654`）是同一张六格表——**复用它，不要在强制点里另写一遍**；`mint` 的签名里没有裁决值可传（Task 2 的裁定：签发点不重判）。
+
+**本计划原稿此处写过 `Verdict` / `Grant` 两个类型**（`Decision::Allow → Verdict::Allow` 那一套）。它们已按 Task 2 的裁定删除，故本 task **不引入这两个名字**：映射的产物是「铸出的 `Capability` 或拒绝」，不是某个中间的裁决类型。
 
 **连接器侧那半个义务由类型承载**（设计 §4.2）：
 

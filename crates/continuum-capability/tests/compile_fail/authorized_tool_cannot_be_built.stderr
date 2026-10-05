@@ -1,0 +1,9 @@
+error[E0451]: fields `tool_id` and `granted` of struct `AuthorizedTool` are private
+  --> tests/compile_fail/authorized_tool_cannot_be_built.rs:14:9
+   |
+13 |     let _ = AuthorizedTool {
+   |             -------------- in this type
+14 |         tool_id: ToolId::new("t"),
+   |         ^^^^^^^ private field
+15 |         granted: Vec::new(),
+   |         ^^^^^^^ private field

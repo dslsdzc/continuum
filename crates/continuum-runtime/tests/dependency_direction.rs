@@ -79,6 +79,28 @@ const ALLOWED: &[(&str, &[&str])] = &[
         "continuum-policy",
         &["continuum-artifact", "continuum-effect", "continuum-persist"],
     ),
+    // P3 资源层：Capability 词汇表、Tool/ToolProfile、ToolRegistry 与签发点。
+    // Task 1 用到 effect（`CapabilityKind::for_effect` 取 `EffectType`，方向写在本
+    // crate 上以免 continuum-effect 反向依赖）；Task 3 起加上 core——`Tool.id` 复用
+    // `continuum_core::tool::ToolId`，**不另建第二个 `ToolId`**（设计 §3.1）；
+    // Task 4 起加上 persist——`tool` 表的迁移与读写经 `Tx`（设计 §3.3、§7）。
+    // Task 5 起加上 events——`registry.rs` 的 `authorize` 在成功授权时写一条
+    // `AuditKind::CapabilityGrants`（设计 §3.4）。至此设计 §6 的边表在本 crate 上到齐。
+    (
+        "continuum-capability",
+        &[
+            "continuum-core",
+            "continuum-effect",
+            "continuum-events",
+            "continuum-persist",
+        ],
+    ),
+    // P3 子项目 A 的强制点 (3)：密钥运行时（设计第 5 节）。设计 §6 的终态边表在
+    // 本 crate 上写的是 `continuum-capability, continuum-core`，但本 crate 对
+    // `continuum-core` 零引用（`grep -rn continuum_core crates/continuum-secrets`
+    // 无命中），故只登记实际用到的那一条——叶子 crate 的条目记实际依赖，
+    // 零使用的边即假边（P2b 为此删过两条）。
+    ("continuum-secrets", &["continuum-capability"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
@@ -90,6 +112,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // （下篇第 5.7 节），故取用该 crate 的 `load_policies` / `decide` / `PolicyContext`
     // 与它的 `p2_policy_migrations()`（`policy` 表由驱动自己建，见 `main.rs` 的装配处）。
     //
+    // P3 的 Task 4 起加上 capability：装配处注册 `p3_capability_migrations()`
+    // （`tool` 表由用它的那个 task 注册）。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
     // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇；
@@ -99,6 +124,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
         "continuum-runtime",
         &[
             "continuum-artifact",
+            "continuum-capability",
             "continuum-core",
             "continuum-effect",
             "continuum-events",

@@ -1,0 +1,22 @@
+[package]
+name = "continuum-secrets"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`runtime.rs` 的 `issue` 取 `&Capability` 并在 `Capability::is_valid_at`
+# 上判能力是否还可用；`error.rs` 转出 `CapabilityError`（设计 §5.1、§5.2）。
+# 这是本 crate 唯一的内部依赖。设计 §6 的终态边表列过 `continuum-core`，但本 crate
+# 对它零引用（`grep -rn continuum_core crates/continuum-secrets` 无命中），而叶子 crate
+# 的 `ALLOWED` 条目记的是**实际依赖**，故不登记这条零使用的边——与 P2b 为此删边
+# （`bfdb29b` 与终审修复波各一条）同一条判据。
+continuum-capability = { path = "../continuum-capability" }
+# `error.rs` 的 `SecretsError` 派生 `thiserror::Error`。
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# `tests/type_level.rs` 的两份编译失败样例（无「取全部」入口、`issue` 无作用域入参）。
+trybuild = { workspace = true }
+# `tests/source.rs` 的文件源样例各起一个临时目录。
+tempfile = { workspace = true }

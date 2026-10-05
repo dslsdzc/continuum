@@ -277,13 +277,41 @@ fn always(level: Level, decision: Decision) -> Policy {
 /// 只应用 `policy` 这一条迁移：驱动自己开库时会把它那份清单里其余几条补上，
 /// 编号 41 已记录在案故被跳过。这顺带证明两边的清单能接上，而不是各建各的表。
 fn seed_policies(db: &Path, rules: &[(&str, Level, Decision)]) {
+    let policies: Vec<(&str, Policy)> = rules
+        .iter()
+        .map(|(id, level, decision)| (*id, always(*level, *decision)))
+        .collect();
+    seed_policy_rows(db, &policies);
+}
+
+/// 同 [`seed_policies`]，但收**完整规则**（条件自定）——`effect_type` 这类条件写不出
+/// 恒真的形式，而 P3 强制点 (2) 的用例要用它把「逐条效应」这一维变得可观察。
+fn seed_policy_rows(db: &Path, rules: &[(&str, Policy)]) {
     let handle = Db::open_with(db, continuum_policy::p2_policy_migrations()).unwrap();
     handle.migrate().unwrap();
     let tx = handle.begin().unwrap();
-    for (id, level, decision) in rules {
-        continuum_policy::save_policy(&tx, id, &always(*level, *decision)).unwrap();
+    for (id, policy) in rules {
+        continuum_policy::save_policy(&tx, id, policy).unwrap();
     }
     tx.commit().unwrap();
+}
+
+/// 一条**只对某一种效应**成立的 `Allow`，占**第 1 级**。
+///
+/// 第 1 级是刻意的：P3 强制点 (2) 的逐条效应裁决要用它压过其余落库规则（例如一条第 3 级
+/// 的 `RequireApproval`），而集成那次裁决的上下文里 `effect_type` 缺省，本规则**不成立**
+/// ——两者由此可以给出不同的裁决。上下文里没有 `effect_type` 的条件不成立，见
+/// `continuum_policy::rule` 的 `Fact::EffectType`。
+fn allow_only_effect(effect_type: EffectType) -> Policy {
+    Policy {
+        level: Level::SystemSafety,
+        condition: Condition::parse(&serde_json::json!({
+            "all": [{"fact": "effect_type", "eq": effect_type.as_str()}]
+        }))
+        .expect("effect_type 是封闭事实，取值取自枚举"),
+        decision: Decision::Allow,
+        scope: Scope::User,
+    }
 }
 
 /// 退出码为 0 的守卫，失败时把 stdout/stderr 一并带出来（否则只知道断言挂了）。
@@ -1198,6 +1226,10 @@ fn a_failed_command_is_not_integrated_and_the_workspace_is_cleaned() {
 ///
 /// 库是 WAL 模式（`continuum-persist` 的 `Db::open_with`），刚提交的状态在 `<库>-wal`
 /// 里，故两个文件都查。
+///
+/// **P3 起库里要先有放行这条效应的规则**：强制点 (2) 在执行前逐条问策略，铸不出能力即
+/// 拒绝运行命令（`continuum-runtime/tests/capability_gate.rs`）。故这里放一条第 5 级
+/// `Allow`——本用例验的是「写入早于执行」，不是「铸不出会怎样」。
 #[test]
 fn effects_are_recorded_before_the_command_runs() {
     const TEST: &str = "effects_are_recorded_before_the_command_runs";
@@ -1214,6 +1246,7 @@ fn effects_are_recorded_before_the_command_runs() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
 
     let out = run_task(
         &base,
@@ -1262,6 +1295,9 @@ fn a_killed_command_leaves_executing_and_recovery_turns_it_unknown() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
+    // P3 起强制点 (2) 要求每一条 `--effect` 都能铸出能力，否则命令一步都不跑；本用例
+    // 要命令真的跑起来，故先放一条第 5 级 `Allow`。
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
 
     // 命令先写「已开始」再长睡。stdio 接到 null：被杀的驱动与仍活着的 `sleep` 子进程
     // 都会持有管道的写端，接管道会让测试在读取端空等。
@@ -1341,6 +1377,8 @@ fn the_same_idempotency_key_refuses_to_run_again() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
+    // 第一次要真的跑起来（强制点 (2) 要求这条效应能铸出能力），放一条第 5 级 `Allow`。
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
     let after_db = [
         "--effect",
         "deploy:prod",
@@ -1403,6 +1441,8 @@ fn a_successful_command_commits_all_declared_effects() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
+    // 每条 `--effect` 都要能铸出能力，命令才会跑（强制点 (2)），放一条第 5 级 `Allow`。
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
 
     let out = run_task(
         &base,
@@ -1451,6 +1491,8 @@ fn a_failing_command_fails_all_declared_effects() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
+    // 每条 `--effect` 都要能铸出能力，命令才会跑（强制点 (2)），放一条第 5 级 `Allow`。
+    seed_policies(&db, &[("r1", Level::RuntimeDefault, Decision::Allow)]);
 
     let out = run_task(
         &base,
@@ -1566,9 +1608,16 @@ fn any_declared_key_existing_refuses_the_whole_command() {
 /// `require_approval` 与 `deny` 对调）不会有任何用例变红。期望值**手写字面量**，
 /// 不调 `Decision::as_str` 去拼：拼出来的期望值会跟着实现一起漂移，钉不住格式。
 ///
-/// 三次调用只有裁决那一路不同：先无规则（默认 `Deny`），再放一条第 3 级
-/// `RequireApproval`（不传 `--approve` → `RequireApproval`），最后传 `--approve`
-/// （第 2 级越过第 3 级 → `Allow`）。三次用不同的目标，避免撞上幂等键。
+/// 三次调用只有裁决那一路不同：先是一条**按效应限定**的第 1 级 `Allow`（集成那次裁决
+/// 匹配不到它 → 默认 `Deny`），再放一条无条件的第 3 级 `RequireApproval`（集成那次 →
+/// `RequireApproval`），最后传 `--approve`（第 2 级越过第 3 级 → `Allow`）。三次用不同
+/// 的目标，避免撞上幂等键。
+///
+/// **P3 起还有一层要求**：强制点 (2) 逐条问策略，`charge` 那一条铸不出能力就不跑命令
+/// （`capability_gate.rs`）。故每一次里 `charge` 的效应裁决都必须是 `Allow`——由那条
+/// 按 `effect_type` 限定的第 1 级 `Allow` 提供（它压过第 3 级的 `RequireApproval`）。
+/// 于是**本用例同时是两种裁决并存的照片**：同一次运行里，集成那次是 `Deny`/
+/// `RequireApproval`，而 `charge` 那条效应是 `Allow`。
 #[test]
 fn the_authorization_field_records_the_flag_and_the_verdict() {
     const TEST: &str = "the_authorization_field_records_the_flag_and_the_verdict";
@@ -1578,8 +1627,9 @@ fn the_authorization_field_records_the_flag_and_the_verdict() {
     let (_d, base) = git_repo();
     let dbdir = tempfile::tempdir().unwrap();
     let db = dbdir.path().join("t.db");
+    seed_policy_rows(&db, &[("r_eff", allow_only_effect(EffectType::Charge))]);
 
-    // 一：库里一条规则都没有 → 默认 Deny；未给 --approve。
+    // 一：集成那次裁决匹配不到任何规则 → 默认 Deny；未给 --approve。
     assert_success(&run_task(
         &base,
         &db,
