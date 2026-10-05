@@ -106,8 +106,13 @@ pub enum SecretsError {
     /// 分开成一个变体，是为了让两条路径上的消息都**说真话**——把它们并进
     /// [`SecretsError::Superseded`] 会让「凭据已被取代」在一条从未发生取代的路径上出现。
     ///
-    /// 两个字段都是代号（`u64`），带不了材料。
+    /// 两个字段都是**运行时代号**（`u64`），带不了材料：`runtime` 是签出这张凭据的运行时，
+    /// `current` 是**此刻拿着凭据去取料的那一个**（两者的语义都是 [`SecretsError::ForeignCredential`]
+    /// 所属的运行时代号，与 [`SecretsError::Superseded`] 的 `current`——那是**轮换代**代号
+    /// ——不是同一种东西）。消息里写「本运行时 {current}」而不是「当前 {current}」，正是
+    /// 不让诊断的人把运行时代号读成轮换代代号。
+    ///
     /// 照片：`tests/issue.rs` 的 `a_credential_from_another_runtime_is_rejected`。
-    #[error("凭据属于另一个运行时（凭据 {runtime}，当前 {current}）")]
+    #[error("凭据属于另一个运行时（凭据 {runtime}，本运行时 {current}）")]
     ForeignCredential { runtime: u64, current: u64 },
 }

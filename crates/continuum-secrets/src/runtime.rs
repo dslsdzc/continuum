@@ -84,9 +84,17 @@ impl RotationEvent {
 ///
 /// **不含能力本身**：凭据一旦签出即与那枚能力解耦，故后续无法凭它反推或扩大权限。
 /// 这一条是**形状陈述**，没有运行期照片——字段私有、无公开构造函数，crate 外既读不到
-/// 也造不出（唯一构造点在 [`SecretsRuntime::issue`]）。它的可观察后果是
-/// `tests/issue.rs` 的 `a_credential_carries_the_capabilitys_scope_and_expiry`：
-/// 凭据上能读到的只有作用域与到期时刻。
+/// 也造不出（唯一构造点在 [`SecretsRuntime::issue`]）。
+///
+/// **凭据上读得到的东西**（不止作用域与到期时刻，别把下面这几样漏掉）：
+/// [`Credential::scope`] 与 [`Credential::expiry`] 两个访问器；
+/// [`Credential::is_valid_at`] 给出的到期结论；以及 `Debug` 打出的四个字段——除作用域与
+/// 到期时刻外还有两个句柄（运行时代号与轮换代代号）。**读不到的是能力与材料**：前者不在
+/// 这个类型里，后者留在源里、每次访问现取
+/// （`the_material_is_fetched_at_every_access_and_not_kept_on_the_credential`）。
+/// 效果可见的那一半的照片是 `tests/issue.rs` 的
+/// `a_credential_carries_the_capabilitys_scope_and_expiry`（它断言的是两个访问器，
+/// 不是「只读得到这两样」）。
 ///
 /// **也不含材料**：材料留在源里，每次访问现取（`the_material_is_fetched_at_every_access_and_not_kept_on_the_credential`）。
 #[derive(Debug, Clone)]
@@ -211,8 +219,14 @@ impl SecretsRuntime {
     ///
     /// **能力是否容许不在这里判，这里也看不到能力**：那一判在 [`SecretsRuntime::issue`]
     /// （`cap.is_valid_at(now)?`），签出后不再复核。故一次访问能否成功，与那枚能力
-    /// 此刻是否还有效无关——本阶段唯一能让一枚**尚未到期**的凭据提前失效的是**轮换**
-    /// （§5.4）；到期本身是另一回事（[`SecretsError::CredentialExpired`]），不属于「撤销」。
+    /// 此刻是否还有效无关。一次访问失败有**三个互不相同**的原因，别把它们并成一句：
+    ///
+    /// - **撤销**：本阶段唯一能让一枚尚未到期的凭据被本运行时拒绝的是**轮换**（§5.4），
+    ///   报 [`SecretsError::Superseded`]；
+    /// - **不供料**：源可能不再覆盖该作用域（文件源 `reload` 后该条目被删、环境变量源的
+    ///   变量被取消或置空），报 [`SecretsError::ScopeNotCovered`] / [`SecretsError::EmptyMaterial`]
+    ///   ——那是源不给料了，不是撤销；
+    /// - **到期**：凭据自己的到期时刻已过，报 [`SecretsError::CredentialExpired`]，第三回事。
     ///
     /// **也不要把这里读成「材料只有这里出得去」**：材料的另一处出口是
     /// [`CredentialSource::fetch`] 本身——它是公开 trait 方法，`FileCredentialSource::open`
