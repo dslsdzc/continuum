@@ -133,6 +133,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // P3 的 Task 4 起加上 capability：装配处注册 `p3_capability_migrations()`
     // （`tool` 表由用它的那个 task 注册）。
     //
+    // P3 子项目 B 的 Task 7 起加上 secrets：`main.rs` 的装配处在分派之前构造并持有
+    // 密钥运行时（`src/secrets.rs` 的 `assemble`，设计 §4.1「驱动装配好传进来」、
+    // §11 第 15 条把这条边的所有者写死为 B）。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
     // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇；
@@ -151,6 +155,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-policy",
             "continuum-provider",
             "continuum-sandbox",
+            "continuum-secrets",
             "continuum-workspace",
         ],
     ),

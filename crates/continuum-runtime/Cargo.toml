@@ -19,6 +19,9 @@ continuum-persist = { path = "../continuum-persist" }
 continuum-policy = { path = "../continuum-policy" }
 continuum-provider = { path = "../continuum-provider" }
 continuum-sandbox = { path = "../continuum-sandbox" }
+# Task 7：`main.rs` 的装配处构造并持有密钥运行时（`src/secrets.rs` 的 `assemble`）。
+# P3 子项目 A 交付的 `continuum-secrets` 在此之前全仓零引用，这是它的第一个真消费方。
+continuum-secrets = { path = "../continuum-secrets" }
 continuum-workspace = { path = "../continuum-workspace" }
 # Task 10 起：`task_cmd` 要构造第 2 级（`ExplicitCurrent`）那条内建规则，而 `Policy` 的
 # `condition` 只能经 `Condition::parse(&serde_json::Value)` 造出——`continuum-policy`

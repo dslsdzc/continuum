@@ -10,6 +10,7 @@ use std::process::ExitCode;
 mod recover_cmd;
 mod recovery;
 mod sandbox_select;
+mod secrets;
 mod task_cmd;
 
 fn main() -> ExitCode {
@@ -18,26 +19,45 @@ fn main() -> ExitCode {
     // `unshare -Urm` 重新执行，转交的必须是**调用方实际写的那串参数**，从解析结果
     // 重建会丢掉形状（同一个值可以有多种写法）。
     let raw: Vec<OsString> = std::env::args_os().skip(1).collect();
-    match cli::parse(args) {
-        Ok(Command::Recover(a)) => match recover_cmd::run(&a.db) {
+    // 参数解析在装配之前：命令行写错了要先说命令行的事，不去碰凭据源的 IO。
+    let command = match cli::parse(args) {
+        Ok(command) => command,
+        Err(e) => {
+            eprintln!("参数错误：{e}");
+            eprintln!("{}", cli::USAGE);
+            return ExitCode::FAILURE;
+        }
+    };
+
+    // 密钥运行时的装配（设计 §4.1：驱动装配好传进来）。放在**分派之前**：
+    // 凭据源配错时任何子命令都不启动，失败点落在启动、而不是落到某条路径的深处。
+    //
+    // 这个绑定今天**没有消费者**（唯一消费者是 B 的连接器入口，那条边按裁决 §六.3
+    // 不接）——它不是「暂时没用到的管道」，是 §11 第 13b 条那条未接线的现场。
+    // 详见 `secrets` 模块的文档；不要把它读成「已经接上了」。
+    let _secrets_runtime = match secrets::assemble() {
+        Ok(runtime) => runtime,
+        Err(e) => {
+            eprintln!("启动失败: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    match command {
+        Command::Recover(a) => match recover_cmd::run(&a.db) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("启动失败: {e}");
                 ExitCode::FAILURE
             }
         },
-        Ok(Command::Task(a)) => match task_cmd::run(&a, &raw) {
+        Command::Task(a) => match task_cmd::run(&a, &raw) {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("任务失败: {e}");
                 ExitCode::FAILURE
             }
         },
-        Err(e) => {
-            eprintln!("参数错误：{e}");
-            eprintln!("{}", cli::USAGE);
-            ExitCode::FAILURE
-        }
     }
 }
 

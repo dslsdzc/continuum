@@ -212,6 +212,7 @@ dependencies = [
  "continuum-policy",
  "continuum-provider",
  "continuum-sandbox",
+ "continuum-secrets",
  "continuum-workspace",
  "serde_json",
  "tempfile",
