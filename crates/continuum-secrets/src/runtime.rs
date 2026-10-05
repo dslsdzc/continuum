@@ -21,15 +21,16 @@ use continuum_capability::Capability;
 use crate::error::SecretsError;
 use crate::source::{CredentialSource, SecretMaterial};
 
-/// 全局单调的代号发号器。
+/// 全局单调的代号发号器，两个用途共用：**运行时代号**（`new` 时取一次，此后不变）
+/// 与**轮换代代号**（`new` 与 `rotate` 各取一次）。
 ///
-/// **为什么是全局而不是每运行时的计数器**：凭据的句柄只是一个代号，判定「凭据是否
-/// 已被取代」就是比代号是否相等。若代号按运行各自从 0 数起，同进程里 A 签出的凭据
-/// （代号 0）会被 B（代号也 0）当成自己的，B 会按 **B 的源**给出同一个作用域的材料
-/// ——一次混淆代理。全局发号让**不同运行时的代号不可能相等**，等值判定因此是可靠的。
+/// **为什么是全局而不是每运行时的计数器**：代号是判等的唯一依据，若按运行各自从 0
+/// 数起，同进程里 A 与 B 的运行时代号会一样、轮换代代号也会撞上，A 签出的凭据会被 B
+/// 当成自己的，B 会按 **B 的源**给出同一个作用域的材料——一次混淆代理。全局发号让
+/// 不同运行时之间、同一运行时的不同代之间都不可能撞号。
 ///
 /// 照片：`tests/issue.rs` 的 `a_credential_from_another_runtime_is_rejected`
-/// （A 的凭据在 B 上被拒，且有 A 自己可用的对照臂）。
+/// （A 的凭据在 B 上报 `ForeignCredential`，且有 A 自己可用的对照臂）。
 static NEXT_TICKET: AtomicU64 = AtomicU64::new(0);
 
 fn next_ticket() -> u64 {
@@ -78,7 +79,8 @@ impl RotationEvent {
     ];
 }
 
-/// 签出的凭据：**作用域 + 到期时刻 + 取得材料的代号**（设计 §5.2）。
+/// 签出的凭据：**作用域 + 到期时刻 + 取得材料的句柄（运行时代号 + 轮换代代号）**
+/// （设计 §5.2）。
 ///
 /// **不含能力本身**：凭据一旦签出即与那枚能力解耦，故后续无法凭它反推或扩大权限。
 /// 这一条是**形状陈述**，没有运行期照片——字段私有、无公开构造函数，crate 外既读不到
@@ -91,7 +93,10 @@ impl RotationEvent {
 pub struct Credential {
     scope: String,
     expiry: i64,
-    /// 取得材料的句柄：签发时的运行时代号。轮换使代号前进，旧凭据即失效（§5.4）。
+    /// 签出它的**运行时**的代号：`new` 时取一次，`rotate` 不改。用来判「这张凭据
+    /// 是不是本运行时签的」。
+    runtime: u64,
+    /// 取得材料的句柄：签发时的**轮换代**代号。轮换使它前进，旧凭据即失效（§5.4）。
     generation: u64,
 }
 
@@ -125,9 +130,13 @@ impl Credential {
     }
 }
 
-/// 密钥运行时：持有凭据源与当前代号，按能力逐枚签发。
+/// 密钥运行时：持有凭据源、本运行时的代号与当前轮换代，按能力逐枚签发。
 pub struct SecretsRuntime {
     source: Box<dyn CredentialSource>,
+    /// 本运行时的代号：`new` 时取一次，**`rotate` 不改**。凭据记下它，用来判
+    /// 「这张凭据是不是本运行时签的」。
+    runtime: u64,
+    /// 当前轮换代代号：`new` 与 `rotate` 各领一个全局号（见 [`NEXT_TICKET`]）。
     generation: u64,
     last_rotation: Option<RotationEvent>,
 }
@@ -136,8 +145,9 @@ impl SecretsRuntime {
     pub fn new(source: Box<dyn CredentialSource>) -> Self {
         Self {
             source,
-            // 开局即领一个全局代号，不是 0：0 只属于「轮换前的第一个运行时」，
-            // 而下一个运行时若也从 0 数起，两个运行时的凭据会互相通用（见 NEXT_TICKET）。
+            // 运行时代号与轮换代代号各领一个全局号，都不是 0：两者若按运行各自从 0
+            // 数起，两个运行时的凭据会互相通用（见 NEXT_TICKET）。
+            runtime: next_ticket(),
             generation: next_ticket(),
             last_rotation: None,
         }
@@ -165,6 +175,7 @@ impl SecretsRuntime {
         Ok(Credential {
             scope: cap.scope().to_owned(),
             expiry,
+            runtime: self.runtime,
             generation: self.generation,
         })
     }
@@ -176,7 +187,8 @@ impl SecretsRuntime {
     /// 里，「按事件」这几个字至少要是可观察的，否则调用方传哪一类都一样，
     /// 参数就是装饰。
     pub fn rotate(&mut self, event: RotationEvent) {
-        // 同样取全局代号：轮换后的代号也不会与别的运行时的当前代号撞上。
+        // 轮换代也取全局号：与 `new` 共用同一个发号器，故同一运行时内代号单调前进。
+        // （`runtime` 不动：轮换不改变「这张凭据是不是本运行时签的」。）
         self.generation = next_ticket();
         self.last_rotation = Some(event);
     }
@@ -186,21 +198,38 @@ impl SecretsRuntime {
         self.last_rotation
     }
 
-    /// 取凭据的材料。这是本 crate 里**唯一一处把「能力是否容许、凭据是否被取代、是否
-    /// 到期」三件事合在一起判**的执行点：凭据的代号仍是当前代号（未被轮换取代，§5.4），
-    /// `now` 未到凭据的到期时刻，作用域取自凭据并交由源校验。材料此刻才从源取
-    /// （设计 §5.2：凭据上只有句柄）。
+    /// 取凭据的材料。这里判**三件**事，判的全是凭据这一侧：
     ///
-    /// **不要把这一句读成「材料只有这里出得去」**：材料的另一处出口是
+    /// 1. 这张凭据是**本运行时**签出的（否则 [`SecretsError::ForeignCredential`]）；
+    /// 2. 签出它的轮换代仍是当前代——即未被轮换取代（否则
+    ///    [`SecretsError::Superseded`]，§5.4）；
+    /// 3. `now` 未到凭据的到期时刻（否则 [`SecretsError::CredentialExpired`]）。
+    ///
+    /// 之后才把凭据的作用域交给源取材料——作用域是否被源覆盖由源自报
+    /// （[`SecretsError::ScopeNotCovered`]）。材料此刻才从源取（设计 §5.2：凭据上
+    /// 只有句柄）。
+    ///
+    /// **能力是否容许不在这里判，这里也看不到能力**：那一判在 [`SecretsRuntime::issue`]
+    /// （`cap.is_valid_at(now)?`），签出后不再复核。故一次访问能否成功，与那枚能力
+    /// 此刻是否还有效无关——本阶段唯一能让一枚**尚未到期**的凭据提前失效的是**轮换**
+    /// （§5.4）；到期本身是另一回事（[`SecretsError::CredentialExpired`]），不属于「撤销」。
+    ///
+    /// **也不要把这里读成「材料只有这里出得去」**：材料的另一处出口是
     /// [`CredentialSource::fetch`] 本身——它是公开 trait 方法，`FileCredentialSource::open`
     /// 之类的公开构造点也公开，故 `FileCredentialSource::open(path)?.fetch("repo/X", 0)?`
-    /// 能直接拿到材料，不经过能力、代号与到期的任何判定。本运行时是**强制执行点**，
+    /// 能直接拿到材料，不经过上面任何一条判定。本运行时是**强制执行点**，
     /// 不是本 crate 里唯一的材料出口。
     pub fn material(
         &self,
         credential: &Credential,
         now: i64,
     ) -> Result<SecretMaterial, SecretsError> {
+        if credential.runtime != self.runtime {
+            return Err(SecretsError::ForeignCredential {
+                runtime: credential.runtime,
+                current: self.runtime,
+            });
+        }
         if credential.generation != self.generation {
             return Err(SecretsError::Superseded {
                 current: self.generation,

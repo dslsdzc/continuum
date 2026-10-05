@@ -58,6 +58,15 @@ fn the_variable_name_is_the_prefix_plus_the_escaped_scope() {
     unique.sort();
     unique.dedup();
     assert_eq!(unique.len(), 4, "编码塌缩了：{names:?}");
+
+    // 限制（拍下来，不只是写在注释里）：编码是**单射 modulo ASCII 大小写**——
+    // 字母统一转大写，故只差大小写的两个作用域共用一个变量名、共用一份材料。
+    // 媒介不保留大小写（Windows 环境变量名不区分大小写），这一折叠去不掉；
+    // 凡以大小写区分作用域的场景用文件源。
+    assert_eq!(
+        env_var_name("P_", "repo/X"),
+        env_var_name("P_", "REPO/X")
+    );
 }
 
 #[test]

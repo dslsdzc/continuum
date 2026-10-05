@@ -1,6 +1,6 @@
 //! 本 crate 的错误类型。
 //!
-//! **七个变体的消息都不带凭据材料**，逐个体给依据（枚举式断言逐项有照片或逐项给
+//! **八个变体的消息都不带凭据材料**，逐个体给依据（枚举式断言逐项有照片或逐项给
 //! 「为什么带不了」）：
 //!
 //! - **有照片的五个**（这些变体产生时，材料确实在运行时的源手里）：
@@ -10,9 +10,9 @@
 //!   `a_malformed_entry_is_rejected_without_echoing_the_line` 与
 //!   `every_rejection_reason_of_the_parser_has_a_photo` 钉——它的 `reason` 取
 //!   `&'static str` 而不是拼串，正是让「把出错的那一行原样带出去」在**类型上写不出来**。
-//! - **结构上带不了的两个**：`SourceIo` 的 `message` 来自 `std::io::Error` 的显示文本
+//! - **结构上带不了的三个**：`SourceIo` 的 `message` 来自 `std::io::Error` 的显示文本
 //!   （只有路径与失败原因，文件内容从不进这条消息）；`EmptyMaterial` 的产生条件是取值
-//!   **恰为空**，没有内容可带。
+//!   **恰为空**，没有内容可带；`ForeignCredential` 的两个字段都是 `u64` 代号。
 //!
 //! 其余字段全是「主题是谁」（源名、作用域、行号、代号）与到期时刻这两类数，
 //! 内容一律不进消息。
@@ -31,7 +31,8 @@ use continuum_capability::CapabilityError;
 /// - `SourceIo`：文件源的读（文件不存在、权限、非 UTF-8 内容）；
 /// - `EmptyMaterial`：环境变量源取到空值——空材料不能当成一枚凭据发出去；
 /// - `CredentialExpired`：`Credential::is_valid_at`；
-/// - `Superseded`：`SecretsRuntime::material` 的代号比对。
+/// - `Superseded`：`SecretsRuntime::material` 的轮换代代号比对；
+/// - `ForeignCredential`：同处的运行时代号比对（凭据不是本运行时签出的）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum SecretsError {
     /// 所据能力在签发时不可用（已失效，或作用域为空这类签发点错误）。
@@ -86,11 +87,27 @@ pub enum SecretsError {
     #[error("凭据已于 {expiry} 失效（Unix 毫秒），当前 {now}")]
     CredentialExpired { expiry: i64, now: i64 },
 
-    /// 凭据已被轮换取代：签出它的那个代号不再是当前代号。
+    /// 凭据已被轮换取代：同属一个运行时，但签出它的那个代号不再是当前代号。
     ///
     /// `current` 是取代它的当前代号。消息只说代号，不带材料。
     /// 照片：`tests/issue.rs` 的 `every_rotation_event_class_invalidates_old_credentials`
     /// （§103 的四类事件各一行，逐项）。
+    ///
+    /// **「不是本运行时的凭据」不再走这个变体**：那是另一回事（凭据从未被取代，
+    /// 只是不属于这里），说的是它会让消息说一件不真的事。分开见
+    /// [`SecretsError::ForeignCredential`]。
     #[error("凭据已被取代（当前代号 {current}）")]
     Superseded { current: u64 },
+
+    /// 凭据属于**另一个运行时**。
+    ///
+    /// 每个运行时在 `new` 时领一个全局运行时代号，`rotate` 不改它；凭据记下签出它的
+    /// 那个运行时代号。故这里的判定与轮换无关：凭据可能还完全有效，只是不归这个运行时。
+    /// 分开成一个变体，是为了让两条路径上的消息都**说真话**——把它们并进
+    /// [`SecretsError::Superseded`] 会让「凭据已被取代」在一条从未发生取代的路径上出现。
+    ///
+    /// 两个字段都是代号（`u64`），带不了材料。
+    /// 照片：`tests/issue.rs` 的 `a_credential_from_another_runtime_is_rejected`。
+    #[error("凭据属于另一个运行时（凭据 {runtime}，当前 {current}）")]
+    ForeignCredential { runtime: u64, current: u64 },
 }

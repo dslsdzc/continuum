@@ -15,7 +15,9 @@
 //!
 //! 两个源都只在 [`CredentialSource::fetch`] 里交出材料；凭据上只有作用域、到期时刻与
 //! 代号（见 `runtime.rs` 的 `Credential`）。材料类型 [`SecretMaterial`] 的 `Debug`
-//! 手工写成隐去内容，且**没有** `Display`——任何把它打进日志的形状都不存在。
+//! 手工写成隐去内容，且**没有** `Display`——本类型上任何**自动**把它打进日志的形状
+//! （`Debug`/`Display`）都不存在。`expose()` 之后由调用方自己打印是另一回事：那是
+//! 调用点上的显式动作，函数名就写着它取出了材料。
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -70,9 +72,11 @@ pub trait CredentialSource {
 
 /// 文件凭据源：每行一条 `作用域<TAB>材料<TAB>到期时刻`，`#` 开头与空行忽略。
 ///
-/// 作用域按**逐字匹配**，不做任何规范化：`repo/X` 与 `repo.X` 是两条不同的作用域
-/// ——与 [`env_var_name`] 的编码同口径：那边的编码也是单射，故两个源对「作用域是
-/// 什么」不会各说各话。
+/// 作用域按**逐字匹配**，不做任何规范化：`repo/X` 与 `repo.X` 是两条不同的作用域。
+///
+/// **与 [`env_var_name`] 的口径不完全一致**：那边把 ASCII 字母统一转大写，故
+/// `repo/X` 与 `REPO/X` 在那里是同一个作用域、共用一份材料，而本源视其为两条。
+/// 两处文档必须一起读，否则会各说各话。凡以大小写区分作用域的场景，用本源。
 ///
 /// 材料字段不得含 TAB 或换行（文件是按行按 TAB 切分的）。这一约束是格式的一部分，
 /// 不是「尽量」。
@@ -266,9 +270,16 @@ impl EnvCredentialSource {
 /// 什么」的口径就会不一致，且环境变量源会**静默**把一份材料发给另一个作用域。
 /// 转义后不会有这种塌缩；`_` 本身也被转义，故 `_2F` 不会被读成字面下划线接 `2F`。
 ///
-/// 编码是单射（可逆）的：`_` 后必接两位十六进制，别处不出现 `_`。
+/// **编码是单射 modulo ASCII 大小写**：`_` 后必接两位十六进制、别处不出现 `_`，
+/// 故转义本身可逆；但 ASCII 字母统一转了大写，`repo/X` 与 `REPO/X` 因此编码相同。
+/// 这一折叠**去不掉**：媒介本身不保留大小写（Windows 的环境变量名不区分大小写，
+/// 与本编码无关），编码层再怎么设计也换不回它。**后果**：只差大小写的作用域共用一份
+/// 材料；凡以大小写区分作用域的场景用文件源（那边按逐字匹配）。
+///
 /// 照片：`tests/source_env.rs` 的 `the_variable_name_is_the_prefix_plus_the_escaped_scope`
-/// ——其中逐项断言 `repo/X` 与 `repo.X`、`repo_a` 与 `repo-a` 编码后**不相等**。
+/// ——逐项断言 `repo/X` 与 `repo.X`、`repo_a` 与 `repo-a` 编码后**不相等**，
+/// 并且**单列一节**断言 `repo/X` 与 `REPO/X` 编码**相等**（把上面这条限制拍下来，
+/// 而不是只在注释里声称）。
 pub fn env_var_name(prefix: &str, scope: &str) -> String {
     let mut name = String::with_capacity(prefix.len() + scope.len());
     name.push_str(prefix);

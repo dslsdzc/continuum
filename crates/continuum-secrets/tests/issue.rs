@@ -310,11 +310,22 @@ fn a_credential_from_another_runtime_is_rejected() {
         SECRET.as_bytes()
     );
 
-    // A 的凭据拿到 B 上：代号是全局发号，两个运行时的当前代号不可能相等，故被拒。
-    // 若不拒，B 会按 **B 的源**给出同一作用域的材料——一次混淆代理。
+    // A 的凭据拿到 B 上：报的是**属于另一个运行时**，不是「已被取代」——凭据从未被
+    // 取代（A 没轮换过），说成取代就是一句不真的话。B 若接受，它会按 **B 的源**给出
+    // 同一作用域的材料——一次混淆代理。
     match b.material(&credential, 0) {
+        Err(SecretsError::ForeignCredential { .. }) => {}
+        other => panic!("另一个运行时的凭据应报 ForeignCredential，实得 {other:?}"),
+    }
+
+    // 轮换那条路径仍报 `Superseded`（两条路径各自的照片不共用一条断言）：
+    let mut rotated = runtime(FakeSource::covering("源C", FAR, SECRET));
+    let cap = capability("repo/X", FAR);
+    let credential = rotated.issue(&cap, 0).expect("应能签发");
+    rotated.rotate(RotationEvent::DeviceRevoked);
+    match rotated.material(&credential, 0) {
         Err(SecretsError::Superseded { .. }) => {}
-        other => panic!("另一个运行时的凭据应被拒，实得 {other:?}"),
+        other => panic!("轮换后的旧凭据应报 Superseded，实得 {other:?}"),
     }
 }
 

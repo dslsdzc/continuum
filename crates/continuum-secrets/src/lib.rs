@@ -6,7 +6,7 @@
 //!
 //! 分三层：
 //! - [`runtime`]：唯一取得凭据的路径 [`SecretsRuntime::issue`]、凭据 [`Credential`]
-//!   与材料的唯一出口 [`SecretsRuntime::material`]，以及 §103 的轮换事件
+//!   与材料的强制执行点 [`SecretsRuntime::material`]，以及 §103 的轮换事件
 //!   [`RotationEvent`]；
 //! - [`source`]：凭据源 [`CredentialSource`] 的两个真实现——文件
 //!   [`FileCredentialSource`] 与环境变量 [`EnvCredentialSource`]（设计 §5.3），
@@ -27,9 +27,10 @@
 //! （设计 §2.3、§7），本 crate 也不依赖任何持久化 crate。
 //!
 //! 材料有两处出口，**不要把其中一处读成唯一**：强制执行点是
-//! [`SecretsRuntime::material`]（唯一把「能力是否容许、凭据是否被取代、是否到期」
-//! 合在一处判的路径），另一处是凭据源自己的 [`CredentialSource::fetch`]——公开的
-//! trait 方法，源也是公开可构造的，故它取材料时**不经过**上面三项判定。
+//! [`SecretsRuntime::material`]——它判的全是**凭据这一侧**的三件事（凭据是否属于本
+//! 运行时、是否已被轮换取代、是否到期），它**看不到也不复核能力**（能力是否容许在
+//! [`SecretsRuntime::issue`] 就定了）；另一处是凭据源自己的 [`CredentialSource::fetch`]
+//! ——公开的 trait 方法，源也是公开可构造的，故它取材料时**不经过**任何判定。
 //!
 //! # 与 §100 的据实偏离
 //!
