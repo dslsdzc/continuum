@@ -105,6 +105,37 @@ impl CapabilityKind {
         }
     }
 
+    /// [`CapabilityKind::for_effect`] 的逆（设计 §3.2 第 4 条）。
+    ///
+    /// 对应关系由 `for_effect` 拥有，**逆也必须只有一个产生点**，故它与 `for_effect`
+    /// 同址（同一 impl 块、紧邻）。`for_effect` 是单射而**不是满射**，故返回 `Option`。
+    ///
+    /// 十二个臂**逐个手写、穷尽且无通配臂**：加 kind 时本函数编译不过，逆不会漏分支。
+    /// 注意臂要写到**动作枚举那一层**（`Self::Filesystem(FsAction::Read)` 这样），
+    /// 不能写成 `Self::Filesystem(_)`——后者在 `FsAction` 加变体时照样编译通过，
+    /// 「加 kind 编译不过」这条保证就没了。
+    ///
+    /// 「该给 `Some` 的恰是像那六枚」由 `tests/vocabulary.rs` 的三条用例钉（前两条逐项、
+    /// 第三条钉两份清单互斥）；**编译器看不出把 `Some` 写成 `None` 的臂**。
+    /// **而「kind 一共十二枚」这一半是编译期保证，不是运行期用例**——本 crate 没有
+    /// `CapabilityKind::ALL`，且 `as_str` 是实例方法，运行期遍历不出全集（见该用例的说明）。
+    pub fn effect(&self) -> Option<EffectType> {
+        match self {
+            Self::Email(EmailAction::Send) => Some(EffectType::SendEmail),
+            Self::Git(GitAction::Push) => Some(EffectType::PushBranch),
+            Self::Registry(RegistryAction::Publish) => Some(EffectType::Publish),
+            Self::Git(GitAction::DeleteRemote) => Some(EffectType::DeleteRemote),
+            Self::Payment(PaymentAction::Charge) => Some(EffectType::Charge),
+            Self::Environment(EnvAction::Deploy) => Some(EffectType::Deploy),
+            Self::Filesystem(FsAction::Read) => None,
+            Self::Filesystem(FsAction::Write) => None,
+            Self::Git(GitAction::Read) => None,
+            Self::Git(GitAction::WorktreeWrite) => None,
+            Self::Git(GitAction::CommitLocal) => None,
+            Self::Github(GithubAction::CreatePr) => None,
+        }
+    }
+
     /// §253 二字段形状里的 `resource` 串，即本枚举的七个 resource。
     ///
     /// 取值取自给例：`filesystem` 与 `git`（§88 `docs/spec/02-positioning.md:909`、
