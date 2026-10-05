@@ -374,11 +374,14 @@ impl std::fmt::Display for Capability {
 /// 不是漏实现——与计划 Task 2 Step 3 的同名订正。
 ///
 /// 「只有一个具名的签发点」这条保证由此**不再由类型独家承担**：类型层保证的是
-/// 「crate 外造不出来」（两份 `tests/compile_fail/` 样例），crate 内的第二个产出点由
-/// 评审与 grep 维持——与 P2 对 `GateApproval` 的既有判据同形
+/// 「**crate 外除 `mint` 外没有第二条产出能力的公开路径**」（结构体字面量与公开构造函数两条通道
+/// 各有一份 `tests/compile_fail/` 样例；另有 `FromStr` / `From<&str>` 两份钉住字符串还原）。
+/// 注意**不是**「crate 外造不出来」——`mint` 本身公开且被再导出，crate 外经它产出一枚能力是
+/// **设计承认的**（设计 §4.2：那是 `mint` 公开本身的性质，与本类型无关）。
+/// crate **内**的第二处产出点由评审与 grep 维持——与 P2 对 `GateApproval` 的既有判据同形
 /// （`crates/continuum-workspace/src/gate.rs:12-17`：「只有一个具名的产生点，维持手段是
-/// 评审与 grep，不再是类型」）。本 crate 内 `Capability` 的字段私有，故除本模块外
-/// 无处能写字面量；本模块内的第二处由评审把关。
+/// 评审与 grep，不再是类型」）：字段的可见性是**crate 内**，故本 crate 的任何模块都**可以**
+/// 写字面量；今天只有本模块内的一处，本 crate 内的第二处由评审把关。
 ///
 /// # 失败路径：空 `scope`
 ///
