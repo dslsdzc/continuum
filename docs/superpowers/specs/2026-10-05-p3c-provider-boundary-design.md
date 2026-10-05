@@ -79,8 +79,9 @@ list_tools / describe_tool / invoke / cancel
 ```
 
 接口类型在 `crates/continuum-core/src/tool.rs`：`ToolId`(6)、`ToolDescriptor`(18)、`ToolInvocation`(25)、
-`ToolResult`(31)。**其中 `ToolInvocation` 在裁决 §一第 2 条之后被 §7.5 的新请求类型取代**（它在 §316
-的 trait 上失去消费方；删与不删须拍板，§12 第 22 条）。`ToolId` **同时**是 §252 的 `Tool.id`，P3A 判为同一个类型并复用
+`ToolResult`(31)。**其中 `ToolInvocation`(25) 将被删除**——裁决 §五（2026-10-05）已拍板；
+它的替代者是 §7.5 的 `AuthorizedToolInvocation<'_>`（见 §7.5 的落地清单、§12 第 22 条）。
+`ToolId` **同时**是 §252 的 `Tool.id`，P3A 判为同一个类型并复用
 （`crates/continuum-capability/src/lib.rs:38-41`）；本子项目**不另建第二个**。
 
 错误类型 `ProviderError` 在 `crates/continuum-core/src/error.rs:3-15`，五个变体：
@@ -101,12 +102,13 @@ list_tools / describe_tool / invoke / cancel
 `crates/continuum-provider/tests/fake_provider.rs:29,89`（`FakeModel` / `FakeTool`），**只在测试里**。
 
 **二、发现：调用方没有任何按 id 找到适配器的入口。**
-`InvokeRequest.model: ModelId`（子项目 G）与 `ToolInvocation.tool: ToolId`（F 侧）都是「调用方按 id 找服务」
+`InvokeRequest.model: ModelId`（子项目 G）与工具侧由 `AuthorizedTool::tool_id()` 给出的 `ToolId`（F 侧）都是「调用方按 id 找服务」
 的形状，而今天没有任何东西回答「哪个适配器服务这个 id」。
 
 **三、非流式不可取消（`cancel` 对非流式调用不可达）。** 这是一处**既有类型事实**，不是漏实现：`ModelStream` 带
 `call: CallId`（`crates/continuum-core/src/model.rs:94`），故 `stream()` 的返回给得出可取消的句柄；
-而 `InvokeResponse`(56)、`ToolInvocation`(25)、`ToolResult`(31) **都没有 `CallId` 字段**，
+而 `InvokeResponse`(56) 与 `ToolResult`(31) **都不带 `CallId`**（§7.5 的新请求类型
+`AuthorizedToolInvocation` 亦只装一枚证明与 `input`，同样不带可取消句柄），
 `invoke()` 与 `ToolProvider::invoke()` 的调用方**拿不到任何 `CallId`**，也就无从调用
 `cancel(&CallId)`。见 §5.3 与 §12 第 1 条。
 
@@ -481,7 +483,7 @@ P3A 的两处守卫失败（`AuthorizedTool` 与 `mint`）都指向同一个取�
 - **解析与调用是同一步**：`invoke_tool(&AuthorizedTool, input)`。适配器按
   `AuthorizedTool::tool_id()`（`crates/continuum-capability/src/registry.rs` 的访问器）查得；
   **未登记 → `Err(ToolCallError::Unregistered { id })`**。工具 id **只有这一个来源**——`invoke_tool`
-  不另收 `ToolInvocation.tool`，也就没有「出示的 id 与被授权的 id 不是一个」这一种可能。
+  不另收 `ToolId`（旧类型 `ToolInvocation` 已裁删，见 §7.5、§12 第 22 条），也就没有「出示的 id 与被授权的 id 不是一个」这一种可能。
 - **三种结果，不是两种**（**其中第一条是 C 加在适配器上的约定，不是规范条文**，见下）：
   工具**跑起来了但自身失败** → `Ok(ToolResult { is_error: true, .. })`；
   provider **没跑成**（传输、协议、不可用）→ `Err(ToolCallError::Provider(e))`；
@@ -608,11 +610,23 @@ F 的设计把「登记 `effect_class == Some(t)` 的工具时，`required_capab
 剩下的那一份与 P3A 对 `mint` 的记录是同一处：`mint` 与 `authorize` 都公开，持有 `Tx` 与能力的调用方
 可以自行铸能力再过 `authorize`；**这不是本 crate 能收回的**（§7.1 残留段、§12 第 4 条）。
 
-**`ToolInvocation` 的处置（须拍板）。** 扩请求面之后，`continuum-core::tool::ToolInvocation`
-（`tool` + `input`）在 §316 的 trait 上**失去消费方**：`input` 移入新请求类型，`tool` 由授权证明给出。
-两个请求类型并存正是本项目判为缺陷的形状，故**建议在同一次改动里删掉它**（今天只有夹具
-`crates/continuum-provider/tests/fake_provider.rs` 在用）。它同时在共享面 §二列出的类型清单里，
-故这是一处**需要拍板的删改**，记在 §12 第 22 条，本子项目不擅自删。
+**`ToolInvocation` 的处置：删（已裁，2026-10-05）。** 裁决见
+`docs/superpowers/specs/2026-10-05-p3-bcdf-set-decisions.md` §五与 `docs/superpowers/p3bcdf-followups.md`
+§二之二。**判据**：扩请求面之后，`continuum-core::tool::ToolInvocation`（`tool` + `input`）在 §316 的
+trait 上**失去生产调用方**——`input` 移入 `AuthorizedToolInvocation`，`tool` 由授权证明给出；
+留着它就是**同一个概念两个类型**（「两套类型各有一批引用者」正是本项目反复出错的形状）。
+**删与 §7.5 是同一批改动**，不另起一波。
+
+**落地清单（本裁决的一部分，五处，缺一不可）：**
+
+1. `crates/continuum-core/src/tool.rs` 里 `ToolInvocation` 的定义（`crates/continuum-core/src/tool.rs:25`）；
+2. `continuum-provider` 的 trait（`crates/continuum-provider/src/tool.rs`）改用新请求类型；
+3. `continuum-provider` 的测试夹具 `crates/continuum-provider/tests/fake_provider.rs`（今天唯一的引用者）；
+4. 共享面 `docs/superpowers/specs/2026-10-05-p3-bcdf-ownership-and-interfaces.md` 的类型清单
+   （§二 §316 段）——**由控制器改**；
+5. `docs/02-工程.md` §10.3 的接口清单——**由控制器改**。
+
+第 4、5 两处本子项目只**点明要改**，不动那两个文件。
 
 ---
 
@@ -673,7 +687,7 @@ P3A 遗留第 8 条把这件事交给 C（`docs/superpowers/p3a-followups.md` �
 - 中立性（模块面）：一条断言 `crates/continuum-provider/src/` 下不出现 `impl ModelProvider for` /
   `impl ToolProvider for` / `impl Connector for` 的用例（§4.1 末段、§4.2 形态 4）。
 - `cancel` 不可达这一条是**结构事实**，照片是类型签名本身（`InvokeResponse` / `ToolResult` /
-  `ToolInvocation` 无 `CallId` 字段），不需要运行。
+  `InvokeResponse` / `ToolResult` / `AuthorizedToolInvocation` 均不带可取消句柄），不需要运行。
 
 **「门禁内正常路径」这条用例的代价要说准**（初稿写轻了，已订正）：它要**真跑通**，
 必须先起库、跑 capability 迁移、`save_tool` 登记一条工具，再 `authorize` 取 `AuthorizedTool`——
@@ -857,10 +871,11 @@ P3A 对 crate 内第二个 `Capability` 产生点的既有判据同形：构造�
 21. **模块面守卫只钉三个字面拼法，逃逸面没有照片**（§4.1 末段、§11）：全限定 trait 路径、`use ... as`
     别名、`include!` 三种写法仍全绿。要钉上界得让守卫**解析 trait 路径**（需 `syn` 之类的新 dev 依赖），
     本阶段不做。**收件人：C 的实现计划**（先落字面拼法那版；要上界时再评估 `syn` 的代价）。
-22. **`ToolInvocation` 删与不删，须拍板**（§7.5）：§316 的请求面扩之后，`continuum-core::tool::ToolInvocation`
-    在 trait 上失去消费方（`input` 移入新的请求类型、`tool` 由授权证明给出）。建议**同一次改动里删掉**
-    （两个请求类型并存正是本项目判为缺陷的形状；今天只有夹具在用）。它同时在共享面 §二的类型清单里，
-    故不由本子项目擅自删。**收件人：控制器（拍板）+ C 的实现计划（执行）。**
+22. **`ToolInvocation` 删掉——已裁（2026-10-05）**（§7.5）：裁决见 set-decisions §五、
+    `p3bcdf-followups.md` §二之二。**判据**：它失去生产调用方、留着即**同一概念两个类型**。
+    **与 §7.5 同批做，不另起一波**；五处落地清单（core 定义 / provider trait / `tests/fake_provider.rs`
+    / 共享面类型清单 / §10.3 接口清单）写在 §7.5，其中后两处**由控制器改**。**来历**：本条曾是「须拍板」，
+    用户已裁「删」。**收件人：C 的实现计划（前三处）+ 控制器（后两处）。**
 23. **凭据要不要也交给适配器，是一个尚未提出的第二个位置**（§7.5）：裁决 §一第 2 条给 §316 的请求面
     加的是**授权证明**（`AuthorizedTool`），不是密钥材料——凭据是 `continuum-secrets` 的词汇、走连接器
     路径（B），裁决亦明写 B 不经 §316。**若将来模型/工具适配器确需持有凭据**，那是一个新位置，
