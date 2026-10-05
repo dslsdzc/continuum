@@ -79,6 +79,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-connector"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "continuum-capability",
+ "continuum-core",
+ "continuum-secrets",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "continuum-core"
 version = "0.1.0"
 dependencies = [

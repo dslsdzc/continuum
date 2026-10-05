@@ -1,0 +1,36 @@
+[package]
+name = "continuum-connector"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`binding.rs` 的 `OpBinding` 两个字段、`registry.rs` 的
+# `ConnectorImpl::descriptor` 返回 `ConnectorDescriptor`、`ConnectorError` 的
+# 两个变体各带 `ConnectorId` / `ConnectorOp`（`ConnectorOp` 只有 `Hash` / `Eq`、
+# 没有 `Ord`，故绑定存放用 `HashMap`）。**不另建第二套 id 或描述类型**（设计 §3.2.1）。
+continuum-core = { path = "../continuum-core" }
+# 本 crate 的使用点：`OpBinding.kind` 与 `ConnectorError` 变体的字段类型取自
+# `CapabilityKind`。**本 crate 不新增授权词汇表**（设计 §3.2 决定 B-3）。
+continuum-capability = { path = "../continuum-capability" }
+# 本 crate 的使用点：`ConnectorImpl::invoke_with` 的材料入参 `&SecretMaterial`
+# ——它是**公开 trait 签名的一部分**，故是真依赖，不是「等有调用点再加」的边。
+# 凭据的签发与强制执行点（`SecretsRuntime::issue` / `material`）由 Task 4 接入。
+continuum-secrets = { path = "../continuum-secrets" }
+# 本 crate 的使用点：`ConnectorImpl::invoke_with` 的 `Value` 入参与返回值
+# （§124 的接口本就经 serde_json 传值）。
+serde_json = { workspace = true }
+# 本 crate 的使用点：`ConnectorImpl` 的 `invoke_with` 是 async 方法，经
+# `#[async_trait]` 展开（与 §124 的 `Connector` 同形）。
+async-trait = { workspace = true }
+# 本 crate 的使用点：`error.rs` 的 `ConnectorError` 派生 `thiserror::Error`。
+thiserror = { workspace = true }
+
+# 其余依赖由需要它们的 task 增量加（设计第 6 节的边表是允许集合，不是一次性声明清单；
+# 叶子 crate 的 `ALLOWED` 条目记的是**实际依赖**，一次声明齐会让条目在中间若干 task 里说谎）：
+# - `continuum-provider` 由 Task 4 加（适配器实现 §124 的 `Connector`）；本 task 用不到它，
+#   而 `ProviderError` 来自 `continuum-core`（`continuum_core::ProviderError`），
+#   故本 task 不为它登记 provider 那条边；
+# - `continuum-effect` 由 Task 5 加（当时才有 `EffectType` 的使用点）；
+# - dev 边 `tokio` / `continuum-persist` / `tempfile` 由 Task 4 加、`trybuild` 由需要它的
+#   那个 task 加。

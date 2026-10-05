@@ -101,6 +101,21 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 无命中），故只登记实际用到的那一条——叶子 crate 的条目记实际依赖，
     // 零使用的边即假边（P2b 为此删过两条）。
     ("continuum-secrets", &["continuum-capability"]),
+    // P3 子项目 B 的连接器边界层（设计 §3.2）。本 task 只登记**本 task 实际有的边**：
+    // core（描述符与操作标识）、capability（`OpBinding` 的 kind）、secrets
+    // （`ConnectorImpl::invoke_with` 的材料入参——公开 trait 签名的一部分，故是真依赖）。
+    // `continuum-provider`（Task 4 的适配器实现 §124 `Connector`）、`continuum-effect`
+    // （Task 5）与三条 dev 边（`tokio` / `continuum-persist` / `tempfile`，Task 4）
+    // **都由用到它的那个 task 自己登记**，不提前——叶子 crate 的条目记的是实际依赖，
+    // 一次声明齐会让条目在中间若干 task 里说谎。
+    (
+        "continuum-connector",
+        &[
+            "continuum-capability",
+            "continuum-core",
+            "continuum-secrets",
+        ],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
