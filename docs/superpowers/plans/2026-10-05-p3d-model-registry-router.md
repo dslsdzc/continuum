@@ -83,11 +83,12 @@
 - `Tx::execute(&self, sql: &str, params: &[Value])`、`Tx::query(...) -> Result<Vec<Vec<Value>>, PersistError>`、`Migration::new(version, name, sql)`（`crates/continuum-persist/src/{tx.rs,db.rs}`）——`Migration.name` 与 `sql` 是 `&'static str`。
 - `ModelProfile` 的构造是 **crate 内**的（`pub(crate) fn try_new`）。故**集成测试（`tests/`）构造不出画像**，只能经 `load_profile` 从库拿——这决定了本计划的测试夹具形态（见 Task 3、Task 11），不是实现细节。
 
-**`tests/compile_fail/*.stderr` 的内容与错误码一律取自实跑，不许凭记忆写。** 本项目已为此付过一次代价：
-Task 3 的 brief 把「私有关联函数」的错误码写成 `E0603`，**实测 rustc 1.95 报的是 `E0624`**
-（`E0603` 是「项本身不可见」；私有的关联函数走另一条诊断）。**错误码是记忆最容易失真的一类事实**——
-它与本节开头那条「手写代码块错误率高」同源，只是更隐蔽：正文措辞可以被复核，凭印象敲下的错误码看起来同样像事实。
-故本计划给出的任何错误码都只是**预期值**，落地时以 `trybuild` 实际产出的 `.stderr` 为准。
+**`tests/compile_fail/*.stderr` 的内容与错误码一律取自实跑，不许凭记忆写；而且逐份各不相同，不许拿一个值套三处。**
+本项目已为此付过一次代价：Task 3 的 brief 给三份样例共用一个错误码 `E0603`，**实测 rustc 1.95 下三份各不相同**
+（本节三份的实跑值：字面量构造 `E0451`、方法不存在 `E0599`、私有关联函数 `E0624`）。
+**错误码是记忆最容易失真的一类事实**——它与本节开头那条「手写代码块错误率高」同源，只是更隐蔽：
+正文措辞可以被复核，凭印象敲下的错误码看起来同样像事实。故本计划给出的任何错误码都只是**预期值**，
+落地时以 `trybuild` 实际产出的 `.stderr` 为准。
 
 ---
 
@@ -347,15 +348,22 @@ git commit -m "feat(model-registry): §248 九维与 §24 的时间序列观测"
   钉住（读 `profile.overall_score()`，判据是**编译失败**）。此条在用例清单里留名，以免被当成漏项（设计 §2.3 第 3 条 (a)）。
 - `tests/compile_fail/model_profile_cannot_be_built.rs`：**结构体字面量**构造被拒（字段私有）。
 - `tests/compile_fail/model_profile_has_no_constructor.rs`：**关联函数** `ModelProfile::try_new(…)` 在 crate 外
-  被拒——实测 rustc 1.95 报 **`E0624`**（`associated function … is private`，**不是 `E0603`**：
-  后者是「项本身不可见」，私有的关联函数走的是另一条诊断）。
+  被拒——实测 rustc 1.95 报 **`E0624`**（`associated function … is private`；**三份样例的错误码各不相同**，
+  逐份的值见下面的表）。
   **这一份必须与上一份并存，判据是「每条构造通道各占一份样例」**：私有字段与私有构造函数是**两条不同的通道**，
   只钉「字面量构造」那一份时，把 `try_new` 改成 `pub` **不会有任何用例变红**——**缺的正是 fail-open 的那一侧**
   （P3A 的 `capability_fields_are_private.rs` 与 `capability_has_no_constructor.rs` 是一对，同一判据）。
 - `tests/compile_fail/overall_score_cannot_be_read.rs`：同法，钉 §248 禁令的形状（§4.4 完成判据的「不依赖单一总分」）。
 - **三份样例的判据都是「编译失败且失败原因正确」**——每份 `.stderr` 钉住预期报错，否则
-  「因为拼错函数名而编译失败」也会让用例变绿。**错误码必须取自实跑**（本节两份已知值：字面量构造走
-  `E0603` 一类「字段私有」，私有构造函数走 `E0624`）——**`.stderr` 不许凭记忆写**，见「关于本计划的代码块」一节。
+  「因为拼错函数名而编译失败」也会让用例变绿。**三份的错误码逐份不同，必须对着实跑值写**：
+
+  | 样例 | 实测错误码 | 诊断 |
+  |---|---|---|
+  | `model_profile_cannot_be_built.rs` | `E0451` | 字段私有（结构体字面量构造被拒） |
+  | `overall_score_cannot_be_read.rs` | `E0599` | 该方法不存在 |
+  | `model_profile_has_no_constructor.rs` | `E0624` | 关联函数私有 |
+
+  ——**`.stderr` 不许凭记忆写，也不许拿一个值套三处**，见「关于本计划的代码块」一节。
 
 - [ ] **Step 2: 运行，确认失败**
 
