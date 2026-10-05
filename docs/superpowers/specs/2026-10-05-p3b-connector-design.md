@@ -242,9 +242,14 @@ impl ConnectorRegistry {
    （`crates/continuum-effect/src/effect.rs:16-23`，六项），而 §125 的给例里有
    `GitHub.read_repo`、`Email.read`、`Email.draft`——它们**不是副作用，将来也不会是**：
    「读」这件事在定义上就不改变外部世界。绑到 `EffectType` 等于把它们从设计里**永久**排除。
-   反过来，`CapabilityKind` 本来就装着非效应的动作：`Filesystem(Read)`、`Git(Read)`、
-   `Git(WorktreeWrite)`、`Git(CommitLocal)`、`Github(CreatePr)` 都是 §88 / §253 的**照录项**
-   而非外部效应类型（P3A 设计 §2.2 明写这一点，`for_effect` 因此不是满射）。
+   反过来，`CapabilityKind` 本来就装着非效应的动作。**十二枚 kind 里，非像的恰有六枚**
+   （`for_effect` 是单射不是满射，像只有六枚），逐枚列全：
+   `Filesystem(Read)`、**`Filesystem(Write)`**、`Git(Read)`、`Git(WorktreeWrite)`、
+   `Git(CommitLocal)`、`Github(CreatePr)`——它们都是 §88 / §253 的**照录项**而非外部效应类型
+   （P3A 设计 §2.2 明写这一点）。
+   **这一句初稿只列了五枚，漏 `Filesystem(Write)`**（`docs/superpowers/plans/2026-10-05-p3bcdf-plan-stage-rulings.md`
+   的 B1 裁为设计改）；**列全的意义在于它是枚举断言**——凡给数量的地方都必须逐项列得出来，
+   否则读者无从发现漏项，而漏的那一枚恰好会让「非像有六枚」这句话在用例里对不上。
    §125 的读操作与它们是同一类东西，故应落在同一张表里。
 
 **「一一」这条的理由**：§125 的意图是「`GitHub.merge` 能单独不授」。若两个操作绑同一 kind，
@@ -490,10 +495,17 @@ pub async fn invoke(
     authorization: ConnectorAuthorization,
     op: &ConnectorOp,
     input: Value,
+    /// `now` 由调用方给。**入口不收时钟**——与 `Capability::is_valid_at`、`mint`、`issue`、
+    /// `material`、`authorize` 同一条既有约定（本仓的核一律不取时钟）。
+    now: i64,
 ) -> Result<Value, ConnectorError>
 ```
 
-**两臂共用一个入口而不是两个入口**：两个入口就是「谁记得调哪一个」的问题，
+**`now` 是必需的入参，不是可选**：第 4.1 节的流程要 `issue(cap, now)` 与 `material(&cred, now)`，
+两个 `now` 都从这一处来；**入口自己不取第二个时钟**——两次判定若各取一次，
+「签发时未过期、取料时已过期」这条正好落在两次取值之间的情形就会被抹掉，
+而那正是 §103 与 §51 要看得见的那一格。**入口内的两次判定共用同一个 `now`。**
+（本条由 `plan-b` 查出、裁决文件 B2 裁为设计改。）
 而本项目点名的缺陷形态正是「机制建好、路径不经过」。臂与绑定的对应由入口按 3.2 第 4 条
 **推出来**再核对，不由调用方选。
 
@@ -570,7 +582,7 @@ B 能且只能相信到这个程度。B **不能**从 `AuthorizedEffect` 判断�
 | `UndeclaredOperation { connector, op }` | 入口第 2 步 | **操作不在声明集内**——§125 的那条注释第一次有了强制 |
 | `EffectAuthorizationRequired { op, effect }` | 入口第 3 步 | 绑定落在 `for_effect` 的像里（有外部效应），却没走效应臂——**绕开强制点 (2) 的那条路** |
 | `AuthorizationMismatch { op, bound, presented }` | 入口第 4 步 | 出示的那枚能力的 kind 与绑定的 kind 不是同一枚 |
-| `Credentials(#[from] SecretsError)` | `issue` / `material` | 能力已失效、源不覆盖该作用域、凭据已被轮换取代、凭据属另一个运行时 |
+| `Credentials(#[from] SecretsError)` | **转出**（不是「产生」）：`issue` 与 `material` 各转出它们**自己**的那几个内层变体，见下 | 能力已失效（`Capability`）、源不覆盖该作用域、源读不出来、凭据已到期 |
 | `Provider(#[from] ProviderError)` | 实现自身 | **后端错误**（§124 的接口本就以 `ProviderError` 报错） |
 | `UnboundOperation { connector, op }` | **注册期**（第 3.2 节第 2 条） | **声明了却没绑**——绑定不完备 |
 | `UndeclaredBoundOperation { connector, op }` | **注册期**（第 3.2 节第 2 条） | **绑了却没声明**——另一侧；只建一侧不算钉住 |
@@ -582,9 +594,22 @@ B 能且只能相信到这个程度。B **不能**从 `AuthorizedEffect` 判断�
 - **上面四条注册期变体不是留桩**：它们在 `ConnectorRegistry::register`（第 3.2.1 节）里都有真实
   产生方（各有照片，见第 9 节）。**调用期**不存在「绑定缺失」这条路径——完备性在构造期就强制了，
   故调用期不建对应的变体。这一条要说准：不是「这个形状不存在」，而是「它只能在注册期出现」。
-- **`Credentials` 转出 `SecretsError` 而不展开**：`SecretsError` 的八个变体各有产生方与照片
-  （`crates/continuum-secrets/src/error.rs`），B 再抄一层就会与它漂移。
-  「是哪一种失败」由内层变体给出——与 P3A `CapabilityError::Persist` 的取舍同形。
+- **`Credentials` 是「转出时保留内层变体」，不是「产生」**：入口不新造凭据侧的失败，
+  只把 `issue` / `material` 给出的 `SecretsError` **原样**带出去（`#[from]`，不重编成新变体、
+  不吞成一句笼统的话）。`SecretsError` 的八个变体各有产生方与照片
+  （`crates/continuum-secrets/src/error.rs`），B 再抄一层就会与它漂移——与 P3A
+  `CapabilityError::Persist` 的取舍同形。**「是哪一种失败」永远由内层变体给出。**
+- **八个内层变体里，有两个经本入口不可达——写进设计，不是留给读者推**（裁决文件 B3）：
+  - **`Superseded`**（§103 的轮换）：它要求「签发之后、取料之前**发生过一次 `rotate`**」。
+    入口的一次调用里**没有可以插入 `rotate` 的位置**——`issue` 与 `material` 是同一个调用内的
+    前后两步，而 `rotate` 要 `&mut SecretsRuntime`、在入口之外。故经入口签出的那张凭据
+    不可能被取代；
+  - **`ForeignCredential`**：它要求凭据是**另一个运行时**签的。而入口的凭据是**本次调用自己
+    刚签出的**，故不可能是外来的。
+  **这两条仍然保留在 `Credentials` 的类型里**（转出不展开的那条决定即含此意）：它们在内层
+  各有用例与照片，只是**本入口这条路走不到**——若将来入口变成持有凭据的形态（例如跨调用复用），
+  两条会立刻可达，那时无需改类型。**故本子项目的测试策略里，这两条没有照片，
+  且原因是「经入口不可达」而不是「没做够」**（第 6.3、第 9 节）。
 - **`Provider` 独立于 `Credentials`**：后端不可用与凭据拿不到是两回事，并成一个变体会让
   「凭据被拒」这条路径上的消息说一件不真的事（P3A 为同类情形专门分过 `ForeignCredential`
   与 `Superseded`，`continuum-secrets/src/error.rs:90-99`）。
@@ -648,9 +673,13 @@ B 再写一条，就是同一个事实两个产生点。**决定 B-5：B 的入�
 3. **§125 那五个操作的「相配 kind」**——本子项目不补臂，故不存在「补了之后」的状态可照
    （第 3.4 节照片 3）。**这与第 2 条是两回事**：补了臂，「相配的那一枚」存在了，
    但「配得对不对」的判据**仍然不存在**——补臂让正确的绑法**可写**，不让错误的绑法**不可写**。
-4. **凭据不越权在真实调用上的表现**——「作用域没被放宽」在类型上有照片（4.2 节三条），
+4. **`Superseded` 与 `ForeignCredential` 经本入口不可达**（第 6.1 节的 B3 段）：
+   前者要「签发后、取料前发生过一次 `rotate`」，后者要凭据属另一个运行时，**两条在入口的一次
+   调用里都构造不出来**，故没有照片。**原因是「走不到」，不是「没做够」**——两条在内层
+   （`continuum-secrets`）各有用例，那不属于本子项目（第 9 节的轮换行同此）。
+5. **凭据不越权在真实调用上的表现**——「作用域没被放宽」在类型上有照片（4.2 节三条），
    但「拿着这枚令牌真的调不动别的仓库」要真实服务才照得出来。
-5. **漂移**：本子项目**没有**「真实连接器」这个产生方，故一切「按操作细分」的断言都只在
+6. **漂移**：本子项目**没有**「真实连接器」这个产生方，故一切「按操作细分」的断言都只在
    假连接器的操作集上为真。这条留给后来者，不要读成对真实连接器的保证。
 
 ---
@@ -741,8 +770,17 @@ continuum-runtime   → continuum-secrets      （**由把密钥运行时接上�
 与 §4.1 一致；两文在 `continuum-provider` 的层归属上并不冲突，冲突只在 **Connector 自己**放哪
 （第 7.2 节）。
 
-**不新增** `continuum-connector → continuum-events` / `→ continuum-persist`：本子项目不写审计、
+**主依赖不新增** `continuum-connector → continuum-events` / `→ continuum-persist`：本子项目不写审计、
 不建表（第 6.2 节）。将来若 B 有了落库需求再按实际使用加。
+
+**但有一条 dev 边必须有：`continuum-connector → continuum-persist`（dev-dependency）**（裁决文件 B4）。
+理由是本设计自己那张照片：§9 的「**不写审计**」要断言「一次成功的连接器调用前后 `audit_log` 行数不变」，
+而**裸查行数**要能开库、能读表——那是 `continuum-persist` 的 `Db` / `Tx`。**这条边与上面那句不矛盾**：
+上面说的是**主依赖**（生产代码不落库），本条说的是**测试夹具**（照片要读库）。
+**`ALLOWED` 表必须覆盖它**——`dependency_direction.rs` 用 `cargo tree --edges all`，
+`all` 同时含 normal / build / **dev**（该文件自己的注释即如此写），故 dev 边不登记会被抓；
+这与 C 的 `persist` dev 边是同一条判据。
+**两句都不写清楚，读者会以为「不建表」与「裸查 `audit_log`」相抵——那正是 `plan-b` 报的这一处。**
 
 ---
 
@@ -788,7 +826,7 @@ Connector ← 密钥运行时 + 第 4 层 Capability Token
 | 凭据作用域不越能力 | 两条臂各一条：断言 `credential.scope()` 等于**那一次出示的那枚能力**的 scope；并带一条「能力的 scope 是什么、凭据就是什么」的对照 |
 | 能力已失效 | 过期能力经**两条臂各一次** → `Credentials(SecretsError::Capability(CapabilityError::Expired))`（**断言是这一种**，不是笼统的 `Err`） |
 | 源不覆盖作用域 | 文件源里没有该作用域 → `Credentials(ScopeNotCovered { .. })` |
-| 轮换 | `rotate` 之后用旧凭据取料 → `Credentials(Superseded { .. })`。**§103 的四类事件逐项那一组是复用既有照片**（`crates/continuum-secrets/tests/issue.rs::every_rotation_event_class_invalidates_old_credentials`，由 `error.rs:93-94` 引出），**不是本子项目的新证据**；本子项目要新增的只是「B 的入口把 `Superseded` 原样转出、不吞成别的变体」那一条。§10 末句刚说过「不许用别人的用例代表自己」，此处照那条办 |
+| 轮换 | **本子项目没有照片，且写不出**：`Superseded` 要求「签发之后、取料之前发生过一次 `rotate`」，而**入口的一次调用里没有可以插入 `rotate` 的位置**（第 6.1 节的 B3 段），故 `rotate` 之后用旧凭据取料这条**在 B 的入口上构造不出来**。§103 的四类事件逐项那一组**是 `continuum-secrets` 既有的照片**（`crates/continuum-secrets/tests/issue.rs::every_rotation_event_class_invalidates_old_credentials`，由 `error.rs:93-94` 引出）——**那是那一层的证据，不是本子项目的**（§10 末句刚说过「不许用别人的用例代表自己」）。本子项目能说的只有：`Credentials` 转出时**保留内层变体**（第 6.1 节），故一旦可达，`Superseded` 会原样出去——**这是一句关于类型的断言，不是照片** |
 | 后端错误 | 假实现返回 `ProviderError::Unavailable` → `Provider(Unavailable(_))` |
 | **不写审计** | 一次成功调用前后 `audit` 表行数不变（裸查 `kind` 列） |
 | 凭据材料不进返回值 | 假实现把收到的材料原样回显 → B 的返回值里**不含**它（适配器方案下这条天然成立，仍需一条照片：适配器不把材料放进 `input`） |
