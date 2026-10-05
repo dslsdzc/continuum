@@ -141,8 +141,9 @@ impl ModelProfile {
 是 §4.2 那条「没有画像就没有候选」的第二条腿——**它必须与 `RoutableModel` 同为结构性保证，
 否则那条腿是纸的**：
 
-- 若 `ModelProfile` 能在内存里自由构造，则 `RoutableModel::try_new(自造画像, RoutableState::Discovered)`
-  就能把一个**从未落库、从未过画像流水线**的模型送进 `rank`。那样 §21 的「新增模型不能直接进入自动 Router」
+- 若 `ModelProfile` 能在内存里自由构造，则 `RoutableModel::try_new(自造画像, LifecycleState::Discovered)`
+  就能把一个**从未落库、从未过画像流水线**的模型送进 `rank`——**注意入参是 `LifecycleState`（十态），
+  不是 `RoutableState`**：闸门要在 `try_new` 内部发生，收窄后的类型不能是入参（§4.2）。那样 §21 的「新增模型不能直接进入自动 Router」
   就退化成「Router 记得只收真画像」，而 §4.2 那半边的保证随之失效。
 - 照片两张，与 P3A 的 `AuthorizedTool` 同形：`tests/compile_fail/model_profile_cannot_be_built.rs`
   的编译失败样例（crate 外无公开构造），以及一条用例断言**该 profile 的 id 在库里不存在**时
@@ -238,9 +239,29 @@ pub struct SkillScore(f64);        // 构造时拒 NaN / ±∞
 pub struct Ratio(f64);             // 构造时拒 NaN / ±∞，且须落在 0.0..=1.0
 ```
 
+**三个取值类型与 `SkillVector` 的构造失败都收在同一个错误类型里**——本设计先前只写「各返回具体 `Err`」
+而没给类型名，那会逼计划自定一个名字（**这一处是计划作者报出来的，已补**）：
+
+```rust
+/// 画像侧取值类型的构造错误。**与 [`LifecycleError`] / [`RoutingError`] 分开**：
+/// 它标的是「这个值根本不是合法取值」，不是「这次操作不合法」。
+pub enum ProfileError {
+    /// 不是有限实数（NaN 或 ±∞）。
+    NotFinite,
+    /// 落在 [0,1] 之外（`Ratio`）。
+    OutOfRange { value: f64 },
+    /// 该维度的观测在时间窗上不自洽（`end < start`）。
+    BadTimeRange { start: i64, end: i64 },
+}
+```
+
+判据是**每一种 `Err` 各有一条用例**（§9）：三个越界输入（`NaN`、`1.5`、`-0.1`）各断言是哪一枚，
+外加时间窗反序一条。**`ProfileError` 不进 `RoutingError`**：`rank` 收到的是构造好的值，
+构造失败在构造期就被拒（同 §5.4 对 `RequirementError` 的处置）。
+
 - **为什么 `Ratio` 要拒 NaN**：NaN 与任何值的比较都是 false，`sort_by` 在含 NaN 的列表上不是全序
   ——排序结果随实现细节漂移。这不是洁癖：§84 的输出要被比对与记录，不确定的排序无法有照片。
-  用例钉三个越界输入（`NaN`、`1.5`、`-0.1`）各返回具体 `Err`。
+  用例钉三个越界输入（`NaN`、`1.5`、`-0.1`）各返回具体 `Err`（`ProfileError` 的哪一个变体，逐条断言）。
 - **这对辅助函数的返回类型与 P3A 的不同，且是有理由的偏离**：`CapabilityKind::as_str` 返回
   `&'static str`，因为它是封闭枚举、字面量固定；`SkillScore` / `Ratio` 的域不是封闭枚举，`as_str` 返回
   `String`。**契约不变**：`parse(as_str(x)) == Some(x)` 逐值成立（用例钉往返），
@@ -364,6 +385,10 @@ pub fn load_skill_series(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension)
                          -> Result<Vec<SkillObservation>, PersistError>;   // 按 score_version 升序
 pub fn register_model(tx: &Tx<'_>, id: &ModelId) -> Result<(), PersistError>;  // §21 发现即登记
 pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState>, PersistError>;
+/// 迁移一个模型的登记状态。**返回的是迁移前的旧态（`from`）**，不是 `to`——
+/// 调用方要记「从哪来」，而「到哪去」它就是自己传的 `to`，返回它没有信息量。
+/// 旧态另有一个来源：`load_lifecycle` 在同一事务里读。**若登记项不存在**：
+/// `Err(LifecycleError::UnknownModel { id })`（**不静默创建**——登记是 `register_model` 的活）。
 pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
                   -> Result<LifecycleState, LifecycleError>;                    // §4.3
 ```
@@ -379,8 +404,11 @@ pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
 「前几位是十位一档」是本仓的既有取法（P3A 计划第 441 行）。
 
 **号段已由协调者裁定：一个子项目一个十位档——A 50、B 60、C 70、D 80、E 90**，每一档**取用前仍须核对该档未被占用**。
-**本设计取 `80`**（三张表在一条迁移里，`Db::migrate` 用 `execute_batch`，一条迁移可含多条语句，
-`crates/continuum-persist/src/db.rs:117`），**预留 `81`** 给后续 task 新增的表。
+**本设计取 `80`，且只取一个**（三张表在一条迁移里，`Db::migrate` 用 `execute_batch`，一条迁移可含多条语句，
+`crates/continuum-persist/src/db.rs:117`）。**不预留 `81`**——第一版稿子写过「预留 `81` 给后续 task 新增的表」，
+**那句已删**（来历留在此段）：三张表全在 `80` 里，`81` 当下**没有使用点**，预留一个没有表要建的编号
+就是留一条死迁移；而按本仓既有的分工，「用它的那个 task 自己注册迁移、自己取号」本来就不需要预留。
+将来真有新表时，那一刻取一个未占用的号即可，与 P3A 的取号方式相同（判据是「未占用」）。
 
 - **「未占用」的判据是按库说的，不是按全仓说的。** 编号在**别的库里**也出现是**无害的**：唯一的判据是
   「同一个库里的编号不重复」，而**驱动装配的那个集合是唯一会碰上面的一条**。两处实例：
@@ -490,6 +518,15 @@ impl TryFrom<LifecycleState> for RoutableState {
 /// 一个**可交给 Router** 的模型：画像 + 已过闸门的状态。
 /// 字段私有、无公开构造函数；唯一的产生点是 `RoutableModel::try_new`。
 pub struct RoutableModel { profile: ModelProfile, state: RoutableState }
+
+impl RoutableModel {
+    /// **入参的状态是十态的 [`LifecycleState`]，不是收窄后的 [`RoutableState`]**——
+    /// 闸门就在这个函数里发生；若入参已经是 `RoutableState`，闸门就跑到调用方去了，
+    /// 那道「Router 忘了检查」的保证随之失效。收窄在函数体内经 `RoutableState::try_from` 完成，
+    /// 失败即 `Err(RoutingError::NotRoutable { state })`，**`state` 带的是传入的那个十态值**。
+    pub fn try_new(profile: ModelProfile, state: LifecycleState)
+        -> Result<Self, RoutingError>;
+}
 ```
 
 于是 `pub fn rank(request, models: &[RoutableModel], policy) -> ...` 的签名里**不存在**
@@ -745,6 +782,23 @@ pub struct BaselineRankingPolicy;
 **基线是具名的、可替换的，不是对规范的声称。** 被否掉的两个候选打分法：**(a) 分数加权求和**——需要
 一个规范没有的尺度与方向；**(b) 阈值匹配**——需要一个规范没有的阈值。两者都撞在 §2.4 的同一条判据上。
 
+### 「当前可用性」怎么用：**过滤，且只过滤 `Unavailable`**（写死，不留计划自定）
+
+§250 的八项 MUST 考虑里有「当前可用性」，而它是**唯一一项八项里既能判、又只判一档的**。本设计写死如下：
+
+- **`ProviderHealth::Unavailable` 的模型不进候选集**。这不是发明阈值，而是 §250 的输出本身要求的：
+  输出是 `RankedExecutionCandidates`——**可执行的**候选；一个供应商侧已不可用的模型不是执行候选，
+  把它排进去，§1.2 说的「拿它跑」那一步必然失败，排序因此变成空话。**故这一条是「不可用即不是候选」，
+  不是「可用性低就降权」。**
+- **`Healthy` 与 `Degraded` 都进候选集**，且**两者之间没有判据**：`Degraded` 该不该降权、降到什么程度，
+  **规范未给判据**（§250 只说「考虑」，§84 没有给这一维的算法），故本设计**不发明**——
+  它把健康度原样带进 `reason`，让策略自己决定；**基线策略不因 `Degraded` 改变排序**。
+- **`availability` 里没有条目的候选**（含候选集里有、列表里无）：`Err(RoutingError::UnknownAvailability { id })`，
+  **不当作可用**——按未知放行是 fail-open 的形状。
+
+**照片**：`Unavailable` 被排除（一条）、`Healthy`/`Degraded` 都留下且**排序不变**（一条，逐项）、
+缺条目得 `Err(UnknownAvailability { id })`（一条）。**`Degraded` 的降权判据落下一条遗留**（§11 第 24 条）。
+
 **§250 的「MUST 考虑成本」在本设计里只是结构性地不可省略，而不是已实现**：`RoutingRequest` 里
 `budget: BudgetView` 是**必填参数**（不是 `Option`），故一个策略想忽略预算，是一次**看得见的选择**，
 而不是一次遗漏。它的量值无法计算的理由见 §6。**这一条是本设计最需要在复审里被挑战的地方**，
@@ -762,18 +816,24 @@ pub enum RoutingError {
     /// 候选集里同一个模型出现了两次。**它是 `compare` 的「全序」这条断言的守门人**：
     /// 两条 `ModelId` 相同的候选无从定序，`ModelId` 兜底档也就兜不住。
     DuplicateModelCandidate { id: ModelId },
-    /// 画像读失败。
-    Persist(#[from] PersistError),
+    /// 候选集里的某个模型在 `RoutingRequest::availability` 里没有条目（§5.3）。
+    /// **不把它当「可用」**：缺席即未知，而按未知放行是 fail-open 的形状。
+    UnknownAvailability { id: ModelId },
 }
 ```
 
 每条各有用例断言**具体是哪一枚**。`NoEligibleCandidate` **不合并**进 `NotRoutable`：前者是「没有可用的」，
 后者是「有一枚被点名挡下了」，调用方（§110 的流程）对两者的处置不同。
 
-**`RequirementError` 不出现在这里，且这是刻意的**：空需求在 `TaskSkillRequirement::try_new` 就被拒，
-而 `RoutingRequest` 装的是一个**已构造的** `TaskSkillRequirement`，故「空需求」这条路径**到不了 `rank`**。
-若给 `RoutingError` 加一个 `Requirement(#[from] RequirementError)`，它就是一个**没有产生方**的变体——
-本仓对这类变体的处置是删或写明理由。
+**这个枚举里只有 `rank` 真的会产出的变体，三个「没有产生方」的一律不收**——本仓对这类变体的处置是删或写明理由：
+
+- **`Persist` 已删**（原第一版有 `Persist(#[from] PersistError)`）：**`rank` 是纯函数，签名里根本没有 `Tx`**
+  （§8.1「Router 的纯由签名保证」），故它**产不出**读库失败。留着它会让人以为本层会写库，
+  且它是一个死物。**这不同于「分支不可达但保留」那一类**：那一类的前提是类型确被别处需要，此处不是。
+- **`Requirement(#[from] RequirementError)` 不收**：空需求在 `TaskSkillRequirement::try_new` 就被拒，
+  而 `RoutingRequest` 装的是一个**已构造的** `TaskSkillRequirement`，故「空需求」这条路径**到不了 `rank`**。
+- **`ProfileBeforeVerified` 不收**：它是 [`LifecycleError`] 的变体（§4.1、§4.3），产生方是 `save_profile`，
+  不是 `rank`；本层把两类错误分开，不合成一个「什么都收」的枚举。
 
 ---
 
@@ -964,9 +1024,10 @@ crates/continuum-model-registry/
   src/lifecycle.rs    LifecycleState、RoutableState、RoutableModel、迁移表
   src/persist.rs      三张表的迁移与读写（与表定义同址）
   src/router.rs       RoutingRequest、RankedExecutionCandidates、RankingPolicy、BaselineRankingPolicy
+  src/escalation.rs   EscalationStep、EscalationLadder、next_step（§7.1）
   src/budget.rs       BudgetView（§333 的只读投影）
-  src/error.rs        LifecycleError、RoutingError
-  tests/{profile,lifecycle,persist,router,budget}.rs
+  src/error.rs        LifecycleError、RoutingError、ProfileError、RequirementError
+  tests/{profile,lifecycle,persist,router,escalation,budget}.rs
   tests/compile_fail/*.rs
 ```
 
@@ -1169,7 +1230,7 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     **再另：B 的设计也要求改《工程》§4.3 的同一张图**（B 抱怨图里没有 Connector）——
     **两处改动应由同一个人一次做完**，别各改一半。
     **收件人：《工程》文档维护者 ＋ C 的设计**。
-14. **迁移编号 `80` / 预留 `81`（号段已裁定，核对未做）**：协调者已裁定一号段一子项目（A 50、B 60、C 70、D 80、E 90），
+14. **迁移编号 `80`（号段已裁定，核对未做；`81` 已删）**：协调者已裁定一号段一子项目（A 50、B 60、C 70、D 80、E 90），
     但**每一档取用前仍须核对该档未占用**——本设计只核了 `80` 在 `runtime_migrations()` 的集合里未占用。
     实现时最后核一次。**收件人：实现者（D 的第一个 task）**。
 15. **P3A 遗留第 9 条在本设计里仍然悬着**：`cost` / `latency` 的取值域**仍然没有被给出**
@@ -1234,3 +1295,7 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     **没有 trust**），`trust` 退给**子项目 F（工具调用路径）＋ 规范维护者**。
     协调者已订正 P3A 的设计、记明工具侧的 `cost` / `latency` **与 `trust`** 无人认领——
     本条是 D 对这一格的正式答复，不是沉默。
+24. **`ProviderHealth::Degraded` 的降权判据规范未给**（§5.3）。本设计写死的是**只过滤 `Unavailable`**
+    （不可用即不是执行候选），`Healthy` 与 `Degraded` 都进候选集、**基线不为 `Degraded` 改变排序**；
+    `Degraded` 该不该降权、降多少，**§250 只说「考虑」、§84 没有给这一维的算法**，故不发明。
+    它原样带进 `reason` 供策略自用。**收件人：规范维护者**。
