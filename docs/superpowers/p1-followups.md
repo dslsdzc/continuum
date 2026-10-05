@@ -61,8 +61,14 @@ P1 内真正接通的生产链只有两条：迁移注册（`main.rs`）与恢�
 
 **`RESOURCE` 的固有策略不能取 `RetryPolicy::default()`。** 设计 §13.1 给 RESOURCE 的是
 「退避后仍失败则升级」，而默认策略 `max_attempts = 1` 会在首次失败即失败，连一次退避都没有。
-默认值是「未配置」的表示，不是任何类别的固有策略——P3 的 Router 必须为 RESOURCE 显式给出
-`max_attempts >= 2` 与退避参数。
+默认值是「未配置」的表示，不是任何类别的固有策略——**必须为 RESOURCE 显式给出 `max_attempts >= 2`
+与退避参数**。
+
+**订正（2026-10-05，子项目 D 的设计提出）**：本条原写「**P3 的 Router** 必须为 RESOURCE 显式给出…」
+——**那句把义务记错了地方**。`RetryPolicy` 属 §246 的 `ExecutionProfile`（**执行层**，P1 已建的
+`continuum-graph` 那侧），配置它的是**构造 `ExecutionProfile` 的那一方**（执行侧），
+不是资源层的 Router：Router 的交付物是**排序后的候选**（§250/§84），它不构造执行画像，也不决定重试参数。
+故义务的收件人是**执行侧**；本条对 RESOURCE 的判据（`max_attempts >= 2` 与退避）不变，改的只是**谁**来做。
 
 **`EscalationPolicy::None` 把 `CONSTRAINT` / `AUTHORIZATION` 压成 `Fail`。** 设计 §13.1 要求这两类
 「立即升级为决策」，而 P1 内没有决策对象，`escalate()` 把它压成 `Fail`，语义是「无处可升级」
