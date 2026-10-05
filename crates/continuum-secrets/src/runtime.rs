@@ -104,7 +104,9 @@ pub struct Credential {
     /// 签出它的**运行时**的代号：`new` 时取一次，`rotate` 不改。用来判「这张凭据
     /// 是不是本运行时签的」。
     runtime: u64,
-    /// 取得材料的句柄：签发时的**轮换代**代号。轮换使它前进，旧凭据即失效（§5.4）。
+    /// 取得材料的句柄：签发时的**轮换代**代号。轮换使它前进，旧凭据随即被**取代**
+    /// （[`SecretsError::Superseded`]，§5.4）——注意这里说的是「取代」不是「失效」：
+    /// 本 crate 里「失效」指到期（[`SecretsError::CredentialExpired`]），两者是不同的原因。
     generation: u64,
 }
 
