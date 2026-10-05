@@ -373,7 +373,15 @@ git commit -m "feat(connector): 一一绑定与服务半边相符"
 - Modify: `crates/continuum-connector/src/{lib.rs,error.rs,registry.rs}`
 - Modify: `crates/continuum-connector/Cargo.toml`（加 `continuum-provider`；dev 加 `tokio`、`continuum-persist`、`tempfile`）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 的 `continuum-connector` 条目加 `continuum-provider`、`continuum-persist`）
+- Modify: `crates/continuum-connector/tests/register.rs`（**连带改**：`ConnectorRegistry::new` 本 task 起要收 `SecretsRuntime`，该文件里构造注册表的地方跟着变，**只改构造，四条核对的判据一个字不动**）
 - Create: `crates/continuum-connector/tests/{invoke.rs,audit.rs}`
+
+> **Files 清单的判据是「本 task 之后哪些文件会跟着变」，不是「本 task 主动要写哪些文件」。**
+> 本 task 改了 `ConnectorRegistry::new` 的签名（收 `SecretsRuntime`，设计 §4.1），故除上列各处外，
+> **凡构造过注册表的测试文件都要跟着改**。本项目在这一类上已经栽过两次（Task 5 漏 `tests/audit.rs`、
+> 本 task 漏 `tests/register.rs`），两次的病根相同：**只按「我要写哪个文件」列清单**，
+> 而改了签名之后「谁会被我改坏」不会自己出现在清单里——**列完 Files 后要把本 task 改动的每个签名过一遍，
+> 逐一问「谁在用它」**。
 
 **Interfaces:**
 - Consumes: Task 2/3 的 `ConnectorRegistry`、Task 1 的 `CapabilityKind::effect`、既有的 `continuum_secrets::{SecretsRuntime, SecretsError, SecretMaterial}`、`continuum_capability::AuthorizedEffect`、`continuum_provider::Connector`
@@ -505,9 +513,14 @@ impl ConnectorRegistry {
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 git add crates/continuum-connector crates/continuum-runtime/tests/dependency_direction.rs Cargo.lock
 git commit -m "feat(connector): 入口的核对、凭据签发与逐次调用的适配器"
 ```
+
+`git add` 的路径是**目录** `crates/continuum-connector`，故 `tests/register.rs`（连带改的那处）、
+`tests/invoke.rs` 与 `tests/audit.rs` **都已含在内**——**不要**把路径收窄成某几个具体文件；
+`--all-targets` 那次 build 就是这一步的编译面自检（改了签名，改漏的调用点不会让单个测试目标报错）。
 
 ---
 
