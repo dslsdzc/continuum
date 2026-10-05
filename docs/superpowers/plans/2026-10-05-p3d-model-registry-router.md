@@ -162,11 +162,19 @@ crates/continuum-runtime/tests/startup.rs                 三处迁移计数断�
 `tests/profile.rs`（本 task 只放两个取值类型的用例）：
 
 - `ratio_round_trips_through_its_text_encoding`：对 `0.0` / `0.5` / `0.94` / `1.0` / 极小与极大的**有限**值，
-  断言 `Ratio::parse(&r.as_str()) == Some(r)`。**红的条件**：`as_str` 用 `Debug` 或截断格式（如 `{:.2}`）时变红；
-  这是设计 §2.4「浮点存文本会丢精度」那句最容易被想当然的地方，故被钉住的是**往返**而非「最短长度」。
-- `ratio_rejects_nan_and_out_of_range`：`NaN`、`1.5`、`-0.1` 三个输入各断言
-  `Err(ProfileError::OutOfRange { value })`（**具体是哪一枚**，且 `value` 是给的那个数）。红的条件：去掉 `is_finite()` 检查、
-  或把上界写成 `< 1.0`（`1.0` 是合法值，`ratio_round_trips…` 与它**两侧对钉**）。
+  断言 `Ratio::parse(&r.as_str()) == Some(r)`。**红的条件**：`as_str` 用**截断格式**（如 `{:.2}`）时变红。
+  **`Debug` 之所以不变红，要写进用例注释**：Rust 的 `f64` 的 `Debug` 与 `Display` 是**同一套最短精确往返算法**
+  （实现者用探针实测：各取值丢精度 0 格；把 `as_str` 换成 `{:?}` 跑全量 `exit=0`、不变红）。
+  这**不是等价变异体**——两版输出确实不同（`1e300`：`Display` 三百多个字符 vs `Debug` 的 `1e300`），
+  只是**用例没有观察长度**；而设计 §2.4 只声称**往返**、不声称**最短长度**，故**不补用例**是对的。
+  这是设计 §2.4「浮点存文本会丢精度」那句最容易被想当然的地方，故被钉住的是往返而非长度。
+- `ratio_rejects_non_finite_and_out_of_range`：**逐格三格**——`NaN` → `Err(ProfileError::NotFinite)`；
+  `1.5` 与 `-0.1` → `Err(ProfileError::OutOfRange { value })`（`value` 是给的那个数）。
+  **协调者已裁：`NaN` 归 `NotFinite`，`OutOfRange` 只收「有限但落在 [0,1] 之外」**——
+  判据是**跨类型一致性**：同一个 `NaN` 在 `Ratio` 上判 `OutOfRange`、在 `SkillScore` 上判 `NotFinite` 说不通，
+  且 NaN 不是「落在某区间之外」的点；这样两枚变体的文档各自成立。
+  红的条件：去掉 `is_finite()` 检查（`NaN` 那格红）、或把上界写成 `< 1.0`
+  （`1.0` 是合法值，`ratio_round_trips…` 与它**两侧对钉**）。
 - `skill_score_round_trips_through_its_text_encoding`：对 `9.2`（**唯一出处是 `docs/spec/02-positioning.md:773`，
   §83 Model Failure Modes** 的「不是只有：`coding = 9.2` 还应该有……」；设计 §2.4 把它记成
   `docs/spec/01-concepts.md:1068-1104`——那里是 §23 的技能树、全文无 `9.2`，该处已由协调者派回设计作者订正）、
@@ -187,7 +195,9 @@ cargo test -p continuum-model-registry --test profile
 pub struct Ratio(f64);
 
 impl Ratio {
-    pub fn try_new(v: f64) -> Result<Self, ProfileError>;   // 非有限 或 不在 0.0..=1.0 → Err
+    /// 非有限（NaN / ±∞）→ `NotFinite`；**有限**但不在 `0.0..=1.0` → `OutOfRange { value }`。
+    /// 两者分开：NaN 不是「落在某区间之外」的点（协调者裁决，见 Step 2 的用例）。
+    pub fn try_new(v: f64) -> Result<Self, ProfileError>;
     pub fn get(&self) -> f64;
     /// 十进制串。契约是 `parse(as_str(x)) == Some(x)`——只声称**往返**，不声称最短长度
     /// （设计 §2.4：Rust 的 `Display` 对 `f64` 保证可精确往返，`1e300` 会打出三百多个字符）。
