@@ -44,7 +44,8 @@
   `continuum-connector → continuum-core, continuum-capability, continuum-secrets, continuum-provider, continuum-effect`；
   `continuum-runtime → continuum-secrets`。
   `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 与各 `Cargo.toml` 必须**精确一致**（断言是逐对 `assert_eq!`，且覆盖 dev 边——那把 `cargo tree` 带 `--edges all`）。
-- **本计划改 `continuum-capability` 的 `capability.rs` 与 `tests/vocabulary.rs` 两处，不改它的依赖边**（`EffectType` 已是它的依赖，`for_effect` 与 `effect` 同址）。接缝图 §五.7 记的「同一个 crate 被两个项目改」在本计划里就是这一处（F 改的是 `persist.rs`，与本计划不同文件）。
+- **本计划改 `continuum-capability` 的 `capability.rs` 与 `tests/vocabulary.rs` 两处，不改它的依赖边**（`EffectType` 已是它的依赖，`for_effect` 与 `effect` 同址）。接缝裁决（`docs/superpowers/p3bcdf-followups.md` **§七第 8 条**）记的「同一个 crate 被两个项目改」在本计划里就是这一处（F 改的是 `persist.rs`，与本计划不同文件），**该条判为已知非缺陷、不做任何事**——两处不同文件、无编译冲突，且都不新增该 crate 的依赖边。
+  **本条判据的出处是 §七（权威转录），不是 `.superpowers/sdd-p3bcdf/impl-seam-map.md`**——后者是 gitignore 的 scratch，随时会丢（§七 的末段说明了为什么一律引 §七）。
 - **不建表、不取迁移号**：B 不落库、不写审计（设计 §6.2、§7.3）。故本计划**没有**迁移编号核对这一步——不是漏了，是设计明写不建（§1 的表、§7.3 末段）。
 - **§124 的 `Connector` trait 一字不改**（`crates/continuum-provider/src/connector.rs`）；**`ConnectorDescriptor` 的字段不改**；`continuum-core` 的任何类型不改。
 - 代码注释、错误信息、测试断言信息用中文。标识符用英文。

@@ -41,7 +41,7 @@
   - **不发明 `effect_class` / `trust` / 工具侧 `cost` / `latency` 的处置**——对 `effect_class` 与 `trust` 的两次退件，在实现里就是「不实现」：**本计划不为它们建 task**（见 `## 遗留`）。
   - **不收紧 `ExecutionProfile.cost_budget`**（设计 §6.3 明写不做，理由两条）。
 
-### 本计划的前置与交接（接缝图第四节要求的那一段）
+### 本计划的前置与交接（`docs/superpowers/p3bcdf-followups.md` §七 每份计划都要有的那一段）
 
 - **依赖已交付（不必再造）**：P3A 的 `continuum-capability`（本层取 `Cost` / `Latency` 两个单位结构体）、
   `continuum-core` 的 `ModelId`（`crates/continuum-core/src/model.rs:9`）、`ToolId`（`src/tool.rs:7`）、
@@ -49,7 +49,8 @@
   **不依赖 B、C、F 的任何产物**；执行序 B → **D** → C → F，D 与 B 无编译期关系。
 - **交给子项目 G（模型调用路径）**：`RankedExecutionCandidates`、`ExecutionCandidate`、`RoutingReason`、
   `RoutableModel`、`RoutingRequest`、`TaskSkillRequirement`、`FamilyPreference`、`BudgetView`，
-  以及「取 `ProviderHealth` 快照」这一步（设计 §11 第 20 条、接缝图第四节）。
+  以及「取 `ProviderHealth` 快照」这一步（设计 §11 第 20 条；接缝裁决的权威转录是
+  `docs/superpowers/p3bcdf-followups.md` §七——**不引那份 gitignore 的接缝分析 scratch**）。
 - **交给协调者**：`effect_class` 两轴之问的退件、`trust` 退件、`ToolProfile` 上工具侧 `cost` / `latency`
   的 `Some` 无人认领（设计 §11 第 15 / 22 / 23 条，均见 `## 遗留`）。
 - **必须自己声明的未决**：迁移号 80 的现场复核；以及一处**计划自定的取名**——落库版的迁移函数
@@ -513,10 +514,12 @@ git commit -m "feat(model-registry): §249 十态、可路由闸门与迁移表"
 
 **本 task 起登记 `continuum-persist` 这条边**（Step 4 的 `p3d_model_migrations()` 返回 `Vec<Migration>`，
 Step 2 的夹具用 `Db::open_with` / `builtin_migrations()`）：`crates/continuum-model-registry/Cargo.toml`
-加 `continuum-persist`、dev-dep 加 `tempfile`，`ALLOWED` 的 `continuum-model-registry` 条目由空数组改为
-`["continuum-persist"]`——**两处一起改**（那张表是逐对 `assert_eq!`，只改一处会红）。
-**边由用它的那个 task 登记，而本 task 就是它的使用者**（Global Constraints 的口径）；Task 6 不再新增这条边。
-`continuum-core` 与 `continuum-capability` 两条边在 Task 3 已登记，本 task 不动它们。
+加 `continuum-persist`、dev-dep 加 `tempfile`，`ALLOWED` 的 `continuum-model-registry` 条目**由 Task 3 登记的
+两元素改为三元素**：`["continuum-capability", "continuum-core"]` → `["continuum-capability", "continuum-core",
+"continuum-persist"]`（三枚与 Global Constraints 的边表相同；数组按本仓既有的字母序写，同 C 的 provider 条目）
+——**两处一起改**（那张表是逐对 `assert_eq!`，
+只改一处会红）。**边由用它的那个 task 登记，而本 task 就是它的使用者**（Global Constraints 的口径）；
+Task 6 不再新增这条边，`continuum-core` 与 `continuum-capability` 两条边在 Task 3 已登记、本 task 不动它们。
 
 - [ ] **Step 1: 现场核实该库的空号（**不许假定**）**
 
@@ -1282,10 +1285,12 @@ git commit -m "docs(model-registry): P3 子项目 D 的收尾与复核"
 - **C↔D 接缝（设计 §11 第 13 条）—— 已闭，且它那条「未闭」系误读**（据接缝分析 §五.8）：
   设计把它记为「未闭（收件人：C 的设计）」，要求 C 订正 §4「调用面」与关于 `ALLOWED`「只应含
   `continuum-provider`」的那句。**判据两条**：(a) **C 的 §6 调用面早已订正**——C 现文写「Router 不调用
-  适配器，调用方是子项目 G」；(b) D 引的 `C:274` 实为 C §4.2 形态 3（**现 `C:303`**），讲的是**未来的
+  适配器，调用方是子项目 G」；(b) D 引的 `C:274` 实为 C §4.2 形态 3
+  （**现 C 设计 `:314-315`**，即「而它的 `ALLOWED` 条目只应含 `continuum-provider`」那一句），讲的是**未来的
   `continuum-adapter-*` crate 的 `ALLOWED`**「只应含 `continuum-provider`」——**不是 C 自己的条目**
   （C 自己的 provider 条目已是三元素）。
-  **故本计划不给它写 task，实现时也不得去「修」`C:303`**——那会改掉一句正确的、关于未来适配器 crate 的约束。
+  **故本计划不给它写 task，实现时也不得去「修」C 设计 `:314-315`**——那会改掉一句正确的、
+  关于未来适配器 crate 的约束。
   （条目标题里的「接缝分析 §五.8」是那次只读复核的编号；**它的判据已逐条抄在上面两句里**，
   故本条不依赖那份不随仓库版本走的文件。）
 
