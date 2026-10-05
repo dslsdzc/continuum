@@ -42,8 +42,15 @@ Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
 1. 排序因此是**同步纯函数**——没有 I/O、没有 `.await`，可以在表驱动用例里穷举；
 2. §4.3 的那条箭头说的是「适配器的信息到达 Router」，**以值为载体同样到达**，且不产生一条 C 与 D 之间的新边。
 
-**若 C 的设计判定 Router 必须经它的注册表调用适配器**，那是 C 与 D 的实现次序问题，不改本设计：本设计只定「Router 收到
-一个可用性快照」。此交界记在 §11 第 13 条。
+**本子项目的交付物是一个「判断」，不是一次执行。** §250 的输出是 `RankedExecutionCandidates`、§84 要的是
+`confidence` / `alternatives` / `reason`——两处要的都是**排序后的候选与理由**。故 **`ModelProvider::invoke` /
+`stream` 的调用方不在本层**：那是**执行侧**（驱动，子项目 F）拿着一张 `RankedExecutionCandidates` 去做的下一步，
+本层既不持有 `CallId`，也不消费 `ModelStream`。**本设计对 `continuum-provider` 的引用为零**（§8.2），
+`invoke` / `stream` 在本 crate 里一次都不出现。
+
+**这一条是本设计对 C↔D 交界的正式表态**：责任的分界是「**选哪个模型**」在本层、「**拿它跑**」在执行侧。
+C 的设计须指名真正的调用方（`RankedExecutionCandidates` 的消费者）并记明**今天没有这个调用方**。
+此交界记在 §11 第 13 条。
 
 ---
 
@@ -354,12 +361,13 @@ pub enum LifecycleState {
     Stale, Degraded, Quarantined, Disabled,
 }
 
-/// 可被**自动路由**的那七个状态。
+/// 可被**自动路由**的那六个状态。
 ///
 /// `unprofiled` / `quarantined` / `disabled` **不在此枚举里**——§249 禁的那三态
-/// 在路由路径上无处安放。这与 P3A §2.3「`full_access` 不是禁止作为默认，而是没有
+/// 在路由路径上无处安放（`stale` 是额外挡下的第四态，见本节上文的裁定与标记）。
+/// 这与 P3A §2.3「`full_access` 不是禁止作为默认，而是没有
 /// 这个成员」是同一种做法。
-pub enum RoutableState { Discovered, Researched, Probed, Verified, Active, Stale, Degraded }
+pub enum RoutableState { Discovered, Researched, Probed, Verified, Active, Degraded }
 
 impl TryFrom<LifecycleState> for RoutableState {
     type Error = RoutingError;   // NotRoutable { state: LifecycleState }
@@ -373,16 +381,17 @@ pub struct RoutableModel { profile: ModelProfile, state: RoutableState }
 于是 `pub fn rank(request, models: &[RoutableModel], policy) -> ...` 的签名里**不存在**
 未画像、被隔离、被停用的模型——**「Router 忘了检查状态」这条路径在类型上不存在**。
 
-**这里的措辞要与保证等强，故写准**：三态在 `LifecycleState` 上**是表达得出来的**（画像流水线、隔离与停用
-都要用它），被挡住的是**路由路径**。本设计**不**声称「三态不可表达」。
+**这里的措辞要与保证等强，故写准**：这四态在 `LifecycleState` 上**是表达得出来的**（画像流水线、漂移标记、
+隔离与停用都要用它），被挡住的是**路由路径**。本设计**不**声称「四态不可表达」。
 
-**逐项有照片**：十个状态各一条用例喂进 `RoutableModel::try_new`，七个返回 `Ok`，三个返回
+**逐项有照片**：十个状态各一条用例喂进 `RoutableModel::try_new`，六个返回 `Ok`，四个返回
 `Err(NotRoutable { state })` 且**断言是哪一枚**（不是「返回了 Err」）。这是枚举式绝对断言，按本项目纪律**逐项**钉。
 
-**`stale` 与 `degraded` 是可路由的——这是一个判断，写在此处供推翻。** §249 的 MUST NOT 是一张**封闭清单**，
-三态之外都不禁；§82 的意图（别用失效画像）与 §249 的字面在这里有张力，本设计按**规范层的封闭清单**办，
-并把状态原样带进候选的 `reason`（§5.2），让策略可以据此降权——**可见但不禁**。若复审判定 `stale` 也该禁，
-那是规范要改，不是本设计要私自加一条禁令。记在 §11 第 1 条。
+**`degraded` 仍可路由，且它不是 `ProviderHealth` 的那个同名变体。** 判据是出处：`DEGRADED` 出现在 §249 的
+**模型生命周期异常态清单**里（`docs/spec/05-normative.md:867-874`），与 `ProviderHealth::Degraded`
+（`crates/continuum-core/src/model.rs:83-87`，那是**供应商侧的可用性**）是两个轴上的两个东西，只是名字撞了。
+本设计**不因这次撞名而动它**：§249 列了它，本轮裁定没有点它，故它保持可路由，状态原样带进候选的 `reason`
+（§5.2），让策略可以据此降权——**可见但不禁**。
 
 ## 4.3 谁迁移
 
@@ -405,6 +414,17 @@ pub struct RoutableModel { profile: ModelProfile, state: RoutableState }
 `{verified, active, stale, degraded, quarantined, disabled}` 之内，返回
 `Err(RegistryError::ProfileBeforeVerified { state })`。依据是 §22 的流水线顺序——「生成初步画像 → 执行 Active Probe
 → Verifier → **生成正式 Profile**」，正式画像在 Verifier 之后。
+
+**§22 的「初步画像」是一个被**刻意丢弃**的中间物，本设计不落它。** 这一句必须写明，否则读了 §22
+的流水线的人会以为本设计漏了一环：§22 的顺序是「读官方文档 → 搜 model card → 收集 benchmark → 收集公开 failure mode
+→ **生成初步画像** → 执行 Active Probe → Verifier → 生成正式 Profile」（`docs/spec/01-concepts.md:1022-1066`）。
+初步画像**先于** probe，而本设计的 `model_profile` 行只在 `probed → verified` 时产生，故初步画像**没有落库的落点**。
+
+**它不落库是决定，不是遗漏**：初步画像的全部内容来自公开资料、**样本数为零**；把它作为一个可路由的画像存下来，
+等于给一个从未实测过的模型一个与实测画像同形的身份，而那正是 §21「新增模型不能直接进入自动 Router」要拦的。
+**它的效果由 §247 的两个字段承载**——`evidence_count` 与 `confidence`：初步阶段二者分别是「证据条数」与
+「低置信」，**正式画像生成时一并写入**（`evidence_count` 记入收集到的证据条数，`confidence` 记入画像的置信），
+故初步阶段的成果**不是被丢掉，而是被折进正式画像的两个字段**。见 §11 第 16 条。
 
 **这条与 §249 的关系要说清，免得被读成全称的**：§249 没禁 `discovered` / `researched` / `probed` 三态，
 所以**类型闸门放过它们**；把它们挡在自动路由之外的**不是第二张禁令表，而是「没有画像就没有候选」**——
@@ -447,7 +467,7 @@ impl RankedExecutionCandidates {
 
 pub struct ExecutionCandidate {
     model: ModelId,
-    state: RoutableState,     // §249 的状态对策略可见（stale / degraded 据此降权，见 §4.2）
+    state: RoutableState,     // §249 的状态对策略可见（degraded 据此降权，见 §4.2）
     compatibility: Ratio,     // §84
     confidence: Ratio,        // §84
     reason: RoutingReason,    // §84
@@ -533,7 +553,8 @@ pub struct BaselineRankingPolicy;
 
 ```rust
 pub enum RoutingError {
-    /// §249 的三态。`state` 原样带出，调用方可分辨是被隔离还是没画像。
+    /// §249 的三态，加本轮裁定挡下的 `stale`（§4.2）。`state` 原样带出，
+    /// 调用方可分辨是被隔离、没画像，还是画像已漂移。
     NotRoutable { state: LifecycleState },
     /// 一个候选都没有（含「全部被闸门挡下」与「一个模型都没登记」两种情形）。
     NoEligibleCandidate,
@@ -549,14 +570,21 @@ pub enum RoutingError {
 
 # 6. 成本输入 = 预算视图（ENG-005）
 
-## 6.1 接口：本层定义**投影类型**，语义层生产
+## 6.1 接口：一个过渡的投影类型，归属地是语义层
 
 ENG-005 裁决：D 的成本输入是**预算视图**（剩余额度，不是「一个数」），它来自**语义层**，而语义层尚未建
 （`docs/superpowers/specs/2026-10-05-eng-005-budget-accounting.md` 第五节；共享面第三节）。
 §9.1 的层间方向是 **`语义层 (2) → 资源层 (4)`**（`docs/02-工程.md:560-579`，「依赖方向单向，无环」）。
 
-**方向决定了接口放在哪一边**：若本层去调用语义层的一个 trait，就写出一条反向边。故正确形状是
-**本层定义投影类型，语义层来生产它**：
+**先定方向，因为它决定这个类型最终归谁。** §9.1 的箭头读**被依赖者 → 依赖者**（判据见 §6.3 那段订正：
+§2.1 说「语义层……**本层不依赖任何下层**」，`docs/02-工程.md:75`，而 §9.1 画了 `语义层 (2) → 执行层 (3)`／`→ 资源层 (4)`
+——只有一种读法能让这两处同时成立）。故 `语义层 (2) → 资源层 (4)` 说的是**资源层依赖语义层**：
+**这个视图类型的归属地最终是语义层，本层是消费者，方向正是 §9.1 已画的那条。**
+
+**但语义层尚未建，本层无法引用一个不存在的 crate。** 故本设计**在本层定义这个过渡类型**，
+把契约写在类型的文档上；**语义层落地后它迁到语义层**，本层改为依赖它——那时走的正是已画的那条方向，
+**不是反向边**。这条搬迁义务以两件东西固定，而不靠一句将来时：类型文档里的一段，与 §11 第 5 条。
+（本项目的教训：只写在文档里的将来时会烂，故凡能承载于类型的，不留成文字。）
 
 ```rust
 /// §333 Budget 的**只读投影**：该任务当前可用的剩余额度。
@@ -576,7 +604,12 @@ pub struct BudgetView {
 ```
 
 **路由器是纯函数，它不「调用」语义层**：`BudgetView` 由调用方（驱动）从语义层取好后作为值传入。
-故本设计**不定义任何 trait**——一个没有第二个实现者的 trait 是假接口。
+
+**共享面第三节要求「把这个视图写成**一个待实现的接口**」，本设计的兑现方式是一个类型，不是一个 trait。**
+`BudgetView` 就是那个接口：语义层要做的正是「造出它」。**不定义 trait 是刻意的**——
+一个没有实现者、且唯一的实现者尚未存在的 trait 是**假接口**，而本仓对「声明了没有产生方的东西」
+一贯的处置是删或写明理由，此处按同一条办。若语义层落地后确实需要多态（例如「剩余」有两种取法），
+那时再抽 trait，并同时补照片。
 
 ## 6.2 可以假设什么、绝不自己算什么
 
@@ -600,14 +633,29 @@ pub struct BudgetView {
 ## 6.3 一处**没有**按 ENG-005 办的事，连同理由
 
 ENG-005 第五节把「`execution_profile.cost_budget` 的类型收紧」列为「**D 落地时**」。
-**本设计不做这一步**，理由如下，请复审裁决：
+**本设计仍然不做这一步**，理由两条（**第一版稿子里还有第三条「会写出反向边」，那条已作废**，见下）：
 
-- `ExecutionProfile.cost_budget`（`crates/continuum-graph/src/execution.rs:31`）是 §246（`docs/spec/05-normative.md:796`）
-  的**节点级声明式约束**；本设计的 `BudgetView` 是**剩余额度的投影**。「一个上限」与「一个余量」是两个角色。
+- **要收到的那个类型现在不存在，且它不该由本层发明。** 按 §246 与 ENG-005，节点预算是**语义层的 `Budget`（分配）**；
+  语义层未建。本设计若替它发明一个中间类型占位，正是本项目明令禁止的「预先发明」。
+  故这一条的**解除条件是语义层落地**，不是本子项目的某个 task。
+- **角色不同：`cost_budget` 是一个上限，`BudgetView` 是一个余量。**
+  `ExecutionProfile.cost_budget`（`crates/continuum-graph/src/execution.rs:31`）是 §246
+  （`docs/spec/05-normative.md:796`）的**节点级声明式约束**；本设计的 `BudgetView` 是**剩余额度的投影**。
   把余量放进约束的位置，会让同一个类型有两个含义——那是本项目一贯判为缺陷的那一类。
-- 按 §246 与 ENG-005，节点预算的类型应当是**语义层的 `Budget`（分配）**。但 `continuum-graph` 属**执行层 (3)**，
-  它引用语义层的类型会写出 `执行层 → 语义层` 这条**反向边**（§9.1 的方向是 `语义层 → 执行层`）。
-- 故本设计**不发明一个中间类型**去占位——那正是「预先发明」。记在 §11 第 12 条，收件人是协调者与语义层设计。
+  故「用 `BudgetView` 顶上去」这条替代方案**被否掉**，理由是角色的混同，与依赖方向无关。
+
+**作废的那条理由，连同它为什么错，留在原地**（订正时保留错误说法的来历，是本项目的既有做法）：
+
+> ~~「`continuum-graph` 属**执行层 (3)**，引用语义层的类型会写出 `执行层 → 语义层` 这条**反向边**。」~~
+
+**这一句建立在一条**反了的**箭头约定上。** §9.1 的箭头读**被依赖者 → 依赖者**，不是依赖者 → 被依赖者。
+判据两条：§9.2 说「入度为零的组件……**不依赖任何其他组件**，是依赖图的源点」（`docs/02-工程.md:588`），
+故「入度为 0」= 无上游 = 被依赖者；代码亦印证——`continuum-policy`（边界层 5）依赖 `continuum-effect`（执行层 3），
+见 `crates/continuum-runtime/tests/dependency_direction.rs:67-81` 的 `ALLOWED` 条目，而 §9.1 画的正是
+`执行层 (3) → 边界层 (5)`（`docs/02-工程.md:565`）。故**执行层引用语义层，正是 §9.1 已列的那条
+`语义层 (2) → 执行层 (3)`，不是反向边**。ENG-005 把这一步判给 D，在依赖方向上**没有越界**。
+
+记在 §11 第 12 条，收件人是协调者与语义层设计。
 
 ---
 
@@ -726,7 +774,7 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 
 | 验什么 | 怎么验 |
 |---|---|
-| §249 三态不入路由路径 | **十态逐项**：七态 `Ok`、三态 `Err(NotRoutable { state })` 并断言是哪一枚 |
+| §249 三态＋`stale` 不入路由路径 | **十态逐项**：六态 `Ok`、四态 `Err(NotRoutable { state })` 并断言是哪一枚 |
 | `RoutableModel` 不可外部构造 | trybuild 样例（与 P3A 的 `AuthorizedTool` 同形） |
 | `overall_score` 读不到 | trybuild 样例；另：`SELECT overall_score FROM model_profile` 得到具体 `Err` |
 | `ModelProfile` 无总分 | 断言 `model_profile` 的列清单**逐列**（加一列即红） |
@@ -783,8 +831,10 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 
 # 11. 遗留与未决项
 
-1. **§249 的封闭清单与 §82 的意图在 `stale` / `degraded` 上有张力**（§4.2）：本设计按封闭清单放行、
-   把状态带进 `reason` 供策略降权。**收件人：规范维护者**（是否要把 `stale` / `degraded` 也列入 MUST NOT）。
+1. **`stale` 被额外挡下自动路由，是协调者的解释，可被推翻**（§4.2）：§249 的 MUST NOT 字面上只有三态，
+   本设计按「三态是**下限不是上限**」把 `stale` 一并挡住（§82 的 `ACTIVE → STALE → 重新 profiling` 是退出服役的路径，
+   放行即 fail-open）。**`degraded` 保持可路由**，它是 §249 的异常态而非 `ProviderHealth::Degraded` 的同名变体。
+   **收件人：用户 / 规范维护者**（是否把 `stale` 正式列入 MUST NOT，从而把这条裁定由解释升为规范）。
 2. **§27 的探索被 OPEN-014（C1）与 OPEN-008 双阻断**（§7.2），本设计不建。**收件人：规范维护者**。
 3. **§25 的 Population Feedback 来源未定义（OPEN-008）**，冷启动期排序证据残缺（《工程》§4.5）。
    **收件人：规范维护者**。
@@ -793,6 +843,9 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
    **需要复审明确表态**——它与 §248 的禁令能否并存，取决于这一读法。**收件人：复审者 → 规范维护者**。
 5. **§333 的五个量纲没有单位，§87 的 `Cost` / `Latency` 没有取值域**（§2.5、§6），
    故 §250 的「考虑成本」与「考虑延迟」**无法计算**。本设计只把它们做成**不可省略的输入**。
+   **`BudgetView` 现在住在资源层是过渡**（§6.1）：语义层落地后它迁到语义层，本层改为依赖它
+   （方向即 §9.1 已画的 `语义层 (2) → 资源层 (4)`，读作资源层依赖语义层）。搬迁时本层删掉本地定义，
+   **不留第二份**——留两份就是「同一件事两个词汇表」。
    **收件人：语义层设计 + 规范维护者**。
 6. **复用 `continuum_capability::{Cost, Latency}` 是一个决定**（§2.5）：若后续判定模型的
    `cost_profile` 与工具的 `cost` 不是同一轴，此处要拆，并把 `Cost` / `Latency` 上移到 `continuum-core`。
@@ -809,16 +862,27 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 11. **§249 未定义迁移关系，本设计的状态迁移表是**本设计的决定（§4.1，与 §237 落在 P1 的同一情形）。
     **收件人：复审者**。
 12. **`ExecutionProfile.cost_budget` 的类型收紧未做**（§6.3），与 ENG-005 第五节把它判给「D 落地时」相反。
-    理由：那是声明式约束、`BudgetView` 是余量投影、且执行层引用语义层类型会写出反向边。
-    **收件人：协调者 + 语义层设计**（需重新指派或另定一个不产生反向边的类型位置）。
-13. **《工程》§4.3 的两条依赖边与实际依赖不符**（§8.4）。**收件人：《工程》文档维护者**。
-14. **迁移编号 `80` / 预留 `81` 需与 B、C 核对**（§3.3）。判据是未占用，不是顺位。**收件人：协调者**。
+    理由两条：**要收到的 `Budget` 类型随语义层才出现**（本层替它发明占位类型即是「预先发明」），
+    以及**上限与余量是两个角色**（不能用 `BudgetView` 顶上去）。
+    **依赖方向不是理由**——第一版稿子那条「会写出反向边」已作废（§6.3 保留了它的来历）。
+    **收件人：协调者 + 语义层设计**（重新指派，或把这一步改为「语义层落地之后」）。
+13. **C↔D 的交界：已裁定，本设计的读法胜出**（§1.2、§8.4）。协调者裁定：§4.3 的
+    「`Provider Adapter → 被 Router 调用`」属**层间依赖**一章，说的是组成与依赖方向，**不是调用次序**；
+    §250/§84 要的是一份**判断**（带 confidence / alternatives / reason 的候选排序），不是一次执行。
+    故 Router 不调适配器，`invoke` / `stream` 的调用方在**执行侧**（子项目 F）。
+    **C 侧须指名真正的调用方并记明今天不存在。** 剩下的待办：《工程》§4.3 那一行与 §4.3 的
+    `Router ← … Capability Token`（§8.4 第 1 条，含义是 `Cost`/`Latency` 而非 token）**文档层面的订正**。
+    **收件人：《工程》文档维护者**。
+14. **迁移编号 `80` / 预留 `81`（号段已裁定，核对未做）**：协调者已裁定一号段一子项目（A 50、B 60、C 70、D 80、E 90），
+    但**每一档取用前仍须核对该档未占用**——本设计只核了 `80` 在 `runtime_migrations()` 的集合里未占用。
+    实现时最后核一次。**收件人：实现者（D 的第一个 task）**。
 15. **P3A 遗留第 9 条在本设计里仍然悬着**：`cost` / `latency` 的取值域**仍然没有被给出**
     （D 是消费者，但不是给出尺度的那个，§2.5），`Cost` / `Latency` 的 `Some` 也仍然只表示「画像已登记」。
     **收件人：复审者**（P3A 要求「要么给出可达 `Some` 的路径并附照片，要么明写为什么没有」；
     本设计选了后者，且给的是**更明确的理由**：三个相关量纲都没有单位）。
-16. **§22 的「初步画像」是否算 §247 的 `ModelProfile` 未定义**（§4.3）：本设计按 §22 的流水线顺序取「不算」
-    （画像只在 `probed → verified` 时产生），从而使 §21 的「新增模型不能直接进入自动 Router」成立。
-    若判定「算」，则 `discovered` / `researched` / `probed` 三态将获得可路由性。**收件人：规范维护者**。
+16. **§22 的「初步画像」是否算 §247 的 `ModelProfile` 未定义**（§4.3）：本设计按 §22 的流水线顺序取「不算」，
+    并把初步画像作为**刻意不落库的中间物**写明（它的效果折进 §247 的 `evidence_count` / `confidence`），
+    从而使 §21 的「新增模型不能直接进入自动 Router」成立。若判定「算」，
+    则 `discovered` / `researched` / `probed` 三态将获得可路由性。**收件人：规范维护者**。
 17. **「当前观测」的判据取 `version` 最大而非 `time_range` 最晚**（§2.2）：§24 未定义二者冲突时的优先。
     **收件人：复审者**。

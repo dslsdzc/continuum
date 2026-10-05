@@ -10,12 +10,13 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
 
 ---
 
-# 0. 两处待裁决的抵触点，与一处已闭的假归因
+# 0. 待裁决的抵触点，与两处已闭的错记
 
 写设计前核过共享面与规范原文。按共享面的约定「本文里的判断若与你（用户）的决定冲突，以本文为准并回报」，
 凡与共享面或规范对不上的**一律留在此处并回报**，**不在正文里偷偷按我认为对的那一版写**。
 
 第 2、3 条是**待用户裁决**的规范级归属问题（协调者已接手，本子项目不改动它们）；
+第 4 条是两份前文之间的收件人冲突，收件人是协调者 / 用户。
 第 1 条是我自己的**假归因**，已由协调者核出并订正——留格记其来历，见下。
 
 1. **§124 / §125 不在 `docs/spec/05-normative.md` 里。** 该文件是 §219 起的那一卷，
@@ -34,11 +35,33 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
 2. **§4.1 把 Connector 列在资源层，但按 §9.1 的无环约束，B 的 crate 应落在边界层。** 见第 7 节，
    那里给出理由与被否掉的替代。
 
-3. **§9.1 的层间依赖图缺 `边界层 → 资源层` 这条边，而 P3A 已经需要它。** `continuum-secrets`
-   是边界层，其依赖边是 `["continuum-secrets", &["continuum-capability"]]`
-   （`crates/continuum-runtime/tests/dependency_direction.rs:103`），即 5 → 4；而 §9.1 的图
-   （`docs/02-工程.md:559-579`）里没有这条。**这是 P3A 留下的既成事实，不是 B 引入的**，
+3. **§9.1 的层间依赖图缺 `资源层 (4) → 边界层 (5)` 这条边，而 P3A 已经需要它。**
+   `continuum-secrets` 是边界层（5），它依赖 `continuum-capability`（资源层 4），
+   依赖边是 `["continuum-secrets", &["continuum-capability"]]`
+   （`crates/continuum-runtime/tests/dependency_direction.rs:103`）；
+   按 §9.1 的方向约定，这条在层图上写作 **`资源层 (4) → 边界层 (5)`**，
+   而 §9.1 的图（`docs/02-工程.md:559-579`）里没有它。**这是 P3A 留下的既成事实，不是 B 引入的**，
    但在 B 这里会再叠一条同类边，故一并报出。**收件人：协调者 / 规范**。
+
+   **§9.1 的方向约定（本节初稿在这里读反过，把来历留在下）**：`A → B` 读作 **「B 依赖 A」**，
+   即箭头由**被依赖者**指向**依赖者**。两处独立佐证：
+
+   - §9.2（`docs/02-工程.md:581-583`）说入度为零的组件「不依赖任何其他组件，是依赖图的**源点**」
+     ——只有「入度 = 被依赖数」才推得出「源点」；若 `A → B` 读作「A 依赖 B」，入度为零的会是汇点。
+   - 代码：`continuum-policy`（边界层 5）依赖 `continuum-effect`（执行层 3）
+     （`dependency_direction.rs:79-81`），而 §9.1 画的正是 `执行层 (3) → 边界层 (5)`。
+
+   **本节初稿写的是「即 5 → 4」——那是我按「箭尾依赖箭头」的直觉读的，与上面两处都不符。**
+   留此一句，是为了让后来者看到这条约定确实会读反（与本项目「订正时把错误说法的来历留在原地」
+   同一条手法）。**这条读反连带推翻了第 7.2 节的第二个理由**，见那里。
+
+4. **`AuthorizedTool` 的消费方，两份前文指的不是同一个子项目。** `p3a-followups.md` 第一节
+   「B 的义务」第 3 条写「**B 怎么消费 `AuthorizedTool` 属 B 的设计**」；共享面 §一（2026-10-05，
+   已由用户拍板）把「工具调用路径（`authorize` → `ToolProvider::invoke`）」判给 **F**——
+   而 `AuthorizedTool` 正是那条路径的载体。**两份前文互相冲突，本设计不自行选边**：
+   按后出的、且经用户拍板的共享面，`AuthorizedTool` 的消费方是 F，B 不收它（第 11 节第 14 条）。
+   **收件人：协调者 / 用户**（要么订正 `p3a-followups.md` 第一节第 3 条的收件人，要么说明
+   「B 消费」指的是另一件事）。
 
 ---
 
@@ -47,6 +70,7 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
 | 组件 | 规范依据 | 本子项目 |
 |---|---|---|
 | 连接器的操作集与它的**声明完整性** | §125 | 建 |
+| **注册入口**（`ConnectorImpl` / `ConnectorRegistry::register`，绑定在这里产生） | §125 | 建（第 3.2.1 节） |
 | 操作 → 授权的映射（**承重**，见第 3 节） | §125 §253 | 建 |
 | 连接器侧的强制点 (2)：收下 `AuthorizedEffect` | §4.2 §51 | 建 |
 | 凭据取得（`SecretsRuntime::issue` / `material`） | §51 §100 §103 | 建 |
@@ -140,6 +164,57 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
    里、紧邻 `for_effect`**：对应关系由那一处拥有，逆也必须只有一个产生点。它是本子项目对
    P3A crate 的唯一新增面（第 11 节第 11 条）。
 
+5. **操作的服务半边必须与连接器自己的 id 相等**（注册期核对）。`ConnectorOp` 只要求串里有一个
+   `.`（`crates/continuum-core/src/connector.rs:31-37`），故它**不保证**这个操作属于哪个服务
+   ——一个 id 为 `Email` 的连接器可以声明 `GitHub.push_branch`，而双向覆盖与一一绑定都会通过。
+   于是那条操作**永不可达**（入口第 1 步按服务半边解析，永远解析不到它）。这条核对把它挡在注册期。
+
+### 3.2.1 绑定的产生点：注册入口（这张表此前缺它）
+
+**形状示意，不是实现**：
+
+```rust
+/// 一条「操作 → 授权」的绑定。两个字段都是既有类型，本子项目不新增词汇表。
+pub struct OpBinding { op: ConnectorOp, kind: CapabilityKind }
+
+/// 连接器作者实现的是 B 的这个 trait（§4.5 有它为什么不是 §124 那个）。
+pub trait ConnectorImpl: Send + Sync {
+    /// 复用 §124 的 `ConnectorDescriptor`，**不另建第二个描述类型**（共享面 §二）。
+    fn descriptor(&self) -> ConnectorDescriptor;
+    /// 每个已声明操作恰一条。这就是绑定的产生点。
+    fn bindings(&self) -> Vec<OpBinding>;
+    async fn invoke_with(
+        &self,
+        op: &ConnectorOp,
+        input: Value,
+        material: &SecretMaterial,
+    ) -> Result<Value, ProviderError>;
+}
+
+impl ConnectorRegistry {
+    /// **注册期全部核对的唯一产生点**：双向覆盖（第 2 条）、一一（第 3 条）、
+    /// 服务半边相符（第 5 条）。
+    pub fn register(&mut self, connector: Box<dyn ConnectorImpl>) -> Result<(), ConnectorError>;
+}
+```
+
+**与 `ConnectorDescriptor` 的关系：登记项含定义，不是并列**——`register` 从
+`ConnectorImpl::descriptor()` 取出描述符并连绑定一起收下，**不改 `ConnectorDescriptor` 的字段**
+（它只收 `(id, operations)`，`crates/continuum-core/src/connector.rs:77-84`），故 §10.3 冻结的接口
+一个字不动。这与 P3A 的 `ToolProfile` 是同一手法：P3A 设计 §3.1 判「`Tool` 是**定义**，
+`ToolProfile` 是**登记项**，且登记项含定义而非与它并列」。
+
+**三条注册期变体的产生方就在这里**（§6.1）：`UnboundOperation`（声明了没绑）、
+`UndeclaredBoundOperation`（绑了没声明）、`DuplicateKindBinding`（两条绑同一枚 kind）；
+第 5 条另加 `OperationServiceMismatch { connector, op }`。
+
+**`ConnectorRegistry` 也是入口第 1 步解析的地方**（§5.3）——注册期核过服务半边，解析才有唯一解。
+
+**服务半边怎么取、比不比大小写**（第 5 条判据）：取第一个 `.` 之前的子串，**逐字比较、不折叠大小写**。
+**被否掉的替代**：折叠大小写——`p3a-followups.md` 第四节第 11 条记过同一类形状的代价：
+折叠只到「modulo ASCII 大小写」，于是两个源对「这是什么」的口径不同。此处同样的取舍，
+只不过那时选的是接受，这里选的是拒收先于比较。
+
 ## 3.3 为什么绑到 `CapabilityKind` 而不是绑到 `EffectType`
 
 两个理由，第二条是决定性的：
@@ -192,6 +267,15 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
   就配不上。但两套串的**服务半边对不齐**（连接器说 GitHub、能力说 git）这件事要记下来
   （第 11 节第 12 条）。
 
+- **还有一条替代没被否掉，只是被判给别处**：把 `read_repo` 这类读操作表达成 **§316 的工具**，
+  于是它落到强制点 (1)（`authorize`，载体 `AuthorizedTool`，`crates/continuum-capability/src/registry.rs`）
+  上——强制点 (1) 判的是「**工具调用前**」，与「有没有副作用」无关，故读操作在它那里是够得着的。
+  **本设计不采用，理由**：共享面 §一 刚把「工具调用路径」判给 **F**、把连接器判给 **B**，并
+  写了一句话——「**不要**把工具当作『另一种外部资源』并进 §124 连接器」。把连接器操作并进工具
+  是同一个错误的**镜像**，两边都做则「工具」与「连接器操作」两个概念重叠，正是本项目一贯判为
+  缺陷的形态。**但这扇门不由本设计关死**：收件人 **F / C**（若两文判定读操作该走工具，
+  第 3.5 节的非效应臂在这里要重新处置）。这条替代此前缺失，是复审指出的。
+
 **照片**：可注册的两条各有一条注册 + 一次成功调用的用例；**「注册不了」这一条也有照片**
 ——以 `GitHub.merge` 建一条绑定 → 注册期拒，并断言**是哪一种** `Err`（第 9 节）。
 **「补一枚臂之后就能注册」这条没有照片**：本子项目不补臂，故不存在「补了之后」的状态可照。
@@ -235,6 +319,19 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
 `Git(GitPush, origin/main)` 与 `Git(GitPush, origin/release)` 两枚），
 连接器级的一次签发没有可以放它的作用域。
 
+**`SecretsRuntime` 由谁构造：本设计未定，且这一条有下游后果。** 两种形状都可以：
+
+- **驱动装配好传进来**（`ConnectorRegistry::new(runtime)`）：于是
+  `continuum-runtime → continuum-secrets` 是一条**真边**（那个 task 登记它）；
+- **`continuum-connector` 自建**（自己读凭据源配置）：于是那条边**不是真边**，改由
+  `continuum-connector` 承担 `continuum-secrets` 的构造，而 `runtime → secrets` **不该被登记**
+  ——B 自己引的 §四.4 正是「零使用的边即假边」。
+
+**本设计取第一种**（驱动装配），理由：`SecretsRuntime` 的构造要读凭据源的位置与内容
+（`crates/continuum-secrets/src/source.rs`），那是**外部配置**，与驱动的装配处
+（`crates/continuum-runtime/src/main.rs`）同一职责；连接器自带凭据源会让「凭据从哪来」
+在装配处看不见。**这条决定把第 11 节第 15 条与 `runtime → secrets` 的边一起定了。**
+
 ## 4.2 为什么凭据的作用域不可能超出这个操作被授权的范围
 
 三条合起来，且**每一条都落在已有的类型上，不是本子项目新加的**：
@@ -248,12 +345,24 @@ A（Capability）已交付，B 是它两处「建了但无生产调用方」的�
    **B 不得重铸能力**——`mint` 虽公开，B 自己铸一枚就把上面整条链变成自证。
 3. **凭据不越期**：`expiry` 取「源声称的」与「能力的」两者中更早的（同文件 `:183`）。
 
-## 4.3 B 是能力时效**第一次变得可观察**的地方
+## 4.3 能力时效在 B 这里第一次进入一条会被执行的比较（**力度已按复审下调**）
 
-`CAPABILITY_LIFETIME_MS` 今天只是个被记下的数——驱动不读时钟地用它
-（P3A 设计 §10 第 11 条、`p3a-followups.md` 第四节第 4 条）。
-B 调用 `issue` 时，`issue` 会走 `Capability::is_valid_at` 并把它的
-`CapabilityError` 转成 `SecretsError::Capability`（`runtime.rs:177`）。
+**本节初稿写的是「B 是能力时效第一次变得可观察的地方」——那句无论证，已改。** 改后的说法只到
+可证的那一步：
+
+- `CAPABILITY_LIFETIME_MS` 今天只是个被记下的数——驱动不读时钟地用它
+  （P3A 设计 §10 第 11 条、`p3a-followups.md` 第四节第 4 条）；
+- B 是**第一个在生产路径上调用 `issue`** 的地方，而 `issue` 会走 `Capability::is_valid_at`
+  并把 `CapabilityError` 转成 `SecretsError::Capability`（`runtime.rs:177`）。
+  故这个常量**第一次进入一条会被执行的比较**。
+
+**它「何时真的判出过期」本设计尚未规定，也不该在这里规定**：那取决于「铸出」与「取料」之间
+由谁引入间隔。铸出在驱动（`task_cmd.rs:459-463`，取 `spec.target`，`expiry = now + CAPABILITY_LIFETIME_MS`），
+而 B 的入口**今天没有生产调用方**（第 11 节第 13 条），故这条间隔由谁引入**在接线之前无从判断**。
+
+**与 F 的相抵，据实记下**：F 的设计从同一个前提（同一步铸出）判 `Expired` 在它的路径上**不可达**；
+本节的初稿从同一个前提判它「第一次可观察」。**两条不可能同时为真，而至少有一条无据。**
+本设计按上面改后的说法退到可证的一步，并把这条接缝记给 F（第 11 节第 13 条）。
 
 **B 不另写一次时效比较**：本项目里「能力还有效吗」只有 `Capability::is_valid_at` 一个产生点，
 `issue` 已把它转出。B 要做的是**不吞这个 `Err`**，让它带着原来的变体出到调用方。
@@ -276,7 +385,8 @@ B 调用 `issue` 时，`issue` 会走 `Capability::is_valid_at` 并把它的
 
 **决定 B-4：用「逐次调用的适配器」承载凭据，§124 的 `invoke` 签名一个字不改。**
 
-- 连接器作者实现的是 B 定义的一个扩展 trait（暂名 `ConnectorImpl`），它的方法多一个材料入参；
+- 连接器作者实现的是 B 定义的扩展 trait **`ConnectorImpl`**（形状见第 3.2.1 节），
+  它的 `invoke_with` 比 §124 的 `invoke` 多一个材料入参；
 - B 的入口在签发凭据、取出材料之后，构造一个**逐次存活**的适配器（持有实现的引用与材料），
   对它调用 §124 的 `Connector::invoke`；适配器把参数转发给 `ConnectorImpl` 并附上材料。
 - 适配器**只在入口里构造**，材料**只在调用期间存活**。
@@ -350,7 +460,9 @@ B 能且只能相信到这个程度。B **不能**从 `AuthorizedEffect` 判断�
 
 ## 5.3 入口核对的四步与它们的次序
 
-1. 按操作串的**服务半边**解析连接器；未注册 → `UnknownConnector`；
+1. 按操作串的**服务半边**（第一个 `.` 之前的子串，逐字比较）解析连接器；未注册 → `UnknownConnector`。
+   **解析之所以唯一，靠的是注册期那条「服务半边 == 连接器 id」的核对**（第 3.2 节第 5 条），
+   没有它，一个连接器可以声明不属于自己的操作，而那条操作在这里永远解析不到；
 2. `op ∈ descriptor.operations()`；否则 → `UndeclaredOperation`；
 3. **臂必须对**：由绑定 kind 推出这条操作该走哪一臂（3.2 第 4 条）；
    走错 → `EffectAuthorizationRequired { op, effect }`（绑定落在像里，却没出示 `AuthorizedEffect`）；
@@ -384,12 +496,13 @@ B 能且只能相信到这个程度。B **不能**从 `AuthorizedEffect` 判断�
 | `UnboundOperation { connector, op }` | **注册期**（第 3.2 节第 2 条） | **声明了却没绑**——绑定不完备 |
 | `UndeclaredBoundOperation { connector, op }` | **注册期**（第 3.2 节第 2 条） | **绑了却没声明**——另一侧；只建一侧不算钉住 |
 | `DuplicateKindBinding { connector, kind }` | **注册期**（第 3.2 节第 3 条） | 一个连接器内两条操作绑了同一枚 `CapabilityKind`（「一一」） |
+| `OperationServiceMismatch { connector, op }` | **注册期**（第 3.2 节第 5 条） | 操作串的服务半边不等于本连接器的 id——该操作永不可达 |
 
 四处取舍，各给理由：
 
-- **上面三条注册期变体不是留桩**：它们在注册期都有真实产生方（各有照片，见第 9 节）。
-  **调用期**不存在「绑定缺失」这条路径——完备性在构造期就强制了，故调用期不建对应的变体。
-  这一条要说准：不是「这个形状不存在」，而是「它只能在注册期出现」。
+- **上面四条注册期变体不是留桩**：它们在 `ConnectorRegistry::register`（第 3.2.1 节）里都有真实
+  产生方（各有照片，见第 9 节）。**调用期**不存在「绑定缺失」这条路径——完备性在构造期就强制了，
+  故调用期不建对应的变体。这一条要说准：不是「这个形状不存在」，而是「它只能在注册期出现」。
 - **`Credentials` 转出 `SecretsError` 而不展开**：`SecretsError` 的八个变体各有产生方与照片
   （`crates/continuum-secrets/src/error.rs`），B 再抄一层就会与它漂移。
   「是哪一种失败」由内层变体给出——与 P3A `CapabilityError::Persist` 的取舍同形。
@@ -402,16 +515,23 @@ B 能且只能相信到这个程度。B **不能**从 `AuthorizedEffect` 判断�
 §313（`docs/spec/05-normative.md:2132`）的必录清单里，与本子项目相关的是两项：
 **external effects** 与 **capability grants**。两项都已有产生方：
 
-- `AuditKind::ExternalEffects`：`continuum-effect` 的 `record_planned`（`crates/continuum-effect/src/journal.rs:23,36`）
-  与 workspace 门控的 `discard`（`crates/continuum-workspace/src/gate.rs:45`，其记录点在驱动侧）；
+- `AuditKind::ExternalEffects`：**两个产生点，各写一行**——
+  `crates/continuum-effect/src/journal.rs:59` 的 `record_planned` 写**计划**时刻那一行
+  （它的 `audit` 调用在 `:62`，`audit` 函数本身在 `:34`），
+  同文件 `:117` 的 `advance` **在每一次状态迁移都写一行**（其 `audit` 调用在 `:129`）；
+  另有 workspace 门控的 `discard`（`crates/continuum-workspace/src/gate.rs:157` 起，其
+  `append_audit` 在 `:168`）。
 - `AuditKind::CapabilityGrants`：`continuum-capability` 的 `authorize`（`crates/continuum-capability/src/registry.rs` 的 `append_audit`，P3A 为该变体建的第一个产生方）。
 
 B 再写一条，就是同一个事实两个产生点。**决定 B-5：B 的入口用那个值、不重记它。**
 照片是「不写」的那一侧：一次成功的连接器调用前后，`audit` 表行数不变（第 9 节）。
 
-**要指出的时序问题（不是 B 能处置的）**：今天 `external effects` 记的是**计划**那一刻
-（驱动在跑命令之前写效应行），不是**实际发生**那一刻。若判定这条 MUST 的落点应在「实际发生」，
-那是 effect journal 的活。**收件人见第 11 节。**
+**本节初稿曾断言「`external effects` 记的是计划那一刻，不是实际发生」——那句是假的，已撤。**
+实际是：驱动在命令跑完之后才推进终态（`crates/continuum-runtime/src/task_cmd.rs:269-273` 定
+`Committed` / `Failed`，`:481` 的 `finish_declared_effects` 逐条 `advance`），
+而 `advance` 每次迁移写一行，故**终态那一行就是「实际发生」**。§313 的 external effects
+因此**两侧都有记录**。（本设计初稿引的三处行号也全错：`journal.rs:23` 与 `gate.rs:45` 都是**文档注释**，
+不是代码。）**本条订正由复审推翻，来历留在此处。**
 
 ## 6.3 哪些失败路径有照片、哪些没有
 
@@ -458,21 +578,34 @@ B 的入口需要 `continuum-capability`（`AuthorizedEffect`）、`continuum-se
 §4.2 又把强制点 (2) 判在**第 5 层**（原文：「本层的 Tool Registry（工具调用前）、第 5 层的执行点
 （实际副作用前）、第 5 层的密钥运行时（凭据签发）」）。两处不一致。
 
-**决定 B-6：crate 落在边界层。** 理由两条，任一条单独成立：
+**决定 B-6：crate 落在边界层。**
 
-1. **§4.2 的强制点归属**：B 要落的正是强制点 (2) 的连接器侧那半个（P3A 设计 §4.2 明写
-   「连接器侧留待 B」），而它在第 5 层。
-2. **§9.1 的无环约束**：`continuum-secrets` 是边界层而依赖 `continuum-capability`（资源层），
-   即已有 5 → 4。若 `continuum-connector` 落在资源层，它就是 4 → 5 → 4 的**层环**，
-   与 §9.1「依赖方向单向，无环」冲突。
+**存活的理由（一条）**：**§4.2 的强制点归属**——B 要落的正是强制点 (2) 的连接器侧那半个
+（P3A 设计 §4.2 明写「连接器侧留待 B」），而 §4.2 把它判在**第 5 层**。
+
+**已倒掉的理由（第二条，留其来历）**：本节初稿还写了第二条，说 `continuum-connector` 落在资源层
+会构成层环。**那条不成立，且不成立的原因是方向读反了。** 按 §9.1 的方向约定
+（`A → B` 读作「B 依赖 A」，佐证见第 0 节第 3 条），`continuum-secrets` 依赖 `continuum-capability`
+是 **`4 → 5`**；而 `continuum-connector` 落在资源层时依赖密钥运行时，也是 **`4 → 5`**。
+**两条边同向，无环。** 我初稿按「箭尾依赖箭头」的直觉读，才读出了那个不存在的环。
+
+**这条纠正把问题整个倒了过来**：按正确的方向约定，**两种落法在层图上要的边是同一条
+（`4 → 5`）**，而那条边 §9.1 里本来就没有、且 P3A 已经需要它（第 0 节第 3 条）。
+故「放资源层还是边界层」在层图上**不产生差别**——差别只剩 §4.2 的强制点归属那一条。
 
 **据实说明这条决定的强度**：`dependency_direction.rs` 断言的是 **crate 级直接边**，
-上面两条路在**crate 图上都无环**（`capability` 不依赖 `connector`，也不依赖 `secrets`）。
-差别只出现在**层图**上。故这不是构建约束，是归属与文档的一致性问题；
-若把 §9.1 读成只约束 crate 图，则两条路都可行，此时仍以 (1) 为准取边界层。
-**收件人：协调者 / 规范**（§4.1 的表要么订正，要么说明「组件在资源层、强制点在第 5 层」是可以并存的）。
+两种落法在 crate 图上都无环（`capability` 不依赖 `connector`，也不依赖 `secrets`）。
+故这不是构建约束，是**归属与文档的一致性**问题；若把 §9.1 读成只约束 crate 图，
+两种落法都可行，此时仍以 §4.2 的强制点归属为准取边界层。
+**收件人：协调者 / 规范**（§4.1 的表要么订正，要么说明「组件在资源层、强制点在第 5 层」是可以并存的；
+本决定已交用户裁决）。
 
 ## 7.3 依赖边（只登记实际用到的）
+
+**本节 `→` 的方向与 §9.1 的层图相反，读之前先看这一句**：这里是 crate 图，
+`A → B` 读作 **「A 依赖 B」**（与 `dependency_direction.rs` 的 `ALLOWED` 表同一读法）；
+§9.1 的层图则是 `A → B` = 「B 依赖 A」（第 0 节第 3 条给了佐证）。
+**两个图的两套箭头方向，本项目已经在这上面栽过一次**（本设计初稿，第 7.2 节），故两处都写明。
 
 ```
 continuum-connector → continuum-core         （ConnectorId / ConnectorOp / ConnectorDescriptor / ProviderError）
@@ -482,12 +615,22 @@ continuum-connector → continuum-capability   （AuthorizedEffect / Capability 
 continuum-connector → continuum-provider     （§124 的 Connector trait）
 continuum-connector → continuum-secrets      （issue / material / SecretMaterial）——强制点 (3) 的第一条真消费边
 continuum-runtime   → continuum-connector    （装配处；**由用它的那个 task 登记**）
-continuum-runtime   → continuum-secrets      （**由把密钥运行时接上的那个 task 登记**——见 p3a-followups 第三节末段）
+continuum-runtime   → continuum-secrets      （**由把密钥运行时接上的那个 task 登记**——见 p3a-followups 第三节末段；
+                                               它是不是真边取决于第 4.1 节那条「谁构造 SecretsRuntime」——本设计取
+                                               「驱动构造」，故它是真边）
 ```
 
 `connector` 与 `secrets` 两条到 runtime 的边**不在本子项目的第一个 task 一次声明齐**：
 本仓口径是「零使用的边即假边」，`ALLOWED` 必须等于实际依赖，P2b 为此删过两条边。
 这与 P3A 设计 §6「边由需要它的那个 task 增量加上」是同一条判据。
+
+**`continuum-connector → continuum-provider` 这一条要在层图上算一笔**（复审指出）：
+`continuum-provider` 按 §4.1 的组件表属**资源层**（那表把「Provider Adapter（中立）」
+「ToolProvider（中立）」列在资源层工程下），它不是一个跨层的外围 crate。故这条边与
+`→ continuum-capability` 同类，都是 **`资源层 (4) → 边界层 (5)`**——**不是新增的一类缺口，
+是第 0 节第 3 条那条边上的第二个实例**。C 的设计把 Provider Adapter 与注册表放在资源层，
+与 §4.1 一致；两文在 `continuum-provider` 的层归属上并不冲突，冲突只在 **Connector 自己**放哪
+（第 7.2 节）。
 
 **不新增** `continuum-connector → continuum-events` / `→ continuum-persist`：本子项目不写审计、
 不建表（第 6.2 节）。将来若 B 有了落库需求再按实际使用加。
@@ -525,13 +668,14 @@ Connector ← 密钥运行时（跨层：第 5 层 → 本处；见 §9.1 与该
 | 未注册的连接器 | 请求一个没有注册的服务 → `UnknownConnector` |
 | 绑定的双向覆盖 | 声明了没绑、绑了没声明，各一条，各断言**是哪一种** `Err` |
 | 绑定的一一 | 两个操作绑同一枚 `CapabilityKind` → 拒 |
+| 服务半边相符 | id 为 `GitHub` 的连接器声明 `Email.send` → 注册期拒 `OperationServiceMismatch`；并带一条「同 id 的正例注册成功」的对照臂。**大小写那一侧也要有**：id `GitHub` + 操作 `github.push_branch` → 拒（判据是逐字比较） |
 | 假连接器注册不了 §125 的读操作 | 以 `GitHub.merge` 建一条绑定 → 注册期拒（表里没有这一枚 kind），断言是哪一种 `Err` |
 | 效应臂只收 `AuthorizedEffect` | trybuild 样例：在效应臂的位置传 `Capability` 不编译；**判据是编译失败** |
 | 效应是推出来的，不是声明的 | 用例断言连接器的绑定类型里**没有** `EffectType` 这个字段可填：给一条绑定指定一个与 `for_effect` 逆对不上的效应**写不出来**；并逐项断言 `effect(for_effect(e)) == Some(e)`（P3A 已有 `for_effect` 的六条照片，本处补的是逆） |
 | 凭据作用域不越能力 | 两条臂各一条：断言 `credential.scope()` 等于**那一次出示的那枚能力**的 scope；并带一条「能力的 scope 是什么、凭据就是什么」的对照 |
 | 能力已失效 | 过期能力经**两条臂各一次** → `Credentials(SecretsError::Capability(CapabilityError::Expired))`（**断言是这一种**，不是笼统的 `Err`） |
 | 源不覆盖作用域 | 文件源里没有该作用域 → `Credentials(ScopeNotCovered { .. })` |
-| 轮换 | `rotate` 之后用旧凭据取料 → `Credentials(Superseded { .. })`（§103 的四类事件**逐项**各一行） |
+| 轮换 | `rotate` 之后用旧凭据取料 → `Credentials(Superseded { .. })`。**§103 的四类事件逐项那一组是复用既有照片**（`crates/continuum-secrets/tests/issue.rs::every_rotation_event_class_invalidates_old_credentials`，由 `error.rs:93-94` 引出），**不是本子项目的新证据**；本子项目要新增的只是「B 的入口把 `Superseded` 原样转出、不吞成别的变体」那一条。§10 末句刚说过「不许用别人的用例代表自己」，此处照那条办 |
 | 后端错误 | 假实现返回 `ProviderError::Unavailable` → `Provider(Unavailable(_))` |
 | **不写审计** | 一次成功调用前后 `audit` 表行数不变（裸查 `kind` 列） |
 | 凭据材料不进返回值 | 假实现把收到的材料原样回显 → B 的返回值里**不含**它（适配器方案下这条天然成立，仍需一条照片：适配器不把材料放进 `input`） |
@@ -576,12 +720,15 @@ Connector ← 密钥运行时（跨层：第 5 层 → 本处；见 §9.1 与该
 | 2 | **`Connector::invoke` 的签名放不下凭据**；本设计用「逐次调用的适配器」绕开（决定 B-4），若协调者认为适配器方案仍算动了 §124 的边界，须重新裁决 | 协调者 / 用户 |
 | 3 | **§125 的非效应操作在本子项目里注册不了**，原因是**词汇表里没有对应的那一枚 `CapabilityKind`**（`GitHub.read_repo` / `GitHub.create_issue` / `GitHub.merge` / `Email.read` / `Email.draft`）。补法按 P3A §2.2 的先例往那张封闭枚举加臂；**本子项目不加**（不预先发明，今天零连接器） | 子项目 B 的实现（当有真连接器提出这些操作时，加臂落在 `continuum-capability`） |
 | 3b | **连接器读权限的强制点落在哪里，规范未规定**（§125 只规定粒度）。本子项目选了「B 的入口按出示的 kind 把关」（决定 B-3b），与效应臂同一判据。若后续判定读权限该由别处强制，此处要重新处置 | 长期阶段 / 语义层 |
-| 4 | **Connector 的层归属**：§4.1 列在资源层，§4.2 把强制点 (2) 归第 5 层，§9.1 的层图既没有 Connector 也没有 5 → 4 的边 | 协调者 / 规范 |
+| 4 | **Connector 的层归属**：§4.1 列在资源层，§4.2 把强制点 (2) 归第 5 层；§9.1 的层图既没有 Connector，也没有 **`资源层 (4) → 边界层 (5)`** 这条边（P3A 的 secrets→capability 已经需要它）。**已交用户裁决** | 协调者 / 用户 |
 | 5 | **§4.3 的层内依赖图漏了 Connector**，补法见第 8 节 | 协调者 |
-| 6 | **`CAPABILITY_LIFETIME_MS` 的数值无规范来源**，而 B 是它第一次变得可观察的地方（P3A §10 第 11 条）——首次接上时须核这个数是否合理 | 子项目 B 的实现 |
+| 6 | **`CAPABILITY_LIFETIME_MS` 的数值无规范来源**（P3A §10 第 11 条）。B 是**第一个在生产路径上调用 `issue`** 的地方，故这个常量第一次进入一条会被执行的比较；**它何时真的判出过期未定**（取决于铸出与取料之间的间隔由谁引入，见第 4.3 节）——首次接上时须核这个数是否合理 | 子项目 B 的实现 |
 | 7 | **轮换只在下一次取料时可见**，进行中的一次调用不受影响（第 4.4 节）；本阶段没有调用中途复查的机构 | 子项目 B 的实现 / 长期阶段 |
-| 8 | **`AuditKind::ExternalEffects` 记的是「计划」那一刻**，不是「实际发生」（第 6.2 节）。B 不重记；若要改落点，属 effect journal | 语义层 / 后续阶段 |
+| 8 | ~~`AuditKind::ExternalEffects` 只记「计划」那一刻~~——**已闭，那句是假的**：`record_planned`（`journal.rs:59`）与 `advance`（`:117`，每次迁移一行、终态那行即「实际发生」）两侧都有记录，故 §313 的两侧都满足（第 6.2 节）。B 不重记这一定论不变 | 无（已闭） |
 | 9 | **`SecretMaterial` 出到实现之后无回收机构**：材料在调用期间存活，调用结束随适配器析构。本阶段够用，若将来材料需显式清零（§100 的硬件后端语境），此处是替换点 | 长期阶段 |
 | 10 | **真实连接器零个**：本子项目全部用例跑在假连接器上，「按操作细分」在真实服务上的表现没有照片（第 6.3 节） | 长期阶段 |
 | 11 | **本子项目对 P3A crate 的唯一新增面**：`CapabilityKind` 上补一枚 `for_effect` 的逆（暂名 `effect`，落在 `crates/continuum-capability/src/capability.rs` 紧邻 `for_effect`）。它是那条对应唯一的逆产生点；`for_effect` 是单射不是满射，故逆返回 `Option`。消费方是 B 的入口（第 3.2 节第 4 条） | 子项目 B 的实现 |
 | 12 | **两套串的服务半边对不齐**：连接器操作 `GitHub.push_branch` 必须绑到 `Git(Push)`——resource 是 `git`、不是 `github`（第 3.4 节）。今天这不是错（§88 与驱动的铸法都如此），但**连接器说 GitHub、能力说 git** 这条缝在 §125 的服务清单（§124 列了六个服务）与 `CapabilityKind` 的 resource 集之间普遍存在。若后续出现第二个服务也需要同一枚 kind，须重新处置 | 语义层 / 子项目 B 的实现 |
+| 13 | **B 的入口没有生产调用方，`AuthorizedEffect` 的交付通道因此悬空。** 本设计给了入口（第 5.1 节）与边（第 7.3 节），但**没有一条路径说明驱动何时、以什么调用它**——今天驱动执行效应只有「跑命令」一条路（`Sandbox::spawn`），而 §316 上不存在把 `AuthorizedEffect` 交给连接器的通道（F 的设计 `p3f` 记了这条，收件人写的正是「C 与 B 共同处置」）。**故 §10 的第一条完成判据在生产路径上没有落点**，而共享面 §八 把「B 是 `continuum-secrets` 的兑现处」记在本子项目名下。**这不是本设计能单独关掉的**：要么驱动在跑命令之外多一条「经连接器执行效应」的路径，要么这条判据的兑现推迟 | **F / B 共同处置** + 协调者 |
+| 14 | **`AuthorizedTool` 的消费方，两份前文冲突**（第 0 节第 4 条）：`p3a-followups.md` 第一节第 3 条判给 B，共享面 §一判给 F。**本设计按后者不消费它**，理由是 `AuthorizedTool` 是「工具调用路径」的载体，而那条路径经用户拍板归 F。**若判定应归 B，第 5.1 节的入口要重新处置**（B 目前收 `ConnectorAuthorization`，不收 `AuthorizedTool`） | 协调者 / 用户 |
+| 15 | **`SecretsRuntime` 由谁构造**：本设计取「驱动装配好传进来」（第 4.1 节），故 `continuum-runtime → continuum-secrets` 是**真边**、由那个 task 登记。若改为连接器自建，那条边不该登记，且要重新算第 7.3 节 | 子项目 B 的实现 |
