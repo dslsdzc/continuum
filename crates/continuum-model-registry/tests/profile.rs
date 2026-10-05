@@ -8,6 +8,11 @@ use continuum_model_registry::{
 };
 
 /// §248 的九维，**逐项列出**（不抽代表）：凡「九维」「其余八维」的断言都遍历它。
+///
+/// **这张表是手写的，加维度时必须手工同步**：`src` 侧加第十维会让 `as_str` / `parse` /
+/// `index` 的穷尽 `match` 编译失败，**但不会让这张表编译失败**——新维度会在这里静默漏掉照片
+/// （编码用例里「表里漏了 {dimension:?}」那条断言遍历的正是本表，故它也跟着一起漏）。
+/// 这个点不设防，靠后来者自己记得。
 const ALL_DIMENSIONS: [SkillDimension; 9] = [
     SkillDimension::Reasoning,
     SkillDimension::Coding,
@@ -222,8 +227,12 @@ fn every_dimension_is_absent_before_any_observation() {
 
 /// 写入一维后，**其余八维逐项**仍为 `None`；写入的那一维也逐项确认落地。
 ///
-/// 遍历九个维度各写一次（不是抽一个代表）：数组下标算错时（例如把 `dimension as usize`
-/// 当成 1-based、或 `index()` 里两臂写反）**只有这条能抓**。
+/// 遍历九个维度各写一次（不是抽一个代表）：这道守卫抓**下标越界**（`index()` 里某臂写成
+/// `9` 那类，`get` 处直接 panic）与**两臂撞到同一格**（那一格串味）——只这两类能靠本用例抓。
+///
+/// **两臂互换抓不到**，别把置换当成这里钉的东西：`dimensions` 私有，`from_current` 写入与
+/// `get` 读出走的是同一个 `index()`，且没有用例格式化整个向量，故**任意置换在可观察行为上
+/// 完全等价**（跑出来是绿的）。
 #[test]
 fn one_observation_leaves_the_other_eight_absent() {
     for written in ALL_DIMENSIONS {
