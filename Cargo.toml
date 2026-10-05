@@ -15,6 +15,7 @@ members = [
     "crates/continuum-effect",
     "crates/continuum-policy",
     "crates/continuum-capability",
+    "crates/continuum-secrets",
 ]
 
 [workspace.package]

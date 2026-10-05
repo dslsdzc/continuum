@@ -95,6 +95,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P3 子项目 A 的强制点 (3)：密钥运行时（设计第 5 节）。设计 §6 的终态边表在
+    // 本 crate 上写的是 `continuum-capability, continuum-core`，但本 crate 对
+    // `continuum-core` 零引用（`grep -rn continuum_core crates/continuum-secrets`
+    // 无命中），故只登记实际用到的那一条——叶子 crate 的条目记实际依赖，
+    // 零使用的边即假边（P2b 为此删过两条）。
+    ("continuum-secrets", &["continuum-capability"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

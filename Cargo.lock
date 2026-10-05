@@ -213,6 +213,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-secrets"
+version = "0.1.0"
+dependencies = [
+ "continuum-capability",
+ "tempfile",
+ "thiserror",
+ "trybuild",
+]
+
+[[package]]
 name = "continuum-workspace"
 version = "0.1.0"
 dependencies = [
