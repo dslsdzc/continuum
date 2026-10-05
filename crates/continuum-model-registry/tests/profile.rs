@@ -2,7 +2,43 @@
 //!
 //! 每条断言的「红的条件」见各用例的注释——这些注释不是说明，是变异时的靶子。
 
-use continuum_model_registry::{ProfileError, Ratio, SkillScore};
+use continuum_model_registry::{
+    current_observation, ProfileError, Ratio, SkillDimension, SkillObservation, SkillScore,
+    SkillVector,
+};
+
+/// §248 的九维，**逐项列出**（不抽代表）：凡「九维」「其余八维」的断言都遍历它。
+const ALL_DIMENSIONS: [SkillDimension; 9] = [
+    SkillDimension::Reasoning,
+    SkillDimension::Coding,
+    SkillDimension::Vision,
+    SkillDimension::Planning,
+    SkillDimension::ToolUse,
+    SkillDimension::ConstraintFollowing,
+    SkillDimension::Verification,
+    SkillDimension::Spatial,
+    SkillDimension::Media,
+];
+
+/// 用例内的一次观测。断言里要区分的五个字段都给**互不相同**的值，
+/// 免得「取错了哪一条」被两个字段恰好相等掩盖过去。
+fn observation(
+    score: f64,
+    confidence: f64,
+    sample_count: u64,
+    version: u32,
+    time_range: (i64, i64),
+) -> SkillObservation {
+    SkillObservation::try_new(
+        SkillScore::try_new(score).unwrap_or_else(|e| panic!("{score} 应是合法评分，实为 {e:?}")),
+        Ratio::try_new(confidence)
+            .unwrap_or_else(|e| panic!("{confidence} 应是合法置信度，实为 {e:?}")),
+        sample_count,
+        version,
+        time_range,
+    )
+    .unwrap_or_else(|e| panic!("{time_range:?} 应是自洽的时间窗，实为 {e:?}"))
+}
 
 /// `[0,1]` 闭区间内侧的往返：极小（含最小次正规）与极大（`1.0`，本类型的上界）都在内。
 ///
@@ -161,4 +197,217 @@ fn skill_score_is_totally_ordered() {
     shuffled.reverse();
     shuffled.sort();
     assert_eq!(shuffled, scores);
+}
+
+// ============================================================================
+// Task 2：九维、观测与「缺席不是 0」
+// ============================================================================
+
+/// 「缺席不是 0」：未画像的向量**九维逐项**为 `None`——不抽代表、不给默认值。
+///
+/// 这条钉的是设计 §2.2 的第一条：`None`（没有观测）与 `SkillScore(0.0)`（评分是 0）
+/// 是两件事。红的条件：把 `Option` 换成默认值（如全维填 `SkillScore(0.0)` 的观测）即红
+/// ——那样一个未画像的模型看起来「所有维度都很差」，在 §23 的语义下与「很强」一样是假的。
+#[test]
+fn every_dimension_is_absent_before_any_observation() {
+    let vector = SkillVector::from_current(Vec::new());
+    for dimension in ALL_DIMENSIONS {
+        assert!(
+            vector.get(dimension).is_none(),
+            "{dimension:?} 在未画像的向量上应是 None（缺席不是 0），实为 {:?}",
+            vector.get(dimension)
+        );
+    }
+}
+
+/// 写入一维后，**其余八维逐项**仍为 `None`；写入的那一维也逐项确认落地。
+///
+/// 遍历九个维度各写一次（不是抽一个代表）：数组下标算错时（例如把 `dimension as usize`
+/// 当成 1-based、或 `index()` 里两臂写反）**只有这条能抓**。
+#[test]
+fn one_observation_leaves_the_other_eight_absent() {
+    for written in ALL_DIMENSIONS {
+        let vector = SkillVector::from_current(vec![(written, observation(1.0, 0.5, 3, 1, (0, 10)))]);
+        for dimension in ALL_DIMENSIONS {
+            if dimension == written {
+                assert!(
+                    vector.get(dimension).is_some(),
+                    "{dimension:?} 刚写入，不该是 None"
+                );
+            } else {
+                assert!(
+                    vector.get(dimension).is_none(),
+                    "只写了 {written:?}，{dimension:?} 不该有观测（下标错位？），实为 {:?}",
+                    vector.get(dimension)
+                );
+            }
+        }
+    }
+}
+
+/// 同一维度给两次：**覆盖**，不是合并——后给的那条胜。
+///
+/// 照片对应 [`SkillVector::from_current`] 文档里「同一维度给两次即覆盖前一次，不合并」那句话。
+#[test]
+fn a_second_observation_for_the_same_dimension_overwrites_the_first() {
+    let vector = SkillVector::from_current(vec![
+        (SkillDimension::Coding, observation(1.0, 0.1, 1, 1, (0, 10))),
+        (SkillDimension::Coding, observation(9.0, 0.9, 2, 2, (20, 30))),
+    ]);
+    let got = vector
+        .get(SkillDimension::Coding)
+        .expect("写过 Coding，应有一条观测");
+    assert_eq!(got.score().get(), 9.0, "后给的那条应覆盖前一条，不合并");
+    assert_eq!(got.version(), 2);
+    assert_eq!(got.time_range(), (20, 30));
+    // 覆盖只发生在同一维：其余八维仍空。
+    for dimension in ALL_DIMENSIONS {
+        if dimension != SkillDimension::Coding {
+            assert!(vector.get(dimension).is_none(), "{dimension:?} 不该有观测");
+        }
+    }
+}
+
+/// 「当前值」的判据是 `version` **最大**的那次观测，**不是** `time_range` 最晚的那次。
+///
+/// 三条观测的 `version` 大小与 `time_range` 早晚**刻意相反**（设计 §2.2 记的选择，
+/// §11 第 17 条）：`version` 是 §24 列出的字段里唯一由产生方显式递增的量。
+///
+/// 两种排列各断言一次：取「第一条」或「最后一条」的实现也会红，不只是取时间最晚的那种。
+/// 五个字段各断言一次（访问器逐个有照片）。
+#[test]
+fn the_current_observation_is_the_highest_version_not_the_latest_time_range() {
+    let latest_time_lowest_version = observation(1.0, 0.1, 11, 2, (3000, 4000));
+    let highest_version = observation(2.0, 0.2, 22, 9, (1000, 2000));
+    let earliest_time = observation(3.0, 0.3, 33, 5, (0, 500));
+
+    let forward = vec![
+        latest_time_lowest_version.clone(),
+        highest_version.clone(),
+        earliest_time.clone(),
+    ];
+    let backward = vec![earliest_time, highest_version, latest_time_lowest_version];
+
+    for (label, series) in [("正序", forward), ("倒序", backward)] {
+        let got = current_observation(&series)
+            .unwrap_or_else(|| panic!("{label}：非空序列必有当前观测"));
+        assert_eq!(got.version(), 9, "{label}：当前观测应取 version 最大的那条");
+        assert_eq!(got.score().get(), 2.0, "{label}：取错了观测");
+        assert_eq!(got.confidence().get(), 0.2, "{label}：取错了观测");
+        assert_eq!(got.sample_count(), 22, "{label}：取错了观测");
+        assert_eq!(
+            got.time_range(),
+            (1000, 2000),
+            "{label}：时间窗更早的那条才是当前值——按 time_range 取最大即红"
+        );
+    }
+}
+
+/// 空序列没有当前观测：`None`，不是 panic、不是默认值。
+#[test]
+fn an_empty_series_has_no_current_observation() {
+    assert!(current_observation(&[]).is_none());
+}
+
+/// 九个维度的落库编码**逐项**断言字面量，并在同一用例里反向 `parse` 回各自的变体。
+///
+/// 红的条件：多词项写成 `toolUse` 或 `tool-use` 即红——字面量是**手册写的**，钉的是格式；
+/// 反向那半用的是被测函数，钉的是路径。表里还要覆盖全九维（漏一臂即红）。
+#[test]
+fn skill_dimension_encoding_is_lowercase_with_underscores() {
+    let table: [(SkillDimension, &str); 9] = [
+        (SkillDimension::Reasoning, "reasoning"),
+        (SkillDimension::Coding, "coding"),
+        (SkillDimension::Vision, "vision"),
+        (SkillDimension::Planning, "planning"),
+        (SkillDimension::ToolUse, "tool_use"),
+        (SkillDimension::ConstraintFollowing, "constraint_following"),
+        (SkillDimension::Verification, "verification"),
+        (SkillDimension::Spatial, "spatial"),
+        (SkillDimension::Media, "media"),
+    ];
+
+    for dimension in ALL_DIMENSIONS {
+        assert!(
+            table.iter().any(|(d, _)| *d == dimension),
+            "{dimension:?} 在编码表里漏了——九维要逐项有照片"
+        );
+    }
+    for (dimension, literal) in table {
+        assert_eq!(
+            dimension.as_str(),
+            literal,
+            "{dimension:?} 的落库编码不符（小写、多词 `_` 连接）"
+        );
+        assert_eq!(
+            SkillDimension::parse(literal),
+            Some(dimension),
+            "{literal:?} 应反解回 {dimension:?}"
+        );
+    }
+}
+
+/// 表外维度名一律 `None`，**不取默认维度**——把表外串猜成某一维会成为第二份表示。
+///
+/// `"visual"` 是最像的一个（§22 的画像清单里有 `vision`），其余几格钉的是格式的几种
+/// 近似写法：大小写、连字符、全大写、空串、前导空格。
+#[test]
+fn an_unknown_dimension_name_is_rejected() {
+    for s in ["visual", "ToolUse", "tool-use", "TOOL_USE", "", " reasoning"] {
+        assert_eq!(
+            SkillDimension::parse(s),
+            None,
+            "{s:?} 不是九维的落库编码，应拒收为 None"
+        );
+    }
+}
+
+/// 时间窗反序被拒：`(200, 100)` → `BadTimeRange { start: 200, end: 100 }`，**两个端点值都断言**
+/// （设计 §2.4：「外加时间窗反序一条」）。
+///
+/// **两侧对钉**：`(100, 200)` 与**退化区间** `(100, 100)` 各返回 `Ok`——`time_range` 是
+/// **闭区间**，`start == end` 是自洽的。只写拒的那一侧不算钉住：
+/// 去掉 `end < start` 判定即第一条红；把判定写成 `end <= start` 则只有退化区间那一条红。
+#[test]
+fn an_observation_whose_time_range_is_reversed_is_rejected() {
+    let reversed = SkillObservation::try_new(
+        SkillScore::try_new(9.2).expect("9.2 应是合法评分"),
+        Ratio::try_new(0.5).expect("0.5 应是合法置信度"),
+        7,
+        3,
+        (200, 100),
+    );
+    assert_eq!(
+        reversed,
+        Err(ProfileError::BadTimeRange {
+            start: 200,
+            end: 100
+        }),
+        "反序时间窗应被拒，且两个端点值原样带回"
+    );
+
+    // 放行的一侧：正序。
+    assert!(
+        SkillObservation::try_new(
+            SkillScore::try_new(9.2).expect("9.2 应是合法评分"),
+            Ratio::try_new(0.5).expect("0.5 应是合法置信度"),
+            7,
+            3,
+            (100, 200),
+        )
+        .is_ok(),
+        "正序时间窗应被接受"
+    );
+    // 放行的一侧：退化区间（闭区间上的一个点）。
+    assert!(
+        SkillObservation::try_new(
+            SkillScore::try_new(9.2).expect("9.2 应是合法评分"),
+            Ratio::try_new(0.5).expect("0.5 应是合法置信度"),
+            7,
+            3,
+            (100, 100),
+        )
+        .is_ok(),
+        "退化区间 start == end 应被接受（闭区间是自洽的）"
+    );
 }

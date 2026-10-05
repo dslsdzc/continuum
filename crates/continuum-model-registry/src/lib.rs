@@ -11,13 +11,17 @@
 //! 不持有 `CallId`、不消费 `ModelStream`。`ModelProvider::invoke` / `stream` 的调用方是
 //! **子项目 G（模型调用路径）**，本 crate 里那两个名字一次都不出现（设计 §1.2）。
 //!
-//! # 本 task（Task 1）到哪为止
+//! # 走到哪为止
 //!
-//! 只建骨架与两个取值类型 [`Ratio`] / [`SkillScore`] 及错误类型 [`ProfileError`]。
-//! 画像、生命周期、持久化、路由、阶梯、预算各自在后续 task 落在自己的模块里。
+//! Task 1 建骨架与两个标量取值类型 [`Ratio`] / [`SkillScore`] 及错误类型 [`ProfileError`]；
+//! Task 2 补 §248 的九维 [`SkillDimension`]、§24 的观测 [`SkillObservation`] 与
+//! 向量 [`SkillVector`]（含 [`current_observation`]）。`ModelProfile` 本体、生命周期、
+//! 持久化、路由、阶梯、预算各自在后续 task 落在自己的模块里。
 
 pub mod error;
 pub mod profile;
 
 pub use error::ProfileError;
-pub use profile::{Ratio, SkillScore};
+pub use profile::{
+    current_observation, Ratio, SkillDimension, SkillObservation, SkillScore, SkillVector,
+};
