@@ -230,7 +230,11 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 
 - 结构体 `ProviderRegistry`，文件 `crates/continuum-provider/src/registry.rs`，经 `lib.rs` 再导出。
 - 两个错误类型：`RegistryError`（`NotFound` / `Duplicate`，登记与查找用），与 **`ToolCallError`**
-  （`Unregistered { id }` / `Provider(ProviderError)`，受门禁的 `invoke_tool` 用）。
+  （`Unregistered { id }` / `Provider(ProviderError)`，**工具侧按 id 查的入口用**：受门禁的 `invoke_tool`
+  与**只读的 `describe_tool`**。`list_tools()` 是已登记适配器各自 `list_tools()` 的并集、**不按 id 查**，
+  故它不产生这种错）。**订正**：本行原写「受门禁的 `invoke_tool` 用」，与 §3.1「工具侧未命中（含
+  `describe_tool`）返回 `ToolCallError::Unregistered`」**两说相抵**；裁决 C1 取 §3.1，本行据此改，
+  错误说法的来历留在此处。
   **为什么需要第二个**：`invoke_tool` 的失败有两个不同来源——「这个 id 没有适配器」（路由，
   配置缺陷）与「适配器调用失败」（可能瞬时）；一个 `Result` 只能带一个错误类型，把两者压进
   `ProviderError` 就是把「配置错了」报成「provider 挂了」（§5.2 记的正是这种混淆的既有实例）。
@@ -283,12 +287,19 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 `crates/continuum-provider/src/` 下不出现 `impl ModelProvider for` / `impl ToolProvider for` /
 `impl Connector for` 的用例——判据是**模块面**（源码文本），不是行为。本条与本判据一并交实现计划。
 
-**这条守卫有明确的逃逸面，两侧都写明（「守卫须两侧都钉」）**：它匹配的是**三个字面拼法**。
-`impl crate::model::ModelProvider for DeepSeek`（全限定路径）、`impl <别名> for DeepSeek`（先 `use ... as`
-再实现）、或把实现 `include!` 进来，**都照样全绿**。故它是一个**下界**，不是封闭判定；
-那几种写法**没有照片**，落在评审（与 P2 对 `GateApproval`、P3A 对第二个 `Capability` 产生点的判据同形）。
-若要把上界也钉住，改法是让守卫**解析 trait 路径**（例如用 `syn` 解析 crate 内所有 `impl` 的 trait 路径
-并归一化后比对），而不是匹配文本——那会新增一个 dev 依赖（`syn`），本阶段不做，记在 §12 第 21 条。
+**这条守卫有明确的逃逸面，两侧都写明（「守卫须两侧都钉」）**：它匹配的是**三个字面拼法**，
+故它只在「文本写出来的就是这个拼法」时命中。**必须先做空白归一化**（裁决 C7，2026-10-05）：
+`impl  ModelProvider for`（多一个空格）、`impl\tModelProvider for`、`impl\nModelProvider for`
+这类**空白变体**一样是同一个拼法，**留一种不归一就是没关严**——守卫的用意本就是逮住文本拼法，
+故守卫在匹配前**折叠空白**（把连续空白折成一个空格）再比对，这四种是**同一个字面拼法**。
+
+**空白归一化之后仍逃逸的三种**（它们不是同一个拼法，而是换了写法）：
+`impl crate::model::ModelProvider for DeepSeek`（全限定路径）、`impl <别名> for DeepSeek`
+（先 `use ... as` 再实现）、或把实现 `include!` 进来——**都照样全绿**。故归一化后的守卫是一个**下界**，
+不是封闭判定；这三种写法**没有照片**，落在评审（与 P2 对 `GateApproval`、P3A 对第二个 `Capability`
+产生点的判据同形）。若要把上界也钉住，改法是让守卫**解析 trait 路径**（例如用 `syn` 解析 crate 内所有
+`impl` 的 trait 路径并归一化后比对），而不是匹配文本——那会新增一个 dev 依赖（`syn`），本阶段不做，
+记在 §12 第 21 条。
 
 ## 4.2 违规长什么样
 
@@ -559,10 +570,19 @@ F 的设计把「登记 `effect_class == Some(t)` 的工具时，`required_capab
 **变的是 `invoke` 的参数类型**；§10.3 亦已带订正注记。
 
 **位置：`invoke` 的请求参数换成一个只装得下「已授权」的请求类型。** 在 `continuum-provider` 内定义
-`AuthorizedToolInvocation<'_>`，装 `&AuthorizedTool` 与 `input: Value`；唯一的公开构造入口收
-`&AuthorizedTool`。由此：
+`AuthorizedToolInvocation<'_>`，装 `&AuthorizedTool` 与 `input: Value`。**可见性（裁决 C2，2026-10-05）**：
+
+- **类型 `pub`**——它出现在**公开 trait 的方法签名**里，必须 `pub`；
+- **构造入口 `pub(crate)`**——只有 `continuum-provider` 内的**注册表**构造它（`ProviderRegistry::invoke_tool`），
+  crate 外没有第二条；
+- **字段私有**——`authorization` / `input` 只经访问器读。
+
+由此：
 
 - **「没有 `AuthorizedTool` 就构造不出请求」在类型上成立**（与 §7.1 的 `invoke_tool` 同一取向）。
+  构造入口是 `pub(crate)` 之后这条**更强**：**crate 外的代码即使手里有一枚真的 `AuthorizedTool`，
+  也构造不出这个请求**——它只能把证明交给注册表（`invoke_tool`），由注册表替它构造。
+  即「谁构造」是注册表一个产生点，与「谁持有证明」（F）是两件事。
 - **工具 id 只有一个来源**：授权证明的 `tool_id()`。请求类型**不另收 `ToolId`**，故「出示的 id 与被
   授权的 id 不是一个」这一种可能**不存在**——与 §7.1 我把 `invoke_tool` 收成「`AuthorizedTool`+输入」
   是同一条判据的第二次应用。
@@ -597,8 +617,14 @@ F 的设计把「登记 `effect_class == Some(t)` 的工具时，`required_capab
 
 **谁产出、谁检查。**
 
-- **产出：F**（工具调用路径的调用方）。F 先调 `continuum_capability::authorize` 拿 `AuthorizedTool`，
-  再经 `ProviderRegistry::invoke_tool(&auth, input)`（§7.1）构造这个请求。**生产路径上没有第二个产生点。**
+按裁决 C2 的分工写清三步（三句各自独立，不混）：
+
+- **谁持有证明并传值：F**（工具调用路径的调用方）。F 先调 `continuum_capability::authorize` 拿
+  `AuthorizedTool`，把它与 `input` 一起交给 `ProviderRegistry::invoke_tool(&auth, input)`（§7.1）。
+- **谁构造请求：`continuum-provider` 的注册表**（`invoke_tool` 内那一次 `pub(crate)` 构造），
+  **生产路径上没有第二个产生点**；F 与任何 crate 外的代码都构造不出它（§7.5 可见性）。
+- **谁在签名里提到它：trait `ToolProvider` 与它的实现**——`invoke` 的参数类型是公开的，
+  故夹具要实现该 trait 时必须写出类型名。
 - **检查：适配器侧不再判一次授权**——强制点 (1) 已在 `authorize` 处判过；类型保证请求必持有一枚
   针对该 `tool_id()` 的 `AuthorizedTool`。适配器**可以**拿 `list_tools()` / `describe_tool` 的登记自检
   「这个 id 我服不服务」，但那是它自己的判断，不是本层强制的。
@@ -755,12 +781,12 @@ P3A 遗留第 8 条把这件事交给 C（`docs/superpowers/p3a-followups.md` �
 | 模型侧登记后按 id 发现 | 用 `FakeModel`：登记 → `model_for` 命中同一适配器 |
 | 模型侧：登记 id 与 `list_models` 不一致（§3.3 代价一） | 把 `FakeModel` 登记到它 `list_models` 不含的 id → `model_for` 命中、`describe_model` 报 `UnknownModel` |
 | 工具侧：公开面清单里没有返回裸适配器的入口 | 判据是**公开面清单** + 两份 **trybuild 编译失败样例**（`tool_for`、`tool_providers`）。**样例只能钉写下来的那几个拼法**——它证明不了「任何名字的入口都不存在」这一全称否定（§11 末段） |
-| 工具侧：授权证明进不到该进的地方 | trybuild 编译失败样例两条：**裸 `ToolInvocation` 传不进 `invoke_tool`**；**没有 `AuthorizedTool` 就构造不出 `AuthorizedToolInvocation`**（§7.5，故也调不了 trait 的 `invoke`） |
+| 工具侧：授权证明进不到该进的地方 | trybuild 编译失败样例两条：**外部 crate 构造不出 `AuthorizedToolInvocation`**（构造入口 `pub(crate)`；**持一枚真的 `AuthorizedTool` 也构造不出**，§7.5 裁决 C2）；**裸输入传不进 `invoke_tool`**（它只收 `AuthorizedTool` + 输入） |
 | 工具侧：门禁内的正常路径 | 起库 + capability 迁移 + `save_tool` 登记一条工具 → `authorize` 取 `AuthorizedTool` → `invoke_tool` 得到 `ToolResult`（**需 dev 依赖 `continuum-persist` / `tempfile`**，§10） |
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | 用 `FakeTool`：工具级失败要 `Ok(is_error: true)`、provider 级失败要 `Err`。**它钉的是夹具对这条约定的服从，不是真实适配器**（§7.1） |
 | 两个登记点不一致，向一（§3.3 代价三） | `save_tool` 登记 + **不**登记适配器 → `authorize` 过、`invoke_tool` 返回 `ToolCallError::Unregistered` |
 | 两个登记点不一致，向二（§3.3 代价三） | 登记适配器 + **不** `save_tool` → `authorize` 返回 `CapabilityError::UnknownTool`（在 `invoke_tool` 之前） |
-| 中立性（模块面，§4.2 形态 4） | 断言 `crates/continuum-provider/src/` 下不出现 `impl ModelProvider for` / `impl ToolProvider for` / `impl Connector for`（**只钉这三个字面拼法**；逃逸面见 §4.1 末段） |
+| 中立性（模块面，§4.2 形态 4） | 断言 `crates/continuum-provider/src/` 下不出现 `impl ModelProvider for` / `impl ToolProvider for` / `impl Connector for`——**匹配前先折叠空白**（故空白变体一路被逮住，裁决 C7），**只钉这三个字面拼法**（三种换写法的逃逸见 §4.1 末段） |
 | 模型侧未登记 id | `RegistryError::NotFound`，且断言**是哪一个变体** |
 | 工具侧未登记 id | `invoke_tool` 返回 `ToolCallError::Unregistered`（**不是** `Provider(..)`），且断言**是哪一个变体** |
 | 重复登记同一 id | `RegistryError::Duplicate`，且断言**是哪一个变体** |
@@ -838,7 +864,8 @@ P3A 对 crate 内第二个 `Capability` 产生点的既有判据同形：构造�
     方法与注册表**无生产调用方**（§9 的表要按这一条读）。**收件人：子项目 G。**
 13. **实现被写进 `continuum-provider` 内部**（§4.1 末段、§4.2 形态 4）：在 `src/` 里加一份具体适配器，
     不引用外部类型、不动 `ALLOWED`、**在 §11 那条模块面断言落地之前不红任何用例**。
-    该断言落地后，三个字面拼法会被它红掉；而全限定路径 / 别名 / `include!` 那几种仍全绿（§4.1 末段的逃逸面）。
+    该断言落地后，三个字面拼法**连同它们的空白变体**会被它红掉（匹配前折叠空白，裁决 C7）；
+    而全限定路径 / 别名 / `include!` 三种**换写法**仍全绿（§4.1 末段的逃逸面）。
     **没有行为照片**；守卫是 `lib.rs:1` 的定位声明 + 那条模块面断言 + 评审。
     **收件人：C 的实现计划**（把那条模块面断言落下来）。
 14. **「唯一调用入口」曾有两个实现——已解决（2026-10-05）**（§7.4 接缝一）：C 的
@@ -868,9 +895,10 @@ P3A 对 crate 内第二个 `Capability` 产生点的既有判据同形：构造�
     D 的设计原写「可用性由**调用方（驱动，子项目 F）**取好后传入」，**D 已自行订正为子项目 G**
     （其 §1.2 末段与「调用方是子项目 G，不是 F（已裁）」一节，F 那处措辞的来历留在了 D 自己的文档里）。
     **来历**：本条曾是一条要求 D 订正的接缝，现为回扫欠账，已还清。**收件人：无（已闭）。**
-21. **模块面守卫只钉三个字面拼法，逃逸面没有照片**（§4.1 末段、§11）：全限定 trait 路径、`use ... as`
-    别名、`include!` 三种写法仍全绿。要钉上界得让守卫**解析 trait 路径**（需 `syn` 之类的新 dev 依赖），
-    本阶段不做。**收件人：C 的实现计划**（先落字面拼法那版；要上界时再评估 `syn` 的代价）。
+21. **模块面守卫归一化空白后仍只钉三个字面拼法，三种换写法没有照片**（§4.1 末段、§11）：
+    **空白变体已由裁决 C7 关掉**（匹配前折叠空白）；全限定 trait 路径、`use ... as` 别名、`include!`
+    三种**换写法**仍全绿。要钉上界得让守卫**解析 trait 路径**（需 `syn` 之类的新 dev 依赖），本阶段不做。
+    **收件人：C 的实现计划**（先落「折叠空白 + 三个字面拼法」那版；要上界时再评估 `syn` 的代价）。
 22. **`ToolInvocation` 删掉——已裁（2026-10-05）**（§7.5）：裁决见 set-decisions §五、
     `p3bcdf-followups.md` §二之二。**判据**：它失去生产调用方、留着即**同一概念两个类型**。
     **与 §7.5 同批做，不另起一波**；五处落地清单（core 定义 / provider trait / `tests/fake_provider.rs`
