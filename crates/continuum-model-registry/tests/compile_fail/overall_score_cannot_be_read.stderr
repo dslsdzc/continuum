@@ -1,0 +1,5 @@
+error[E0599]: no method named `overall_score` found for reference `&ModelProfile` in the current scope
+  --> tests/compile_fail/overall_score_cannot_be_read.rs:12:13
+   |
+12 |     profile.overall_score()
+   |             ^^^^^^^^^^^^^ method not found in `&ModelProfile`

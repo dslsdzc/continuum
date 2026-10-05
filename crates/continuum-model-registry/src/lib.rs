@@ -15,13 +15,15 @@
 //!
 //! Task 1 建骨架与两个标量取值类型 [`Ratio`] / [`SkillScore`] 及错误类型 [`ProfileError`]；
 //! Task 2 补 §248 的九维 [`SkillDimension`]、§24 的观测 [`SkillObservation`] 与
-//! 向量 [`SkillVector`]（含 [`current_observation`]）。`ModelProfile` 本体、生命周期、
-//! 持久化、路由、阶梯、预算各自在后续 task 落在自己的模块里。
+//! 向量 [`SkillVector`]（含 [`current_observation`]）；Task 3 补 §247 的 [`ModelProfile`]
+//! 本体的十二字段，并以 `tests/type_level.rs` 钉住它的两处不可表达性（crate 外构造不出来、
+//! 读不到总分）。生命周期、持久化、路由、阶梯、预算各自在后续 task 落在自己的模块里。
 
 pub mod error;
 pub mod profile;
 
 pub use error::ProfileError;
 pub use profile::{
-    current_observation, Ratio, SkillDimension, SkillObservation, SkillScore, SkillVector,
+    current_observation, ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore,
+    SkillVector,
 };

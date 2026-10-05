@@ -1,0 +1,29 @@
+error[E0451]: fields `id`, `version`, `provider`, `model_revision`, `modalities`, `tools`, `skill_vector`, `failure_modes`, `latency_profile`, `cost_profile`, `evidence_count` and `confidence` of struct `ModelProfile` are private
+  --> tests/compile_fail/model_profile_cannot_be_built.rs:17:9
+   |
+16 |     let _ = ModelProfile {
+   |             ------------ in this type
+17 |         id: ModelId::new("model-alpha"),
+   |         ^^ private field
+18 |         version: String::from("version-beta"),
+   |         ^^^^^^^ private field
+19 |         provider: String::from("provider-gamma"),
+   |         ^^^^^^^^ private field
+20 |         model_revision: String::from("revision-delta"),
+   |         ^^^^^^^^^^^^^^ private field
+21 |         modalities: vec![String::from("text")],
+   |         ^^^^^^^^^^ private field
+22 |         tools: vec![ToolId::new("tool-epsilon")],
+   |         ^^^^^ private field
+23 |         skill_vector: SkillVector::from_current(Vec::new()),
+   |         ^^^^^^^^^^^^ private field
+24 |         failure_modes: vec![String::from("loses constraints in very long tasks")],
+   |         ^^^^^^^^^^^^^ private field
+25 |         latency_profile: Some(Latency),
+   |         ^^^^^^^^^^^^^^^ private field
+26 |         cost_profile: Some(Cost),
+   |         ^^^^^^^^^^^^ private field
+27 |         evidence_count: 42,
+   |         ^^^^^^^^^^^^^^ private field
+28 |         confidence: Ratio::try_new(0.94).unwrap(),
+   |         ^^^^^^^^^^ private field

@@ -6,11 +6,23 @@ rust-version.workspace = true
 
 [dependencies]
 # 本 crate 的使用点：`error.rs` 的 `ProfileError` 派生 `thiserror::Error`。
-# 这是本 task 唯一声明的依赖。
-#
-# 设计 §8.2 的另外三条边（`continuum-core` 的 `ModelId` / `ToolId` / `ProviderHealth`、
-# `continuum-capability` 的 `Cost` / `Latency`、`continuum-persist` 的 `Tx` / `Migration` /
-# `Value` / `kind_name` / `PersistError`）**不在这里一次声明齐**：本 task 对内部 crate 的
-# 引用为零，一次声明齐会让 `dependency_direction.rs` 的 `ALLOWED` 条目在中间若干 task 里
-# 说谎。叶子 crate 的条目记的是**实际依赖**，故三条边各由需要它的那个 task 增量加。
 thiserror = { workspace = true }
+# Task 3 起的使用点：`profile.rs` 的 `ModelProfile.id` 取 `ModelId`（§315，设计 §2.1）、
+# `tools[]` 的元素取 `ToolId`（§252/§316）。两个都是**既有类型**，本 crate 一个都不新建
+# ——同一件事两个类型是本项目一贯判为 Critical 的那一类。
+continuum-core = { path = "../continuum-core" }
+# Task 3 起的使用点：`profile.rs` 的 `latency_profile` / `cost_profile` 复用 `Cost` /
+# `Latency` 两个**类型**（设计 §2.5）。**不另建一对自己的单位结构体**，否则
+# 「一个成本画像」就有两套词汇表。本层只取这两个类型，**不取能力凭据**——
+# `Capability` / `AuthorizedTool` 在本 crate 里零出现（设计 §8.4）。
+continuum-capability = { path = "../continuum-capability" }
+
+[dev-dependencies]
+# Task 3 起的使用点：`tests/type_level.rs` 用编译失败样例钉住「画像 crate 外构造不出来」
+# 与「读不到总分」（设计 §2.1、§2.3）。与 continuum-capability 的用法同形。
+trybuild = { workspace = true }
+
+# 设计 §8.2 的第三条边（`continuum-persist` 的 `Tx` / `Migration` / `Value` /
+# `kind_name` / `PersistError`）**不在这里一次声明齐**：本 task 对它的引用为零，
+# 一次声明齐会让 `dependency_direction.rs` 的 `ALLOWED` 条目在中间若干 task 里说谎。
+# 叶子 crate 的条目记的是**实际依赖**，故那条边由需要它的那个 task（Task 5）增量加。

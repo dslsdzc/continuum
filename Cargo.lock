@@ -147,7 +147,10 @@ dependencies = [
 name = "continuum-model-registry"
 version = "0.1.0"
 dependencies = [
+ "continuum-capability",
+ "continuum-core",
  "thiserror",
+ "trybuild",
 ]
 
 [[package]]

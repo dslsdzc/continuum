@@ -2,7 +2,11 @@
 //!
 //! [`Ratio`] 与 [`SkillScore`] 是标量取值；[`SkillDimension`] / [`SkillObservation`] /
 //! [`SkillVector`] 与 [`current_observation`] 是 §24 的**时间序列观测**与 §248 的**九维向量**
-//! （Task 2）。`ModelProfile` 本体在后续 task 落在同一文件里。
+//! （Task 2）；[`ModelProfile`] 本体是 §247 的十二字段（Task 3）。
+
+use continuum_capability::{Cost, Latency};
+use continuum_core::model::ModelId;
+use continuum_core::tool::ToolId;
 
 use crate::error::ProfileError;
 
@@ -329,4 +333,332 @@ impl SkillVector {
 /// 被钉的契约不存在，照片写不出来。
 pub fn current_observation(series: &[SkillObservation]) -> Option<&SkillObservation> {
     series.iter().max_by_key(|observation| observation.version())
+}
+
+/// §247（`docs/spec/05-normative.md:802-824`）的模型画像，十二个字段。
+///
+/// # 字段私有：**crate 外没有构造入口**
+///
+/// **措辞与保证等强**：被挡住的是 **crate 外构造**；crate 内的 `try_new` 是 crate 可见的
+/// （`persist::load_profile` 要用它）。若写成「唯一产生点」就过头了——**它是「crate 外无入口」，
+/// 不是「全仓只有一个构造点」**（设计 §2.1）。
+///
+/// 这条保证与 `RoutableModel` 的闸门**同为结构性**：若画像能在内存里自由构造，一个从未落库、
+/// 从未过画像流水线的模型就能被送进 `rank`，§21 的「新增模型不能直接进入自动 Router」随之失效
+/// （设计 §2.1、§4.2）。
+///
+/// 两条通道各有一张照片，**不合并**：
+/// - 结构体字面量 → `tests/compile_fail/model_profile_cannot_be_built.rs`（E0451，字段私有）；
+/// - 构造函数 → `tests/compile_fail/model_profile_has_no_constructor.rs`（E0624，`try_new` 非 `pub`）。
+///
+/// 两张都**不是「名字无关」的证明**：它们钉的是这两个名字（字段名与 `try_new`）在 crate 外
+/// 不可用，钉不住「今后不会有人加一个别的名字的公开构造函数」——名字无从枚举。
+/// 这一限制据实写在这里，不假装覆盖到了。
+///
+/// # 用既有的类型，不新建第二个
+///
+/// `id` 取 §315 的 [`ModelId`]、`tools[]` 的元素取 §252/§316 的 [`ToolId`]、
+/// `latency_profile` / `cost_profile` 复用 `continuum-capability` 的 [`Latency`] / [`Cost`]
+/// （设计 §2.1、§2.5）——同一件事两个类型是本项目一贯判为 Critical 的那一类。
+///
+/// **本层不给这两个画像取值域**：它们是**单位结构体**，`Option` 的 `Some` 只表示
+/// 「画像已登记」，与 P3A 的 `tool.cost` 列同一语义（`None` = 尚未登记）。取值域要等有单位
+/// 可依据时才有（设计 §2.5、§11 第 15 条）。
+///
+/// # 不擅自补字段
+///
+/// §81 另要 `deployment` 与 `capability fingerprint`，P3A 还把 `trust` 一并判给过本层：
+/// **§247 的十二个字段里没有它们中的任何一个**，故一处都不加（设计 §2.1、§2.5，
+/// §11 第 7 / 23 条；`trust` 的退件理由见设计的 §2.5 末节）。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelProfile {
+    id: ModelId,
+    version: String,
+    provider: String,
+    model_revision: String,
+    modalities: Vec<String>,
+    tools: Vec<ToolId>,
+    skill_vector: SkillVector,
+    failure_modes: Vec<String>,
+    latency_profile: Option<Latency>,
+    cost_profile: Option<Cost>,
+    evidence_count: u64,
+    confidence: Ratio,
+}
+
+impl ModelProfile {
+    /// 十二个字段按 §247 的顺序全量传入。**crate 内可见**（`persist::load_profile` 与测试用）。
+    ///
+    /// 无 `Result`：十二个字段的类型各自在**自己的构造期**就把关（[`Ratio`] / [`SkillScore`] /
+    /// [`SkillObservation`]），到这一步没有可再失败的判据——故不发明一个永不会出现的 `Err`
+    /// （设计 §2.4 末段：构造失败在构造期就被拒）。
+    ///
+    /// # 为什么带 `#[allow(dead_code)]`
+    ///
+    /// 本函数在**非测试**构建里目前没有调用方：唯一的生产路径 `persist::load_profile` 是
+    /// Task 5 的产物。crate 内测试是它的调用方，但那些在 `cfg(test)` 之下，压不住普通构建的
+    /// `dead_code` 警告。三条路的取舍：删掉它，crate 内测试就构造不出画像（字段私有）；
+    /// 改成 `pub`，直接推翻本类型唯一的保证（见类型文档）；留 `allow` 并写明理由——
+    /// 与 P3C 计划第 229 行对同类情形的处置同形（「0 warning」是硬约束）。
+    /// **Task 5 接上 `load_profile` 之后这一行应当删掉**：那时它有真调用方，`allow` 会变成
+    /// 一条掩盖真死代码的豁免。
+    #[allow(dead_code)]
+    pub(crate) fn try_new(
+        id: ModelId,
+        version: String,
+        provider: String,
+        model_revision: String,
+        modalities: Vec<String>,
+        tools: Vec<ToolId>,
+        skill_vector: SkillVector,
+        failure_modes: Vec<String>,
+        latency_profile: Option<Latency>,
+        cost_profile: Option<Cost>,
+        evidence_count: u64,
+        confidence: Ratio,
+    ) -> Self {
+        Self {
+            id,
+            version,
+            provider,
+            model_revision,
+            modalities,
+            tools,
+            skill_vector,
+            failure_modes,
+            latency_profile,
+            cost_profile,
+            evidence_count,
+            confidence,
+        }
+    }
+
+    /// §247 的 `id`（§315 的 [`ModelId`]）。
+    pub fn id(&self) -> &ModelId {
+        &self.id
+    }
+
+    /// §247 的 `skill_vector`（§248 的九维，见 [`SkillVector`]）。
+    pub fn skill_vector(&self) -> &SkillVector {
+        &self.skill_vector
+    }
+
+    /// §247 的 `confidence`：`[0,1]` 的 [`Ratio`]，**不是 `f64`**。
+    ///
+    /// 越界与非有限的入参在 [`Ratio`] 的构造期即被拒，故画像里装不进一个越界置信度
+    /// （设计 §2.1：取值照 §84 的示例 `0.94` / `0.51` 推导）。
+    pub fn confidence(&self) -> Ratio {
+        self.confidence
+    }
+
+    /// §247 的 `evidence_count`。
+    pub fn evidence_count(&self) -> u64 {
+        self.evidence_count
+    }
+
+    /// §247 的 `modalities[]`。**元素词表规范未定义**（§12 未给封闭集合），故是 `String`
+    /// 而非某个本层自造的枚举（设计 §2.1、§11 第 8 条）。
+    pub fn modalities(&self) -> &[String] {
+        &self.modalities
+    }
+
+    /// §247 的 `tools[]`：元素是既有的 [`ToolId`]（§252/§316）。
+    pub fn tools(&self) -> &[ToolId] {
+        &self.tools
+    }
+
+    /// §247 的 `failure_modes[]`。§83 给的是自由文本例
+    /// （`loses constraints in very long tasks` 等），**无封闭词表**（设计 §2.1、§11 第 9 条）。
+    pub fn failure_modes(&self) -> &[String] {
+        &self.failure_modes
+    }
+
+    // 其余五个字段（`version` / `provider` / `model_revision` / `latency_profile` /
+    // `cost_profile`）的访问器按消费方需要增补，**不预先铺开**（设计 §2.1）。
+}
+
+// ===== `ModelProfile` 的字段级用例（crate 内） =====
+//
+// 计划 Step 1 的第三条用例名是 `a_profile_has_no_total_score`。**它没有运行期形态**，
+// 故这里没有同名的 `#[test]`——「读不到总分」是不可表达性命题，运行期用例只能证明
+// 「我没这么读」，证明不了「读不到」。它的照片在
+// `tests/compile_fail/overall_score_cannot_be_read.rs`（判据是编译失败，E0599）。
+// **留名于此，以免被当成漏项**（计划 Task 3 Step 1、设计 §2.3 第 3 条 (a)）。
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use continuum_capability::{Cost, Latency};
+    use continuum_core::model::ModelId;
+    use continuum_core::tool::ToolId;
+
+    /// 十二个字段**全取非默认值、且同类型的两两互不相同**。
+    ///
+    /// 这样取值的理由就是这条用例的红的条件：全零/空串/`None` 会让「某字段漏存」与
+    /// 「两个同类型字段写串」这两类缺陷**静默**——比如 `version` 与 `provider` 都被写成
+    /// 空串时，对调它们也看不出来。
+    fn a_profile() -> ModelProfile {
+        ModelProfile::try_new(
+            ModelId::new("model-alpha"),
+            String::from("version-beta"),
+            String::from("provider-gamma"),
+            String::from("revision-delta"),
+            vec![String::from("text"), String::from("image")],
+            vec![ToolId::new("tool-epsilon"), ToolId::new("tool-zeta")],
+            SkillVector::from_current(vec![(
+                SkillDimension::Coding,
+                SkillObservation::try_new(
+                    SkillScore::try_new(9.2).expect("9.2 应是合法评分"),
+                    Ratio::try_new(0.8).expect("0.8 应是合法置信度"),
+                    7,
+                    3,
+                    (1_700_000_000_000, 1_700_000_001_000),
+                )
+                .expect("该时间窗应自洽"),
+            )]),
+            vec![String::from("loses constraints in very long tasks")],
+            Some(Latency),
+            Some(Cost),
+            42,
+            Ratio::try_new(0.94).expect("0.94 应是合法置信度"),
+        )
+    }
+
+    /// §247 的十二个字段**逐项各断言一次**（不抽代表）。
+    ///
+    /// 红的条件两条，都在 `try_new` 的字段赋值上：
+    /// - **漏存**：某个字段没接上入参（本夹具的值都不是该类型的默认构造，故不等即红）；
+    /// - **写串**：两个同类型字段互换（如 `version` ↔ `provider`，本夹具的值互不相同，故不等即红）。
+    ///
+    /// 十二项里 `skill_vector` 的断言**弱一档**：`ModelProfile` 里没有第二个 `SkillVector`
+    /// 字段可供写串，故它只钉「存下来的确是传进去的那一个」。这一点据实写在此处，
+    /// 不冒充成与其它十一项等强。
+    #[test]
+    fn a_profile_carries_the_twelve_fields_of_247() {
+        let profile = a_profile();
+
+        assert_eq!(profile.id, ModelId::new("model-alpha"), "§247 第 1 项 id");
+        assert_eq!(profile.version, "version-beta", "§247 第 2 项 version");
+        assert_eq!(profile.provider, "provider-gamma", "§247 第 3 项 provider");
+        assert_eq!(
+            profile.model_revision, "revision-delta",
+            "§247 第 4 项 model_revision"
+        );
+        assert_eq!(
+            profile.modalities,
+            vec![String::from("text"), String::from("image")],
+            "§247 第 5 项 modalities[]"
+        );
+        assert_eq!(
+            profile.tools,
+            vec![ToolId::new("tool-epsilon"), ToolId::new("tool-zeta")],
+            "§247 第 6 项 tools[]"
+        );
+        assert_eq!(
+            profile.skill_vector,
+            SkillVector::from_current(vec![(
+                SkillDimension::Coding,
+                SkillObservation::try_new(
+                    SkillScore::try_new(9.2).expect("9.2 应是合法评分"),
+                    Ratio::try_new(0.8).expect("0.8 应是合法置信度"),
+                    7,
+                    3,
+                    (1_700_000_000_000, 1_700_000_001_000),
+                )
+                .expect("该时间窗应自洽"),
+            )]),
+            "§247 第 7 项 skill_vector"
+        );
+        assert_eq!(
+            profile.failure_modes,
+            vec![String::from("loses constraints in very long tasks")],
+            "§247 第 8 项 failure_modes[]"
+        );
+        assert_eq!(
+            profile.latency_profile,
+            Some(Latency),
+            "§247 第 9 项 latency_profile：`Some` 只表示「画像已登记」"
+        );
+        assert_eq!(
+            profile.cost_profile,
+            Some(Cost),
+            "§247 第 10 项 cost_profile：`Some` 只表示「画像已登记」"
+        );
+        assert_eq!(profile.evidence_count, 42, "§247 第 11 项 evidence_count");
+        assert_eq!(
+            profile.confidence,
+            Ratio::try_new(0.94).expect("0.94 应是合法置信度"),
+            "§247 第 12 项 confidence"
+        );
+
+        // 七个访问器**逐项各断言一次**：它们也要给出所存的那个字段——「写串」在访问器
+        // 这一层同样可能，且更隐蔽（`modalities()` 返回 `&self.failure_modes` 是能编译的，
+        // 两者类型都是 `Vec<String>`）。
+        assert_eq!(profile.id().as_str(), "model-alpha", "访问器 id()");
+        assert_eq!(
+            profile.skill_vector().get(SkillDimension::Coding),
+            Some(&SkillObservation::try_new(
+                SkillScore::try_new(9.2).expect("9.2 应是合法评分"),
+                Ratio::try_new(0.8).expect("0.8 应是合法置信度"),
+                7,
+                3,
+                (1_700_000_000_000, 1_700_000_001_000),
+            )
+            .expect("该时间窗应自洽")),
+            "访问器 skill_vector()"
+        );
+        assert_eq!(
+            profile.confidence(),
+            Ratio::try_new(0.94).expect("0.94 应是合法置信度"),
+            "访问器 confidence()"
+        );
+        assert_eq!(profile.evidence_count(), 42, "访问器 evidence_count()");
+        assert_eq!(
+            profile.modalities(),
+            vec![String::from("text"), String::from("image")],
+            "访问器 modalities()"
+        );
+        assert_eq!(
+            profile.tools(),
+            vec![ToolId::new("tool-epsilon"), ToolId::new("tool-zeta")],
+            "访问器 tools()"
+        );
+        assert_eq!(
+            profile.failure_modes(),
+            vec![String::from("loses constraints in very long tasks")],
+            "访问器 failure_modes()"
+        );
+    }
+
+    /// `confidence` 是 [`Ratio`]，**不是 `f64`**。
+    ///
+    /// 两件事各钉一次：
+    /// - **类型**：下面那行的类型标注是 `Ratio` —— 字段若被换成 `f64`（或 `Option<Ratio>`），
+    ///   这里编译不过；
+    /// - **取值**：越界与非有限的入参在 [`Ratio`] 的**构造期**即被拒，而 `try_new` 收的
+    ///   就是这个类型，故画像里**装不进**一个越界置信度——没有第二条通道。
+    #[test]
+    fn the_confidence_is_a_ratio_and_nothing_else() {
+        let profile = a_profile();
+
+        let confidence: Ratio = profile.confidence();
+        assert_eq!(
+            confidence,
+            Ratio::try_new(0.94).expect("0.94 应是合法置信度")
+        );
+        // 存下来的就是传进去的那一个，不是按某个默认值重算的。
+        assert_eq!(profile.confidence, confidence);
+        assert_eq!(profile.confidence.get(), 0.94);
+
+        assert_eq!(
+            Ratio::try_new(1.5),
+            Err(ProfileError::OutOfRange { value: 1.5 }),
+            "越界置信度在 `Ratio` 的构造期被拒"
+        );
+        assert_eq!(
+            Ratio::try_new(f64::NAN),
+            Err(ProfileError::NotFinite),
+            "非有限的置信度也构造不出来（且不归 `OutOfRange`）"
+        );
+    }
 }

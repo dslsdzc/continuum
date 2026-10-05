@@ -1,0 +1,16 @@
+error[E0624]: associated function `try_new` is private
+  --> tests/compile_fail/model_profile_has_no_constructor.rs:18:27
+   |
+18 |       let _ = ModelProfile::try_new(
+   |                             ^^^^^^^ private associated function
+   |
+  ::: src/profile.rs
+   |
+   | /     pub(crate) fn try_new(
+   | |         id: ModelId,
+   | |         version: String,
+   | |         provider: String,
+...  |
+   | |         confidence: Ratio,
+   | |     ) -> Self {
+   | |_____________- private associated function defined here

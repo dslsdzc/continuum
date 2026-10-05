@@ -119,10 +119,16 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-secrets",
         ],
     ),
-    // P3 资源层（子项目 D）：模型画像、Model Registry 与 Router。本子项目自 Task 1 起
-    // 只依赖 core（ModelId / ToolId / ProviderHealth）、capability（Cost / Latency 两个
-    // **类型**，不取能力凭据）、persist（三张表经 Tx）。三条边由需要它们的 task 增量加。
-    ("continuum-model-registry", &[]),
+    // P3 资源层（子项目 D）：模型画像、Model Registry 与 Router。设计 §8.2 的三条边是
+    // core（ModelId / ToolId / ProviderHealth）、capability（Cost / Latency 两个**类型**，
+    // 不取能力凭据）、persist（三张表经 Tx）；边由需要它们的 task 增量加。
+    // Task 3 起登记前两条：`profile.rs` 的 `ModelProfile` 同时用到 `ModelId` / `ToolId`
+    // 与 `Cost` / `Latency`（设计 §2.1、§2.5）——**数组按字母序**，与 C 的 provider 条目同形。
+    // 第三条（persist）本 task 零引用，故不登记（零使用的边即假边）；它由 Task 5 加。
+    (
+        "continuum-model-registry",
+        &["continuum-capability", "continuum-core"],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
