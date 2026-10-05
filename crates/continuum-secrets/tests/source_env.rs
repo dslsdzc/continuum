@@ -37,16 +37,27 @@ fn capability(scope: &str, expiry: i64) -> Capability {
 }
 
 #[test]
-fn the_variable_name_is_the_prefix_plus_the_sanitized_scope() {
-    // 非字母数字（`/`、`.`、`-`）一律折为 `_`，字母转大写。
+fn the_variable_name_is_the_prefix_plus_the_escaped_scope() {
+    // 非字母数字（含字面 `_`）逐字节写成 `_` + 两位大写十六进制；字母转大写。
     assert_eq!(
         env_var_name("CONTINUUM_SECRET_", "repo/X"),
-        "CONTINUUM_SECRET_REPO_X"
+        "CONTINUUM_SECRET_REPO_2FX"
     );
-    assert_eq!(env_var_name("P_", "a.b-c/d"), "P_A_B_C_D");
-    // 折叠不是单射：`repo/X` 与 `repo.X` 得到同一个变量名。本阶段接受这一限制
-    // （作用域含这类字符时以文件源为准，文件源按作用域逐字匹配、无碰撞）。
-    assert_eq!(env_var_name("P_", "repo/X"), env_var_name("P_", "repo.X"));
+    assert_eq!(env_var_name("P_", "a.b-c/d"), "P_A_2EB_2DC_2FD");
+    assert_eq!(env_var_name("P_", "repo_a"), "P_REPO_5FA");
+
+    // 编码是单射：四个只差一个标点的作用域给出四个互不相同的变量名——它们不会
+    // 共用一份材料（文件源同样视它们为四个不同的作用域）。
+    let names = [
+        env_var_name("P_", "repo/a-b"),
+        env_var_name("P_", "repo/a_b"),
+        env_var_name("P_", "repo/a.b"),
+        env_var_name("P_", "repo/a/b"),
+    ];
+    let mut unique = names.to_vec();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 4, "编码塌缩了：{names:?}");
 }
 
 #[test]

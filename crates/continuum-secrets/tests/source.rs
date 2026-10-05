@@ -165,6 +165,22 @@ fn every_rejection_reason_of_the_parser_has_a_photo() {
 }
 
 #[test]
+fn a_crlf_line_ending_is_tolerated() {
+    // 行尾的 `\r` 不属于第三个字段（否则到期时刻会被解析成「9000\r」而拒收）。
+    let (_dir, source) = source_with(&format!("repo/X\t{SECRET_A}\t{FAR}\r\n"));
+    let rt = runtime(source);
+
+    let credential = rt
+        .issue(&capability("repo/X", FAR), 0)
+        .expect("应能签发");
+
+    assert_eq!(
+        rt.material(&credential, 0).expect("应取得到").expose(),
+        SECRET_A.as_bytes()
+    );
+}
+
+#[test]
 fn a_failed_reload_keeps_the_previous_entries() {
     let dir = tempfile::tempdir().expect("临时目录应建得出");
     let path = dir.path().join("secrets.tsv");

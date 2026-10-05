@@ -71,7 +71,8 @@ pub trait CredentialSource {
 /// 文件凭据源：每行一条 `作用域<TAB>材料<TAB>到期时刻`，`#` 开头与空行忽略。
 ///
 /// 作用域按**逐字匹配**，不做任何规范化：`repo/X` 与 `repo.X` 是两条不同的作用域
-/// （与环境变量源的折叠命名不同，见 [`env_var_name`]）。
+/// ——与 [`env_var_name`] 的编码同口径：那边的编码也是单射，故两个源对「作用域是
+/// 什么」不会各说各话。
 ///
 /// 材料字段不得含 TAB 或换行（文件是按行按 TAB 切分的）。这一约束是格式的一部分，
 /// 不是「尽量」。
@@ -254,21 +255,31 @@ impl EnvCredentialSource {
     }
 }
 
-/// 作用域 → 环境变量名：`prefix` + 作用域，字母数字转大写、其余字符折为 `_`。
+/// 作用域 → 环境变量名：`prefix` + 作用域的**单射**编码。
 ///
-/// **折叠不是单射**：`repo/X` 与 `repo.X` 折成同一个变量名。本阶段接受这一限制——
-/// 作用域含这类字符时以**文件源**为准（文件源按作用域逐字匹配，无碰撞）。
-/// 本条是记录在案的限制，不是「已保证」：照片是 `tests/source_env.rs` 的
-/// `the_variable_name_is_the_prefix_plus_the_sanitized_scope`，其中一节直接断言两者
-/// 相等。
+/// 编码逐**字节**：ASCII 字母数字转大写原样留下；其余每个字节（含字面 `_`）写成
+/// `_` + 两位大写十六进制。故 `repo/X` → `REPO_2FX`、`repo_a` → `REPO_5FA`。
+///
+/// **为什么必须单射**：环境变量名的字母表比作用域窄，若不转义，`repo/a-b`、
+/// `repo/a_b`、`repo/a.b`、`repo/a/b` 会折成同一个变量名——两个不同的作用域共用一份
+/// 材料，而**文件源**按作用域逐字匹配、视它们为四个不同作用域：两个源对「作用域是
+/// 什么」的口径就会不一致，且环境变量源会**静默**把一份材料发给另一个作用域。
+/// 转义后不会有这种塌缩；`_` 本身也被转义，故 `_2F` 不会被读成字面下划线接 `2F`。
+///
+/// 编码是单射（可逆）的：`_` 后必接两位十六进制，别处不出现 `_`。
+/// 照片：`tests/source_env.rs` 的 `the_variable_name_is_the_prefix_plus_the_escaped_scope`
+/// ——其中逐项断言 `repo/X` 与 `repo.X`、`repo_a` 与 `repo-a` 编码后**不相等**。
 pub fn env_var_name(prefix: &str, scope: &str) -> String {
     let mut name = String::with_capacity(prefix.len() + scope.len());
     name.push_str(prefix);
-    for ch in scope.chars() {
-        if ch.is_ascii_alphanumeric() {
-            name.push(ch.to_ascii_uppercase());
+    for byte in scope.bytes() {
+        if byte.is_ascii_alphanumeric() {
+            name.push(char::from(byte.to_ascii_uppercase()));
         } else {
+            // 两位大写十六进制，定宽 → 解码无歧义。
             name.push('_');
+            name.push(char::from_digit(u32::from(byte >> 4), 16).unwrap().to_ascii_uppercase());
+            name.push(char::from_digit(u32::from(byte & 0x0f), 16).unwrap().to_ascii_uppercase());
         }
     }
     name

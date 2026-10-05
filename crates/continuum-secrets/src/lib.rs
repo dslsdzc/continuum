@@ -24,8 +24,12 @@
 //! # 凭据不落库
 //!
 //! [`Capability`](continuum_capability::Capability) 与 [`Credential`] 都**不落库**
-//! （设计 §2.3、§7），本 crate 也不依赖任何持久化 crate。材料只在
-//! [`SecretsRuntime::material`] 一处交出。
+//! （设计 §2.3、§7），本 crate 也不依赖任何持久化 crate。
+//!
+//! 材料有两处出口，**不要把其中一处读成唯一**：强制执行点是
+//! [`SecretsRuntime::material`]（唯一把「能力是否容许、凭据是否被取代、是否到期」
+//! 合在一处判的路径），另一处是凭据源自己的 [`CredentialSource::fetch`]——公开的
+//! trait 方法，源也是公开可构造的，故它取材料时**不经过**上面三项判定。
 //!
 //! # 与 §100 的据实偏离
 //!

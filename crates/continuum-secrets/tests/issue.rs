@@ -269,13 +269,52 @@ fn no_error_message_embeds_the_material() {
     let credential = expired_rt.issue(&cap, 0).expect("应能签发");
     let expired = expired_rt.material(&credential, 1_000).unwrap_err();
 
-    for err in [superseded, expired] {
+    // 能力已失效被拒：源手里也有材料，消息同样不许带。
+    let rt = runtime(FakeSource::covering("测试源", FAR, SECRET));
+    let dead_capability = capability("repo/X", 1);
+    let capability_expired = rt
+        .issue(&dead_capability, 1)
+        .expect_err("失效的能力应拒签");
+
+    // 源不覆盖该作用域：源结构里装的就是 SECRET，错误只许提源名与作用域。
+    let not_covering = runtime(FakeSource::covering_nothing("测试源"));
+    let scope_not_covered = not_covering.issue(&cap, 0).unwrap_err();
+
+    for err in [
+        superseded,
+        expired,
+        capability_expired,
+        scope_not_covered,
+    ] {
         let rendered = err.to_string();
         let debugged = format!("{err:?}");
         assert!(
             !rendered.contains(SECRET) && !debugged.contains(SECRET),
             "错误消息里出现了材料: {rendered} / {debugged}"
         );
+    }
+}
+
+#[test]
+fn a_credential_from_another_runtime_is_rejected() {
+    let a = runtime(FakeSource::covering("源A", FAR, SECRET));
+    let b = runtime(FakeSource::covering("源B", FAR, "另一份材料"));
+    let cap = capability("repo/X", FAR);
+    let credential = a.issue(&cap, 0).expect("应能签发");
+
+    // 对照臂：A 自己的凭据在 A 上可用。
+    assert_eq!(
+        a.material(&credential, 0)
+            .expect("A 自己的凭据应可用")
+            .expose(),
+        SECRET.as_bytes()
+    );
+
+    // A 的凭据拿到 B 上：代号是全局发号，两个运行时的当前代号不可能相等，故被拒。
+    // 若不拒，B 会按 **B 的源**给出同一作用域的材料——一次混淆代理。
+    match b.material(&credential, 0) {
+        Err(SecretsError::Superseded { .. }) => {}
+        other => panic!("另一个运行时的凭据应被拒，实得 {other:?}"),
     }
 }
 

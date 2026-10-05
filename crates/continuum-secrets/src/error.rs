@@ -1,10 +1,21 @@
 //! 本 crate 的错误类型。
 //!
-//! **没有一条消息会带出凭据材料**：可能提到材料的地方只有「主题是谁」（源名与作用域），
-//! 内容一律不进消息。`SourceFormat` 的 `reason` 取 `&'static str` 而不是拼串，正是让
-//! 「把出错的那一行原样带出去」在**类型上写不出来**。照片：`tests/issue.rs` 的
-//! `no_error_message_embeds_the_material`，与 `tests/source.rs` 的
-//! `a_malformed_entry_is_rejected_without_echoing_the_line`。
+//! **七个变体的消息都不带凭据材料**，逐个体给依据（枚举式断言逐项有照片或逐项给
+//! 「为什么带不了」）：
+//!
+//! - **有照片的五个**（这些变体产生时，材料确实在运行时的源手里）：
+//!   `Superseded`、`CredentialExpired`、`Capability`、`ScopeNotCovered` 由
+//!   `tests/issue.rs` 的 `no_error_message_embeds_the_material` 四条消息一起钉
+//!   （断言 `Display` 与 `Debug` 都不含材料）；`SourceFormat` 由 `tests/source.rs` 的
+//!   `a_malformed_entry_is_rejected_without_echoing_the_line` 与
+//!   `every_rejection_reason_of_the_parser_has_a_photo` 钉——它的 `reason` 取
+//!   `&'static str` 而不是拼串，正是让「把出错的那一行原样带出去」在**类型上写不出来**。
+//! - **结构上带不了的两个**：`SourceIo` 的 `message` 来自 `std::io::Error` 的显示文本
+//!   （只有路径与失败原因，文件内容从不进这条消息）；`EmptyMaterial` 的产生条件是取值
+//!   **恰为空**，没有内容可带。
+//!
+//! 其余字段全是「主题是谁」（源名、作用域、行号、代号）与到期时刻这两类数，
+//! 内容一律不进消息。
 
 use continuum_capability::CapabilityError;
 

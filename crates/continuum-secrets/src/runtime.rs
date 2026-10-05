@@ -14,10 +14,27 @@
 //! 3. **没有「取全部」的入口**——只有按能力逐枚签发的
 //!    [`SecretsRuntime::issue`]（`tests/compile_fail/there_is_no_way_to_ask_for_all_secrets.rs`）。
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use continuum_capability::Capability;
 
 use crate::error::SecretsError;
 use crate::source::{CredentialSource, SecretMaterial};
+
+/// 全局单调的代号发号器。
+///
+/// **为什么是全局而不是每运行时的计数器**：凭据的句柄只是一个代号，判定「凭据是否
+/// 已被取代」就是比代号是否相等。若代号按运行各自从 0 数起，同进程里 A 签出的凭据
+/// （代号 0）会被 B（代号也 0）当成自己的，B 会按 **B 的源**给出同一个作用域的材料
+/// ——一次混淆代理。全局发号让**不同运行时的代号不可能相等**，等值判定因此是可靠的。
+///
+/// 照片：`tests/issue.rs` 的 `a_credential_from_another_runtime_is_rejected`
+/// （A 的凭据在 B 上被拒，且有 A 自己可用的对照臂）。
+static NEXT_TICKET: AtomicU64 = AtomicU64::new(0);
+
+fn next_ticket() -> u64 {
+    NEXT_TICKET.fetch_add(1, Ordering::Relaxed)
+}
 
 /// §103 列出的四类轮换触发事件。
 ///
@@ -119,8 +136,9 @@ impl SecretsRuntime {
     pub fn new(source: Box<dyn CredentialSource>) -> Self {
         Self {
             source,
-            // 初始代号 0：还没有轮换过。
-            generation: 0,
+            // 开局即领一个全局代号，不是 0：0 只属于「轮换前的第一个运行时」，
+            // 而下一个运行时若也从 0 数起，两个运行时的凭据会互相通用（见 NEXT_TICKET）。
+            generation: next_ticket(),
             last_rotation: None,
         }
     }
@@ -158,7 +176,8 @@ impl SecretsRuntime {
     /// 里，「按事件」这几个字至少要是可观察的，否则调用方传哪一类都一样，
     /// 参数就是装饰。
     pub fn rotate(&mut self, event: RotationEvent) {
-        self.generation += 1;
+        // 同样取全局代号：轮换后的代号也不会与别的运行时的当前代号撞上。
+        self.generation = next_ticket();
         self.last_rotation = Some(event);
     }
 
@@ -167,14 +186,16 @@ impl SecretsRuntime {
         self.last_rotation
     }
 
-    /// 当前代号。凭据签出时记下它，[`SecretsRuntime::material`] 用它判凭据是否被取代。
-    pub fn generation(&self) -> u64 {
-        self.generation
-    }
-
-    /// 取凭据的材料。**这是本 crate 里唯一一处把材料交出去的地方**，且只在两件事都
-    /// 成立时交：凭据的代号仍是当前代号（未被轮换取代，§5.4），且 `now` 未到凭据的
-    /// 到期时刻。材料此刻才从源取（设计 §5.2：凭据上只有句柄）。
+    /// 取凭据的材料。这是本 crate 里**唯一一处把「能力是否容许、凭据是否被取代、是否
+    /// 到期」三件事合在一起判**的执行点：凭据的代号仍是当前代号（未被轮换取代，§5.4），
+    /// `now` 未到凭据的到期时刻，作用域取自凭据并交由源校验。材料此刻才从源取
+    /// （设计 §5.2：凭据上只有句柄）。
+    ///
+    /// **不要把这一句读成「材料只有这里出得去」**：材料的另一处出口是
+    /// [`CredentialSource::fetch`] 本身——它是公开 trait 方法，`FileCredentialSource::open`
+    /// 之类的公开构造点也公开，故 `FileCredentialSource::open(path)?.fetch("repo/X", 0)?`
+    /// 能直接拿到材料，不经过能力、代号与到期的任何判定。本运行时是**强制执行点**，
+    /// 不是本 crate 里唯一的材料出口。
     pub fn material(
         &self,
         credential: &Credential,
