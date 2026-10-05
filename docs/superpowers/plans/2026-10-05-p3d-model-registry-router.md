@@ -428,7 +428,10 @@ git commit -m "feat(model-registry): §247 的 ModelProfile 与两处不可表�
 - Create: `crates/continuum-model-registry/src/lifecycle.rs`
 - Modify: `crates/continuum-model-registry/{src/lib.rs,src/error.rs}`
 - Create: `crates/continuum-model-registry/tests/lifecycle.rs`
-- Create: `crates/continuum-model-registry/tests/compile_fail/routable_model_cannot_be_built.rs`（配 `.stderr`）
+- Create: `crates/continuum-model-registry/tests/compile_fail/routable_model_fields_are_private.rs`（配 `.stderr`）
+  （执行期改名：原名 `routable_model_cannot_be_built.rs`。原名会被读成「crate 外造不出 `RoutableModel`」，
+  而 `RoutableModel::try_new` 按设计 §4.2 **是 `pub` 的**、闸门在它函数体内，故那个说法不成立。
+  样例钉的一直只是**结构体字面量**这条通道，新名如实。）
 
 **Interfaces:**
 - Consumes: Task 3 的 `ModelProfile`
@@ -462,8 +465,10 @@ git commit -m "feat(model-registry): §247 的 ModelProfile 与两处不可表�
 - `disabling_returns_a_model_to_unprofiled_not_active`：`disabled → unprofiled` 为 `Ok`、
   `disabled → active` 为 `Err(Illegal{..})`。**两侧对钉**：这条钉住 §21 的「重新启用须重走画像流水线」那个方向，
   只写「`→unprofiled` 可以」的话，把出口改成 `active` 不会有任何用例变红。
-- `tests/compile_fail/routable_model_cannot_be_built.rs`：crate 外构造被拒（字段私有、无公开构造函数）。
+- `tests/compile_fail/routable_model_fields_are_private.rs`：crate 外**用结构体字面量**构造被拒（E0451，字段私有）。
   与 P3A 的 `AuthorizedTool` 同形。
+  （原写「无公开构造函数」——**这句与设计 §4.2 自己的 `pub fn try_new` 相抵**，更正为「结构体字面量」；
+  文件原名 `routable_model_cannot_be_built.rs`。）
 
 - [ ] **Step 2: 运行，确认失败**
 

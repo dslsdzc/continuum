@@ -1,9 +1,9 @@
 error[E0451]: fields `profile` and `state` of struct `RoutableModel` are private
-  --> tests/compile_fail/routable_model_cannot_be_built.rs:16:9
+  --> tests/compile_fail/routable_model_fields_are_private.rs:21:9
    |
-15 |     RoutableModel {
+20 |     RoutableModel {
    |     ------------- in this type
-16 |         profile,
+21 |         profile,
    |         ^^^^^^^ private field
-17 |         state: RoutableState::Active,
+22 |         state: RoutableState::Active,
    |         ^^^^^ private field

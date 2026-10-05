@@ -143,7 +143,7 @@ impl TryFrom<LifecycleState> for RoutableState {
 /// 一个**可交给 Router** 的模型：画像 + 已过闸门的状态。
 ///
 /// 字段私有，故**结构体字面量这条路在 crate 外走不通**（`tests/compile_fail/
-/// routable_model_cannot_be_built.rs` 钉住它，E0451）；**唯一的产生点是
+/// routable_model_fields_are_private.rs` 钉住它，E0451）；**唯一的产生点是
 /// [`RoutableModel::try_new`]**，而它内部过闸门。于是在 `rank` 的签名里**不存在**
 /// 未画像、被隔离、被停用、已漂移的模型——
 /// **「Router 忘了检查状态」这条路径在类型上不存在**（设计 §4.2）。
@@ -226,6 +226,10 @@ pub fn transition(from: LifecycleState, to: LifecycleState) -> Result<LifecycleS
     }
 
     // 其余各边逐对列出，**不含自环**——它的合法性由上面那条 `*` 给出，不在这里重复。
+    //
+    // **这张表与 `tests/lifecycle.rs` 里那组逐条合法对断言是两份手写副本**（`#[cfg(test)]`
+    // 的 crate 内模块与集成测试是两个 crate，共享不了表，理由同下面 `ALL_STATES`）。
+    // 故 §4.1 若添一条边而两处同漏，**没有任何用例会红**——编译器兜不住，只有靠加边时记得两处都加。
     let listed = matches!(
         (from, to),
         (Discovered, Unprofiled)
@@ -237,7 +241,8 @@ pub fn transition(from: LifecycleState, to: LifecycleState) -> Result<LifecycleS
             | (Stale, Researched)
             | (Active, Degraded)
             | (Degraded, Active)
-            | (Quarantined, Disabled)
+            // `quarantined → disabled` 不在这里列：`:224` 的 `* → Disabled` 已先返回，
+            // 此处再列一条是不可达的死臂（表上它仍是一条边，由那一行覆盖）。
             | (Disabled, Unprofiled)
     );
 
@@ -362,8 +367,10 @@ mod tests {
             );
         }
 
-        // 十态是**完整**的：本用例逐项写了十条，一条不漏。上面两个集合并起来必须恰好是十态，
-        // 若 `ALL_STATES` 与逐项清单漂移（例如加态时只改了那张表），这里立刻红。
+        // 这条断言**只比个数**：`ALL_STATES` 恰好十项，多一项少一项即红。
+        // 它**不验**「上面那两段逐项清单的并集恰好是十态」——那十条是本用例手写的、
+        // 与 `ALL_STATES` 是两份表，这里求不了并集。「十态一个不漏」的兜底在
+        // `RoutableState::try_from`：它穷尽且无通配臂，加第十一态时编译不过。
         assert_eq!(ALL_STATES.len(), 6 + 4, "十态 = 六个放行 ＋ 四个拒绝");
     }
 
