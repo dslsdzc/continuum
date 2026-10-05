@@ -571,3 +571,78 @@ fn the_effects_are_registered_before_the_command_runs_under_the_gate() {
     );
     ran(TEST);
 }
+
+/// 多条效应**都**铸不出时报的是**按声明次序第一条**——把次序对调，报的就换成另一条。
+///
+/// 这不是「整条拒绝」的又一张照片（那是
+/// [`an_effect_that_cannot_be_minted_refuses_the_whole_command`]），而是**报哪一条**：
+/// 库里一条规则都没有 ⇒ 两条都是默认 `Deny` ⇒ 哪一条都铸不出。若实现报的是最后一条、
+/// 或按别的次序挑一条，对调前后必有一条对不上。两侧都断言（报了这一条、且没报另一条）。
+///
+/// **不受沙箱门控**：校验排在 `Sandbox::spawn` 之前，本用例两次调用都在那之前返回，
+/// 故在既无 Landlock 也无 bwrap 的机器上也真的跑得起来（本文件其余用例不行）。
+#[test]
+fn the_first_unmintable_effect_in_declaration_order_is_reported() {
+    const TEST: &str = "the_first_unmintable_effect_in_declaration_order_is_reported";
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+
+    let first = run_task(
+        &base,
+        &db,
+        &[
+            "--effect",
+            "charge:a1",
+            "--effect",
+            "deploy:d1",
+            "--exec",
+            "true",
+        ],
+        &[],
+    );
+    assert!(
+        !first.status.success(),
+        "两条效应都铸不出时必须拒绝运行\n--- stdout ---\n{}",
+        stdout_of(&first)
+    );
+    let stderr = stderr_of(&first);
+    assert!(
+        stderr.contains("charge:a1"),
+        "应报声明次序第一条 charge:a1，实际 stderr：{stderr}"
+    );
+    assert!(
+        !stderr.contains("deploy:d1"),
+        "不该报后面那一条，实际 stderr：{stderr}"
+    );
+
+    // 对调声明次序：报的随之换成新的第一条。
+    let second = run_task(
+        &base,
+        &db,
+        &[
+            "--effect",
+            "deploy:d1",
+            "--effect",
+            "charge:a1",
+            "--exec",
+            "true",
+        ],
+        &[],
+    );
+    assert!(
+        !second.status.success(),
+        "两条效应都铸不出时必须拒绝运行\n--- stdout ---\n{}",
+        stdout_of(&second)
+    );
+    let stderr = stderr_of(&second);
+    assert!(
+        stderr.contains("deploy:d1"),
+        "对调次序后应报新的第一条 deploy:d1，实际 stderr：{stderr}"
+    );
+    assert!(
+        !stderr.contains("charge:a1"),
+        "不该报后面那一条，实际 stderr：{stderr}"
+    );
+    ran(TEST);
+}

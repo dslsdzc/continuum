@@ -56,10 +56,11 @@
 //! 本校验排在**写效应记录之前**，故拒绝时一条 `EXECUTING` 记录都还没落库；[`run`] 走的
 //! 是第 4 步出错时的同一条清理路径（[`discard_recorded_workspace`]），不另立一条。
 //! **这一条位置是刻意的**：若把校验排在第 4 步提交**之后**，那几条 `EXECUTING` 记录已经
-//! 落库，而本仓没有任何删除 `effect` 行的路径（`grep DELETE crates/` 无命中；
-//! [`IntegrationGate::discard`] 只回收工作区、不碰 Journal，见
-//! `continuum-workspace/src/gate.rs`）——拒绝之后同一个 Intent 会因幂等键再也创建不了，
-//! 正是第 4 步错误路径要防的那件事。
+//! 落库，而本仓没有任何删除 `effect` 行的路径（`grep 'DELETE FROM effect' crates/` 无命中
+//! ——本仓确有别的 `DELETE`，如 `continuum-workspace/src/persist.rs` 删 `workspace` 行，
+//! 故引用必须限定到 `effect` 表才成立；[`IntegrationGate::discard`] 只回收工作区、不碰
+//! Journal，见 `continuum-workspace/src/gate.rs`）——拒绝之后同一个 Intent 会因幂等键
+//! 再也创建不了，正是第 4 步错误路径要防的那件事。
 //!
 //! # 策略只查一次，排在写效应之前
 //!
@@ -887,7 +888,9 @@ pub enum TaskError {
     ///
     /// 命令一步都没跑。`decision` 取 [`decision_name`] 的中文名，使调用方能分辨是
     /// 「要求批准」还是「禁止」；`effect` / `target` 点名是哪一条声明——多效应时报的是
-    /// **按声明次序第一条**铸不出的。
+    /// **按声明次序第一条**铸不出的。照片：`capability_gate.rs` 的
+    /// `the_first_unmintable_effect_in_declaration_order_is_reported`（两条都铸不出，
+    /// 把次序对调一次，报的就换成另一条；据此也钉住了「不是报最后一条」）。
     ///
     /// 与 [`TaskError::IntegrationRefused`] 是两件事：那一个是集成那次裁决（`--apply`
     /// 那一支，命令**已经跑完**），本变体是逐条效应的裁决（命令**一步没跑**）。

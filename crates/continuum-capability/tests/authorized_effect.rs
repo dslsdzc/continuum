@@ -78,19 +78,24 @@ fn every_effect_type_rejects_a_capability_of_another_kind() {
     }
 }
 
-/// 一枚**不与任何 `EffectType` 对应**的能力（`filesystem.read`）同样被拒。
+/// 一枚**不与任何 `EffectType` 对应**的能力（`git.read`）同样被拒。
 ///
-/// 上一条用的是各效应的「另一枚」；本条的 kind 不在 `for_effect` 的像里，故它挡住的是
-/// 「只比对两个 `EffectType` 的像之间的对应」这类实现。
+/// `git.read` 是 [`CapabilityKind`] 里的成员，但**不在 `for_effect` 的像里**（像只有
+/// 六个：`email.send` / `git.push` / `registry.publish` / `git.delete_remote` /
+/// `payment.charge` / `environment.deploy`）。轮转表用的那枚像外 kind 是
+/// `filesystem.read`，本条换成一枚**不同的**像外 kind——两条臂的**输入不同**，
+/// 各自的落点也具名可查。
+///
+/// **本条不声称它挡住了轮转表挡不住的形状**：轮转表的六条反例本身也都用像外的
+/// `filesystem.read`，故「像外 kind 被拒」这条性质那六条已经覆盖；本条是它的第二个
+/// 输入、不是第二种形状。
 #[test]
 fn a_capability_outside_the_effect_vocabulary_is_rejected() {
     let err = AuthorizedEffect::new(
         EffectType::Charge,
-        minted(CapabilityKind::Filesystem(
-            continuum_capability::FsAction::Read,
-        )),
+        minted(CapabilityKind::Git(continuum_capability::GitAction::Read)),
     )
-    .expect_err("filesystem.read 不得当作 charge 已获准");
+    .expect_err("git.read 不得当作 charge 已获准");
     assert!(
         matches!(
             err,
