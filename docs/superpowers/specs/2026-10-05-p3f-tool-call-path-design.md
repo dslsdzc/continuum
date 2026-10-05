@@ -224,9 +224,15 @@ fn mint_declared_effects(
   错误类型**，两条路径各报一套，且 bin 还要写一层逐变体映射——正是本项目判为 Critical 的「同一件事
   两个类型」。**搬家是一步机械动作，造第二套词汇是一个长期的坑。**
 - **变体一个不改**：§8 的失败面表**逐行照旧**（只是这些变体的定义位置从 bin 挪到 lib）。
-- **`TaskError` 的 `#[from]` 目标**（`GateError` / `SandboxSelectError` / `WorkspaceError` /
-  `SandboxError` / `PersistError`）全部来自 lib 已依赖的 crate，故这一步**不动 `Cargo.toml`**
-  （§10.1 的「不新增任何 crate 边」仍成立）。
+- **`TaskError` 的 `#[from]` 目标**（`GateError` / `WorkspaceError` / `SandboxError` /
+  `PersistError`）来自 lib 已依赖的 crate；**但 `SandboxSelectError` 不是**（plan-f 第 1 条）——它定义在 **bin 模块**
+  `src/sandbox_select.rs`。故**该模块整体搬进 lib**（变体与 `Cargo.toml` 的依赖项不动）。
+  **原稿在此处写「全部来自 lib 已依赖的 crate，故这一步不动 `Cargo.toml`」，那句话是假的，
+  来历留此**（plan-f 第 1 条）。
+- **`Cargo.toml` 并非「不动」**（plan-f 第 8 条）：库级夹具要实现 `#[async_trait]` 的 `ToolProvider`，
+  故 `continuum-runtime` 需要 **`async-trait` 的 dev 边**。它是**外部 crate**，
+  故 `ALLOWED`（内部边表）与 `Cargo.lock` 都不受影响——**「不新增任何 crate 边」这句话的射程是
+  `ALLOWED` 那张内部边表，不是 `Cargo.toml` 的全部**（§10.1 据此加限定）。
 
 **由此得到一条「承重」性质**（原稿即有，现在才真的成立）：步骤 4 与 5 用**同一个事务**，一次 `commit`。
 故「工具已获准」的审计行与「效应已在执行」的 `EXECUTING` 行**要么都在、要么都不在**：不存在
@@ -247,6 +253,8 @@ lib 内的一处，不需要跨 crate 传递事务。
 `ToolResult` 是驱动手里唯一一份结果，没有第二个东西会替它说话，**stdout 是调用方仅有的那条通道**；
 不打印等于调用方付了一次调用却看不到结果。**这正是两条路径在此处必须不同的原因**，不是风格取舍
 ——把它按命令路径的规矩删掉，工具调用的结果就没有任何出口了。记在此以免后来者照 `task` 的样子删。
+
+**这条决定的照片有一半拍不到（plan-f 第 4 条）**：「结果确实出现在 stdout 上」这一半，库级用例到不了那一跳（打印在 `tool_cmd` 的 bin 层）、且 `println!` 被测试框架捕获，故**据实记为无照片，不许为它造夹具**；能拍的是它的**上游**——`ToolResult` 被交回到调用处（P-11 那一半）。
 
 ## 3.4 决定 F4：工具调用（那一跳）排在强制点与效应行**之后**
 
@@ -403,11 +411,23 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 **它同时把上文那条洞关在唯一入口上**：`save_tool` 是唯一的写点，故没有第二条路能让一条违反
 不变量的登记项落库。
 
-**这条不变量为什么够**：若某工具有 `effect_class == Some(t)`，则它必然声明了 `for_effect(t)` 这枚能力；
+**这条不变量为什么够（射程限定在 `effect_class == Some(t)`；plan-f 第 6 条）**：若某工具有
+`effect_class == Some(t)`，则它必然声明了 `for_effect(t)` 这枚能力；
 `authorize` 的两向合取（出示集 ⊆ 声明集 且 声明集 ⊆ 出示集）于是**要求**出示集里有一枚
 `for_effect(t)`；而本路径的出示集只可能来自 `--effect` 铸出的能力；故调用方**必须**声明一条能铸出
-`for_effect(t)` 的 `--effect`，那条效应遂进 Journal。**「工具做了外部效应却没有效应记录」这条洞
-由此被不变量堵死**，而驱动不必读 `effect_class`。
+`for_effect(t)` 的 `--effect`，那条效应遂进 Journal。**故「工具做了外部效应却没有效应记录」这条洞
+在 `Some(t)` 这一支上被堵死**，而驱动不必读 `effect_class`。
+**原稿在此处写「这条洞由此被不变量堵死」，那是绝对措辞、过宽，来历留此。**
+**`None` 那一支不开这个保证**：`effect_class == None` 的工具若其适配器仍做了外部效应，而这次调用
+**零 `--effect`**，则**不留痕**——没有效应行、也没有别的记录（§7.3 与 §14 第 9 条：§312 的
+trace 无落点）。这条不变量管的是「登记项与其声明一致」，**管不了适配器实际做了什么**。
+
+**连带面（plan-f 第 5 条，实现时必须一并处置）**：在 `save_tool` 里加这条检查，会**打红 P3A 三处既有用例**
+——`continuum-capability/tests/persist.rs` 的夹具 `tool()` 用了 `effect_class = Some(DeleteRemote)`
+而能力表不含 `Git(DeleteRemote)`，涉及 `tool_round_trips` / `required_capabilities_round_trip` /
+`saving_the_same_id_twice_is_rejected`。**这是「新增一道前置判定会改变既有用例命中的分支」那一类**，
+不是本设计的缺陷；处置随实现计划的 Task 1 连带修正（把那三处夹具的能力表补齐或改 `effect_class`）。
+**本设计只据实记下这条连带面，不在这里改那个 crate 的用例。**
 
 **为什么这条不变量今天仍没有强制点**：`save_tool` 的生产调用方今天**不存在**（全仓只在测试里被调，
 见第 14 节第 1 条），故**实现这一步（在 `save_tool` 里加这条检查）就是要落地的那件事**，
@@ -463,7 +483,8 @@ ProviderRegistry::invoke_tool(&self, authorized: &AuthorizedTool, input: Value)
     -> Result<ToolResult, ToolCallError>;
     // 裁决 2（§6.5）：**请求侧**承载授权——按 C 设计 §7.5，请求类型装的是**整枚
     // `AuthorizedTool`**（＋ input），故工具 id 只由授权证明给出。**那个类型由 `invoke_tool`
-    // 在内部构造，F 不构造也不命名它**；本处不写它的字段（不预先发明接口）。
+    // 在内部构造，F 的生产路径不构造、不经它传值**（**F 的库级夹具会 `impl ToolProvider`，
+    // 故签名里会写到它**——那是被实现的 trait 的形状，见 plan-f 第 3 条）；本处不写它的字段。
 
 pub enum ToolCallError {                 // C 设计 §3.5（定义）与 §7.1（用于 invoke_tool）
     Unregistered { id: ToolId },         // 这个 id 没有适配器（路由）
@@ -577,8 +598,11 @@ P3A 设计 §8）。注册表的 `invoke_tool` **只收它**，且注册表不�
 **F 传什么、从哪来（本子项目认领的那一半）——传的是「整枚 `AuthorizedTool`」**：
 
 - **F 把整枚 `&AuthorizedTool`（连同 `input`）交给 `ProviderRegistry::invoke_tool`**（§6.1 那条唯一入口）。
-  **请求类型由 `invoke_tool` 在内部构造——F 既不构造它，也不命名它**（C 设计 §7.5 定的是那个类型
-  **长什么样**，§7.1 定的是**谁构造、经哪条路调**；F 只走 §7.1 那条路）。
+  **请求类型由 `invoke_tool` 在内部构造——F 的**生产路径**既不构造它、也不经它传值**（C 设计 §7.5
+  定的是那个类型**长什么样**，§7.1 定的是**谁构造、经哪条路调**；F 只走 §7.1 那条路）。
+  **但 F 的库级夹具会在签名里写到它**（plan-f 第 3 条，裁决）：夹具要 `impl ToolProvider`，而那个 trait 的
+  `invoke` 形参就是它——**那是「被实现的公开 trait 的形状」，不是「F 自己造的形状」**，
+  两者不是一回事，别混成一句（协调者已把它记为派单纪律）。
   **F 也不调 `AuthorizedTool::granted()`**，也不把授权值拆出来单独传一份（**取 `granted()` 的是适配器**，
   C 设计 §7.5）。
   **订正的来历（本节改过两轮，都留此）**：① 初稿写「F 从 `granted()` 取授权值、经请求侧传过去」——
@@ -716,7 +740,9 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
   **这个间隔由 F 自己的交出动作引入**（§11 的「F ↔ B」行即此事的收口，
   与 B 设计 §11 第 18 条对齐）。
   **订正后的口径（这才是本节要留的那句）**：**F 的 `authorize` 那一次调用上 `Expired` 不可达**——
-  步骤 3 铸出与步骤 4 校验之间**没有 I/O**、两处的 `now` 取同一步，而 `expiry` 在 15 分钟之后
+  步骤 3 铸出与步骤 4 校验之间**没有 I/O**、而 `now` 是**两次读时钟**（§3.2 的共享函数签名里没有
+  `now`，铸币那处自己取一次、`authorize` 这处再取一次，**两次相差微秒级**；plan-f 第 7 条），
+  而 `expiry` 在 15 分钟之后
   （`CAPABILITY_LIFETIME_MS`，`task_cmd.rs:459-463`），故**F 这一次调用里那一行比较会跑、
   但永不触发**（除常量取 0）——**注意这里的「永不触发」只覆盖 F 那一次调用，不覆盖整条路径**。
   **下游**（适配器取用 / 凭据签发）**才是它第一次可能真的判出过期的地方**。
@@ -732,7 +758,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 
 # 9. 测试策略（照片表）
 
-**库级用例**（`continuum-runtime`，夹具适配器经 C 注册表的登记入口装进去，记录它**在实现 `invoke` 时收到的那份请求**——类型由 C 定，F 侧不命名）：这是唯一能观察「工具有没有被调用」的地方——**生产装配点今天是空的**（§10.2）。
+**库级用例**（`continuum-runtime`，夹具适配器经 C 注册表的登记入口装进去）：夹具**实现 §316 的 `ToolProvider`**，故它的 `invoke` 签名里会写下 `AuthorizedToolInvocation<'_>`——**这是被实现 trait 的形状，不是 F 的生产路径造的形状**（plan-f 第 3 条）；夹具记录它收到的那份请求。这是唯一能观察「工具有没有被调用」的地方——**生产装配点今天是空的**（§10.2）。
 夹具适配器的形状照 `crates/continuum-provider/tests/fake_provider.rs`（那已是本仓既有的写法）。
 
 | 编号 | 验什么 | 怎么验 |
@@ -743,11 +769,11 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | P-4 | 出示了未声明的能力 ⇒ `UndeclaredCapability` | 登记项声明能力 A，声明 `--effect` 铸出能力 B |
 | P-5 | 缺声明的能力 ⇒ `MissingCapability` | 登记项声明 A+B，只声明铸出 A 的那条 `--effect` |
 | P-6 | **F 确实经注册表调用**（不是自己另开一条路） | 登记一个夹具适配器，放行后断言它**收到了一次调用**；与 P-1 互为对照臂（见末尾的变异说明）。**「唯一入口」那条类型层保证的照片归 C**（C 设计 §7.1），F 不重复 |
-| P-7 | 工具 id **由 `AuthorizedTool` 定**（配对） | 授权 t1 后调用，夹具断言收到的 `call.tool` 是 t1；另一条断言 `call.input` 与 `--input` 逐字相同 |
+| P-7 | 工具 id **由 `AuthorizedTool` 定**（配对） | 授权 t1 后调用，夹具断言**它收到的那份请求里的工具 id 是 t1**（该 id 由 `invoke_tool` 从授权证明取出，C §7.1）；另一条断言请求里承载的 `input` 与 `--input` 逐字相同。**原稿按已删类型写「`call.tool`」，已随 §6.5 改**（plan-f 第 2 条） |
 | P-8 | 登记项被写坏 ⇒ `CapabilityError::Persist` 原样带出 | 照 `tests/authorize.rs` 的 `insert_bad_capabilities` 写坏 `required_capabilities` 列 |
 | P-9 | 注册表里没有该 id ⇒ 效应记 `FAILED`、报 `ToolCallError::Unregistered` | 注册表为空（不登记任何适配器） |
 | P-10 | 适配器报错 ⇒ 效应记 `FAILED`、`ToolCallError::Provider` 原样带出 | 夹具返回 `Err(ProviderError::Transport)` |
-| P-11 | 适配器自报失败（`is_error`）⇒ 效应记 `FAILED`、**stdout 仍有 output** | 夹具返回 `is_error: true` |
+| P-11 | 适配器自报失败（`is_error`）⇒ 效应记 `FAILED`；**「stdout 仍有 output」这一半没有照片**（plan-f 第 4 条） | 夹具返回 `is_error: true`，断言效应记 `FAILED` 与 `TaskError::ToolReportedError`。**「stdout 仍有 output」这一半拍不到**——库级用例到不了那一跳、库函数不交出该值、且 `println!` 被测试框架捕获；**据实记为无照片，不许为它造夹具** |
 | P-12 | 非法 `--input` ⇒ 解析期 `Err` | 端到端，`--input '{'` |
 | P-13 | 选项组两向都拒 | 两条端到端用例（见 §2.2） |
 | P-14 | `tool` 不认识的选项 ⇒ `UnknownOption` | 逐条：`--base` / `--exec` / `--apply` / `--sandbox`（**四条各一**：四个是四条独立的分支，抽一个代表不算） |
@@ -775,9 +801,12 @@ payload 用例覆盖，本路径不重复。
 里**已经有**本子项目要用到的全部内部 crate：`continuum-capability`（`AuthorizedTool` / `authorize` /
 `AuthorizedEffect` / `mint` / `CapabilityKind`）、`continuum-core`（`ToolId` / `ToolResult` /
 `ProviderError`——**`ToolInvocation` 已由裁决 §五删除**）、`continuum-provider`（**`ProviderRegistry`**
-——F 只调它的 `invoke_tool`，**不命名请求类型**；`ToolProvider` 亦在此 crate）、`continuum-policy`（沿用）、
-`continuum-effect`（沿用）、`continuum-persist`（沿用）。**故不改 `ALLOWED` 表，也不改 `Cargo.toml`
-的内部依赖清单。**
+——F 的生产路径只调它的 `invoke_tool`、**不构造也不传请求类型**；`ToolProvider` 与
+`AuthorizedToolInvocation<'_>` 亦在此 crate，**后者由库级夹具 `impl ToolProvider` 的签名用到**）、`continuum-policy`（沿用）、
+`continuum-effect`（沿用）、`continuum-persist`（沿用）。**故不改 `ALLOWED` 表**（那张表记的是**内部**
+crate 边）。**`Cargo.toml` 的射程要限定**（plan-f 第 8 条）：内部依赖清单不动，但**要加 `async-trait` 的 dev 边**
+（库级夹具实现 `#[async_trait]` 的 `ToolProvider` 需要它）——它是**外部** crate，故 `ALLOWED` 与
+`Cargo.lock` 都不受影响。**原稿在此处写「也不改 `Cargo.toml`」，那是过宽的说法，已限定。**
 
 **但有两处注释会变成假的，必须就地订正**（本仓的既有做法：订正时把错误说法的来历留在原地）：
 `dependency_direction.rs:121` 写着「core / events / provider 在 runtime 内**至今无任何引用**」
@@ -904,6 +933,8 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
    故「成功调用」在生产里不可达；它的照片全部来自库级用例里经注册表登记的夹具适配器。
 7. §6.5（裁决 2 的**请求侧传值**）：**照片待 C 定下那个位置的类型**——今天写不出实参，
    故这条保证暂时只由正文承载（理由与替代处置写在 §6.5 末段）。
+8. §3.3「结果打到 stdout」与 P-11 的「stdout 仍有 output」：**这一半拍不到**（plan-f 第 4 条）——
+   库级用例到不了那一跳、库函数不交出该值、`println!` 又被测试框架捕获。**据实记为无照片，不许为它造夹具**。
 
 ---
 
