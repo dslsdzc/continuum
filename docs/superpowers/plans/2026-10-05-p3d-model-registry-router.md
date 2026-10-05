@@ -1085,6 +1085,13 @@ pub fn rank(request: &RoutingRequest, models: &[RoutableModel], policy: &dyn Ran
 `ModelId` 升序保证兜底档是**全序的最后兜底**（两两可比且无相等）；若两条候选连 `ModelId` 都相同，
 它们本就是同一个模型的两次打分——该情形由建候选集时判重排除。
 
+**`profile.rs` 里那句「NaN 会让 `sort_by` 不是全序」的绝对措辞，照片归本 task，且要写成「为什么没有」**：
+那句理由是对的，但**它在 `Ratio` 上拍不到**——NaN 在构造期就被拒，**进不到 `compare` 的入参里**，
+故本处**不为它造用例**（造不出：候选的 `compatibility` / `confidence` 都是已构造的 `Ratio`）。
+它真正的落点是**构造期**：Task 1 的 `ratio_rejects_non_finite_and_out_of_range` 就是它的照片——
+`compare` 的前两档因此**可以假定**操作数是合法 `Ratio`。**这句话要写进 `compare` 的文档注释**，
+否则后来者会以为这里少了一条排序用例。
+
 `ExecutionCandidate` 的五个访问器**是接口冻结处的必需品**：`selected()` 要交给消费者，而消费者下一步
 就是拿着 `model` 去（在它自己那一层）调 provider（**子项目 G**）。`RoutingReason` 的四个访问器
 **今天没有具名消费方**，只是 §84 要输出的内容的读口——**这句话刻意写得比上面弱**（设计 §5.2）。
