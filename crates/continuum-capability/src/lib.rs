@@ -7,6 +7,8 @@
 //! - [`persist`]：`tool` 表的迁移与行级读写（设计第 3.3、7 节）；
 //! - [`registry`]：强制点 (1)——[`authorize`] 与 [`AuthorizedTool`]，唯一能把工具
 //!   交给调用方的路径（设计第 3.4 节）；
+//! - [`effect`]：强制点 (2) 的连接器侧载体 [`AuthorizedEffect`]，连接器要做副作用
+//!   就必须收它（设计第 4.2 节；驱动侧的校验在 `continuum-runtime` 的 `task_cmd`）；
 //! - [`error`]：本 crate 的错误类型。
 //!
 //! 本 crate 不持有数据库连接：落库经 `continuum-persist` 的 `Tx` 访问（该依赖自
@@ -19,6 +21,7 @@
 //! 不按落库约定拼；两者取值不同，见 [`CapabilityKind::action`] 的文档）。
 
 pub mod capability;
+pub mod effect;
 pub mod error;
 pub mod persist;
 pub mod registry;
@@ -28,6 +31,7 @@ pub use capability::{
     Capability, CapabilityKind, EmailAction, EnvAction, FsAction, GitAction, GithubAction, Issuer,
     PaymentAction, RegistryAction, mint,
 };
+pub use effect::AuthorizedEffect;
 pub use error::CapabilityError;
 pub use persist::{load_tool, load_tools, p3_capability_migrations, save_tool};
 pub use registry::{AuthorizedTool, authorize};

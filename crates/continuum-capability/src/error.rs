@@ -1,6 +1,7 @@
 //! 本 crate 的错误类型。
 
 use continuum_core::tool::ToolId;
+use continuum_effect::EffectType;
 use continuum_persist::PersistError;
 
 use crate::capability::CapabilityKind;
@@ -12,7 +13,9 @@ use crate::capability::CapabilityKind;
 /// - [`crate::mint`]：`EmptyScope`；
 /// - [`crate::Capability::is_valid_at`]：`Expired`；
 /// - [`crate::authorize`]：`UnknownTool` / `Persist` / `MissingCapability` /
-///   `UndeclaredCapability`，并转出上面两条。
+///   `UndeclaredCapability`，并转出上面两条；
+/// - [`crate::AuthorizedEffect::new`]：`EffectCapabilityMismatch`（强制点 (2) 的
+///   连接器侧载体要求「效应与能力互相对应」）。
 ///
 /// **不含「裁决为 `Deny`」这类变体**：那是**驱动**的判断（`continuum-runtime` 的
 /// `mints` 六格表），本 crate 不复核调用方已经决定过的事——同一个判断有两个产生点，
@@ -85,4 +88,26 @@ pub enum CapabilityError {
     /// `a_presented_capability_that_the_tool_did_not_declare_is_rejected`。
     #[error("调用方出示了工具未声明的能力 {}", kind.as_str())]
     UndeclaredCapability { kind: CapabilityKind },
+
+    /// [`crate::AuthorizedEffect::new`] 收到了一枚**与这条效应对应不上**的能力
+    /// （设计 §4.2）。
+    ///
+    /// 三个字段都带出去：`effect` 是这条效应，`expected` 是它该配的那枚 kind，
+    /// `actual` 是实际收到的那一枚——只报「不匹配」会让读错误的人无从判断是拿错了
+    /// 能力还是构造方接错了。
+    ///
+    /// 照片：`tests/authorized_effect.rs` 的
+    /// `every_effect_type_rejects_a_capability_of_another_kind`（六个 `EffectType`
+    /// 逐项各一条反例）与 `a_capability_outside_the_effect_vocabulary_is_rejected`。
+    #[error(
+        "效应 {} 需要能力 {}，而给出的能力是 {}",
+        effect.as_str(),
+        expected.as_str(),
+        actual.as_str()
+    )]
+    EffectCapabilityMismatch {
+        effect: EffectType,
+        expected: CapabilityKind,
+        actual: CapabilityKind,
+    },
 }

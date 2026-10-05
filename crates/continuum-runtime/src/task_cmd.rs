@@ -7,8 +7,11 @@
 //!    环境变量 [`IN_NAMESPACE_ENV`] 标识已进入以防递归。**这一步排在创建任何东西之前**，
 //!    否则会建出一个子进程看不见的工作区（设计上篇第 5 节）；
 //! 3. `create_task_workspace` → `WorkspaceRecord::from_workspaces` → `save_workspace`；
-//! 4. **查一次策略**，再对每个 `--effect` 写 `PLANNED → AUTHORIZED → EXECUTING`
-//!    （[`record_declared_effects`]）。全部**提交之后**才执行命令（`§268`：执行前写入）；
+//! 4. **先查一次策略**判本次集成（`decision`，第 7 步复用）；查各 `--effect` 的幂等键；
+//!    **再逐条问策略铸能力**——铸不出即拒绝整条命令（**强制点 (2)**，
+//!    [`authorize_declared_effects`]）；最后对每个 `--effect` 写
+//!    `PLANNED → AUTHORIZED → EXECUTING`（[`record_declared_effects`]）。全部**提交之后**
+//!    才执行命令（`§268`：执行前写入）；
 //! 5. `Sandbox::spawn` 跑 `--exec`，工作目录由 `spawn` 设为 Task 根；
 //! 6. 按命令的退出形态写终态：退出码 0 → `COMMITTED`，非 0 → `FAILED`
 //!    （[`finish_declared_effects`]）；
@@ -16,6 +19,47 @@
 //!    （[`mints`]）→ 经 Gate 应用。**这一支不清理工作区**（见下）；
 //! 8. **未给 `--apply`，或命令退出码非 0**：`discard_task_workspace` 成功之后再
 //!    `remove_workspace`，失败则不删记录。
+//!
+//! # 强制点 (2)：执行之前的逐条效应校验（设计第 4.1、4.2 节）
+//!
+//! 驱动按「命令即效应」运行命令，**命令跑起来就是副作用**，故校验排在 `Sandbox::spawn`
+//! 之前。检查对象是命令声明的那几条 `--effect`：**逐条**问策略，据裁决铸
+//! [`Capability`](continuum_capability::Capability)；**任意一条铸不出即拒绝整条命令**
+//! （不是只拒绝那一条）。
+//!
+//! ## 与「策略只查一次」不冲突：问的是两个问题
+//!
+//! P2 那条裁定（见上文「策略只查一次」）的对象是**集成**的裁决：`--apply` 那一支第 7 步
+//! 复用第 4 步的那一次，上下文里 `effect_type` 缺省。**本处是逐条效应的裁决**，上下文里
+//! `effect_type` 填着这一条效应的类型（[`policy_context_for_effect`]）。两者问的不是同一
+//! 件事——「这次集成准不准」对「这条效应准不准」——两处各自裁一次、互不复用同一个
+//! [`Decision`]。**策略表只从库里读一次**（第 4 步那一读），两个问题用同一张表各裁一次；
+//! 「只查一次」要防的是同一个裁决有两个产生点，不是同一张表被问两个问题。
+//!
+//! ## 裁决到「铸不铸」的映射只有一个产生点
+//!
+//! 三个臂（`Allow` / `RequireApproval` / `Deny`）的判定**复用** [`mints`]——那张六格表的
+//! 唯一落点。本处**不重写**它，也不引入 `Verdict` / `Grant` 之类的中间裁决类型
+//! （Task 2 已按「签发点不重判」删除它们）：映射的产物就是「铸出的一枚
+//! [`Capability`](continuum_capability::Capability)，或一次拒绝」。
+//!
+//! ## 铸出的能力：持有至命令结束，随后丢弃
+//!
+//! 每条声明铸一枚，装进 [`AuthorizedEffect`]（效应 + 准它的能力）由 [`run`] 的局部变量
+//! 持有，直到 [`run`] 返回才随作用域析构。**今天没有消费方**——消费方是连接器
+//! （子项目 B），由它在做副作用时收下（设计 §4.2、§10 第 7 条）。**丢弃不是遗留物**：
+//! 这枚值的存在本身就是「这条效应过了校验」的载体；驱动不要拿它去做别的（尤其**不得**
+//! 把它或其内容塞进命令的环境——§51 要求 Agent 不直接拿到凭据）。
+//!
+//! ## 拒绝时的工作区清理：走第 4 步已有的那条路
+//!
+//! 本校验排在**写效应记录之前**，故拒绝时一条 `EXECUTING` 记录都还没落库；[`run`] 走的
+//! 是第 4 步出错时的同一条清理路径（[`discard_recorded_workspace`]），不另立一条。
+//! **这一条位置是刻意的**：若把校验排在第 4 步提交**之后**，那几条 `EXECUTING` 记录已经
+//! 落库，而本仓没有任何删除 `effect` 行的路径（`grep DELETE crates/` 无命中；
+//! [`IntegrationGate::discard`] 只回收工作区、不碰 Journal，见
+//! `continuum-workspace/src/gate.rs`）——拒绝之后同一个 Intent 会因幂等键再也创建不了，
+//! 正是第 4 步错误路径要防的那件事。
 //!
 //! # 策略只查一次，排在写效应之前
 //!
@@ -101,8 +145,9 @@
 
 use crate::runtime_migrations;
 use crate::sandbox_select::{self, SandboxSelectError};
+use continuum_capability::{AuthorizedEffect, CapabilityKind, mint};
 use continuum_effect::{
-    Effect, EffectId, EffectState, advance, find_by_idempotency_key, record_planned,
+    Effect, EffectId, EffectState, EffectType, advance, find_by_idempotency_key, record_planned,
 };
 use continuum_persist::{Db, PersistError};
 use continuum_policy::{
@@ -124,6 +169,22 @@ use thiserror::Error;
 
 /// 标识「本进程已经是被重新执行出来的那一份」，防止第 2 步的 re-exec 无限递归。
 pub const IN_NAMESPACE_ENV: &str = "CONTINUUM_IN_NAMESPACE";
+
+/// 强制点 (2) 铸出的能力活多久（Unix 毫秒），即签发时取 `now_millis() + 本值`。
+///
+/// §51 要求凭据「short-lived」，而**规范与设计都没有规定这个数**——它是本阶段的决定，
+/// 集中在此一处、不散落。取值理由：
+///
+/// - 这枚能力只需覆盖**本条命令的执行**，以及由它签出的凭据（设计 §5.2：凭据的到期
+///   不晚于能力的 `expiry`，故能力的寿命是那个上限）；
+/// - 15 分钟对一条任务命令是宽的余量，又远短于长期令牌，符合「short-lived」的意；
+/// - **驱动今天不自己校时**（[`mint`] 不读时钟，见其文档），故这个数在本次运行中不可
+///   观察：一条跑得比它久的命令不会在运行中被拦下，而是让下游签出的凭据更早到期——
+///   那是 fail-closed 的方向。
+///
+/// 连接器（子项目 B）真的消费 [`AuthorizedEffect`] 时，这个数应按那时能给出的依据
+/// （命令的实际时长上界、凭据源的轮换周期）重新定；届时也只改这一处。
+const CAPABILITY_LIFETIME_MS: i64 = 15 * 60 * 1000;
 
 /// 运行 `task` 子命令。
 ///
@@ -160,11 +221,16 @@ pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
         });
     }
 
-    // 第 4 步：查一次策略，再写各效应的 `PLANNED → AUTHORIZED → EXECUTING`。
-    // 失败（幂等键已存在、库层错误）时命令一步都没跑，故工作区与记录按第 8 步的次序
-    // 清理——留着记录会让同一个 Intent 再也创建不了（`save_workspace` 是裸 `INSERT`）。
-    let decision = match record_declared_effects(&db, args) {
-        Ok(decision) => decision,
+    // 第 4 步：查一次策略、逐条效应校验（强制点 (2)），再写各效应的
+    // `PLANNED → AUTHORIZED → EXECUTING`。失败（幂等键已存在、某条效应铸不出能力、
+    // 库层错误）时命令一步都没跑，故工作区与记录按第 8 步的次序清理——留着记录会让
+    // 同一个 Intent 再也创建不了（`save_workspace` 是裸 `INSERT`）。
+    //
+    // 第 4 步返回的批准值只给第 7 步用（`decision`）；铸出的各枚能力由 `_authorized`
+    // 持有着，直到本次运行结束才随作用域析构——消费方是连接器（子项目 B），
+    // 见模块文档「铸出的能力」。
+    let (decision, _authorized) = match record_declared_effects(&db, args) {
+        Ok(result) => result,
         Err(e) => {
             return Err(match discard_recorded_workspace(&db, &args.intent) {
                 Ok(()) => e,
@@ -268,14 +334,24 @@ fn save_record(db: &Db, record: &WorkspaceRecord) -> Result<(), TaskError> {
     Ok(())
 }
 
-/// 第 4 步：查一次策略，再对每个 `--effect` 写 `PLANNED → AUTHORIZED → EXECUTING`。
+/// 第 4 步：查一次策略（集成的裁决）、逐条效应校验（强制点 (2)），再对每个 `--effect`
+/// 写 `PLANNED → AUTHORIZED → EXECUTING`。
 ///
-/// 返回本次调用**唯一**的那次裁决结果，供第 7 步复用（见模块文档「策略只查一次」）。
+/// 返回本次调用**唯一**的那次集成裁决（供第 7 步复用，见模块文档「策略只查一次」）与
+/// 各条效应铸出的能力（[`AuthorizedEffect`]，见模块文档「铸出的能力」）。
 ///
 /// # 为什么先查全部键、再写任何一条
 ///
 /// 任意一条 `--effect` 的幂等键已存在即拒绝**整条**命令（设计第 6.5 节）。两趟走——
 /// 先全查、后全写——使「拒绝」不依赖回滚来保证「一条也没写」，读代码时不必推演事务。
+/// **幂等键的检查排在强制点 (2) 之前**：它不依赖任何裁决，且是更具体的前置条件；
+/// 排在前面也让「同键的第二次调用」报的仍是幂等键冲突（P2 的既有判据）。
+///
+/// # 强制点 (2) 排在写效应之前
+///
+/// 铸不出能力即 `Err` 返回，此时一条记录都还没写（事务随作用域回滚，也无需回滚）。排在
+/// 写之前是刻意的：本仓没有删除 `effect` 行的路径，若记录已落库再拒绝，同一个 Intent
+/// 会因幂等键再也创建不了（模块文档「拒绝时的工作区清理」）。
 ///
 /// # 事务在返回前提交
 ///
@@ -284,11 +360,14 @@ fn save_record(db: &Db, record: &WorkspaceRecord) -> Result<(), TaskError> {
 /// 消失，恢复钩子就看不到那条 `EXECUTING`，`§268` 的「执行前写入」也就无从谈起。
 ///
 /// 出错时 `tx` 随作用域析构回滚，调用方（[`run`]）随后清理工作区与记录。
-fn record_declared_effects(db: &Db, args: &TaskArgs) -> Result<Decision, TaskError> {
+fn record_declared_effects(
+    db: &Db,
+    args: &TaskArgs,
+) -> Result<(Decision, Vec<AuthorizedEffect>), TaskError> {
     let tx = db.begin()?;
 
-    // 裁决在本步做，不留给第 7 步：`AUTHORIZED` 要真的意味着「策略已授权」，而
-    // `authorization` 字段（第 6.7 节）要写进这个裁决结果。
+    // 集成那条裁决在本步做，不留给第 7 步：`AUTHORIZED` 要真的意味着「策略已授权」，
+    // 而 `authorization` 字段（第 6.7 节）要写进这个裁决结果。
     let policies = load_policies(&tx)?;
     let decision = arbitrate(&policies, &policy_context(args.approve));
     let authorization = authorization_field(args.approve, decision);
@@ -300,6 +379,10 @@ fn record_declared_effects(db: &Db, args: &TaskArgs) -> Result<Decision, TaskErr
             return Err(TaskError::EffectAlreadyRecorded { key });
         }
     }
+
+    // 强制点 (2)：逐条问策略、铸能力；铸不出即拒绝整条命令。与上面那次集成裁决共用
+    // 同一张已读出的策略表，但**各裁一次**（上下文不同，见模块文档）。
+    let authorized = authorize_declared_effects(&policies, args)?;
 
     for spec in &args.effects {
         let key = effect_key(&args.intent, spec);
@@ -325,7 +408,65 @@ fn record_declared_effects(db: &Db, args: &TaskArgs) -> Result<Decision, TaskErr
     }
 
     tx.commit()?;
-    Ok(decision)
+    Ok((decision, authorized))
+}
+
+/// **强制点 (2)**：逐条问策略，铸不出能力即拒绝整条命令（设计第 4.1 节）。
+///
+/// 每条 `--effect` 用它自己的 [`policy_context_for_effect`]（`effect_type` 已填）裁决
+/// 一次；「铸不铸」复用 [`mints`]（六格表唯一的落点，见其文档），**不重写**。铸得出就
+/// 用 [`CapabilityKind::for_effect`] 取 kind、以该效应的**目标**为作用域铸一枚能力
+/// （§253 的 `git.push:origin/main` 即此形），并配成 [`AuthorizedEffect`]。
+///
+/// # 拒绝的是**整条**命令
+///
+/// 按声明次序逐条走，遇到第一条铸不出的即返回 [`TaskError::EffectNotAuthorized`]——
+/// 不是只跳过那一条。命令一步都没跑，调用方（[`record_declared_effects`] 的 `tx`）回滚，
+/// 上层再清理工作区。
+///
+/// # 两个 `expect` 的理由
+///
+/// [`mint`] 唯一的失败是空作用域，而 `--effect` 的空目标在解析期即被拒
+/// （`continuum_runtime::cli` 的 `EffectWithEmptyTarget`）；[`AuthorizedEffect::new`]
+/// 唯一的失败是效应与能力的 kind 不对应，而这里的 kind 正是由同一条效应经
+/// [`CapabilityKind::for_effect`] 派生的。两者都是本文件内部的不变量，写法与
+/// [`run_in_sandbox`] 的「cli 已保证」同例，不在用户调用上兜底。
+///
+/// # 不读时钟
+///
+/// [`mint`] 不读时钟，`expiry` 由调用方给；这里取 [`now_millis`] 加
+/// [`CAPABILITY_LIFETIME_MS`]。铸出的能力**不在这里做时效校验**——`
+/// Capability::is_valid_at` 是时效判定的唯一产生点，由消费方（连接器 / 凭据签发）
+/// 在用它之前判。
+fn authorize_declared_effects(
+    policies: &[Policy],
+    args: &TaskArgs,
+) -> Result<Vec<AuthorizedEffect>, TaskError> {
+    let mut authorized = Vec::with_capacity(args.effects.len());
+    for spec in &args.effects {
+        let decision = arbitrate(
+            policies,
+            &policy_context_for_effect(args.approve, spec.effect_type),
+        );
+        if !mints(decision, args.approve) {
+            return Err(TaskError::EffectNotAuthorized {
+                effect: spec.effect_type.as_str(),
+                target: spec.target.clone(),
+                decision: decision_name(decision),
+            });
+        }
+        let capability = mint(
+            CapabilityKind::for_effect(spec.effect_type),
+            spec.target.clone(),
+            now_millis() + CAPABILITY_LIFETIME_MS,
+        )
+        .expect("cli 已保证 --effect 的目标非空，mint 不会失败");
+        authorized.push(
+            AuthorizedEffect::new(spec.effect_type, capability)
+                .expect("kind 由 for_effect 从同一条效应派生，配对必然成立"),
+        );
+    }
+    Ok(authorized)
 }
 
 /// 第 6 步：把各效应记为命令退出形态对应的终态。
@@ -385,10 +526,13 @@ fn effect_key(intent: &IntentId, spec: &EffectSpec) -> String {
 /// # 本子项目到此为止
 ///
 /// **生产代码**不读回、不校验本字段（测试会读它，以钉住写入的内容与格式）。它是留给
-/// 对账与审计的记录，不是一道强制。
-/// 校验属 Capability（P3）与 Authority（长期）的职责；本驱动既没有 Capability 的输入，
-/// 也没有 Authority 的来源，故它**不**在此处假装检查过什么。**不要把本函数或这个字段
-/// 读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
+/// 对账与审计的记录，不是一道强制。**本字段记的仍是集成那次裁决**（[`policy_context`]，
+/// `effect_type` 缺省），与强制点 (2) 逐条效应的裁决（[`policy_context_for_effect`]，
+/// `effect_type` 已填）是两个问题、两处各裁一次。**P3 起驱动确实有了 Capability 的
+/// 输入**（强制点 (2) 已接上，见模块文档），但那条路径**不读回本字段**、也不靠它——
+/// 本字段本身仍不被任何生产代码校验。校验属 Capability（P3）与 Authority（长期）的
+/// 职责，其中 Capability 那一半落在 [`authorize_declared_effects`]。
+/// **不要把本函数或这个字段读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
 fn authorization_field(approved: bool, decision: Decision) -> String {
     format!("approve={approved};policy={}", decision.as_str())
 }
@@ -396,9 +540,29 @@ fn authorization_field(approved: bool, decision: Decision) -> String {
 /// 裁决用的上下文。`--approve` 给没给是唯一有来源的事实；其余五事实本项目暂无来源
 /// （设计第 5.6 节：`task_class` 由驱动注入，但没规定注什么），填 `None` 而不是编一个
 /// 值——编出来的值会让引用它的规则开始匹配，那正是第 5.6 节点名的变更风险。
+///
+/// **这是集成那次裁决的上下文**（第 4 步的 `decision`，第 7 步复用），`effect_type` 缺省。
+/// 逐条效应那次用 [`policy_context_for_effect`]——两者问的不是同一件事，见模块文档
+/// 「与『策略只查一次』不冲突」。
 fn policy_context(approved: bool) -> PolicyContext {
     PolicyContext {
         explicit_current: approved.then_some(ExplicitApproval),
+        ..PolicyContext::default()
+    }
+}
+
+/// 逐条效应那次裁决的上下文（强制点 (2)）。
+///
+/// 与 [`policy_context`] 的唯一差别是 `effect_type` 填着这一条效应的类型——那是
+/// [`PolicyContext::effect_type`] 这个字段存在的理由（其文档原文：「本次待记的效应
+/// 类型」）。**其余四个事实同样缺省**，理由与 [`policy_context`] 相同。
+///
+/// 这个字段可观察：一条按 `{"fact":"effect_type","eq":"charge"}` 限定的规则只在
+/// `--effect` 为 `charge` 时成立，而集成那次裁决（`effect_type` 缺省）不会被它匹配。
+fn policy_context_for_effect(approved: bool, effect_type: EffectType) -> PolicyContext {
+    PolicyContext {
+        explicit_current: approved.then_some(ExplicitApproval),
+        effect_type: Some(effect_type),
         ..PolicyContext::default()
     }
 }
@@ -718,6 +882,24 @@ pub enum TaskError {
          跳过会让调用方以为命令执行了）"
     )]
     EffectAlreadyRecorded { key: String },
+    /// 某条 `--effect` 的策略裁决**铸不出能力**，拒绝运行**整条**命令（强制点 (2)，
+    /// 设计第 4.1 节）。
+    ///
+    /// 命令一步都没跑。`decision` 取 [`decision_name`] 的中文名，使调用方能分辨是
+    /// 「要求批准」还是「禁止」；`effect` / `target` 点名是哪一条声明——多效应时报的是
+    /// **按声明次序第一条**铸不出的。
+    ///
+    /// 与 [`TaskError::IntegrationRefused`] 是两件事：那一个是集成那次裁决（`--apply`
+    /// 那一支，命令**已经跑完**），本变体是逐条效应的裁决（命令**一步没跑**）。
+    #[error(
+        "效应 {effect}:{target} 的策略裁决为 {decision}，铸不出能力：\
+         拒绝运行整条命令（命令一步都没跑）"
+    )]
+    EffectNotAuthorized {
+        effect: &'static str,
+        target: String,
+        decision: &'static str,
+    },
     /// 策略裁决为「不铸造批准值」，故拒绝集成。
     ///
     /// **工作区与记录原样保留**（设计第 4.2 节）：命令成功了，改动是完整可用的，
