@@ -475,7 +475,8 @@ pub enum LifecycleState {
 /// 可被**自动路由**的那六个状态。
 ///
 /// `unprofiled` / `quarantined` / `disabled` **不在此枚举里**——§249 禁的那三态
-/// 在路由路径上无处安放（`stale` 是额外挡下的第四态，见本节上文的裁定与标记）。
+/// 在路由路径上无处安放（`stale` 是额外挡下的第四态，见本节上文的已裁那段：
+/// `set-decisions` 第一节第 4 条）。
 /// 这与 P3A §2.3「`full_access` 不是禁止作为默认，而是没有
 /// 这个成员」是同一种做法。
 pub enum RoutableState { Discovered, Researched, Probed, Verified, Active, Degraded }
@@ -1006,16 +1007,37 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 
 ## 8.4 与《工程》§4.3 的两处不一致（**两处均已订正**）
 
-`docs/02-工程.md:245-254` 的层内依赖图里曾有两条边与本设计的实际依赖不符。**两条都已按本设计的读法订正**
-（`docs/superpowers/specs/2026-10-05-p3bcdf-set-decisions.md` 第二节的规范侧订正清单）。留此表备查：
+`docs/02-工程.md:245-254` 的层内依赖图里有两条边与本设计的实际依赖不符：
 
-| §4.3 的原样 | 本设计的读出 | 订正结果 |
+| §4.3 的原样 | 本设计的读出 | 现状（2026-10-05 核对） |
 |---|---|---|
-| `Router ← … + Capability Token` | 到 `continuum-capability` 的那条边**存在但含义不同**：取的是 `Cost`/`Latency` 两个画像容器，**不是** Capability Token | 已由该批订正执行。判据：全仓找不到 `Router` 对「能力凭据」的使用点——路由选的是**模型**，能力约束的强制点在工具调用路径（归子项目 A 与 F） |
-| `Provider Adapter → 被 Router 调用，接口中立` | 适配器**不被 Router 调用**；可用性以值到达 Router，调用方是**子项目 G**（模型调用路径） | 已订正为「`Provider Adapter → 被执行侧（模型调用路径）调用，接口中立`」——**与本设计的读法一致** |
+| `Provider Adapter → 被 Router 调用，接口中立` | 适配器**不被 Router 调用**；可用性以值到达 Router，调用方是**子项目 G**（模型调用路径） | **已订正**：该行现读 `Provider Adapter → 被模型调用路径（子项目 G）调用，接口中立`（`docs/02-工程.md:249`）——与本设计的读法一致，并附了订正日期与来历 |
+| `Router ← Model Registry + Capability Token` | 到 `continuum-capability` 的那条边**存在但含义不同**：本层取的是 `Cost`/`Latency` 两个画像容器，**不是** Capability Token | **已订正（2026-10-05，commit `a139fa9`）**：该行现读 `Router ← Model Registry + continuum-capability 的两个类型（Cost / Latency）`（`docs/02-工程.md:248`），并附了来历注记——与本设计的读出一致 |
 
-**这一节现在是「已订正」而不是「待协调」**，故 §11 第 13 条里对应的两项可销。
-`Router ← Model Registry` 那一半本来就没有争议，保留。
+**两处都已落地**：第一处依据 `docs/superpowers/specs/2026-10-05-p3bcdf-set-decisions.md` 第二节；
+第二处依据同一次收口（commit `a139fa9`）。故 §11 第 13 条里对应的两项都可销。
+
+**这条记录前后翻过两回，三段来历都留在此处**——本项目最常犯的形状正是「**一处事实的三种记法各自漂移**」，
+所以三种记法都要看得见，而不是只留最后那一种：
+
+1. **第一版：据转述写成「已订正」（过头话）。** 协调者在派工口信里说「§4.3 那两处订正已在」，
+   本设计照转述写进了「两处均已订正」。
+2. **第二版：据实移回「未订正」。** 定点复核时去读 `docs/02-工程.md`，发现 `:248` 那行**原样未动**、
+   无订正注记，于是改回未闭，并写了「核对日期 2026-10-05，不等于『已经改过』」。
+3. **第三版（当前）：规范侧真订正后复归「已订正」。** commit `a139fa9` 把那行改成
+   `Router ← Model Registry + continuum-capability 的两个类型（Cost / Latency）`，并附来历注记。
+
+**教训留在此段**：第 1 版的错不在「转述」，而在**没有在读源文件之前就写定论**——
+第 2 版的订正之所以必要，是因为第 1 版把一次口头的「已做」当成了文件事实。
+**一条关于别的文件的断言，判据只能是那个文件本身。**
+
+第二处的判据（记此以免被当成口味）：`Router ← Model Registry + Capability Token` 里
+`← Model Registry` 那半没有争议（§5 的 Router 正是读画像）；争议全在 `+ Capability Token`——
+本设计对 `continuum-capability` 的依赖是**取 `Cost` / `Latency` 两个类型**（§2.5），
+**不是取「能力凭据」**：全仓找不到 Router 对 `Capability` / `AuthorizedTool` 的引用，
+路由选的是**模型**，能力约束的强制点在工具调用路径（归子项目 A 与 F）。
+**这条边在 crate 层面成立**（本设计确实依赖那个 crate），**在组件层面名不符实**，
+故订正的方向是**含义**，即现在《工程》写的那一版。
 
 ---
 
@@ -1128,9 +1150,13 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     §250/§84 要的是一份**判断**（带 confidence / alternatives / reason 的候选排序），不是一次执行。
     故 Router 不调适配器，`invoke` / `stream` 的调用方是**子项目 G**（**不是 F**，见 §1.2 末段与第 20 条）。
     **C↔D 共三条记录在案的接缝**：调用面、`ALLOWED` 条目、以及「模型调用路径今天不存在」，三条的收件人都是 **G**。
-    - **已闭**：§4.3 已订正为「`Provider Adapter → 被执行侧（模型调用路径）调用，接口中立`」，
-      `Router ← … Capability Token` 的含义也已订正（`set-decisions` 第二节）——**本设计的读法已写进《工程》**；
-      同一批订正还写出了 §9.1 的箭头读法（被依赖者 → 依赖者）并补了 `资源层 → 边界层`，§6.3 那段订正因此有了规范出处。
+    - **已闭**：§4.3 的 Provider Adapter 一行已订正为「`Provider Adapter → 被模型调用路径（子项目 G）调用，接口中立`」
+      （`docs/02-工程.md:249`）——**本设计的读法已写进《工程》**；同一批订正还写出了 §9.1 的箭头读法
+      （被依赖者 → 依赖者）并补了 `资源层 → 边界层`，§6.3 那段订正因此有了规范出处。
+    - **已闭**：`Router ← Model Registry + Capability Token` 那一行亦已订正为
+      `Router ← Model Registry + continuum-capability 的两个类型（Cost / Latency）`
+      （`docs/02-工程.md:248`，commit `a139fa9`，2026-10-05）——本设计依赖那个 crate 取的是 `Cost`/`Latency`，
+      不是能力凭据（§8.4）。**本条曾两次翻面，三段来历见 §8.4。**
     - **未闭（收件人：C 的设计）**：C 的 §4「调用面」与它关于 `ALLOWED`「只应含 `continuum-provider`」
       的那句（C:274）须照样订正。**D 不改 C 的文档。**
     - **未闭（收件人：子项目 G）**：G 是三条接缝的共同收件人。
@@ -1181,8 +1207,8 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     （取 `ProviderHealth` 快照、消费 `RankedExecutionCandidates` 去发起 `invoke` / `stream`）
     落在**子项目 G（模型调用路径）**上，**不是 F**（F 是工具调用路径，本轮已裁）。
     依据：`docs/superpowers/specs/2026-10-05-p3bcdf-set-decisions.md` 第一节第 1 条——G 是那个
-    承担了约 28 处义务却从未具名的「执行侧」，本轮把它裁了出来。**「模型调用路径今天不存在」这条须与 C
-    的同一句一致**，它构成 C↔D 的**第三条接缝**。
+    承担了约 28 处义务却从未具名的「执行侧」，本轮把它裁了出来。**「模型调用路径今天仍无实现方」这条
+    须与 C 的同一句一致**——G 只是具了名，本轮**不设计**，故代码路径仍不存在——它构成 C↔D 的**第三条接缝**。
     **收件人：子项目 G**（G 本轮不设计，等 B/C/D/F 落计划后再起；**它的输入接口由 C 与 D 定**——
     本条即 D 侧的那一半）。
 21. **§86 的 `Tier 1 Low` 不在 §251 的阶梯五档里**（§7.1）：两者是规范自身的不一致
