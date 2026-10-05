@@ -58,7 +58,7 @@
   `exec`，`--exec` 消费其后全部参数（`cli.rs:23-35`）。工具调用没有命令 argv，却有工具 id 与一段
   JSON 输入；把它硬塞进 `--exec` 会让 `--exec` 的约定（「其后全是 argv」）说谎。
 - **工具调用不落在工作区上**：`--exec` 那条路建 Task 工作区是因为被跑的命令会改文件；工具调用的外部
-  效应由 §316 的适配器执行，`AuthorizedToolInvocation<'_>`（`continuum-provider`，C 设计 §7.5）里没有工作区
+  效应由 §316 的适配器执行，而 `invoke_tool` 交给适配器的那份**请求侧**里没有工作区
   这一项。把工具调用做成 `task` 的一个模式，会为了复用工作区而**凭空要求**一次工作区生命周期
   （建、落库、收尾），并且让 `--apply` 那道集成门对一条不改工作区的调用显得有意义——那是发明。
 
@@ -92,7 +92,7 @@
 - `--tool`（必填，只一次）：工具 id，取值就是 `continuum_core::tool::ToolId`（**不另建第二个
   `ToolId`**，`p3a-followups.md` 第五节第 1 条）。字形不校验（`ToolId::new` 只收字符串）：
   未登记的工具由强制点 (1) 以 `UnknownTool` 拒掉，那比在解析期发明一套 id 语法更早失败也更准。
-- `--input`（可选，只一次）：`AuthorizedToolInvocation<'_>` 的 `input` 字段的 JSON（该类型由 C 设计 §7.5 定，装 `&AuthorizedTool` 与 `input: Value`）。
+- `--input`（可选，只一次）：**请求侧承载的那段 `input` JSON**（F 把它连同 `&AuthorizedTool` 一起交给 `ProviderRegistry::invoke_tool`；请求类型本身由 `invoke_tool` 构造，F 不命名它）。
   **省略即 `{}`**。为什么允许省略：`ToolDescriptor.input_schema`（`tool.rs:18-23`）是自由 JSON、本层
   不解释它，一个无参数的工具写 `--input '{}'` 是纯噪声。为什么默认 `{}` 而不是 `null`：`input` 是
   对象形状的输入参数表，`{}` 是「没有参数」，`null` 是「没有输入」——后者是一个本层无从赋予含义的值。
@@ -317,7 +317,7 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 - **它只经两处交出去，且两处交出去的都是「整枚它」**：**（i）** 交给 `invoke_tool`（§6.1）；
   **（ii）** 按裁决 2 **用它构造扩位后的请求类型**交给适配器（§6.5）——**不是拆出授权值再传一份**。
   **除此之外它不进任何地方**：
-  不进 `AuthorizedToolInvocation::input`（那是自由 JSON，不是授权通道）、不进 stdout、不进命令行环境、
+  不进**请求侧承载的 `input`**（那是自由 JSON，不是授权通道）、不进 stdout、不进命令行环境、
   不进 `effect.parameters`（后者本路径照 `task` 的先例写 `{}`，见 §7.2）。**这一条与 §51 的禁止同源**：
   命令路径上驱动不得把 `AuthorizedEffect` 或其内容塞进命令的环境（`task_cmd.rs:46-52`），
   工具路径上驱动同样不得把 `AuthorizedTool` 塞进工具的**输入**——**授权走请求侧的具名位置，
@@ -340,7 +340,7 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 `authorize` 的比对**只按 kind**，作用域由能力自带（P3A 设计 §3.4「比对按 kind，作用域由能力自带」）。
 故在本路径上：调用方用 `--effect git.push:origin/main` 声明、铸出 `git.push:origin/main` 这枚能力；
 若它真正想做的是 `git.push:origin/dev`，**本路径不会拦**——它拦不了，因为工具调用的输入
-（`AuthorizedToolInvocation::input`，仍是一段自由 JSON）本层不解释它，也无从知道「输入里的分支」是哪一个。
+（即请求侧承载的那段 `input`，仍是一段自由 JSON）本层不解释它，也无从知道「输入里的分支」是哪一个。
 
 这条**不是本子项目的缺陷，是本层边界的既有形状**：作用域的强制落在凭据签发（§51、P3A 设计 §5.2：
 凭据的作用域不超出所给的能力）与执行点（子项目 B）。**本路径的作用是把这个 scope 原样带进
@@ -462,8 +462,8 @@ authorize(tx, tool_id, presented, now) -> Result<AuthorizedTool, CapabilityError
 ProviderRegistry::invoke_tool(&self, authorized: &AuthorizedTool, input: Value)
     -> Result<ToolResult, ToolCallError>;
     // 裁决 2（§6.5）：**请求侧**承载授权——按 C 设计 §7.5，请求类型装的是**整枚
-    // `AuthorizedTool`**（＋ input），故工具 id 只由授权证明给出。**形状由 C 定**，
-    // 本处不写它的字段（不预先发明接口）。
+    // `AuthorizedTool`**（＋ input），故工具 id 只由授权证明给出。**那个类型由 `invoke_tool`
+    // 在内部构造，F 不构造也不命名它**；本处不写它的字段（不预先发明接口）。
 
 pub enum ToolCallError {                 // C 设计 §3.5（定义）与 §7.1（用于 invoke_tool）
     Unregistered { id: ToolId },         // 这个 id 没有适配器（路由）
@@ -499,7 +499,7 @@ pub enum ToolCallError {                 // C 设计 §3.5（定义）与 §7.1�
 
 1. **门禁放在「最后一跳」，对每个持有者都成立。** 放在驱动的一个 crate 私有函数里，它只绑住那
    一个函数：**任何拿到注册表、或拿到某个适配器实例的代码**都可以绕开它去调 §316 的
-   `invoke`（后者收的是 `AuthorizedToolInvocation<'_>`，C 设计 §7.5）。
+   `invoke`（后者是 §316 的 trait，其请求参数由 `invoke_tool` 在内部构造后传入，C 设计 §7.1 / §7.5）。
    放在注册表里，注册表**不交出** `Arc<dyn ToolProvider>`（C 设计 §7.1：**不提供** `tool_for`、
    也**不提供** `tool_providers()` 枚举；只读的 `list_tools` / `describe_tool` 不在门禁内），
    故**任何持有注册表的代码都只能经 `invoke_tool`** 调到工具。
@@ -525,18 +525,19 @@ P3A 设计 §8）。注册表的 `invoke_tool` **只收它**，且注册表不�
 
 **说不出**（两条，据实写明）：
 
-1. **`ToolProvider` 仍是 §316 的公开 trait，它对外可被调用**——但**请求类型换过之后，
-   「自己拼一个请求去调」这条旧路已经走不通了**。**订正（本条的论证方向反了，来历留此）**：
-   原稿写的是「任何持有适配器实例的代码可以自己拼一个 `ToolInvocation { tool: ToolId::new("随便"),
-   input: ... }` 直接调 `invoke`，而这段代码**编译得过**」——**那句在 `ToolInvocation` 被删、
-   请求侧换成 `AuthorizedToolInvocation<'_>`（C 设计 §7.5）之后为假**：
-   新类型的**唯一公开构造入口收 `&AuthorizedTool`**，且它**不另收 `ToolId`**（工具 id 只从授权证明取）。
-   故「拿一枚自己编的 id 去调 `invoke`」**在类型上写不出来**——与 §7.1 的 `invoke_tool` 同一取向。
-   **剩下说得出的限度因此只剩一条**：**任何已经持有一枚真 `AuthorizedTool` 的代码**都能构造请求
-   （那是 `authorize` 给的，属正当路径），而**装配者**在装配期手里那份裸适配器**也不再够用**——
-   它同样要先有一枚 `AuthorizedTool`。C 设计 §7.5 的编译失败样例钉的正是这一条。
+1. **`ToolProvider` 仍是 §316 的公开 trait**——但**「自己拼一个请求去调 `invoke`」这条旧路已经走不通**，
+   因为**工具侧唯一的入口是 `ProviderRegistry::invoke_tool`**（C 设计 §7.1），它**在内部**用
+   `&AuthorizedTool` 构造请求（C 设计 §7.5）。
+   **订正（本条的论证方向反了，来历留此）**：原稿写的是「任何持有适配器实例的代码可以自己拼一个
+   `ToolInvocation { tool: ToolId::new("随便"), input: ... }` 直接调 `invoke`，而这段代码**编译得过**」
+   ——**那句在 `ToolInvocation` 被删、请求侧换成只装得下「已授权」的类型之后为假**（C 设计 §7.5）。
+   故「拿一枚自己编的 id 去调 `invoke`」**在类型上写不出来**：那条路的请求只能由 `invoke_tool` 构造，
+   而它**只收 `&AuthorizedTool` 与 `input`**（不另收 `ToolId`）。
+   **剩下说得出的限度只剩一条**：**任何已经持有一枚真 `AuthorizedTool` 的代码**都能走到
+   `invoke_tool`（那是 `authorize` 给的，属正当路径），而**装配者**在装配期手里那份裸适配器
+   **也不再够用**——它同样要先有一枚 `AuthorizedTool`。C 设计 §7.5 的编译失败样例钉的正是这一条。
 2. **配对的粒度是「工具 id」，不是「适配器真的按这个 id 做」**：`invoke_tool` 按
-   `authorized.tool_id()` 路由，请求类型也只从授权证明取 id，但一个实现多工具的适配器**仍然可以**
+   `authorized.tool_id()` 路由，请求里的 id 也只从授权证明来，但一个实现多工具的适配器**仍然可以**
    无视它去做别的事（`ToolResult` 里没有回执字段可比对）。**类型层管住了「id 从哪来」，
    管不住「适配器照着它做」**——适配器是可信代码（C 的交付、在驱动进程内），本层不为它兜底。
 
@@ -575,15 +576,23 @@ P3A 设计 §8）。注册表的 `invoke_tool` **只收它**，且注册表不�
 
 **F 传什么、从哪来（本子项目认领的那一半）——传的是「整枚 `AuthorizedTool`」**：
 
-- **F 传的值就是 `authorize` 给出的那枚 `AuthorizedTool` 本身**：**§316 的请求类型装的是整枚它**
-  （＋ `input`），F **用它构造**请求类型、**调 `provider.invoke`**。**F 不调 `AuthorizedTool::granted()`**，
-  也不把授权值拆出来单独传一份（**取 `granted()` 的是适配器**，C 设计 §7.5）。
+- **F 把整枚 `&AuthorizedTool`（连同 `input`）交给 `ProviderRegistry::invoke_tool`**（§6.1 那条唯一入口）。
+  **请求类型由 `invoke_tool` 在内部构造——F 既不构造它，也不命名它**（C 设计 §7.5 定的是那个类型
+  **长什么样**，§7.1 定的是**谁构造、经哪条路调**；F 只走 §7.1 那条路）。
+  **F 也不调 `AuthorizedTool::granted()`**，也不把授权值拆出来单独传一份（**取 `granted()` 的是适配器**，
+  C 设计 §7.5）。
+  **订正的来历（本节改过两轮，都留此）**：① 初稿写「F 从 `granted()` 取授权值、经请求侧传过去」——
+  与 C §7.5 相抵，是**上游派单措辞**造成的；② 上一稿改成「F 用整枚值**构造请求类型**、调
+  `provider.invoke`」——**仍偏了**：构造者是 `invoke_tool`，不是 F（同样是上游派单措辞引入的，
+  协调者已两次认领）。**判据一句话：§7.5 定类型长什么样，§7.1 定谁构造、经哪条路调。**
 - **为什么必须是整枚，而不是「F 拆出授权值再传」——这是本条的要害，不是风格**：
-  - **工具 id 只由授权证明给出，没有第二个来源**（C 设计 §7.1 / §7.5）：请求类型里那个工具 id
+  - **工具 id 只由授权证明给出，没有第二个来源**（C 设计 §7.1 / §7.5）：请求里那个工具 id
     **来自 `AuthorizedTool`**，故「没有授权就构造不出这次调用」是**类型层保证**；
   - 「F 拆出授权值、另带一个工具 id」的形状里，**那份授权**与**被调用的那个工具**是两个可各自漂移的
     值——**授权了 t1、却调用 t2** 在这条形状里写得出来，而它**编译得过**：这是 **fail-open 的形状**，
     与本项目「消除 fail-open」的判据相抵（与 §6.1 的配对、`AuthorizedEffect` 的配对同一条判据）。
+    **注意这条论证与「谁构造」无关**：构造者换成 `invoke_tool` 之后，它**更**成立——拆开的那条路
+    在 `invoke_tool` 的签名上就连写都写不出来（它只收 `&AuthorizedTool` 与 `input`）。
   - **订正的来历（我的派单引起的，记此）**：本设计上一稿写的是「F 从 `granted()` 取授权值、经请求侧
     传过去」——**那句话与 C 的 §7.5 相抵**，是**上游派单措辞**造成的（协调者已认领），**以 C 的 §7.5
     为准**，本稿按它改写。
@@ -723,8 +732,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 
 # 9. 测试策略（照片表）
 
-**库级用例**（`continuum-runtime`，夹具适配器经 C 注册表的登记入口装进去，记录收到的
-`AuthorizedToolInvocation<'_>`）：这是唯一能观察「工具有没有被调用」的地方——**生产装配点今天是空的**（§10.2）。
+**库级用例**（`continuum-runtime`，夹具适配器经 C 注册表的登记入口装进去，记录它**在实现 `invoke` 时收到的那份请求**——类型由 C 定，F 侧不命名）：这是唯一能观察「工具有没有被调用」的地方——**生产装配点今天是空的**（§10.2）。
 夹具适配器的形状照 `crates/continuum-provider/tests/fake_provider.rs`（那已是本仓既有的写法）。
 
 | 编号 | 验什么 | 怎么验 |
@@ -766,8 +774,8 @@ payload 用例覆盖，本路径不重复。
 `continuum-runtime` 的 `ALLOWED` 条目（`crates/continuum-runtime/tests/dependency_direction.rs:123-138`）
 里**已经有**本子项目要用到的全部内部 crate：`continuum-capability`（`AuthorizedTool` / `authorize` /
 `AuthorizedEffect` / `mint` / `CapabilityKind`）、`continuum-core`（`ToolId` / `ToolResult` /
-`ProviderError`——**`ToolInvocation` 已由裁决 §五删除**）、`continuum-provider`（`ToolProvider` /
-**`AuthorizedToolInvocation<'_>`**，裁决 §五把请求类型定在这里）、`continuum-policy`（沿用）、
+`ProviderError`——**`ToolInvocation` 已由裁决 §五删除**）、`continuum-provider`（**`ProviderRegistry`**
+——F 只调它的 `invoke_tool`，**不命名请求类型**；`ToolProvider` 亦在此 crate）、`continuum-policy`（沿用）、
 `continuum-effect`（沿用）、`continuum-persist`（沿用）。**故不改 `ALLOWED` 表，也不改 `Cargo.toml`
 的内部依赖清单。**
 
@@ -958,7 +966,7 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
    故**这一步的实现就是「在 `save_tool` 里加这条检查」**。**在该检查落地之前，那条洞是开着的。**
    **收件人：`continuum-capability`**（不再是子项目 C）。
 8. **工具调用不建 Task 工作区**（§3 的决定 F8）：若某个工具**确实需要**一个 Task 工作区，
-   §316 的 `AuthorizedToolInvocation<'_>` 里没有把工作区交给适配器的通道。**收件人：子项目 C**（改 §316 的调用面
+   §316 的**请求侧**（`invoke_tool` 交给适配器的那份）里没有把工作区交给适配器的通道。**收件人：子项目 C**（改 §316 的调用面
    是 C 的活），并与第 10 条同源。
 9. **§312 的「tool invoked」没有落点**（`docs/spec/05-normative.md:2116`）：全仓没有 Execution Trace
    的设施（`grep -rni trace crates/` 只命中 `continuum-artifact` 的两个无关文件）。本子项目**不发明**
@@ -968,7 +976,7 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
 10. **`AuthorizedEffect` / 授权的交付通道：已裁 (a)，不再是未决项。**
     **问题（留档；当时的类型现已不存在）**：`ToolProvider::invoke` 当时收的是 `ToolInvocation`
     （tool id + input），**没有携带授权或凭据的字段**——该类型已由裁决 §五删除，请求侧换成
-    `AuthorizedToolInvocation<'_>`（C 设计 §7.5）。故若某工具的外部效应
+    一个只装得下「已授权」的请求类型（C 设计 §7.5，由 `invoke_tool` 构造）。故若某工具的外部效应
     最终由 B 的连接器执行，**驱动无从把授权交给它**——「收下 `AuthorizedEffect` 才能做副作用」
     这条义务（共享面第四节第 2 条）在这条边界上**没有交付通道**。最吃紧的是**凭据类的工具**
     （`Email.Send`、`Payment.Charge` 这一类）。
