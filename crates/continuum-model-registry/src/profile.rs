@@ -370,7 +370,22 @@ pub fn current_observation(series: &[SkillObservation]) -> Option<&SkillObservat
 /// §81 另要 `deployment` 与 `capability fingerprint`，P3A 还把 `trust` 一并判给过本层：
 /// **§247 的十二个字段里没有它们中的任何一个**，故一处都不加（设计 §2.1、§2.5，
 /// §11 第 7 / 23 条；`trust` 的退件理由见设计的 §2.5 末节）。
-#[derive(Debug, Clone, PartialEq)]
+///
+/// # 五个字段今天没有读取方，故带 `#[allow(dead_code)]`
+///
+/// `version` / `provider` / `model_revision` / `latency_profile` / `cost_profile` 这五个字段
+/// 的访问器**按设计 §2.1 「随消费方增补、不预先铺开」**，故它们今天没有读取方，而本 crate 是库、
+/// 字段私有，`dead_code` 会如实报 `fields ... are never read`（实测，见本 task 报告），
+/// 「0 warning」又是硬约束。这是**计划的**状态，不是遗骸——消费方随 `load_profile`（Task 5）
+/// 等后续 task 接上，**那时这一行必须删掉**：留着会让将来真正多余的字段也静默。
+///
+/// **不派生任何 trait 来压这个警告。** 派生的 `PartialEq` / `Clone` impl 确实会读这些字段、
+/// 从而让警告消失（实测：`#[derive(Debug)]` 单独不起作用，加 `PartialEq` 才消失），
+/// 但今天**没有任何一处比对或克隆整份画像**——用一个没有消费方的派生去换警告消失，
+/// 就是给「声明了没有消费方的东西」编理由（`AuthorizedTool` 删掉 `Clone` / `PartialEq` / `Eq`
+/// 正是同一条判据，见 `crates/continuum-capability/src/registry.rs:24-33`）。
+/// 故这五个字段的读取方要么是**真访问器**，要么就是这个如实写明的豁免。
+#[allow(dead_code)]
 pub struct ModelProfile {
     id: ModelId,
     version: String,
