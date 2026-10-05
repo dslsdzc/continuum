@@ -250,22 +250,36 @@ pub struct Ratio(f64);             // 构造时拒 NaN / ±∞，且须落在 0.
 /// 画像侧取值类型的构造错误。**与 [`LifecycleError`] / [`RoutingError`] 分开**：
 /// 它标的是「这个值根本不是合法取值」，不是「这次操作不合法」。
 pub enum ProfileError {
-    /// 不是有限实数（NaN 或 ±∞）。
+    /// 不是有限实数（`NaN`、`+∞`、`-∞`）。**`Ratio` 与 `SkillScore` 都报这一枚**。
     NotFinite,
-    /// 落在 [0,1] 之外（`Ratio`）。
+    /// **有限**但落在 [0,1] 之外（`Ratio`）。**不收 `NaN` / `±∞`**——那些归 [`ProfileError::NotFinite`]，
+    /// 故 `value` 到这里时**总是一个有意义的数**（不是「一个无法比较的占位」）。
     OutOfRange { value: f64 },
     /// 该维度的观测在时间窗上不自洽（`end < start`）。
     BadTimeRange { start: i64, end: i64 },
 }
 ```
 
-判据是**每一种 `Err` 各有一条用例**（§9）：三个越界输入（`NaN`、`1.5`、`-0.1`）各断言是哪一枚，
-外加时间窗反序一条。**`ProfileError` 不进 `RoutingError`**：`rank` 收到的是构造好的值，
+判据是**每一种 `Err` 各有一条用例**（§9）：**两个越界输入（`1.5`、`-0.1`）各断言是 `OutOfRange`，
+外加一个非有限输入（`NaN`）断言是 `NotFinite`**，再外加时间窗反序一条（`BadTimeRange`）。
+**`ProfileError` 不进 `RoutingError`**：`rank` 收到的是构造好的值，
 构造失败在构造期就被拒（同 §5.4 对 `RequirementError` 的处置）。
+
+> **一处订正，来历留在原地**（本项目既有做法）。第一版稿子这句写的是
+> 「**三个越界输入（`NaN`、`1.5`、`-0.1`）**各断言是哪一枚」，而本节上文 `NotFinite` 的文档写的是
+> 「不是有限实数（**NaN 或 ±∞**）」——**两处相抵**：同一个 `NaN`，一处归「非有限」、一处归「越界」。
+> **裁决（2026-10-05，协调者）**：**`Ratio` 的非有限输入（`NaN`、`±∞`）报 `NotFinite`**，
+> **`OutOfRange` 只收「有限但落在 [0,1] 之外」**。
+> **判据是跨类型一致性**：同一个 `NaN` 在 `Ratio` 上判 `OutOfRange`、在 `SkillScore` 上判 `NotFinite`
+> 说不通——两枚类型对同一个输入给出不同的类别，调用方无从据此分支；而且 `NaN` 根本不是
+> 「落在某个区间之外」的点（与任何区间的比较都是 false），把它塞进 `OutOfRange` 会让那个
+> `value` 字段装着一个无法比较的值。改完之后，两枚变体的文档各自成立，`OutOfRange.value` 也总是有意义的数。
+> **本节末那条 bullet 里的同一句话**（`Ratio` 拒 NaN 的用例）一并按此改。
 
 - **为什么 `Ratio` 要拒 NaN**：NaN 与任何值的比较都是 false，`sort_by` 在含 NaN 的列表上不是全序
   ——排序结果随实现细节漂移。这不是洁癖：§84 的输出要被比对与记录，不确定的排序无法有照片。
-  用例钉三个越界输入（`NaN`、`1.5`、`-0.1`）各返回具体 `Err`（`ProfileError` 的哪一个变体，逐条断言）。
+  用例钉**两个越界输入（`1.5`、`-0.1` → `OutOfRange`）**外加**一个非有限输入（`NaN` → `NotFinite`）**，
+  各返回具体 `Err` 且逐条断言是**哪一个变体**（订正说明见本节上文那句判据处）。
 - **这对辅助函数的返回类型与 P3A 的不同，且是有理由的偏离**：`CapabilityKind::as_str` 返回
   `&'static str`，因为它是封闭枚举、字面量固定；`SkillScore` / `Ratio` 的域不是封闭枚举，`as_str` 返回
   `String`。**契约不变**：`parse(as_str(x)) == Some(x)` 逐值成立（用例钉往返），
@@ -1136,7 +1150,7 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 | 编码纪律 | 直接查表：`lifecycle_state` / `dimension` 列是小写、多词 `_` 连接——**不是** `Debug` 表示 |
 | 表外取值 | 裸 SQL 写入表外取值，读回返回具体 `Err`（枚举列、`Ratio` 越界、`score` 非数值各一条） |
 | 浮点往返 | `parse(as_str(x)) == Some(x)` 逐值（含 1.0、0.5、`9.2`、极小/极大有限值） |
-| `Ratio` 拒 NaN / 越界 | `NaN`、`1.5`、`-0.1` 各一条，各断言具体 `Err` |
+| `Ratio` 拒非有限 / 越界 | `1.5`、`-0.1` 各一条断言 `OutOfRange`；`NaN` 一条断言 `NotFinite`（**不归越界**，§2.4 的订正）；`SkillScore` 的同一组输入同法（跨类型一致） |
 | §24 的「时间序列」 | 同维度存三个 `score_version`，`load_skill_series` 返回三条且升序；**同 `(id, dim, version)` 二次写入被主键拒且原行不变**（裸 `INSERT`） |
 | 「缺席不是 0」 | 某维度无观测时 `SkillVector` 该维为 `None`；九维各断言一次（枚举式，逐项） |
 | 路由排序确定 | 打乱输入顺序，输出逐项相同；同分候选按 `ModelId` 升序 |
