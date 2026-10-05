@@ -53,6 +53,13 @@ list_tools / describe_tool / invoke / cancel
 
 ### §124 / §125 Connector
 
+**出处**（补记，2026-10-05）：**§124 在 `docs/spec/02-positioning.md:1803`**（Service Connectors）、
+**§125 在同文件 `:1828`**（Connector Permission）。**不在 `docs/spec/05-normative.md`**（该文件里
+`^## 124.` / `^## 125.` 零命中）——本文初稿只写了节号、未写出处，此处补上，免得后来者按「§ 都在
+05-normative」的习惯找错文件。§125 的给例：`GitHub.read_repo / GitHub.create_issue /
+GitHub.push_branch / GitHub.merge`、`Email.read / Email.draft / Email.send`；§124 有一句定性：
+**「Connector 不等于 Agent，它只是 Capability Provider」**（`docs/01-总纲.md:692`）。
+
 `crates/continuum-provider/src/connector.rs:12-16`（`descriptor()` / `invoke(op, input)`）；
 类型在 `crates/continuum-core/src/connector.rs`：`ConnectorId`、`ConnectorOp`、`ConnectorDescriptor`。
 
