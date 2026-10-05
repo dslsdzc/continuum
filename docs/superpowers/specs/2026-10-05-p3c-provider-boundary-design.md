@@ -82,7 +82,7 @@ list_tools / describe_tool / invoke / cancel
 `ToolResult`(31)。**其中 `ToolInvocation`(25) 将被删除**——裁决 §五（2026-10-05）已拍板；
 它的替代者是 §7.5 的 `AuthorizedToolInvocation<'_>`（见 §7.5 的落地清单、§12 第 22 条）。
 `ToolId` **同时**是 §252 的 `Tool.id`，P3A 判为同一个类型并复用
-（`crates/continuum-capability/src/lib.rs:38-41`）；本子项目**不另建第二个**。
+（`crates/continuum-capability/src/lib.rs:40-43`）；本子项目**不另建第二个**。
 
 错误类型 `ProviderError` 在 `crates/continuum-core/src/error.rs:3-15`，五个变体：
 `Unavailable` / `UnknownModel` / `Cancelled` / `Transport` / `Protocol`。**它不在共享面 §二冻结的类型清单里**
@@ -150,8 +150,9 @@ list_tools / describe_tool / invoke / cancel
 
 未命中：模型侧返回 `RegistryError::NotFound`，工具侧返回 `ToolCallError::Unregistered`（§7.1）。
 
-**重复登记同一 id** 返回 `RegistryError::Duplicate`，与 `crates/continuum-operator/src/registry.rs:20-29`
-的 `OperatorError::Duplicate` 同形——本仓已有这个先例，本子项目沿用其形状，不另发明一套。
+**重复登记同一 id** 返回 `RegistryError::Duplicate`，与 `crates/continuum-operator/src/registry.rs:10-11`
+的 `OperatorError::Duplicate` 同形（`:19-30` 是它的 `new` / `register`，不是变体本身；本行号订正于 2026-10-05）
+——本仓已有这个先例，本子项目沿用其形状，不另发明一套。
 
 ## 3.2 为什么是它，而不是另外三种
 
@@ -274,7 +275,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 `Arc<dyn ToolProvider>` / `ModelId` / `ToolId` / `AuthorizedTool`——**无一是实现类型**。
 若注册表引用了任何具体适配器类型，编译期就会要求一条新边，而那条边必须先写进 `ALLOWED`
 才能通过 `every_crate_depends_only_on_its_allowed_set`
-（`crates/continuum-runtime/tests/dependency_direction.rs:203`）。故中立性仍是**结构性**的，
+（`crates/continuum-runtime/tests/dependency_direction.rs:204`）。故中立性仍是**结构性**的，
 只是多出的一条边是「接口 → 能力类型」，不是「接口 → 实现」。
 
 **但这条「结构性」只到 crate 粒度为止——残留据实记**：它挡的是**跨 crate** 引用实现。
@@ -307,7 +308,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 
 1. **核心 crate 反向依赖 provider。** `continuum-core/Cargo.toml` 或 `continuum-persist/Cargo.toml` 加了
    `continuum-provider` → `core_and_persist_do_not_depend_on_provider`
-   （`crates/continuum-runtime/tests/dependency_direction.rs:244`）红，且 `ALLOWED` 的逐对断言同时红。
+   （`crates/continuum-runtime/tests/dependency_direction.rs:245`）红，且 `ALLOWED` 的逐对断言同时红。
 2. **中立 crate 引用了适配器实现。** `continuum-provider` 里出现某个具体适配器类型名 → 它没有那条依赖边，
    **编译不过**；若有人把边补进 `Cargo.toml`，则 `ALLOWED` 的逐对断言红（表里没有那条边）。
 3. **调用方持有实现。** 调用方（子项目 G，或 F）把适配器类型写进自己的类型签名里 → 它的 crate 必须依赖

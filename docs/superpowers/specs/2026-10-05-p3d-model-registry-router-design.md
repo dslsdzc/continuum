@@ -88,11 +88,11 @@ Router 的「当前可用性」输入取 §315 既有的 `ProviderHealth`
 | `modalities[]` | `Vec<String>`，落库为 JSON 数组 | **词表规范未定义**（§247 未列取值，§12 未给封闭集合）。见 §2.4 的编码约定与 §11 第 8 条 |
 | `tools[]` | `Vec<ToolId>` | 元素复用 §252/§316 的 `ToolId`（`crates/continuum-core/src/tool.rs:7`）——「这个模型能用哪些工具」正是那个类型的含义。**不新建第二个 ToolId** |
 | `skill_vector` | `SkillVector` | §248，见 §2.2 |
-| `failure_modes[]` | `Vec<String>`，落库为 JSON 数组 | §83 给的是自由文本例（`loses constraints in very long tasks` 等，`docs/spec/02-positioning.md:780-786`），**无封闭词表**。见 §11 第 9 条 |
+| `failure_modes[]` | `Vec<String>`，落库为 JSON 数组 | §83 给的是自由文本例（`loses constraints in very long tasks` 等，`docs/spec/02-positioning.md:779-784`），**无封闭词表**。见 §11 第 9 条 |
 | `latency_profile` | `Option<Latency>`（复用 P3A 的类型） | 见 §2.5 |
 | `cost_profile` | `Option<Cost>`（复用 P3A 的类型） | 见 §2.5 |
 | `evidence_count` | `u64` | 计数，没有单位问题 |
-| `confidence` | `Ratio` | §84 的示例把 confidence 写成 `0.94` / `0.51`（`docs/spec/02-positioning.md:796-800`），故取 **[0, 1] 的实数**。这是**照 §84 的示例推导**，不是发明 |
+| `confidence` | `Ratio` | §84 的示例把 confidence 写成 `0.94` / `0.51`（`docs/spec/02-positioning.md:809-816`），故取 **[0, 1] 的实数**。这是**照 §84 的示例推导**，不是发明 |
 
 **§81 与 §247 不一致，本设计按 §247。** §81（`docs/spec/02-positioning.md:708-734`）说模型身份至少含
 `provider / model_id / revision / deployment / capability fingerprint` 五项，而 §247 的 `ModelProfile` 只有
@@ -227,7 +227,11 @@ pub struct SkillVector {
 本设计需要三个新的取值类型，各自的 `as_str` / `parse` 与类型同址：
 
 ```rust
-/// §23 的能力评分（示例 `coding = 9.2`，`docs/spec/01-concepts.md:1068-1104`）。
+/// §23 §24 的能力评分。示例 `coding = 9.2` 的出处是 **§83**（`docs/spec/02-positioning.md:771-773`，
+/// 另见 `docs/01-总纲.md:563`）；§23 给的是能力**向量**（`docs/spec/01-concepts.md:1068-1104`），
+/// §24 给的是评分的**字段组成**（`docs/spec/01-concepts.md:1106-1131`）。
+/// **订正**：第一版稿子把 9.2 这个示例的出处写成了 `01-concepts.md:1068-1104`——那里是 §23 的技能树，
+/// **没有 9.2 这个字面量**（`grep -n "9\.2" docs/spec/01-concepts.md` 零命中）。
 ///
 /// **取值域与单位规范未定义**：§23 的示例是 9.2，§24 未给范围与方向。故本类型
 /// 只保证一件事——**可比较**（全序）。**本设计只使用它的序，从不使用它的量**：
@@ -469,12 +473,24 @@ pub enum LifecycleError {
 - **`stale` 回到 `researched` 而不是 `active`**：§82 说漂移后要「重新 profiling」。若允许它直接回 `active`，
   「避免使用已经过时的 Model Profile」这句话就没有落点。
 - **`* → quarantined` / `* → disabled` 可由任意状态进入**，与 P1 让 `INVALIDATED` / `CANCELLED`
-  由任意状态到达同一判据（`crates/continuum-graph/src/state.rs:18-21`）：事故与人工下线不挑时机。
+  由任意状态到达同一判据（`crates/continuum-graph/src/state.rs:16-19`）：事故与人工下线不挑时机。
 - **`disabled → unprofiled` 有一条件**：重新启用**必须重走画像流水线**（故出口是 `unprofiled` 而不是 `active`），
   依据是 §21「新增模型不能直接进入自动 Router」的同一条道理。被否掉的替代方案是「`disabled` 为终态」——
   它会让一次事故性的下线只能靠删行恢复，而删行会丢掉画像与观测历史。
 
-**自环（`x → x`）非法**，未列出的对一律 `Err(Illegal { from, to })`。
+**自环（`x → x`）在表里列到了的那些对上是合法的，其余一律 `Err(Illegal { from, to })`。**
+判据就是上表本身：`* → quarantined` 与 `* → disabled` 里的 `*` **含它自己**，故
+`quarantined → quarantined` 与 `disabled → disabled` 是 `Ok`（把已隔离的再隔离一次、把已停用的再停用一次，
+都是无害的幂等动作）；而 `active → active`、`verified → verified` 这类**没有列进表**，
+仍是 `Err(Illegal { from, to })`。
+
+> **一处订正，来历留在原地**（本项目既有做法）：第一版稿子写的是「**自环（`x → x`）非法**，
+> 未列出的对一律 `Err(Illegal …)`」——**那句与本节自己的表相抵**：`* → quarantined` / `* → disabled`
+> 两条规则把 `quarantined → quarantined` 与 `disabled → disabled` 也判成 `Ok`，于是同一条断言在
+> 两个地方给出相反结论。**一条与自己那张表相抵的「一律」正是本项目要消灭的形状**，故按表那一侧改。
+> 另有旁证：P1 的既有实现 `crates/continuum-graph/src/state.rs:16-19` 恰恰**放行自环**
+> （`if matches!(to, Invalidated | Cancelled) { return Ok(to); }` 在自环检查之前返回），
+> 本设计与之同形。
 
 ## 4.2 可路由闸门：四态**不可进入路由路径**（§249 ＋ 已裁的一条）
 
@@ -539,7 +555,7 @@ impl RoutableModel {
 `Err(NotRoutable { state })` 且**断言是哪一枚**（不是「返回了 Err」）。这是枚举式绝对断言，按本项目纪律**逐项**钉。
 
 **`degraded` 仍可路由，且它不是 `ProviderHealth` 的那个同名变体。** 判据是出处：`DEGRADED` 出现在 §249 的
-**模型生命周期异常态清单**里（`docs/spec/05-normative.md:867-874`），与 `ProviderHealth::Degraded`
+**模型生命周期异常态清单**里（`docs/spec/05-normative.md:868-871`），与 `ProviderHealth::Degraded`
 （`crates/continuum-core/src/model.rs:83-87`，那是**供应商侧的可用性**）是两个轴上的两个东西，只是名字撞了。
 本设计**不因这次撞名而动它**：§249 列了它，本轮裁定没有点它，故它保持可路由，状态原样带进候选的 `reason`
 （§5.2），让策略可以据此降权——**可见但不禁**。
@@ -1112,7 +1128,8 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 | `RoutableModel` 不可外部构造 | trybuild 样例（与 P3A 的 `AuthorizedTool` 同形） |
 | `overall_score` 读不到 | trybuild 样例；另：`SELECT overall_score FROM model_profile` 得到具体 `Err` |
 | `ModelProfile` 无总分 | 断言 `model_profile` 的列清单**逐列**（加一列即红） |
-| 生命周期迁移表 | 合法对逐条 `Ok`；**未列出的对**给若干条 `Err(Illegal { from, to })`；自环非法 |
+| 生命周期迁移表 | 合法对逐条 `Ok`；**未列出的对**给若干条 `Err(Illegal { from, to })` |
+| 自环**单独一条**（不靠矩阵顺带） | `quarantined → quarantined` 与 `disabled → disabled` 各一条 `Ok`（逐项，两条各断言各的）；**反向**：`active → active` 与 `verified → verified` 各一条 `Err(Illegal { from, to })`——**两侧都钉**，只钉放行那侧会让「没列进表的自环」漂过去 |
 | 画像早于 `verified` | **十态逐项**：`save_profile` 在六态 `Ok`、四态 `Err(ProfileBeforeVerified { state })` 并断言是哪一枚 |
 | 「画像必须来自库」 | `load_profile` 对库里不存在的 id 返回 `Ok(None)`；`ModelProfile` crate 外不可构造（trybuild） |
 | 空需求 | `TaskSkillRequirement::try_new(vec![])` 返回具体 `Err(RequirementEmpty)` |
