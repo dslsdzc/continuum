@@ -17,12 +17,16 @@
 //! Task 2 补 §248 的九维 [`SkillDimension`]、§24 的观测 [`SkillObservation`] 与
 //! 向量 [`SkillVector`]（含 [`current_observation`]）；Task 3 补 §247 的 [`ModelProfile`]
 //! 本体的十二字段，并以 `tests/type_level.rs` 钉住它的两处不可表达性（crate 外构造不出来、
-//! 读不到总分）。生命周期、持久化、路由、阶梯、预算各自在后续 task 落在自己的模块里。
+//! 读不到总分）；Task 4 补 §249 的生命周期十态 [`LifecycleState`]、可路由六态
+//! [`RoutableState`]、闸门 [`RoutableModel`] 与迁移表 [`transition`]。
+//! 持久化、路由、阶梯、预算各自在后续 task 落在自己的模块里。
 
 pub mod error;
+pub mod lifecycle;
 pub mod profile;
 
-pub use error::ProfileError;
+pub use error::{LifecycleError, ProfileError, RoutingError};
+pub use lifecycle::{transition, LifecycleState, RoutableModel, RoutableState};
 pub use profile::{
     current_observation, ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore,
     SkillVector,

@@ -1,6 +1,14 @@
-//! 画像侧取值类型的构造错误（设计 §2.4）。
+//! 本 crate 的错误类型（设计 §2.4、§4.1、§5.4）。
+//!
+//! 三个错误各管一件事，**不并成一个**：
+//! [`ProfileError`] 标「这个值根本不是合法取值」（构造期）；
+//! [`LifecycleError`] 标「这次生命周期操作不合法」；
+//! [`RoutingError`] 标「这次路由请求不合法」。判据是**产生方不同**——
+//! 把「值非法」与「操作非法」并成一枚，调用方就分不出该退回去修数据还是修动作。
 
-/// 画像侧取值类型的构造错误。
+use crate::lifecycle::LifecycleState;
+
+/// 画像侧取值类型的构造错误（设计 §2.4）。
 ///
 /// **与 `LifecycleError` / `RoutingError` 分开**：它标的是「这个值根本不是合法取值」，
 /// 不是「这次操作不合法」。
@@ -38,4 +46,51 @@ pub enum ProfileError {
     /// 自洽。故这条的守卫是 `end < start`，不是 `end <= start`。
     #[error("时间窗反序：start={start} 晚于 end={end}")]
     BadTimeRange { start: i64, end: i64 },
+}
+
+/// 生命周期侧的错误（设计 §4.1）。
+///
+/// **不叫 `RegistryError`**——C 的设计在 `continuum-provider` 里已有一个同名不同物的
+/// `RegistryError`（`NotFound` / `Duplicate`，是适配器注册表的错误）。两件事一个名字会让
+/// 调用方与后来者混淆，与「同一件事两个词汇表」是同一种病灶的两面。
+///
+/// # 只有一枚变体：其余三枚随产生方落地
+///
+/// 设计 §4.1 列了四枚（`Illegal` / `ProfileBeforeVerified` / `UnknownModel` / `Persist`）。
+/// 本 task 只落 `Illegal`——**没有产生方的变体不先铺开**（本仓对这类变体的处置是删或写明理由）。
+/// 另三枚的产生方与到位的 task：`ProfileBeforeVerified`（`save_profile`，Task 7）、
+/// `UnknownModel { id }` 与 `Persist(#[from] PersistError)`（`transition_in_tx` 等落库读写，Task 6）。
+/// 到那时它们在这里增补，**不提前铺开**：一枚永不出现的变体会让 `match` 的穷尽臂说谎。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum LifecycleError {
+    /// 迁移对不在 §4.1 的表里。`from` / `to` 原样带出（形状取自 `continuum-graph` 的同名变体
+    /// `crates/continuum-graph/src/state.rs:8-10`）。
+    ///
+    /// **两端都带出**：只说「这个迁移不合法」而不给是哪一对，调用方无法判断是来源错还是目标错。
+    #[error("迁移 {from:?} → {to:?} 不在 §4.1 的迁移表内")]
+    Illegal {
+        from: LifecycleState,
+        to: LifecycleState,
+    },
+}
+
+/// 路由侧的错误（设计 §5.3）。
+///
+/// # 只有一枚变体：其余由 Task 10 增补
+///
+/// 本 task 只落 [`RoutingError::NotRoutable`]——它是可路由闸门
+/// （[`crate::lifecycle::RoutableModel::try_new`]）的失败值，产生方在本 task 之内。
+/// 设计 §5.3 的其余变体（需求侧与候选集侧）随各自的产生方在 Task 10 / Task 11 落地。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RoutingError {
+    /// 该状态**不可进入自动路由路径**，`state` 原样带出**传入的那个十态值**。
+    ///
+    /// 四个产生方（设计 §4.2）：§249 禁的三态 `unprofiled` / `quarantined` / `disabled`，
+    /// 以及裁决额外挡下的第四态 `stale`（`docs/superpowers/specs/2026-10-05-p3bcdf-set-decisions.md`
+    /// 第一节第 4 条：§249 的三态是**下限不是上限**，漂移中的模型正在退出服役，放行即 fail-open）。
+    ///
+    /// **带的是 [`LifecycleState`]（十态），不是收窄后的 `RoutableState`**：被拒的那个状态
+    /// 恰恰不在 `RoutableState` 里，若这里收窄，错误值就表达不出「是哪一个被拒了」。
+    #[error("状态 {state:?} 不可进入自动路由路径（§249 的三态 ＋ 已裁的 stale）")]
+    NotRoutable { state: LifecycleState },
 }
