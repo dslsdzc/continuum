@@ -141,13 +141,11 @@ async fn an_unregistered_tool_id_is_reported_as_unregistered() {
         .describe_tool(&tool("nope"))
         .await
         .expect_err("未登记的 id 不该命中");
+    // 这一条同时排掉 `Provider`（两变体互斥）：不另写 `!matches!(Provider(_))`——它被本条
+    // 严格蕴含、只在通过后可达，**举不出**一个让它单独红的变异体（评审判据 2026-10-06）。
     assert!(
         matches!(err, ToolCallError::Unregistered { .. }),
         "必须是 Unregistered 这一种 Err（路由层判据），实际 {err:?}"
-    );
-    assert!(
-        !matches!(err, ToolCallError::Provider(_)),
-        "路由未命中不是 provider 调用失败，不许压进 Provider 臂"
     );
 }
 
@@ -225,17 +223,11 @@ async fn registering_the_same_tool_id_twice_is_rejected_as_duplicate() {
     );
     let listed = registry.list_tools().await.expect("注册表应能列出工具");
     assert_eq!(listed.len(), 1, "被拒的登记不该多出一条工具");
+    // 这一条钉住**是哪一条**：id 与描述成对来自同一个 `ToolDescriptor`，故它同时排除掉
+    // 「被拒适配器的那条（声明 `delta`／描述「后登记的那个的描述」）进来了」——「整体替换而非
+    // 追加」的变异体会在这里先红。不另写 `!listed.iter().any(..)` 两条：`len() == 1` 加本条
+    // 已把它们的变异空间完全包含，**举不出**让它们单独红的变异体（评审判据 2026-10-06）。
     assert_eq!(listed[0].description, "先登记的那个的描述");
-    // 「适配器列表侧没被污染」在上一行之后仍需自己一条照片：`len() == 1` 只说明**总条数**，
-    // 而这里要断的是**被拒的那个适配器的声明没进来**——它的 id 与描述都不许出现。
-    assert!(
-        !listed.iter().any(|d| d.id == tool("delta")),
-        "被拒的适配器声明的是 delta，它若进了列表就会在此现形，实际 {listed:?}"
-    );
-    assert!(
-        !listed.iter().any(|d| d.description == "后登记的那个的描述"),
-        "被拒的适配器的描述不该出现在并集里，实际 {listed:?}"
-    );
 }
 
 #[tokio::test]
@@ -274,11 +266,10 @@ async fn registering_a_group_of_tool_ids_is_all_or_nothing() {
     // 适配器列表侧同样不许被污染：被拒的适配器声明 `a`，它若被塞进列表，并集里就会多出 `a`。
     let listed = registry.list_tools().await.expect("注册表应能列出工具");
     assert_eq!(listed.len(), 1, "整组被拒不该往适配器列表里塞适配器");
+    // 这两条一起排除掉「被塞进来的那条」：`len() == 1` 加本条（id 恰是 `b`）之后，元素级
+    // `!listed.iter().any(|d| d.id == tool("a"))` 被完全包含，**举不出**让它单独红的变异体
+    // （评审判据 2026-10-06）。
     assert_eq!(listed[0].id, tool("b"), "列表里只该有先登记的那个适配器");
-    assert!(
-        !listed.iter().any(|d| d.id == tool("a")),
-        "被拒的适配器声明的 a 不该出现在并集里，实际 {listed:?}"
-    );
 }
 
 #[tokio::test]
@@ -295,13 +286,11 @@ async fn list_tools_reports_an_adapter_failure_as_provider() {
         .list_tools()
         .await
         .expect_err("有一个适配器失败，整次列举就该失败——不许吞、不许跳过");
+    // 这一条同时排掉 `Unregistered`（两变体互斥）：不另写 `!matches!(Unregistered)`——它被本条
+    // 严格蕴含、只在通过后可达，**举不出**让它单独红的变异体（评审判据 2026-10-06）。
     assert!(
         matches!(err, ToolCallError::Provider(_)),
         "适配器自己的失败应包在 Provider 臂里，实际 {err:?}"
-    );
-    assert!(
-        !matches!(err, ToolCallError::Unregistered { .. }),
-        "`list_tools()` 不按 id 查，这条路径上 Unregistered 臂不可达"
     );
 }
 
@@ -318,16 +307,14 @@ async fn describe_tool_routes_by_registration_not_by_the_adapters_list_tools() {
         .describe_tool(&tool("m"))
         .await
         .expect_err("适配器不认 m，故它给不出描述");
+    // 反序实现（先查 `list_tools()` 再路由）在上一条断言即红：它给的是 `Unregistered`，
+    // 与本条的 `Provider(Unavailable(_))` 互斥。故不另写 `!matches!(Unregistered)`——被本条
+    // 严格蕴含、只在通过后可达，**举不出**让它单独红的变异体（评审判据 2026-10-06）。
     assert!(
         matches!(
             routed,
             ToolCallError::Provider(ProviderError::Unavailable(_))
         ),
         "应先按登记路由到适配器，再转出它自己的 Unavailable，实际 {routed:?}"
-    );
-    // 反序实现（先查 `list_tools()` 再路由）在上一行即红：它会给 `Unregistered`。
-    assert!(
-        !matches!(routed, ToolCallError::Unregistered { .. }),
-        "命中了登记的适配器，就不该报 Unregistered——报了就说明路由查的是 list_tools()"
     );
 }

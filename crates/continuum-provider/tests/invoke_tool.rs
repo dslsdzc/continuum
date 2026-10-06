@@ -122,7 +122,8 @@ async fn an_unregistered_tool_is_not_called_at_all() {
     assert_eq!(recorder.seen_tool_id(), None, "更不该有适配器收到过授权");
 }
 
-/// 适配器自己失败（传输失败）→ `Provider`，**不是** `Unregistered`。
+/// 适配器自己失败（传输失败）→ `Provider`，**不是** `Unregistered`（后半句由下面那条
+/// `matches!(Provider(Transport(..)))` 一并排除：两变体互斥）。
 ///
 /// 反向的那一侧同样钉住：这一条要是被报成 `Unregistered`，调用方会把它当成配置缺陷
 /// 而不重试（设计 §5.1），而它其实是一次可能瞬时的失败。
@@ -140,16 +141,14 @@ async fn the_adapter_failure_is_reported_as_provider() {
         .await
         .expect_err("适配器返 Err");
 
+    // 这一条同时排掉 `Unregistered`（两变体互斥）：不另写 `!matches!(Unregistered)`——它被本条
+    // 严格蕴含、只在通过后可达，**举不出**让它单独红的变异体（评审判据 2026-10-06）。
     assert!(
         matches!(
             &err,
             ToolCallError::Provider(ProviderError::Transport(m)) if m == "适配器自己没跑成"
         ),
         "适配器的失败应原样经 Provider 透出，实际 {err:?}"
-    );
-    assert!(
-        !matches!(err, ToolCallError::Unregistered { .. }),
-        "已登记的 id 不得被报成 Unregistered，实际 {err:?}"
     );
     assert_eq!(
         recorder.seen_tool_id(),
