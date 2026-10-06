@@ -179,27 +179,52 @@ D 到 Task 9），故 §4 的两处接口请求**此刻改最便宜**。
 
 # 3. 调用面
 
-## 3.1 流程：三段，两个同步边界
+## 3.1 流程：四段，两个同步边界
 
 C 的设计 §6 给了调用方七步（`…p3c-provider-boundary-design.md:462-475`）。本设计把它与 G 的两段
-（同步读库 / 异步调用）交错起来，落成三个函数：
+（同步读库 / 异步调用）交错起来，落成四个函数：
 
 ```rust
 // ① 同步段：读 D 的表、过 D 的闸门、解析适配器。**收 `Tx`**。
 pub fn plan_candidates(tx: &Tx<'_>, registry: &ProviderRegistry)
     -> Result<Vec<Candidate>, ModelCallError>;
 
-// ② 异步段：取可用性快照 → 组装请求 → 调 rank。**不收 `Tx`**（§3.4）。
-pub async fn select(candidates: &[Candidate], input: RouteInput<'_>, policy: &dyn RankingPolicy)
-    -> Result<RankedExecutionCandidates, ModelCallError>;
+// ② 异步段：取可用性快照 → 组装请求 → 调 rank，并把**句柄与排序结果成对带出**。**不收 `Tx`**（§3.4）。
+pub async fn select(candidates: Vec<Candidate>, input: RouteInput, policy: &dyn RankingPolicy)
+    -> Result<CallPlan, ModelCallError>;
 
-// ③ 异步段：对**一个候选**发起调用。**不收 `Tx`**；**也不收 `ModelId`**（§2.2）。
-pub async fn call(candidate: &ExecutionCandidate, input: CallInput<'_>, deadline: Option<Duration>)
+// ③ 异步段：对**一个候选**发起调用。**不收 `Tx`**；**也不收 `ModelId`**（§2.2）；
+//    句柄是**显式的一枚入参**——`ExecutionCandidate` 里没有它（D 的类型不含适配器）。
+pub async fn call(candidate: &ExecutionCandidate, adapter: &Arc<dyn ModelProvider>,
+                  input: CallInput<'_>, deadline: Option<Duration>)
     -> Result<InvokeResponse, ModelCallError>;
 
-// ④ 流式的那一支，与 ③ 同形，返回 ModelStream 并把 cancel 收在自己的一个入口里（§3.5）。
-pub async fn call_stream(candidate: &ExecutionCandidate, input: CallInput<'_>, deadline: Option<Duration>)
+// ④ 流式的那一支，与 ③ 同形；中止是它自己的一个入口（§3.5）。
+pub async fn call_stream(candidate: &ExecutionCandidate, adapter: &Arc<dyn ModelProvider>,
+                         input: CallInput<'_>, deadline: Option<Duration>)
     -> Result<ModelStream, ModelCallError>;
+pub async fn abort(adapter: &Arc<dyn ModelProvider>, stream: &ModelStream)
+    -> Result<(), ModelCallError>;
+```
+
+两枚随行类型（字段私有，构造点各只有一个）：
+
+```rust
+/// ① 的产物：**一个候选与它自己的适配器**。构造点唯一（在 `plan_candidates` 内，
+/// §3.2 的三条合取同一次完成）。
+pub struct Candidate { model: RoutableModel, adapter: Arc<dyn ModelProvider> }
+
+/// ② 的产物：**D 的排序结果** 与 **候选 id → 句柄** 的配对表。
+///
+/// **为什么需要它**：`select` 调完 `rank` 之后，`ExecutionCandidate` 只带 `ModelId`
+/// （D §5.2 的五个访问器里没有句柄），而 ③ 与 `abort` 都要句柄——故句柄必须在 ② 与 ③ 之间
+/// 有地方安放。**配对的键是 `ModelId`**（见正文第 6 条）。
+pub struct CallPlan { /* ranked + adapters，字段私有 */ }
+
+impl CallPlan {
+    pub fn selected(&self) -> (&ExecutionCandidate, &Arc<dyn ModelProvider>);
+    pub fn alternatives(&self) -> Vec<(&ExecutionCandidate, &Arc<dyn ModelProvider>)>;
+}
 ```
 
 **代码块只是示意，正文才是约束**（本项目既有口径：设计里的代码块未被编译器核过）。要写死的约束是：
@@ -207,17 +232,52 @@ pub async fn call_stream(candidate: &ExecutionCandidate, input: CallInput<'_>, d
 1. **候选集与适配器句柄同一次定下**：`Candidate` 里带 `RoutableModel` 与它对应的
    `Arc<dyn ModelProvider>`（由 `registry.model_for(id)` 得到）。**解析只发生一次**，因为解析失败要
    影响候选集（§3.2）；若在 `call` 里再解析一次，那就是同一件事的第二个产生点。
-2. **`select` 收的是候选切片，不是库句柄**：它够不着 D 的表，故「没有画像就没有候选」不可能在它这里被绕过。
-3. **`call` 的第二个参数是 `&ExecutionCandidate`**，不是 `ModelId`（§2.2）。
-4. **截止只包住一次调用**（§3.5）。
-5. **候选集为空时不调 `rank`**：直接以 `ModelCallError::Routing(RoutingError::NoEligibleCandidate)` 返回——
+2. **`select` 收的是候选本身，不是库句柄**：它够不着 D 的表，故「没有画像就没有候选」不可能在它这里被绕过。
+3. **`select` 按值收 `Vec<Candidate>`，不是 `&[Candidate]`**。判据是**类型上的不可投影**：
+   `rank` 的第二个入参是 `&[RoutableModel]`（D 计划 Task 11 的签名），而 `RoutableModel`
+   **字段私有、不可克隆**（`crates/continuum-model-registry/src/lifecycle.rs:153-170`），
+   故 `&[Candidate]` **变不出** `&[RoutableModel]`——一组按值持有 `RoutableModel` 的元素，
+   投影不出它们内部那个字段的切片。按值收之后，`select` 内部把它们**解构成**一枚
+   `Vec<RoutableModel>`（正是 `rank` 要的那个）与一枚句柄表。**本条的来历**：本设计初稿的代码块写的是
+   `&[Candidate]`，**那是一处写不出来的签名**（G 的计划在 Task 7 据实报出，本设计据此订正）。
+4. **`call` / `call_stream` 各收一枚 `&Arc<dyn ModelProvider>`；`abort` 非收不可**。
+   判据两条：(a) 正文第 1 条要求句柄在 `select` 与 `call` 之间不丢；(b) **`ModelStream` 自己不带句柄**
+   （`crates/continuum-core/src/model.rs:93-96` 只有 `call: CallId` 与 `chunks`），
+   故「中止一条流」除了 `CallId` 还必须知道**问哪个适配器**。**来历**：初稿的代码块在这两处
+   把句柄丢了，G 的计划补齐，本设计据此订正。
+5. **`call` 收 `&ExecutionCandidate`**，不是 `ModelId`（§2.2）。
+6. **配对靠 `ModelId`，且它在排序之后仍唯一**。`CallPlan` 按 `ModelId` 把 D 的每条候选配回它自己的句柄；
+   **唯一性的两个来源**：(a) G 的候选集**逐行来自 `model_registry`，`id` 是该表的 `PRIMARY KEY`**
+   （D §3.1 的建表语句），故 G 交出去的候选 id 两两不同；(b) D 在 `rank` 内**另有一道判重**
+   （`DuplicateModelCandidate`，D §5.3——它在 G 这条路径上不可达，正是 (a) 的结果，§4.5）。
+   **若少了 (a)**，按 id 配对就可能把两条候选配到同一个句柄上，而那是**静默的错误配对**。
+7. **`RouteInput` 按值、无生命周期参数**。它持 `TaskSkillRequirement` / `FamilyPreference` / `BudgetView`
+   三样（§250 的第 1、5 项与 ENG-005），而 `TaskSkillRequirement` **没有 `Clone`**
+   （D 计划 Task 10：字段私有 + `try_new`）——**收引用会逼出一次不可得的克隆**。
+   不取「给 `TaskSkillRequirement` 加 `Clone`」这条替代：那要改 D 的类型，而收益只是省一次移动。
+   **来历**：初稿的代码块写成 `RouteInput<'_>`，那个生命周期在正文里没有对应物。
+8. **截止只包住一次调用**（§3.5）。
+9. **候选集为空时不调 `rank`**：直接以 `ModelCallError::Routing(RoutingError::NoEligibleCandidate)` 返回——
    这一条让「一个适配器都没登记」与「全部被闸门挡下」两种情形走同一条失败路径，
    与 D 的 `NoEligibleCandidate`（D 设计 §5.4）形状一致。**它不是 G 自己新造一枚同名的错**：
    G 交出的就是 D 那一枚（§6.1 的错误类型）。
 
-**输入的两个值来自别处，G 不产它们**：`RouteInput` 里的 `TaskSkillRequirement` / `FamilyPreference`
+**这三笔订正（第 3、4、7 条）的来历是一处**：初稿的代码块是示意，**示意的部分写错了两处**
+（一个写不出来的签名、一个没有对应物的生命周期），并**漏了一处**（句柄在 ②③ 之间丢失）。
+G 的计划在写的过程中逐条报出并按最小改动补齐；本设计据此把口径**写回正文**
+（口径以设计为准、计划不替设计做决定）。**第 6 条是这次补齐逼出来的新口径**——配对键与它的唯一性
+来源，初稿一个字都没写，而它是「句柄与候选不会错配」这句话的唯一依据。
+
+**`RouteInput` 里的三个值来自别处，G 不产它们**：`TaskSkillRequirement` / `FamilyPreference`
 （§250 的第 1、5 项）来自规划侧；`BudgetView` 来自驱动的投影（D §6.1）。**这三个值今天的生产方都不存在**
 （§12）。
+
+**`Deadline { elapsed_ms: u64 }` 的口径是「实测耗时」**（从发起到截止触发那一段），
+**不是「截止值」**。判据：字段名与语义必须同宽——写成「截止值」会让 `elapsed_ms` 这个名字说谎，
+而**名字与语义两说正是本项目反复出错的形状**。**它今天没有消费方**，故 §11 的用例
+**只断言是哪一枚 `Err`、不断言数值**（断一个数值就是钉一次巧合：实测耗时在调度抖动下不等于截止值）。
+若将来有人要按它做退避或遥测，那是**消费方出现**那一刻的事（§14 第 16 条）。
+**来历**：初稿给了这个字段、没给口径，G 的计划据实报出。
 
 ## 3.2 候选集：三个来源，一条接缝规则
 
@@ -244,6 +304,11 @@ C §3.3 代价三：`tool` 表与 `ProviderRegistry` 是两个登记点，且**�
   同一方向的对照是 D 对 `availability` 缺席的处置——`Err(UnknownAvailability)`，并明写「按未知放行是
   fail-open 的形状」（D §5.3）。两处判据一致：**不确定就不放行**（差别只在形式：D 拒绝，G 丢弃——
   G 丢弃得更早，那时它连一个候选都没有）。
+- **§3.1 的 `Candidate` 里那条对应关系在这一步就定死**：它的 `adapter` 由
+  `registry.model_for(candidate.model.profile().id())` 解析而来（`RoutableModel::profile()` 在
+  `crates/continuum-model-registry/src/lifecycle.rs:175`，`ModelProfile::id()` 在
+  `src/profile.rs:446`），故「候选 → 句柄」的对应不需要在排序之后**推断**，只需按 `ModelId` **复原**
+  （§3.1 第 6 条）。**这条同时是「解析只发生一次」的落点**：`call` 不再解析。
 - **丢弃必须是显式的、有照片的，不是静默的**：§11 给两侧各一条（丢 vs 登记后回来）。
 - **G 不调 `list_models()`**。登记是**路由**的权威、`list_*` 是**描述**的权威（C §3.1 的口径），
   而 G 要的是路由事实。第三个来源因此**在这条路径上一次都不出现**——它有否定式照片（§11）。
@@ -343,12 +408,12 @@ G 挂住**——要它可中止，须先有「流的分片消费也带截止」�
 
 ---
 
-# 4. 与 C、D 的接缝：三条接口请求（两条已落实、一条已认领）与三条已定的口径
+# 4. 与 C、D 的接缝：一条接口请求（已认领）＋两条判为**不请求**，与三条已定的口径
 
 **本节写在 C 刚落地 Task 1、D 到 Task 9 的时刻。** 每条写明「哪个接口 / 该怎么改 / 为什么 / 不改会怎样」。
-**2026-10-06 回扫（实读 C 与 D 的现文与 D 的计划）**：§4.2、§4.3 两条**已由 C 落实**（C 的设计已就地改，
-并把这处订正的来历留在原地）；§4.1 那条已由 **D 的计划 Task 14 Step 1** 认领（尚未落地为代码）。
-**两条已落实的请求不再改动任何文件，只需 G 的 plan 照现文写。**
+**2026-10-06 回扫（实读 C 与 D 的现文、D 的计划、以及 G 的计划）**：§4.2、§4.3 两条**已由 C 落实**
+（C 的设计已就地改，并把这处订正的来历留在原地）；§4.1 那条已由 **D 的计划 Task 14 Step 1** 认领
+（尚未落地为代码）；§4.6 的两条**判为不请求**（判据在彼处）。**故对 D 的请求最终只有一条。**
 
 ## 4.1 请求 D：缺一个「枚举已登记模型」的读函数（**硬缺口；已由 D 的计划 Task 14 Step 1 认领**）
 
@@ -434,7 +499,6 @@ C §6 第 4 步亦据此写明「**id 来自 D 的 Model Registry 表**（模型
    `Degraded` 原样带进 `reason`。G **不因健康度做任何二次裁剪**——那会是在 D 已写死的地方加第二个判据。
 
 ## 4.5 D 的 `RoutingError` 在 G 这条路径上的可达性（逐变体）
-
 D 的 `RoutingError` 有四枚（D §5.4）：`NotRoutable` / `NoEligibleCandidate` / `DuplicateModelCandidate` /
 `UnknownAvailability`。**G 是它的第一个生产消费方，故逐变体判「从 G 的路径到得了吗」**：
 
@@ -450,6 +514,36 @@ D 的 `RoutingError` 有四枚（D §5.4）：`NotRoutable` / `NoEligibleCandida
 别的调用方可以传一份不全的列表）。**G 这边不重复钉它们的逐变体用例**（D 已有），
 G 钉的是**上表这三处不可达性**——它们各有照片，写在 §11（一条钉候选集与快照的一一对应，
 一条钉候选集逐行来自主键表，一条钉候选集的元素类型是 `RoutableModel`）。
+
+## 4.6 两条**判为不请求**的（逐条给判据，免得被读成漏提）
+
+**（一）`rank` 的第二个入参 `&[RoutableModel]` 不改。**
+
+- **问的是**：G 手里是「候选 + 句柄」的成对值，而 `rank` 要 `&[RoutableModel]`——**要不要请 D 改成
+  收成对值**（例如 `&[(RoutableModel, Arc<dyn ModelProvider>)]`）？
+- **判：不改。** 三条判据：
+  1. **那会把调用侧的实现细节推进排序层**。`rank` 是**纯函数**（D §8.1「Router 的纯由签名保证」），
+     它不接 `Tx`、不持有 `CallId`、不消费 `ModelStream`；把「适配器句柄」写进它的入参，
+     就是让排序层知道适配器存在——与 D §1.2 那条「**判断**在本层、**执行**在 G」的分界正面冲突。
+  2. **`RoutableModel` 的语义正是「一个可交给 Router 的模型」**（D §4.2），它不该长出一条与执行有关的边。
+  3. **G 侧的解不贵**（这就是答「能不能不改 D 就解决」）：`select` 内部把 `Vec<Candidate>`
+     解构成 `Vec<RoutableModel>`（正是 `rank` 要的那个）与一枚句柄表，`rank` 之后**按 `ModelId`
+     复原**配对——`ModelId` 是唯一键，两个来源已在 §3.1 第 6 条写明。**代价是一次解构 + 一次按 id 配对**，
+     而收益是 D 的排序层不认识适配器。
+- **不改会怎样**：G 的 `select` 里多两步（解构、按 id 配对），**没有别的后果**；而改的后果是
+  上一段的三条。
+
+**（二）不向 D 要「画像的播种入口」或测试用的构造口。**
+
+- **问的是**：G 的测试要拿候选，而 `ModelProfile` crate 外造不出、`save_profile` 又收一枚画像
+  ⇒ 只能裸 SQL 播行 ⇒ **G 的测试里嵌 D 的表结构**。要不要请 D 开一个口？
+- **判：不要，接受耦合。** 判据与「接受的是什么」写在 §11 的前置二（三条替代全部更坏，
+  其中第一条**正**是 D §2.2 要挡的东西）。
+- **不改会怎样**：G 的测试知道 D 的列名，D 改掉那些列时 G 红——**这就是护栏的用意**。
+
+**故对 D 的请求最终是 1 条**：§4.1 的 `list_registered`（已由 D 的计划 Task 14 Step 1 认领）。
+C 侧 2 条已落实（§4.2、§4.3）。**本节的两条「不请求」也是判断，不是沉默**——它们的判据在上面，
+收件人是「无（已判）」。
 
 ---
 
@@ -703,12 +797,26 @@ G 没有可半写的副作用，而这条断言把它钉成事实而不是声明
    （模型侧），F 是第一个（工具侧）。同理 `runtime → core` 与 `runtime → model-registry` 也各自有真使用点。
    **边由用它的那个 task 登记**（P2b 的规矩）——F 先落地就由 F 登记，G 落地时**只核不改**。
 
-## 10.2 两处共享文件要登记（不是新增边）
+## 10.2 两处共享文件要登记（不是新增边）——**其中一处依赖 F**
 
 `crates/continuum-runtime/src/error.rs` 与 `tests/dependency_direction.rs` 是**两个子项目都写**的文件
-（与 §七.7 记的「多写者单文件」同形）：G 向 `error.rs` 增补 `ModelCallError`（F 已在那里放了 `TaskError`
-与 `ToolReportedError`），并且**不新增 `ALLOWED` 条目**（故那张表 G 一处都不动）。
-**G 的 plan 要把这两件事各自登记自己那几条**，不设集中登记 task。
+（与 §七.7 记的「多写者单文件」同形）：G 向 `error.rs` 增补 `ModelCallError`，并且**不新增 `ALLOWED`
+条目**（故那张表 G 一处都不动）。**G 的 plan 要把这两件事各自登记自己那几条**，不设集中登记 task。
+
+**订正（2026-10-06，G 的计划据实报出；原话照留、加此注记）**：本段初稿写「（F 已在那里放了 `TaskError`
+与 `ToolReportedError`）」——**那个「已」是假的**。实读：`crates/continuum-runtime/src/error.rs` 与
+`src/tool_call.rs` **今天都不存在**（F 尚未落地；F 的计划 `docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md:307-308`
+才要建它们，且它的 Task 2 还要把 `TaskError` 整块从 bin 搬进 lib）。
+
+**故 G 的实际前置是三个 crate 的流：C、D、F**，而 §4 与本节只把前置写成 C 与 D。
+**落点与收件人（写清缺的是哪一步）**：
+
+- **缺的那一步**：F 的 Task 2 建出 `crates/continuum-runtime/src/error.rs` 并把 `TaskError` 从
+  `task_cmd.rs` 原样搬进去（`docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md:307` 的 `Create` 行、
+  `:158` 的文件表那一行：「新建（lib）：`TaskError` 从 task_cmd.rs 原样搬来」）。
+- **G 不代 F 建那个文件**：同一个文件有两个创建者，而 F 还要整块搬入 `TaskError`——两批改动撞在
+  同一个文件上（§七.7 的「多写者单文件」）。
+- **收件人：协调者**（排期：G 的 Task 1 必须排在 F 的 Task 2 之后），记在 §14 第 17 条。
 
 ## 10.3 中立性：G 侧的三条
 
@@ -730,12 +838,35 @@ crate，而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的�
 
 # 11. 测试策略
 
-**前置**：G 的用例需要一枚**自己的假模型适配器**（实现 `ModelProvider` 七个方法，可配置 `health()`
-的返回值、可记录 `invoke` / `stream` / `cancel` / `usage` 的调用）。**照既有裁定，这是 C 的
+**前置一：G 的用例需要一枚自己的假模型适配器。** 它实现 `ModelProvider` 七个方法，可配置 `health()`
+的返回值、可记录 `invoke` / `stream` / `cancel` / `usage` 的调用。**照既有裁定，这是 C 的
 `tests/common/mod.rs` 里那个 `FakeModel` 的第二份副本，两份不合并**（`p3bcdf-followups.md` §七.8：
-「两份各有其用」）。它需要 `continuum-runtime` 的 **dev 依赖** `async-trait`（F 已按 F8 加）
-与 `futures-core`（若自写单分片流；判据同 `crates/continuum-provider/tests/fake_provider.rs:17-19`
-的注释：`stream::iter` 属 `futures-util`，本仓不用它）。
+「两份各有其用」）。它需要 `continuum-runtime` 的 **dev 依赖** `async-trait` 与 `futures-core`
+（后者用于自写单分片流；判据同 `crates/continuum-provider/tests/fake_provider.rs:17-19` 的注释：
+`stream::iter` 属 `futures-util`，本仓不用它）。**订正**：本行初稿写「`async-trait`（F 已按 F8 加）」
+——**那个「已」也是假的**（同 §10.2）：F 尚未落地，故那两条 dev 边的登记方是**先落地的那一方**；
+G 若先落地就自己登记，F 若先落地就核一遍。
+
+**前置二：G 的夹具必须自己播 D 的画像行，故 G 的测试里嵌着 D 的表结构。** 这条链**不能自举**：
+`ModelProfile` 在 crate 外**构造不出来**（字段私有、`try_new` 是 `pub(crate)`，
+`crates/continuum-model-registry/src/profile.rs:387`/`:415`），而 `save_profile` **收一枚 `ModelProfile`**
+⇒ 第一枚画像只能由**裸 SQL** 播下（D 自己的夹具也是这个形状，D 的计划 Task 11 明写
+「第一枚画像必须由裸 SQL 播下」，`docs/superpowers/plans/2026-10-05-p3d-model-registry-router.md:1092`）。
+
+**判：接受这条耦合，不向 D 请求播种入口。** 要写明「接受的是什么」：
+
+- **接受的是**：G 的测试源码里出现 D 的列名（`model_registry` 的 `id` / `lifecycle_state`；
+  `model_profile` 的十二列与 `modalities` / `tools` / `failure_modes` 的 JSON 容器编码）。
+- **它是有意的耦合，同时是一条护栏**：D 改列名或改编码 → **G 的夹具红**，而**不是静默失配**。
+  这正是想要的：G 的候选集是 D 的表的下游，两者不一致必须看得见（与 §3.2 那条「三个来源」的判据同源）。
+- **它的射程要写准**：**加列不会红**（G 的夹具按列名写、不 `SELECT *`，也不断言列数）；**只有改列名
+  与改编码会红**。所以它不是「D 一改表 G 就红」的全称，而是「**D 改掉 G 依赖的那些列**才红」。
+- **不接受的替代，以及它们为什么更坏**：(i) 给 `ModelProfile` 开一个 crate 外的构造口（`pub` 的
+  `try_new` 或 `#[cfg(test)]` 的跨 crate 口）——那**正**是 D §2.2 那条保证要挡的东西
+  （「没有画像就没有候选」的第二条腿），**测试用的口子也是口子**；(ii) 把 G 的用例放进 D 的 crate
+  ——G 是 runtime 的路径，放错了地方，且会让 D 的 crate 依赖 G 的夹具；
+  (iii) 让 D 提供一个公开的「播种」函数——**那是给一个只在测试里存在的需求开生产接口**。
+- **收件人：D 的实现者**（表结构的变更须通知 G）＋ **G 的实现者**。记在 §14 第 18 条。
 
 | 验什么 | 怎么验 |
 |---|---|
@@ -744,6 +875,7 @@ crate，而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的�
 | G 不调 `list_models()`（§3.2 末条） | 假适配器的 `list_models()` 返回一个**不在 D 的表里**的 id，或直接返 `Err` → 候选集不变。**否定式照片** |
 | G 不调 `usage()` / `describe_model()`（§5） | 这两个方法返 `Err(ProviderError::Unavailable(…))` → 正常路径照过。**否定式照片，三条共用一个假适配器** |
 | 快照与候选集一一对应（§3.3） | 断言交给 `rank` 的 `availability` 的 id 集合 **== 候选集的 id 集合**（这就是 `UnknownAvailability` 在 G 路径上不可达的那条构造性断言，§4.5） |
+| 句柄与候选**按 id 配对**（§3.1 第 6 条） | 三个候选、三个**互不相同**的适配器 → `CallPlan::selected()` 给出的那对**是同一个模型的那一对**，逐项断言 `candidate.model() == 该适配器服务的那一个 id`；`alternatives()` 同法逐项。**红的条件**：把句柄表按候选集的**输入次序**配回去（而不是按 id）→ 排序之后次序变了，红 |
 | 可用性真的通到排序（§3.3） | 假适配器 `health()` 返 `Unavailable` → 该模型不被选中；**两侧对钉**：改回 `Healthy` → 它回到输出 |
 | 探活次数（§3.3） | 三个候选 → `health()` 被问**三次**（计数夹具）；钉「不跳着问」 |
 | `Tx` 不跨 `await`（§3.4） | 编译期：`assert_send(&future)`；**若实现把 `Tx` 带进异步段，编译不过** |
@@ -972,3 +1104,18 @@ G 侧的元素类型就是 `RoutableModel`（字段私有、唯一构造点）�
 15. **`decide_retry` 零生产调用点**（§6.3）：G 的分类产物**今天没有消费方**——裁决把分类放在 G、
     把重试策略放在执行层，而执行层尚未装配。**这不是 G 的漏做。**
     **收件人：驱动侧的节点执行装配点（同第 7 条）＋ 协调者。**
+16. **`Deadline.elapsed_ms` 今天没有消费方**（§3.1 末段）：口径已写死为**实测耗时**，
+    但没有任何一方按它分支（没有退避、没有遥测）。**故 §11 的用例只断言是哪一枚 `Err`、不断言数值。**
+    若将来有人要按它做退避或记录用量，那是**消费方出现**那一刻的事——届时先定「实测耗时」还是
+    「截止值」是否需要分开两个字段。**收件人：将来提出该需求的人。**
+17. **G 的实际前置是三个流：C、D、F**（§10.2 的订正）：`ModelCallError` 的落点
+    `crates/continuum-runtime/src/error.rs` 由 **F 的 Task 2** 创建
+    （`docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md:307` 与 `:158`），**今天不存在**；
+    G **不代 F 建它**（同一个文件两个创建者 + F 还要整块搬入 `TaskError`）。
+    同理 `async-trait` / `futures-core` 两条 dev 边也由先落地的那一方登记（F8 记的是 F 加，尚未落地）。
+    **缺的那一步是「F 的 Task 2 建出 `error.rs` 并搬入 `TaskError`」。**
+    **收件人：协调者**（排期：G 的 Task 1 排在 F 的 Task 2 之后）。
+18. **G 的测试夹具嵌 D 的表结构**（§11 前置二）：**接受这条耦合，不向 D 要播种入口**（判据三条在彼处）。
+    它的性质是**有意的耦合 + 有意的护栏**：**加列不会红**（G 按列名写、不 `SELECT *`），
+    **只有 D 改掉 G 依赖的那些列名或编码才会红**。**缺的机制是「D 改表时通知 G」这一步**。
+    **收件人：D 的实现者（表结构变更须通知）＋ G 的实现者。**
