@@ -15,9 +15,14 @@
 //! **本文件的第三个职责是唯一一条语义判定**：写侧的登记期不变量
 //! （`assert_effect_class_is_covered`，设计 §5.2）。它与上面两条适配不同，是本文件
 //! 自己的判断而非委托。落在此处的理由见该函数的文档：`save_tool` 是 `tool` 表的唯一
-//! 生产写点，不变量必须关在唯一入口上。**读侧不重判**：`load_tool` / `load_tools` 只
-//! 解码，不因不满足不变量而报错（旧库里的历史行仍读得出来，这与本仓「表外取值一律
-//! `Err`」那条**不冲突**——这里管的是取值合法性，不变量管的是登记项自洽性）。
+//! 生产写点，不变量必须关在唯一入口上；那句「唯一生产写点」由
+//! `tests/single_writer.rs` 的 `only_save_tool_writes_the_tool_table` 扫 `crates/*/src/`
+//! 的源码文本钉住（本文件自己的用例钉不住它——别处的写入不经过本文件）。
+//! **读侧不重判**：`load_tool` / `load_tools` 只解码，不因不满足不变量而报错（旧库里的
+//! 历史行仍读得出来，这与本仓「表外取值一律 `Err`」那条**不冲突**——这里管的是取值合法性，
+//! 不变量管的是登记项自洽性）。历史行的照片是 `tests/persist.rs` 的
+//! `a_legacy_row_that_violates_the_invariant_is_still_readable`（「读得出来」这一句原先
+//! 没有照片，Task 1 评审 Minor 3 指出后补）。
 
 use continuum_core::tool::ToolId;
 use continuum_effect::EffectType;
@@ -111,6 +116,11 @@ pub fn save_tool(tx: &Tx<'_>, profile: &ToolProfile) -> Result<(), PersistError>
 /// `save_tool` 是 `tool` 表**唯一的生产写点**（`load_tool` / `load_tools` 只读），故不变量
 /// 「关在唯一入口上」，不依赖任何调用方自觉。反过来，若把它写在调用方（Registry 的装载方
 /// 或更上层的驱动），就多出一个可以忘记的入口。
+///
+/// **「唯一」这两个字不是修辞**：它由 `tests/single_writer.rs` 的
+/// `only_save_tool_writes_the_tool_table` 扫 `crates/*/src/` 的源码文本钉住。
+/// 少了那条守卫，别处新添一个写点会让本段理由静默失效而全仓照绿
+/// （Task 1 评审 Minor 4 指出后补）。
 ///
 /// # 为什么这条不变量够
 ///

@@ -453,6 +453,16 @@ fn saving_a_tool_whose_effect_class_is_not_covered_is_rejected() {
     }
 
     assert_eq!(count_tools(&tx), 0, "被拒的登记不得写入任何行");
+    // **上面那一句之后，本句不是本 task 主题的独立守卫**（Task 1 评审 Minor 5，据实订正）。
+    // 评审的原始说法是「本句被上一句**逻辑蕴含**」——**只在 `load_tool` 正确时成立**。
+    // 按守卫判据机械地看，它是守卫：让 `load_tool` 为不存在的 id 臆造一行
+    // （已实测的变异体 F′，见 Task 1 报告 §修复轮 1），此处全绿的前几句照过、本句红。故准确的处置是
+    // 「**保留 + 写明它守的是什么**」，而不是「删」：
+    //   - 它守的是 `load_tool` 的取数行为（不存在 ⇒ `None`），**不是**「不变量被拒后不落行」；
+    //   - 那份取数行为已由 `tool_round_trips` 的「不存在的 id 是 `None`」断言钉住
+    //     （同一变异体下那条也红）——故本句是**重复覆盖**，对本 task 不新增判别力。
+    // 保留的理由：它是**用户可见的最终结果**（按 id 查回那一行拿不到），而不只是一个计数；
+    // 计数正确而按 id 查得到，是读者会先怀疑的错法。
     assert!(
         load_tool(&tx, &ToolId::new("uncovered")).unwrap().is_none(),
         "被拒的登记不得留下那一行"
@@ -517,6 +527,57 @@ fn a_tool_without_an_effect_class_may_declare_anything() {
     assert_eq!(back.tool().effect_class(), None);
     let back = load_tool(&tx, &ToolId::new("unrelated")).unwrap().unwrap();
     assert_eq!(back, unrelated, "`None` 侧的登记应逐字段读回");
+
+    tx.commit().unwrap();
+}
+
+/// 不变量的**读侧不重判**：本不变量生效**之前**登记的历史行（`Some(t)` 而能力表不覆盖）
+/// 必须仍读得回来。
+///
+/// 这是本不变量**可部署**的安全性质：不变量只在新行**登记时**把关，不在读取时重判。
+/// 若读侧也重判，升级本 crate 之后旧库里那些行会整个读不出来——`load_tools` 会连带失败，
+/// 于是**已有的库**因为一条新增的登记规则而不可用。故 `src/persist.rs` 的模块文档写了
+/// 「读侧不重判」，本条是那句话的照片。
+///
+/// **为什么单列一条**：`an_unknown_enum_column_value_is_rejected` 造的是**表外取值**
+/// （`not_a_type` 之类，解不出来），那条对照臂 `ok` 的 `effect_class` 是 `None`——
+/// 两者都不覆盖「**能解出来、但能力表不覆盖**」这一形态。缺了本条，「历史行」这个说法
+/// 没有照片（绝对措辞须有用例）。
+#[test]
+fn a_legacy_row_that_violates_the_invariant_is_still_readable() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    // 绕过 `save_tool` 直接写，模拟不变量生效之前登记的、或外部工具写进来的行：
+    // `delete_remote` 解得出来（`EffectType::parse`），但能力表里没有 `git_delete_remote`。
+    insert_raw(
+        &tx,
+        "legacy",
+        r#"["filesystem_read"]"#,
+        Some("delete_remote"),
+        None,
+        None,
+        "",
+        1,
+    );
+
+    let back = load_tool(&tx, &ToolId::new("legacy"))
+        .unwrap()
+        .expect("历史行必须仍读得回来——读侧不重判");
+    assert_eq!(
+        back.tool().effect_class(),
+        Some(EffectType::DeleteRemote),
+        "历史行的 effect_class 应原样读回"
+    );
+    let expected = vec![CapabilityKind::Filesystem(FsAction::Read)];
+    assert_eq!(
+        back.tool().required_capabilities(),
+        expected.as_slice(),
+        "能力表应原样读回，**不补**成覆盖形态——补了就从「读得回来」变成「读到的是另一样东西」"
+    );
+
+    // 全量读同样不得因这一行而失败
+    assert_eq!(load_tools(&tx).unwrap().len(), 1);
 
     tx.commit().unwrap();
 }
