@@ -1,0 +1,5 @@
+error[E0599]: no method named `tool_for` found for struct `ProviderRegistry` in the current scope
+  --> tests/compile_fail/tool_for_does_not_exist.rs:13:22
+   |
+13 |     let _ = registry.tool_for(&continuum_core::tool::ToolId::new("t"));
+   |                      ^^^^^^^^ method not found in `ProviderRegistry`

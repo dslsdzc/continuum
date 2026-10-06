@@ -29,3 +29,9 @@ futures-core = { workspace = true }
 # 条目**同批**补成三元素：只改一处，逐对断言即红。
 continuum-persist = { path = "../continuum-persist" }
 tempfile = { workspace = true }
+# Task 6 起的使用点：`tests/type_level.rs` 用编译失败样例钉住工具侧的不可表达性
+# （设计 §11：适配器出不了 crate、`AuthorizedToolInvocation` 在 crate 外构造不出）。
+# **外部 crate 不进 `ALLOWED`**——`crates/continuum-runtime/tests/dependency_direction.rs`
+# 那张表只逐对断言 workspace 成员之间的边（设计 §10），与 provider Cargo.toml 的
+# `thiserror` 一条同理。新增本行会改 `Cargo.lock`，故提交时显式带上它。
+trybuild = { workspace = true }
