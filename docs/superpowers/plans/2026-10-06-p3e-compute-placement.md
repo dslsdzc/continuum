@@ -197,13 +197,23 @@
 
 本项目的既有事实：**手写的计划代码块错误率很高**，且已确立「**代码块是示意，正文的措辞才是约束**」。
 故本计划只给**类型签名、枚举取值与关键判定**，**不给整段可粘贴实现**。
+
+> **报错码的纪律（本计划一律照此写，2026-10-06 收）**：
+> **「预期报错码」必须来自实跑**——`.stderr` 不会替你报错，**码写错了它照样让用例绿**；
+> **跑不了就把话说成「预期是某一类」**（「名字未解析」/「缺字段」/「字段私有」那一类），
+> **不写具体码**。本计划下文出现的每一个 `E0xxx` 都是**预期**，不是判据；
+> **唯一的判据是 `trybuild` 实跑产出并与源码一并入库的那份 `.stderr`**
+> （Task 2 的 Step 4 会打开它读一遍：确认红的原因是**那一条**，而不是拼错路径之类的别的什么）。
+> 凡本计划某个码没有对应的 `.stderr` 机制，就只是提示，**不得被引作证据**。
+
 **本计划特有的三处「签名即判据」，照抄前须对源**：
 
 - `PrivacyClass` 的五个变体名与 `ALL` 的次序（`crates/continuum-artifact/src/artifact.rs:87-105`）：
   `Public / Personal / Private / Secret / LocalOnly`，`ALL` 同序五枚。**变体名写错即编译不过，别凭记忆写。**
 - `Artifact` 恰十个 `pub` 字段（`artifact.rs:170-181`，字段在 `:171-180`）：`id / artifact_type / content_hash / size /
   producer_node / input_artifacts / metadata / provenance / privacy_class / version`。
-  **夹具要写全字段字面量**（少一个字段即 `E0063`），`metadata` / `provenance` 用
+  **夹具要写全字段字面量**（少一个字段会编不过，**预期是「缺字段」那一类**——常见码 `E0063`，
+  **以实跑为准**），`metadata` / `provenance` 用
   `serde_json::json!({})`。`Artifact` **不派生 `Default`**。
   **`continuum-artifact` 的 re-export 里没有 `Value`**（`src/lib.rs` 只导出
   `Artifact` / `ArtifactId` / `ArtifactType` / `PrivacyClass` / `BlobStore` / `ContentHash` /
@@ -379,7 +389,8 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
 - `the_two_node_classes_are_the_two_the_spec_names`（**纯编译期照片**）：`tests/node.rs` 里写一个
   `fn class_label(c: NodeClass) -> &'static str`，函数体是一个覆盖
   `NodeClass::Personal` 与 `NodeClass::Temporary` **两臂、无通配臂**的 `match`。
-  **判据是「它编得过」**：给 `NodeClass` 加第三枚时这个 `match` 编译不过（`E0004`，非穷尽）。
+  **判据是「它编得过」**：给 `NodeClass` 加第三枚时这个 `match` 编译不过，
+  **预期是「非穷尽 match」那一类**（常见码 `E0004`，**以实跑为准**）。
   **它的红形态是「编译失败」，不是「断言失败」**——照实写进用例注释
   （同 G 的 `assert_send` 那条的处置）。
   **不写运行期断言**：「只有两枚」是**枚举定义的封闭性**（一条编译期性质），
@@ -405,7 +416,11 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
 cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
 ```
 
-预期：`E0433` / `E0425`（`continuum_node::ComputeNode` 与它的类型尚未存在）。
+预期：**「名字未解析」这一类**（`continuum_node::ComputeNode` 与它的类型尚未存在）。
+**这一处不写死一个码，理由是码取决于测试怎么引用**：`use continuum_node::…` 进来的路径、
+路径限定的调用（`continuum_node::place(…)`）、裸函数名（`place(…)`）在 rustc 下**不是同一个码**，
+而本 task 的测试文件三种写法都会有——**实跑只会给出它当时给出的那些，以那一次的输出为准**。
+（本行初稿把 `E0433` / `E0425` 两个码并排列出，2026-10-06 按「报错码必须来自实跑」的纪律收成这一类说法。）
 
 - [ ] **Step 3: 实现**
 
@@ -471,7 +486,8 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 **首跑 trybuild 会因缺 `.stderr` 而失败**（它打的是「wip」并写出实际输出）。
 按 D 的做法：`TRYBUILD=overwrite` 跑一次生成
 `tests/compile_fail/compute_node_fields_are_private.stderr`，**再跑一次确认绿**，
-**并打开那份 `.stderr` 读一遍**——确认红的原因是**字段私有**（`E0451`），
+**并打开那份 `.stderr` 读一遍**——确认红的原因是**字段私有**（**预期是「字段私有」那一类**，
+常见码 `E0451`；**这一处的判据是那份实跑产出的 `.stderr` 本身**，不是这个码），
 不是拼错路径或别的什么（「因为拼错函数名而编译失败」也会让用例变绿）。
 **`.stderr` 的内容整份入库**。
 
@@ -743,7 +759,8 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
 **先登记 `serde_json`**（本 task 是它的第一个使用点）：在 `crates/continuum-node/Cargo.toml` 的
 `[dev-dependencies]` 加 `serde_json = { workspace = true }`。**判据**：`Artifact.metadata` /
 `provenance` 的类型是 `serde_json::Value`，而 `continuum-artifact` **不 re-export 它**
-（`artifact.rs:5` 只有一条 `use`）——**不登记则本 task 的夹具编不过**（`E0433`）。
+（`artifact.rs:5` 只有一条 `use`）——**不登记则本 task 的夹具编不过**
+（**预期是「名字未解析」这一类**；具体码以实跑为准）。
 它是**外部 crate**，**不进 `ALLOWED`**（那张表只逐对断言 workspace 成员之间的边）；
 **但它会让 `Cargo.lock` 变化**（本包的依赖列表变了），故 Step 6 要按显式路径提交它。
 **实测记一笔**：这一跑照绿（`dependency_direction` 不受影响），不据口径断言。
@@ -1304,7 +1321,9 @@ git commit -m "fix(node): 收尾复核发现的缺口"
    **证据**：`Artifact.metadata` / `provenance` 是 `serde_json::Value`
    （`crates/continuum-artifact/src/artifact.rs:177-178`），而 `continuum-artifact` 的
    `src/lib.rs` **不 re-export `Value`**（`artifact.rs:5` 只有一条 `use`）——
-   **照原样写必编不过**（`E0433`）。**这一条不是设计的缺陷**：设计从未规定夹具怎么写，
+   **照原样写必编不过**（原话照留；2026-10-06 收：**具体码以实跑读回的报错为准，
+   预期是「名字未解析」这一类**——本行初稿在这里写死了 `E0433`，那是一个**没跑过就写下的码**）。
+   **这一条不是设计的缺陷**：设计从未规定夹具怎么写，
    它只是本计划自己在「不加 `serde_json`」那句话里写死了一个错的口径。
    **处置（已改）**：`crates/continuum-node/Cargo.toml` 的 `[dev-dependencies]` 加
    `serde_json = { workspace = true }`，**由 Task 5 登记**（它是第一个使用点），
