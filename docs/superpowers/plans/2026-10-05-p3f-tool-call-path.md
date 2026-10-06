@@ -79,6 +79,21 @@ cd /home/DslsDZC/Continuum && grep -rnw ToolInvocation crates/   # 预期：无�
 > 加字」**——答得出，那条判据就立不住，要改成对**行**的判据（读那几行、判它是不是注释），
 > 或改成对**结构化语料**的判据（编译产物、`cargo tree`、库表行数）。
 > （同一句错误断言也出现在共享面文档里，已由协调者订正；计划侧即本处。）
+>
+> **这层区分要写准（同一份计划里两种都允许，判据是看它数的是什么）**：
+>
+> | | 合规 | 不合规 |
+> |---|---|---|
+> | 形态 | **对「行」的判据**：先 `grep` **定位**，再逐处读那几行下判断；**对「结构化语料」的判据**：编译是否通过、`cargo tree` 的边、库表行数、夹具调用次数、审计条数 | **对「全仓文本」的零命中**：`grep -rn <名字> crates/` 预期无输出 |
+> | 为什么 | 数的是**闭集**（那几行、那张表、那次构建），本计划改了别处它照样成立 | 数的是**开放语料**，本仓的「留来历」规矩、以及本计划自己的改动**都会往里加字** |
+> | 本计划里的例子 | `:264` 的 `grep "save_tool("` 配「逐处判断」；`:947` 引既有注释原文（Task 8 正要订正它）；P-1 的「零效应行 / 零审计 / 夹具零调用」；P-15 的审计条数；Task 9 的 `cargo tree` 与 `cargo build` | 前置里那条 `grep -rnw ToolInvocation … # 预期：无输出，exit 1`（本节订正的对象） |
+>
+> **第二条同族规矩（状态陈述要带时点）**：**「至今零引用 / 至今没有」是带时点的状态陈述，而写它的
+> 那份计划往往正是要改变那个状态的那一份**——**故凡「至今没有」出现在「将要引入」的同一份文档里，
+> 它自带一个到期日**，要写成「**截至……时** ＋ **本计划起……**」的形式，必要时一并写明分支
+> （同一条命令在不同分支上结论可以不同，见上）。本计划里按此改过的两处：`tokio` 那条（Task 9 的遗留）、
+> `save_tool` 生产调用方那条（同节）；另有一处**只用来当理由**的零命中断言（Task 2 Step 1 的
+> `grep -n TaskError …`）已按此删去 grep 那半句、只留语义理由。
 
 B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁移 80/81 与 `main.rs`／
 `tests/migrations.rs`／`tests/startup.rs` 的连带改）**在本计划开工时已经落地**——F 只做收口复核
@@ -338,9 +353,16 @@ git commit -m "feat(capability): save_tool 的登记期不变量（effect_class 
 
 `task_cmd.rs:874-959` 的 `TaskError` **整块**移进 `src/error.rs`，变体、字段、`#[error(...)]` 文案、
 文档注释**一律照录**。`lib.rs` 加 `pub mod error;` 与 `pub use error::TaskError;`；
-`task_cmd.rs` 改 `use continuum_runtime::TaskError;`。**`main.rs` 不需要这个 `use`**
-（`grep -n TaskError crates/continuum-runtime/src` 除 `task_cmd.rs` 外零命中——它只经
-`task_cmd::run` 的返回类型间接用到，不做名字绑定）。
+`task_cmd.rs` 改 `use continuum_runtime::TaskError;`。**`main.rs` 不需要这个 `use`**——
+它只经 `task_cmd::run` 的返回类型**间接**用到 `TaskError`，不做名字绑定。
+
+> **订正（2026-10-07）**：本处原文还带半句佐证——「`grep -n TaskError crates/continuum-runtime/src`
+> 除 `task_cmd.rs` 外零命中」。**该半句已删，理由不是它今天错，而是它会随本计划自己的改动变假**：
+> Task 2 新加的 `src/error.rs` 是它的定义处，Task 3 的 `src/tool_call.rs` 又整篇引用它，
+> 故「除 `task_cmd.rs` 外零命中」到 Task 2 之后就不再成立。**当一条 `grep` 只用来「说明某处为什么
+> 不需要某样东西」时，它不该以「零命中」的形式出现**——它数的是**全仓文本**（开放语料），
+> 而写它的这份计划正是要往那个语料里加字的那一份。留下的语义理由（「只经返回类型间接用到」）
+> 与语料无关，故不受影响。
 
 **被否掉的替代**（设计 §3.2，记此免得后来者重提）：另建一个 lib 侧的 `ToolCallPathError` + bin 侧逐变体
 映射——那会给同一批失败造出**第二个错误类型**，正是本项目判为 Critical 的「同一件事两个类型」。
@@ -1088,9 +1110,12 @@ git commit -m "docs: P3 子项目 F 的收口与复核"
 ## 遗留
 
 ```
-工具登记无生产调用方     save_tool 只在测试里被调（生产零调用），故真实库里 tool 表是空的，
-                        `tool` 子命令对任何 id 都报 UnknownTool，除非先经 save_tool 登记。
-                        **本计划不改这条**（不发明一个登记用的 CLI）。
+工具登记无生产调用方     **截至本计划定稿时**（2026-10-05，分支 `p3cf`）：save_tool 只在测试里被调，
+                        **生产代码零调用**；故真实库里 tool 表是空的，`tool` 子命令对任何 id 都报
+                        UnknownTool，除非先经 save_tool 登记。
+                        **该状态陈述带时点、也随分支可漂**：生产调用方的有无取决于别的子项目是否
+                        新开一个登记入口，本计划不处置它、也不据此下任何断言（本计划**不发明**一个
+                        登记用的 CLI）。**本计划不改这条。**
                         收件人：continuum-capability（本项目无此子项目）。
 注册表里没有适配器       `ToolProvider` 的唯一实现是测试夹具；组合根登记不出东西，故步骤 6 那一跳
                         在生产路径上**必然**返回 ToolCallError::Unregistered。**这不是遗留物**，
@@ -1131,8 +1156,13 @@ granted() 的消费方      按 C 设计 §7.5，是**适配器**（在 invoke �
                         收件人：continuum-runtime 的下一轮，或按 p3a-followups 第三节末尾的原计划
                         与 B 的密钥运行时接线一并做。**该边与 SecretsRuntime 装配的所有者是 B**
                         （p3bcdf-followups.md §七第 2 条），故本计划不提前登记、也不替它装配。
-tokio 首次真使用         continuum-runtime/Cargo.toml 早已声明 tokio，而 src/ 与 tests/ 至今零引用；
-                        本子项目为 block_on 异步的那一跳**第一次真用**它（单次调用用当前线程运行时）。
+tokio 首次真使用         continuum-runtime/Cargo.toml 早已声明 tokio。**截至本计划定稿时**（2026-10-05）
+                        `src/` 与 `tests/` 对它零引用；**本计划起使用**——为 block_on 异步的那一跳
+                        第一次真用它（单次调用用当前线程运行时）。
+                        **原话照留 ＋ 来历**：本行原写「而 src/ 与 tests/ 至今零引用」。**该说法自带到期日**
+                        ——「至今零引用」是带时点的状态陈述，而写它的这份计划正是要改变那个状态的那一份，
+                        故 Task 3 落地之后它就为假。**凡「至今没有」出现在「将要引入」的同一份文档里，
+                        一律写成带时点的形式**（「截至……时」＋「本计划起……」）。
                         收件人：后续阶段（若驱动整体转异步，这个形状要重做）。
 --input 省略即 {} /      两条都是本设计的**决定**，规范未规定，已由协调者本轮拍板接受；
 --intent 条件必填        「--intent 可观察」已由 P-2 的第二半（Task 5）拍下来。
