@@ -9,14 +9,14 @@
 //! 3. `create_task_workspace` → `WorkspaceRecord::from_workspaces` → `save_workspace`；
 //! 4. **先查一次策略**判本次集成（`decision`，第 7 步复用）；查各 `--effect` 的幂等键；
 //!    **再逐条问策略铸能力**——铸不出即拒绝整条命令（**强制点 (2)**，
-//!    [`authorize_declared_effects`]）；最后对每个 `--effect` 写
+//!    [`mint_declared_effects`]，F 的 Task 2 起与工具调用路径共用）；最后对每个 `--effect` 写
 //!    `PLANNED → AUTHORIZED → EXECUTING`（[`record_declared_effects`]）。全部**提交之后**
 //!    才执行命令（`§268`：执行前写入）；
 //! 5. `Sandbox::spawn` 跑 `--exec`，工作目录由 `spawn` 设为 Task 根；
 //! 6. 按命令的退出形态写终态：退出码 0 → `COMMITTED`，非 0 → `FAILED`
 //!    （[`finish_declared_effects`]）；
 //! 7. **命令成功且给了 `--apply`**：按第 4 步那次裁决决定是否铸造批准值
-//!    （[`mints`]）→ 经 Gate 应用。**这一支不清理工作区**（见下）；
+//!    （[`crate::tool_call::mints`]）→ 经 Gate 应用。**这一支不清理工作区**（见下）；
 //! 8. **未给 `--apply`，或命令退出码非 0**：`discard_task_workspace` 成功之后再
 //!    `remove_workspace`，失败则不删记录。
 //!
@@ -31,14 +31,14 @@
 //!
 //! P2 那条裁定（见上文「策略只查一次」）的对象是**集成**的裁决：`--apply` 那一支第 7 步
 //! 复用第 4 步的那一次，上下文里 `effect_type` 缺省。**本处是逐条效应的裁决**，上下文里
-//! `effect_type` 填着这一条效应的类型（[`policy_context_for_effect`]）。两者问的不是同一
+//! `effect_type` 填着这一条效应的类型（[`crate::tool_call::policy_context_for_effect`]）。两者问的不是同一
 //! 件事——「这次集成准不准」对「这条效应准不准」——两处各自裁一次、互不复用同一个
 //! [`Decision`]。**策略表只从库里读一次**（第 4 步那一读），两个问题用同一张表各裁一次；
 //! 「只查一次」要防的是同一个裁决有两个产生点，不是同一张表被问两个问题。
 //!
 //! ## 裁决到「铸不铸」的映射只有一个产生点
 //!
-//! 三个臂（`Allow` / `RequireApproval` / `Deny`）的判定**复用** [`mints`]——那张六格表的
+//! 三个臂（`Allow` / `RequireApproval` / `Deny`）的判定**复用** [`crate::tool_call::mints`]——那张六格表的
 //! 唯一落点。本处**不重写**它，也不引入 `Verdict` / `Grant` 之类的中间裁决类型
 //! （Task 2 已按「签发点不重判」删除它们）：映射的产物就是「铸出的一枚
 //! [`Capability`](continuum_capability::Capability)，或一次拒绝」。
@@ -145,47 +145,30 @@
 //! 都还在手里，回收不必经记录。
 
 use crate::runtime_migrations;
-use crate::sandbox_select::{self, SandboxSelectError};
-use continuum_capability::{AuthorizedEffect, CapabilityKind, mint};
+use continuum_capability::AuthorizedEffect;
 use continuum_effect::{
-    Effect, EffectId, EffectState, EffectType, advance, find_by_idempotency_key, record_planned,
+    Effect, EffectId, EffectState, advance, find_by_idempotency_key, record_planned,
 };
-use continuum_persist::{Db, PersistError};
-use continuum_policy::{
-    Condition, Decision, ExplicitApproval, Level, Policy, PolicyContext, Scope, decide,
-    load_policies,
-};
+use continuum_persist::Db;
+use continuum_policy::{Decision, load_policies};
+use continuum_runtime::TaskError;
 use continuum_runtime::cli::{EffectSpec, TaskArgs};
-use continuum_sandbox::{Sandbox, SandboxError};
+use continuum_runtime::sandbox_select;
+use continuum_runtime::tool_call::{
+    arbitrate, decision_name, mint_declared_effects, mints, now_millis, policy_context,
+};
+use continuum_sandbox::Sandbox;
 use continuum_workspace::{
-    BaseWorkspace, GateError, IntegrationGate, IntentId, TaskWorkspace, WorkspaceBackend,
-    WorkspaceError, WorkspaceRecord, approve_integration, create_task_workspace, detect_backend,
-    discard_task_workspace, in_user_namespace, load_workspace, remove_workspace, save_workspace,
+    BaseWorkspace, IntegrationGate, IntentId, TaskWorkspace, WorkspaceBackend, WorkspaceRecord,
+    approve_integration, create_task_workspace, detect_backend, discard_task_workspace,
+    in_user_namespace, load_workspace, remove_workspace, save_workspace,
 };
 use std::ffi::OsString;
 use std::path::Path;
 use std::process::Command;
-use std::time::{SystemTime, UNIX_EPOCH};
-use thiserror::Error;
 
 /// 标识「本进程已经是被重新执行出来的那一份」，防止第 2 步的 re-exec 无限递归。
 pub const IN_NAMESPACE_ENV: &str = "CONTINUUM_IN_NAMESPACE";
-
-/// 强制点 (2) 铸出的能力活多久（Unix 毫秒），即签发时取 `now_millis() + 本值`。
-///
-/// §51 要求凭据「short-lived」，而**规范与设计都没有规定这个数**——它是本阶段的决定，
-/// 集中在此一处、不散落。取值理由：
-///
-/// - 这枚能力只需覆盖**本条命令的执行**，以及由它签出的凭据（设计 §5.2：凭据的到期
-///   不晚于能力的 `expiry`，故能力的寿命是那个上限）；
-/// - 15 分钟对一条任务命令是宽的余量，又远短于长期令牌，符合「short-lived」的意；
-/// - **驱动今天不自己校时**（[`mint`] 不读时钟，见其文档），故这个数在本次运行中不可
-///   观察：一条跑得比它久的命令不会在运行中被拦下，而是让下游签出的凭据更早到期——
-///   那是 fail-closed 的方向。
-///
-/// 连接器（子项目 B）真的消费 [`AuthorizedEffect`] 时，这个数应按那时能给出的依据
-/// （命令的实际时长上界、凭据源的轮换周期）重新定；届时也只改这一处。
-const CAPABILITY_LIFETIME_MS: i64 = 15 * 60 * 1000;
 
 /// 运行 `task` 子命令。
 ///
@@ -383,7 +366,15 @@ fn record_declared_effects(
 
     // 强制点 (2)：逐条问策略、铸能力；铸不出即拒绝整条命令。与上面那次集成裁决共用
     // 同一张已读出的策略表，但**各裁一次**（上下文不同，见模块文档）。
-    let authorized = authorize_declared_effects(&policies, args)?;
+    //
+    // 铸币判定走的是与工具调用路径**共用**的那个函数（[`mint_declared_effects`]，F 的
+    // Task 2 提取）：它同时返回每条效应**自己**那次裁决，本处**照旧丢弃**——本处要的是
+    // 上面那次集成裁决（`decision`，另有来源），不是逐条效应的那一个。
+    let authorized: Vec<AuthorizedEffect> =
+        mint_declared_effects(&policies, &args.effects, args.approve)?
+            .into_iter()
+            .map(|(authorized_effect, _per_effect_decision)| authorized_effect)
+            .collect();
 
     for spec in &args.effects {
         let key = effect_key(&args.intent, spec);
@@ -410,64 +401,6 @@ fn record_declared_effects(
 
     tx.commit()?;
     Ok((decision, authorized))
-}
-
-/// **强制点 (2)**：逐条问策略，铸不出能力即拒绝整条命令（设计第 4.1 节）。
-///
-/// 每条 `--effect` 用它自己的 [`policy_context_for_effect`]（`effect_type` 已填）裁决
-/// 一次；「铸不铸」复用 [`mints`]（六格表唯一的落点，见其文档），**不重写**。铸得出就
-/// 用 [`CapabilityKind::for_effect`] 取 kind、以该效应的**目标**为作用域铸一枚能力
-/// （§253 的 `git.push:origin/main` 即此形），并配成 [`AuthorizedEffect`]。
-///
-/// # 拒绝的是**整条**命令
-///
-/// 按声明次序逐条走，遇到第一条铸不出的即返回 [`TaskError::EffectNotAuthorized`]——
-/// 不是只跳过那一条。命令一步都没跑，调用方（[`record_declared_effects`] 的 `tx`）回滚，
-/// 上层再清理工作区。
-///
-/// # 两个 `expect` 的理由
-///
-/// [`mint`] 唯一的失败是空作用域，而 `--effect` 的空目标在解析期即被拒
-/// （`continuum_runtime::cli` 的 `EffectWithEmptyTarget`）；[`AuthorizedEffect::new`]
-/// 唯一的失败是效应与能力的 kind 不对应，而这里的 kind 正是由同一条效应经
-/// [`CapabilityKind::for_effect`] 派生的。两者都是本文件内部的不变量，写法与
-/// [`run_in_sandbox`] 的「cli 已保证」同例，不在用户调用上兜底。
-///
-/// # 不读时钟
-///
-/// [`mint`] 不读时钟，`expiry` 由调用方给；这里取 [`now_millis`] 加
-/// [`CAPABILITY_LIFETIME_MS`]。铸出的能力**不在这里做时效校验**——`
-/// Capability::is_valid_at` 是时效判定的唯一产生点，由消费方（连接器 / 凭据签发）
-/// 在用它之前判。
-fn authorize_declared_effects(
-    policies: &[Policy],
-    args: &TaskArgs,
-) -> Result<Vec<AuthorizedEffect>, TaskError> {
-    let mut authorized = Vec::with_capacity(args.effects.len());
-    for spec in &args.effects {
-        let decision = arbitrate(
-            policies,
-            &policy_context_for_effect(args.approve, spec.effect_type),
-        );
-        if !mints(decision, args.approve) {
-            return Err(TaskError::EffectNotAuthorized {
-                effect: spec.effect_type.as_str(),
-                target: spec.target.clone(),
-                decision: decision_name(decision),
-            });
-        }
-        let capability = mint(
-            CapabilityKind::for_effect(spec.effect_type),
-            spec.target.clone(),
-            now_millis() + CAPABILITY_LIFETIME_MS,
-        )
-        .expect("cli 已保证 --effect 的目标非空，mint 不会失败");
-        authorized.push(
-            AuthorizedEffect::new(spec.effect_type, capability)
-                .expect("kind 由 for_effect 从同一条效应派生，配对必然成立"),
-        );
-    }
-    Ok(authorized)
 }
 
 /// 第 6 步：把各效应记为命令退出形态对应的终态。
@@ -527,45 +460,16 @@ fn effect_key(intent: &IntentId, spec: &EffectSpec) -> String {
 /// # 本子项目到此为止
 ///
 /// **生产代码**不读回、不校验本字段（测试会读它，以钉住写入的内容与格式）。它是留给
-/// 对账与审计的记录，不是一道强制。**本字段记的仍是集成那次裁决**（[`policy_context`]，
-/// `effect_type` 缺省），与强制点 (2) 逐条效应的裁决（[`policy_context_for_effect`]，
-/// `effect_type` 已填）是两个问题、两处各裁一次。**P3 起驱动确实有了 Capability 的
-/// 输入**（强制点 (2) 已接上，见模块文档），但那条路径**不读回本字段**、也不靠它——
-/// 本字段本身仍不被任何生产代码校验。校验属 Capability（P3）与 Authority（长期）的
-/// 职责，其中 Capability 那一半落在 [`authorize_declared_effects`]。
+/// 对账与审计的记录，不是一道强制。**本字段记的仍是集成那次裁决**
+/// （[`crate::tool_call::policy_context`]，`effect_type` 缺省），与强制点 (2) 逐条效应的
+/// 裁决（[`crate::tool_call::policy_context_for_effect`]，`effect_type` 已填）是两个问题、
+/// 两处各裁一次。**P3 起驱动确实有了 Capability 的输入**（强制点 (2) 已接上，见模块
+/// 文档），但那条路径**不读回本字段**、也不靠它——本字段本身仍不被任何生产代码校验。
+/// 校验属 Capability（P3）与 Authority（长期）的职责，其中 Capability 那一半落在
+/// [`mint_declared_effects`]。
 /// **不要把本函数或这个字段读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
 fn authorization_field(approved: bool, decision: Decision) -> String {
     format!("approve={approved};policy={}", decision.as_str())
-}
-
-/// 裁决用的上下文。`--approve` 给没给是唯一有来源的事实；其余五事实本项目暂无来源
-/// （设计第 5.6 节：`task_class` 由驱动注入，但没规定注什么），填 `None` 而不是编一个
-/// 值——编出来的值会让引用它的规则开始匹配，那正是第 5.6 节点名的变更风险。
-///
-/// **这是集成那次裁决的上下文**（第 4 步的 `decision`，第 7 步复用），`effect_type` 缺省。
-/// 逐条效应那次用 [`policy_context_for_effect`]——两者问的不是同一件事，见模块文档
-/// 「与『策略只查一次』不冲突」。
-fn policy_context(approved: bool) -> PolicyContext {
-    PolicyContext {
-        explicit_current: approved.then_some(ExplicitApproval),
-        ..PolicyContext::default()
-    }
-}
-
-/// 逐条效应那次裁决的上下文（强制点 (2)）。
-///
-/// 与 [`policy_context`] 的唯一差别是 `effect_type` 填着这一条效应的类型——那是
-/// [`PolicyContext::effect_type`] 这个字段存在的理由（其文档原文：「本次待记的效应
-/// 类型」）。**其余四个事实同样缺省**，理由与 [`policy_context`] 相同。
-///
-/// 这个字段可观察：一条按 `{"fact":"effect_type","eq":"charge"}` 限定的规则只在
-/// `--effect` 为 `charge` 时成立，而集成那次裁决（`effect_type` 缺省）不会被它匹配。
-fn policy_context_for_effect(approved: bool, effect_type: EffectType) -> PolicyContext {
-    PolicyContext {
-        explicit_current: approved.then_some(ExplicitApproval),
-        effect_type: Some(effect_type),
-        ..PolicyContext::default()
-    }
 }
 
 /// 第 5 步：在 Task 根内启动 `--exec` 的命令，等它结束。
@@ -670,7 +574,7 @@ fn discard_unrecorded_workspace(
 ///
 /// 铸造出的批准值只对**这一次**集成有效（[`approve_integration`] 的文档）：`apply_patch`
 /// 在动第一个字节之前会重算摘要并比对，故「铸造」与「应用」之间若有人改了 Base 或 Task，
-/// 集成会以 [`GateError::ApprovalMismatch`] 失败而不是把错的改动落下去。
+/// 集成会以 [`continuum_workspace::GateError::ApprovalMismatch`] 失败而不是把错的改动落下去。
 fn apply_recorded_integration(
     db: &Db,
     args: &TaskArgs,
@@ -700,132 +604,6 @@ fn apply_recorded_integration(
     IntegrationGate::new(&base).apply_patch(&tx, &task, record.backend, now_millis(), &approval)?;
     tx.commit()?;
     Ok(())
-}
-
-/// 第 2 级 `ExplicitCurrent` 的那条规则：`--approve` 给出时成立的 `Allow`。
-///
-/// **它是内建的、不落库的规则**（设计第 5.2 节：第 2 级在下篇由驱动的显式确认占位，
-/// P4 就位后移交），由 [`arbitrate`] 在裁决时放进给 `decide` 的列表里，**不是从 `policy`
-/// 表读来的**。
-///
-/// # `scope` 对它无意义
-///
-/// [`Scope`] 只有 `User | Project`，而本规则既不属于用户也不属于项目——它是内建的。
-/// 此处填 [`Scope::User`] 只是因为该字段必填，**不是「这条规则是用户的」**。
-/// `decide` **不读 `scope`**（`continuum_policy::engine` 的文档：裁决只按层级与决策取严），
-/// 故这个取值不影响任何裁决结果——这一条由 `continuum-policy` 自己的用例
-/// `crates/continuum-policy/tests/arbitration.rs::scope_does_not_participate_in_arbitration`
-/// 从两个方向钉住（同层内对调 `Scope` 结果不变）。要给它一个名副其实的取值须给 `Scope` 加变体，那是改
-/// 一个跨 crate 的公开类型（`policy` 表的 `scope` 列还有落库编码），须另行裁定，
-/// 不在这里就地扩。
-///
-/// # 条件必须有，且必须是「`explicit_current` 成立」
-///
-/// 一条**无条件**的第 2 级 `Allow` 会在 `--approve` 未给出时照样获胜，把第 3–5 级的
-/// `Deny` 一律推翻，即 fail-open（设计第 5.5 节的取舍只在 `--approve` 给出时成立）。
-/// 本函数的用例 `the_explicit_current_rule_allows_only_when_the_flag_is_given`
-/// 从两侧钉住它：给出时 `Allow`、未给出时**不成立**。
-fn explicit_current_rule() -> Policy {
-    let condition = Condition::parse(&serde_json::json!({
-        "all": [{"fact": "explicit_current", "eq": true}]
-    }))
-    // 字面量条件必然合法：事实名与比较符都在各自的封闭集合内，取值是布尔。
-    // 写成 `expect` 而不是在运行期兜底——这条规则是编译期就定死的常量，
-    // 它若解析不了，那是本文件写错了，不该在用户的调用上表现为一条策略静默失效。
-    .expect("内建的第 2 级规则条件是合法谓词");
-    Policy {
-        level: Level::ExplicitCurrent,
-        condition,
-        decision: Decision::Allow,
-        scope: Scope::User,
-    }
-}
-
-/// 第 7 步的裁决：把第 2 级那条规则放进表里，**一次**裁决完。
-///
-/// 判定与 `decide` 分开写是刻意的（计划 Task 10 第 3 步）：`decide` 只裁决，而
-/// 「`--approve` 能越过什么」这条规则在驱动这一侧，故「第 1 级不可越」有一个单独的落点，
-/// 不会混进通用裁决里被顺手改掉。
-///
-/// **第 2 级那条规则必须留在表里**：把它排除在外、把「越过」留给 [`mints`] 去做，
-/// 是设计第 5.7 节的另一种接法；本子项目在 Task 5 已裁定不这么做（理由见 [`mints`]，
-/// 那边也是「照抄 §5.7 会 fail-open」的完整推导所在）。
-fn arbitrate(policies: &[Policy], ctx: &PolicyContext) -> Decision {
-    let mut table = policies.to_vec();
-    table.push(explicit_current_rule());
-    decide(&table, ctx)
-}
-
-/// 由**一次裁决的结果**决定是否铸造批准值（设计第 5.7 节的表，**本接法**）。
-///
-/// # 为什么不能照抄 §5.7 那张表
-///
-/// §5.7 的表对应的是另一种接法：裁决时**把第 2 级排除在外**，越过在第 5.7 节的映射里做。
-/// 本子项目在 Task 5 已裁定采用**另一种接法**——第 2 级那条规则就留在传给 `decide` 的表里
-/// （见 [`arbitrate`]）。两种接法在「铸造与否」上结果一致，但**返回的 `Decision` 不同**：
-/// 例如第 3 级 `Deny` + `--approve`，接法 A 返回 `Deny`、本接法返回 `Allow`。
-///
-/// **照抄 §5.7 的 `Deny` 那一行（「有 `--approve` 才铸造」）是 fail-open**：本接法在
-/// 「第 1 级 `Deny` + `--approve`」时也返回 `Deny`，照那行读就会铸造——而第 1 级是设计里
-/// 唯一一条命令开关越不过的防线（第 5.5 节）。
-///
-/// # 本接法的映射
-///
-/// `--approve` 已给出时那条第 2 级内建 `Allow` 会参与夺冠（它是第 2 级），故裁决值只能
-/// 来自比它更高（第 1 级）或与它同层更严的规则；未给出时它不成立，裁决值由落库规则或
-/// 「无匹配默认 `Deny`」给出。下面逐种裁决**列全来源**——纪律要求「绝对措辞须有对应
-/// 用例」，故每一支来源都要有照片，见各条末尾。
-///
-/// - **`Allow` → 铸造。** 夺冠的那条规则是 `Allow`，来源只有两类：
-///   1. **落库的一条 `Allow`**——层级不限（[`explicit_current_rule`] 已说明 `save_policy`
-///      不校验层级来源）。**无 `--approve` 时的主路径正是落库的第 3–5 级 `Allow`，
-///      即设计第 5.7 节第一行**；照片：`a_runtime_default_allow_mints_without_the_flag`
-///      与端到端的 `an_allowed_integration_is_applied_without_the_flag`。
-///   2. **第 2 级内建的那条**（[`explicit_current_rule`]），即 `--approve` 已给出时；
-///      照片：`with_no_rule_at_all_the_flag_still_decides`。
-/// - **`RequireApproval` → 有 `--approve` 才铸造。** 夺冠的那条规则是 `RequireApproval`：
-///   - `--approve` **未**给出：只能来自落库的某条 `RequireApproval`（层级不限，理由同上；
-///     设计上落库的是第 3、4 级、第 5 级内建，但 `save_policy` 不拦第 1 级）；照片：
-///     `a_require_approval_rule_needs_the_flag` 的前半段。
-///   - `--approve` **已**给出：落库的第 3–6 级会被第 2 级的 `Allow` 越过（同一张照片的
-///     后半段），但仍有两处返回 `RequireApproval`——**落库的第 1 级**，或**与第 2 级同层
-///     的一条**（同层取更严，压过内建的 `Allow`）；两处各一张照片，见
-///     `a_require_approval_verdict_survives_the_flag_at_the_first_two_levels`。故
-///     `approved` 这个入参在这一支上可观察，六格表逐格钉住它。
-/// - **`Deny` + `--approve` 未给出 → 不铸造。**（夺冠的是一条落库 `Deny`，或无任何规则
-///   匹配而落到默认 `Deny`。）
-/// - **`Deny` + `--approve` 已给出 → 不铸造。** 此时那条内建 `Allow` 在表里，却仍返回
-///   `Deny`，来源只有三种：
-///   1. **落库的第 1 级 `Deny`**（高于第 2 级）；照片：
-///      `a_system_safety_deny_is_not_overridden_by_the_flag`。
-///   2. **落库一条与第 2 级同层的 `Deny`**（`ExplicitCurrent`；同层取更严，压过内建的
-///      `Allow`）——可达性论据同第 1 条来源：`save_policy` 不校验层级来源；照片：
-///      `a_same_level_persisted_deny_survives_the_flag`。
-///   3. **调用方没把第 2 级规则放进表里**（违反 [`decide`] 的前置条件）：此时 `Deny` 只是
-///      「没有更高的规则放行」，`decide` 无从知道 `--approve` 的存在。**本驱动不走这条**
-///      （[`arbitrate`] 恒把那条规则放进表里），故它没有照片——列在这里是为了让「`Deny`
-///      的三种含义」在本层是完整的，三种的处置见 `engine.rs` 的说明。
-///   **三种都不该铸造**：第 1 种是命令开关越不过的那条防线；后两种若铸造，就是把
-///   「更严的同层规则」或「一条都没放行」读成了批准。
-///
-/// 「无任何规则匹配时默认 `Deny`」这一路（设计第 5.3 节）由此自动落到「给出 `--approve`
-/// 才放行」：未给出即 `Deny` 不铸造，给出则那条第 2 级规则成立、裁决为 `Allow` 而铸造——
-/// 与设计第 5.5 节的第三行一致。
-fn mints(decision: Decision, approved: bool) -> bool {
-    match decision {
-        Decision::Allow => true,
-        Decision::RequireApproval => approved,
-        Decision::Deny => false,
-    }
-}
-
-/// 裁决值的中文名，只用于错误信息（标识符仍是英文，见项目的语言口径）。
-fn decision_name(decision: Decision) -> &'static str {
-    match decision {
-        Decision::Allow => "允许",
-        Decision::RequireApproval => "要求批准",
-        Decision::Deny => "禁止",
-    }
 }
 
 /// 第 2 步：把**自身**经 `unshare -Urm` 重新执行一遍，原样转交参数。
@@ -860,108 +638,19 @@ fn reexecute_in_namespace(argv: &[OsString]) -> Result<(), TaskError> {
     })
 }
 
-/// 当前时刻，Unix 毫秒。
-///
-/// 时钟早于 Unix 纪元时取 0 而非报错：`created_at` 只用于记录，回退的时钟不该让一条
-/// 本来能跑的调用失败。
-fn now_millis() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-/// `task` 子命令失败的原因。
-#[derive(Debug, Error)]
-pub enum TaskError {
-    /// 某条 `--effect` 的幂等键已有记录，拒绝运行**整条**命令（设计第 6.5 节）。
-    ///
-    /// **拒绝而非静默跳过**：静默跳过会让调用方以为命令执行了。命令一步都没跑，
-    /// 工作区与记录按第 8 步的次序清理。
-    #[error(
-        "幂等键 {key} 已有记录：拒绝运行整条命令（已存在的记录不静默跳过——\
-         跳过会让调用方以为命令执行了）"
-    )]
-    EffectAlreadyRecorded { key: String },
-    /// 某条 `--effect` 的策略裁决**铸不出能力**，拒绝运行**整条**命令（强制点 (2)，
-    /// 设计第 4.1 节）。
-    ///
-    /// 命令一步都没跑。`decision` 取 [`decision_name`] 的中文名，使调用方能分辨是
-    /// 「要求批准」还是「禁止」；`effect` / `target` 点名是哪一条声明——多效应时报的是
-    /// **按声明次序第一条**铸不出的。照片：`capability_gate.rs` 的
-    /// `the_first_unmintable_effect_in_declaration_order_is_reported`（两条都铸不出，
-    /// 把次序对调一次，报的就换成另一条；据此也钉住了「不是报最后一条」）。
-    ///
-    /// 与 [`TaskError::IntegrationRefused`] 是两件事：那一个是集成那次裁决（`--apply`
-    /// 那一支，命令**已经跑完**），本变体是逐条效应的裁决（命令**一步没跑**）。
-    #[error(
-        "效应 {effect}:{target} 的策略裁决为 {decision}，铸不出能力：\
-         拒绝运行整条命令（命令一步都没跑）"
-    )]
-    EffectNotAuthorized {
-        effect: &'static str,
-        target: String,
-        decision: &'static str,
-    },
-    /// 策略裁决为「不铸造批准值」，故拒绝集成。
-    ///
-    /// **工作区与记录原样保留**（设计第 4.2 节）：命令成功了，改动是完整可用的，
-    /// 丢弃它会让用户无从恢复。`path` 就是那份改动所在之处。
-    ///
-    /// `decision` 取 [`decision_name`] 的中文名，使调用方能分辨是「要求批准」还是
-    /// 「禁止」。**两者都重跑不了**：第二次运行的第 3 步 `create_task_workspace` 必然
-    /// 失败——worktree 后端撞已存在的分支，overlay 后端拒绝已存在的 Intent 目录；即便
-    /// 跨过第 3 步，有 `--effect` 时幂等键也会在第 4 步再拒一次。用户须进本错误给出的
-    /// `path` 自行处理（手工 git）。**对「禁止」还有一层：它本就越不过**（[`mints`] 列的
-    /// 三种 `Deny` 来源都越不过），得从那条规则本身或被拒的原因入手。
-    #[error("策略裁决为 {decision}，拒绝集成；改动仍在 Task 工作区 {path}，未丢弃")]
-    IntegrationRefused {
-        decision: &'static str,
-        path: String,
-    },
-    /// Integration Gate 层的失败（批准值失配、后端拒绝、审计行落库失败）。
-    #[error("Integration Gate 失败：{0}")]
-    Gate(#[from] GateError),
-    /// 沙箱机制的选择失败（两种都不可用，或显式指定的那个不可用）。
-    #[error("沙箱机制选择失败：{0}")]
-    SandboxSelect(#[from] SandboxSelectError),
-    /// Workspace 层的失败。
-    #[error("Workspace 操作失败：{0}")]
-    Workspace(#[from] WorkspaceError),
-    /// 沙箱层的失败（机制不可用、施加隔离失败、子进程起不来）。
-    #[error("沙箱操作失败：{0}")]
-    Sandbox(#[from] SandboxError),
-    /// 数据库层的失败。
-    #[error("数据库操作失败：{0}")]
-    Persist(#[from] PersistError),
-    /// 落库之后读不回记录：本次运行刚写过它，缺失说明它被别处删掉了。此时**不清理**
-    /// 工作区——按一条不存在的记录去回收，只会把别的资源当成自己的。
-    #[error(
-        "工作区记录读不回（Intent {intent}）：本次运行刚写过它，缺失说明记录被别处删掉了；\
-         工作区原样留着，不按猜出来的后端回收"
-    )]
-    RecordMissing { intent: String },
-    /// `--exec` 的命令以非零退出码结束。
-    #[error("命令以退出码 {code} 失败")]
-    CommandFailed { code: i32 },
-    /// 等待子进程结束失败。
-    #[error("等待子进程结束失败：{reason}")]
-    WaitFailed { reason: String },
-    /// 第 2 步重新执行自身失败。
-    #[error("重新执行自身（unshare -Urm）失败：{reason}")]
-    ReExecFailed { reason: String },
-    /// 在既有错误之上附加的一层上下文（哪一步、还剩什么）。
-    #[error("{context}：{source}")]
-    Context {
-        context: String,
-        source: Box<TaskError>,
-    },
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use continuum_effect::EffectType;
+    // 这几个只在用例里用得到：它们的生产消费者随 Task 2 搬进了 lib 的 `tool_call`
+    // （`arbitrate` / `mints`），或被搬走的那些函数一并带走（`Condition` / `Level` /
+    // `Policy` / `Scope` / `decide`）。放在 `mod tests` 里而不是文件顶部，是为了让
+    // **bin 的常规编译**不留下未使用的导入。
+    use continuum_policy::{
+        Condition, ExplicitApproval, Level, Policy, PolicyContext, Scope, decide,
+    };
+    // `arbitrate` / `mints` 由上面的 `use super::*` 带进来（它们在生产代码里也被用到）。
+    use continuum_runtime::tool_call::explicit_current_rule;
 
     /// 幂等键对三段是**单射**：设计第 6.5 节的键由 意图 id / 类型 / 目标 派生，
     /// 若拼接有歧义，两条不同的声明会被当成同一条，第二条被静默拒绝。

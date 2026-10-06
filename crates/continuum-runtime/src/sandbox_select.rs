@@ -30,7 +30,7 @@
 //! 本模块**不**读环境变量、不假定任何机制可用：不可用时一律 `Err`（两个 `Err` 变体各有
 //! 用例），不静默放出一个零隔离的子进程（设计第 4.3 节的 fail-closed 方向）。
 
-use continuum_runtime::cli::SandboxMechanism;
+use crate::cli::SandboxMechanism;
 use continuum_sandbox::{Sandbox, SandboxCapabilities};
 
 /// 机制选择失败的原因。

@@ -9,7 +9,6 @@ use std::process::ExitCode;
 
 mod recover_cmd;
 mod recovery;
-mod sandbox_select;
 mod secrets;
 mod task_cmd;
 
