@@ -46,7 +46,10 @@ impl ToolProvider for OneTool {
         }
     }
 
-    async fn invoke(&self, call: AuthorizedToolInvocation<'_>) -> Result<ToolResult, ProviderError> {
+    async fn invoke(
+        &self,
+        call: AuthorizedToolInvocation<'_>,
+    ) -> Result<ToolResult, ProviderError> {
         Ok(ToolResult {
             output: call.input().clone(),
             is_error: false,
@@ -78,7 +81,10 @@ impl ToolProvider for FailingList {
         })
     }
 
-    async fn invoke(&self, call: AuthorizedToolInvocation<'_>) -> Result<ToolResult, ProviderError> {
+    async fn invoke(
+        &self,
+        call: AuthorizedToolInvocation<'_>,
+    ) -> Result<ToolResult, ProviderError> {
         Ok(ToolResult {
             output: call.input().clone(),
             is_error: false,

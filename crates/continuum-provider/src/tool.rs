@@ -14,9 +14,12 @@ use serde_json::Value;
 ///
 /// **可见性三件套（裁决 C2，2026-10-05；设计 §7.5 的「可见性」段）**：
 /// **类型 `pub`**——它出现在**公开 trait 的方法签名**里，必须 `pub`；
-/// **构造入口 `pub(crate)`**——只有 `continuum-provider` 内的注册表构造它（将来那个构造点是
-/// `ProviderRegistry::invoke_tool`，见 [`crate::ProviderRegistry`] 的文档；该方法归 Task 4，
-/// **本 task 时点上它还不存在**，故此处只作文字指引、不作 `[`…::invoke_tool`]` 形式的链接）；
+/// **构造入口 `pub(crate)`**——**归 Task 4，本 task 时点上尚不存在**：届时那唯一的构造点是
+/// `ProviderRegistry::invoke_tool`（见 [`crate::ProviderRegistry`] 的文档），且必须写成
+/// `pub(crate)`，只有 `continuum-provider` 内的注册表构造它。**为什么不是 `pub`**：若它是
+/// `pub`，任何持有一枚真 [`AuthorizedTool`] 的代码都能自行拼出请求、直接调裸适配器的
+/// [`ToolProvider::invoke`]——那就是「同一件事两个产生点」，而两条路**都编译得过**。
+/// （此处只作文字指引、不作 `[`…::invoke_tool`]` 形式的链接。）
 /// **字段私有**——`authorization` / `input` 只经访问器读。
 ///
 /// 两条性质：
@@ -36,25 +39,6 @@ pub struct AuthorizedToolInvocation<'a> {
 }
 
 impl<'a> AuthorizedToolInvocation<'a> {
-    /// **唯一的构造入口，`pub(crate)`。** 收 `&AuthorizedTool` 而非 `ToolId`——这正是「没有授权就
-    /// 构造不出这次调用」的落点。
-    ///
-    /// **为什么不是 `pub`**：构造点是 `ProviderRegistry::invoke_tool` **一处**（设计 §7.5）。
-    /// 若它是 `pub`，任何持有一枚真 `AuthorizedTool` 的代码都能自行拼出请求、直接调裸适配器的
-    /// [`crate::ToolProvider::invoke`]——那就是「同一件事两个产生点」，而两条路**都编译得过**。
-    ///
-    /// **`#[allow(dead_code)]` 是有据的、且是暂时的**：本 crate 内至今**没有**调用点——
-    /// 唯一那个（`ProviderRegistry::invoke_tool`）归 Task 4。`pub(crate)` 的自由函数若无人调用
-    /// 会报 `dead_code`，而本仓要求 0 warning；写成 `pub` 来消警则正好破坏上一段说的收口，
-    /// 故取 allow + 本段说明。Task 4 落地调用点后这一行应当删掉（那时它会自己变成多余）。
-    #[allow(dead_code)]
-    pub(crate) fn new(authorization: &'a AuthorizedTool, input: Value) -> Self {
-        Self {
-            authorization,
-            input,
-        }
-    }
-
     /// 这次调用获准了什么。**消费方是工具适配器**（[`ToolProvider`] 的实现）：它在 `invoke` 的
     /// 实现体内逐枚取 `Capability::scope()`，把这次动作限定在该作用域内。
     /// **F 只持有并下传整枚值，不读 `granted()`**（设计 §7.5；`AuthorizedTool::tool_id()` 由注册表取，用于路由）。

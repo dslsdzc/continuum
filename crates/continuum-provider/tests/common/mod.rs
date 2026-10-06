@@ -123,7 +123,10 @@ impl ToolProvider for FakeTool {
             .ok_or_else(|| ProviderError::Unavailable(id.as_str().to_owned()))
     }
 
-    async fn invoke(&self, call: AuthorizedToolInvocation<'_>) -> Result<ToolResult, ProviderError> {
+    async fn invoke(
+        &self,
+        call: AuthorizedToolInvocation<'_>,
+    ) -> Result<ToolResult, ProviderError> {
         Ok(ToolResult {
             output: call.input().clone(),
             is_error: false,
