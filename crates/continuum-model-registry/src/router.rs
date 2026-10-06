@@ -56,9 +56,14 @@
 //!
 //! [`BaselineRankingPolicy`] 是本层交付的**具名基线**，**不是对规范的声称**：§84 未给打分函数，
 //! 故它是一个**可替换的实现**（设计 §5.3）。它只读**已定义**的输入——§248 维度的**有无**、
-//! §247 的 `confidence`、§19 的家族偏好、§249 的状态——并**用缺省的 [`RankingPolicy::compare`]**，
+//! §247 的 `confidence`、§19 的家族偏好——并**用缺省的 [`RankingPolicy::compare`]**，
 //! 故「全序」这件事仍由本层的那四档负责。**两处选择写在该类型的文档里**：家族由 `provider` 判
 //! （§19 未给判据），以及被否掉的两个打分法。
+//!
+//! **§249 的状态不是基线的输入**：它住在 [`ExecutionCandidate::state`]（§5.2 的顶层字段），
+//! **不进 `reason`**——同一个事实在两个落点是本项目一贯判为缺陷的那一类（设计 §5.3 的订正注记）。
+//! §4.2 的「**可见但不禁**」因此分两半兑现：**可见** = [`ExecutionCandidate::state`] 这个访问器
+//! 读得到；**不禁** = 基线**不据它改序**（§11 第 24 条未给降权判据）。
 
 use std::cmp::Ordering;
 
@@ -608,13 +613,30 @@ fn family_relation(family: &FamilyPreference, provider: &str) -> FamilyRelation 
 ///
 /// # 它只读**已定义**的输入
 ///
-/// §248 维度的**有无**（不读分数）、§247 的 `confidence`、§19 的家族偏好、§249 的状态：
+/// §248 维度的**有无**（不读分数）、§247 的 `confidence`、§19 的家族偏好：
 ///
 /// - `compatibility` = 需求维度中**有观测**的那几个的占比（`matched / required`）。
 ///   **只判「有没有观测」，`SkillScore` 的数值一概不读**——这正是 §2.4「只用序、不用量」的落点：
 ///   占比是一个**有界的集合运算结果**，不是任何跨维度求和。
 /// - `confidence` = 画像上的 `confidence`（§247），原样带出。
-/// - `reason` 记 `matched` / `missing` / family（[`FamilyRelation`] 字段）与 state（写进 `notes`）。
+/// - `reason` 记 `matched` / `missing` / family（[`FamilyRelation`] 字段）**三样**——
+///   **不含 state**（见下）。
+///
+/// **不读**：`score` 的数值、`cost_profile` / `latency_profile`、`failure_modes`
+/// （它们都还没有可用的判据）。它**也不读 `budget`**（见下）。
+///
+/// # §249 的状态**不是**基线的输入——「可见但不禁」分两半兑现
+///
+/// state 的家是 [`ExecutionCandidate::state`]（§5.2 的顶层字段），**不进 `reason`**：
+/// 同一个事实住在两处就是「同一件事两个落点」，一旦漂移便是两份真相
+/// （设计 §5.3 的订正注记把两条被否的替代方案连理由留在原地）。故 §4.2 末段的
+/// 「**可见但不禁**」在本层分两半——
+///
+/// - **可见**：有 [`ExecutionCandidate::state`] 这个访问器，策略/消费者读得到
+///   （§5.2 的访问器清单里它是**必需**的那一类）；
+/// - **不禁**：**基线不据它改序**——§11 第 24 条明写降权判据规范未给，故 `Healthy` 与 `Degraded`
+///   在本策略下产生**相同**的 compatibility / confidence / family 与相同的次序。
+///   照片：`tests/router.rs` 的 `a_degraded_candidate_stays_in_the_table_and_its_state_is_readable`。
 ///
 /// # `compare` 用缺省实现，**本类型不重写**
 ///
@@ -645,9 +667,11 @@ pub struct BaselineRankingPolicy;
 
 impl RankingPolicy for BaselineRankingPolicy {
     /// 按 §5.3 的三条算：`compatibility` 是**有无**的占比、`confidence` 取画像、
-    /// `reason` 记四样（family 走字段，state 走 `notes`）。
+    /// `reason` 记 `matched` / `missing` / family **三样**（**不含 state**——它的家在
+    /// [`ExecutionCandidate::state`]，见类型文档）。
     ///
-    /// **不读 `SkillScore` 的数值、不读 `budget`、不读 `ProviderHealth`**——后两者本层拿不到，
+    /// **不读 `SkillScore` 的数值、不读 `budget`、不读 `ProviderHealth`、不读 `model.state()`**
+    /// ——后两者本层拿得到但本策略不用（state 是「可见但不禁」，健康度是请求侧的事实），
     /// 前者是 §2.4 的禁令。`missing` 是 `Vec<SkillDimension>`，**不折算成扣分**（那要权重）。
     fn evaluate(&self, request: &RoutingRequest, model: &RoutableModel) -> CandidateScore {
         let skill_vector = model.profile().skill_vector();
@@ -678,18 +702,11 @@ impl RankingPolicy for BaselineRankingPolicy {
                 family_relation(&request.family, model.profile().provider()),
                 matched,
                 missing,
-                vec![state_note(model.state())],
+                // `notes` 留空：本策略写入 `reason` 的三样已经各有其字段，没有第四件事实要记。
+                // **state 不写在这里**——它是 `ExecutionCandidate.state` 的家，写进自由文本既重复
+                // 又把一个机器可读的事实降级成散文（设计 §5.3 的订正注记）。
+                Vec::new(),
             ),
         }
     }
-}
-
-/// 策略写进 [`RoutingReason::notes`] 的那一条状态陈述（`reason` 记 state 的落点，设计 §5.3）。
-///
-/// **`notes` 是自由文本，不是落库编码**：本仓「不用 `Debug` 表示落库」那条纪律管的是列值，
-/// 而这一句不进任何列（`RoutingReason` 没有落库编码，设计 `:586`）。故这里用 `{:?}` 打出变体名，
-/// 与 `RoutableState` **不另建一张编码表**——`RoutableState` 是内存里的收窄类型，
-/// 设计明写它「不落库，故不需要编码」。
-fn state_note(state: RoutableState) -> String {
-    format!("state: {state:?}")
 }

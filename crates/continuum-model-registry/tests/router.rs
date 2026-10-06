@@ -1484,17 +1484,16 @@ fn changing_a_score_value_does_not_change_the_order() {
         rank(&request, &after_models, &BaselineRankingPolicy).expect("两个候选都应过");
     let after = order_of(&after_ranked);
 
-    // 前提（实跑核过，不是假设）：按数值加权必须给出**相反**的次序，否则加权变异体是等价变异体。
+    // 前提（实跑核过，不是假设）：按数值加权必须给出**相反**的次序，否则加权变异体是等价变异体
+    //（同向则加权版与按有无给出同一个次序，「排序不变」在两种实现下都成立——假绿）。
+    // 只留这一条断言：`before` 前面已断言是 `[alpha, bravo]`，故「逆序」蕴含「加权把 bravo 排前」
+    //（`by_value == ["model-bravo", "model-alpha"]` 那句与它蕴含重复，删掉；诊断信息移进这里）。
     let by_value = weighted_by_value_order(&after_models, two_dimensions().dimensions());
     assert_eq!(
         by_value,
-        vec!["model-bravo", "model-alpha"],
-        "夹具前提：改写后的数值使「按加权」把 bravo 排到前面（alpha (0.1+0.1)/2=0.1 ＜ bravo (1.0+0)/2=0.5）"
-    );
-    assert_eq!(
-        by_value,
         before.iter().rev().copied().collect::<Vec<&str>>(),
-        "夹具前提：加权次序必须与按有无次序**相反**——同向则加权变异体不红（假绿）"
+        "夹具前提：加权次序必须与按有无次序**相反**（这里期望 [model-bravo, model-alpha]：\
+         alpha (0.1+0.1)/2=0.1 ＜ bravo (1.0+0)/2=0.5）——同向则加权变异体不红（假绿）"
     );
 
     assert_eq!(
@@ -1559,12 +1558,13 @@ fn adding_an_observation_changes_the_order() {
         rank(&request, &observed_models, &BaselineRankingPolicy).expect("两个候选都应过");
     let after = order_of(&after_ranked);
 
+    // 只留这一条：它同时说出「变成了什么」与「确实变了」（`before` 前面已断言是 `[alpha, bravo]`，
+    // 故与那句相比即变）。原另有一条 `assert_ne!(after, before)`，与它蕴含重复，按诊断价值删去。
     assert_eq!(
         after,
         vec!["model-bravo", "model-alpha"],
-        "bravo 有了 1/2 的观测（alpha 仍是 0/2），它升到表头——次序**变了**"
+        "bravo 有了 1/2 的观测（alpha 仍是 0/2），它升到表头——次序**变了**（原为 [alpha, bravo]）"
     );
-    assert_ne!(after, before, "「有无」是兼容度的输入：动它必须动次序");
 
     tx.commit().unwrap();
 }
@@ -1663,63 +1663,115 @@ fn same_family_candidates_rank_before_cross_family_ones() {
     tx.commit().unwrap();
 }
 
-/// **`Degraded` 的候选可见但不禁：它在表里、`state()` 读出 `Degraded`、`reason` 里看得到**
-/// （§4.2 末段，设计 §5.3「`reason` 记 state」）。
+/// **`Degraded` 的候选留在表里、`state()` 读得到它、而基线不据它改序**——「可见但不禁」分两半
+/// （§4.2 末段、§11 第 24 条、设计 §5.3 的订正注记）。
 ///
-/// 设计写死只过滤 `Unavailable`（`ProviderHealth` 那一侧，Task 11 的照片），
-/// 而 `LifecycleState::Degraded` 是**另一个轴**上的东西（§249 的模型生命周期异常态）。
-/// 基线**不因它改排序**（§11 第 24 条：降权判据规范未给），但**把它带出来**——
-/// 消费者/后续策略据此决定是否降权，看不到这个信息就决定不了。
+/// # state 的家是 `ExecutionCandidate.state`，**不进 `reason`**
 ///
-/// **两侧对钉**：`Active` 与 `Degraded` 各排一次，`state()` 与 `notes()` 都必须跟着变。
-/// 只写 `Degraded` 一侧的话，一个「把状态写死成 `degraded`」的实现照样绿。
+/// 设计**明写**：生命周期状态只住在 [`ExecutionCandidate::state`]（§5.2 的顶层字段），
+/// `RoutingReason` **不带 state**——同一个事实住在两处就是「同一件事两个落点」，一旦漂移便是两份真相
+/// （两条被否的替代方案连理由留在设计 §5.3 的订正注记里）。**故本用例名里不能再有「in the reason」**：
+/// 那正是被否决的方案，把它的行为拍成正确是本仓一贯要消掉的形状。
+/// 与之配套，本用例断言 `reason().notes()` **为空**——把被否决的那条路拍成一条**非行为**的照片
+/// （它是「不该发生的事」，不是「发生了什么」）。
 ///
-/// `notes` 是**自由文本**（`RoutingReason::notes` 的契约），本用例钉的是基线写出的那一句
-/// `state: <变体名>`；它是策略的事实陈述，不是落库编码（见 `src/router.rs` 的 `state_note`）。
+/// # 两半各是什么
 ///
-/// 红的条件：候选被挡下（`Degraded` 不进表）、`state()` 读错、或 `reason` 里没有状态这一句。
+/// - **可见**：`state()` 读出各自过闸门后的那个状态——§5.2 的访问器清单里它是**必需**的那一类；
+/// - **不禁**：同一份夹具只在「alpha 的状态」这一个变量上来回改（`Active` ↔ `Degraded`），
+///   两次运行给出**逐项相同**的 compatibility / confidence / family、相同的 `matched` / `missing`
+///   与**相同的 id 次序**。§11 第 24 条明写降权判据规范未给，故基线不发明。
+///
+/// # 为什么必须有「不禁」那半，且夹具要有**两条**候选
+///
+/// 只有「可见」半的话，本用例会退化成「只有一个候选**在不在表里**」——
+/// 而**一个按 state 排序（同为降权）的策略照样能过**：一个候选没有次序可比。
+/// 两条候选 + 「两次运行的次序逐项相同」才让「state 不动排序」这句话有照片。
+///
+/// 红的条件：`Degraded` 的候选被挡下（不在表里）、`state()` 读错、
+/// 基线据 state 改了任一读数或次序、或 `reason.notes()` 非空（把 state 塞回 `reason`）。
 #[test]
-fn the_state_is_visible_in_the_reason() {
+fn a_degraded_candidate_stays_in_the_table_and_its_state_is_readable() {
     let (_dir, db) = db();
     let tx = db.begin().unwrap();
 
     seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+    // alpha 一维有观测、bravo 无：两条的 compatibility 不同，故次序不是并列的兜底，
+    // 「state 不改序」因此是一句有内容的话（并列次序由 id 定，与 state 无关，太容易恒真）。
     observe(&tx, "model-alpha", SkillDimension::Coding, 0.5, 1);
 
     let request = request_for(
         two_dimensions(),
         FamilyPreference::Auto,
-        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
     );
 
-    for (lifecycle, expected_state, expected_note) in [
-        (LifecycleState::Active, RoutableState::Active, "state: Active"),
-        (
-            LifecycleState::Degraded,
-            RoutableState::Degraded,
-            "state: Degraded",
-        ),
-    ] {
-        let models = vec![routable(&tx, "model-alpha", lifecycle)];
-        let ranked = rank(&request, &models, &BaselineRankingPolicy)
-            .expect("可路由态（含 Degraded）都应成为候选");
+    // 同一份夹具，唯一变量是 alpha 的生命周期状态。
+    let runs: Vec<RankedExecutionCandidates> = [LifecycleState::Active, LifecycleState::Degraded]
+        .iter()
+        .map(|lifecycle| {
+            let models = vec![
+                routable(&tx, "model-alpha", *lifecycle),
+                routable(&tx, "model-bravo", LifecycleState::Active),
+            ];
+            rank(&request, &models, &BaselineRankingPolicy)
+                .expect("可路由态（含 Degraded）都应成为候选")
+        })
+        .collect();
 
+    // 前提：两次运行比的是**同一个**候选，差别只剩 state 一个变量。
+    assert_eq!(
+        runs[0].selected().model().as_str(),
+        "model-alpha",
+        "前提：表头是 alpha（它的 compatibility 更高），两次运行都一样"
+    );
+    assert_eq!(runs[0].selected().model().as_str(), runs[1].selected().model().as_str());
+
+    // 不禁：Degraded 的候选仍在表里。
+    assert_eq!(
+        runs[1].candidates().len(),
+        2,
+        "`Degraded` 不被挡下——两条候选都在表里（「可见但不禁」的「不禁」）"
+    );
+
+    // 可见：`state()` 读出各自过闸门后的那个状态。
+    assert_eq!(
+        runs[0].selected().state(),
+        RoutableState::Active,
+        "可见：`state()` 读出 Active"
+    );
+    assert_eq!(
+        runs[1].selected().state(),
+        RoutableState::Degraded,
+        "可见：`state()` 读出 Degraded（§5.2 的必需访问器）"
+    );
+
+    // 不禁：除 state 外，两次运行逐项相同——读数、族关系、两个维度列表、notes、以及 id 次序。
+    let active = fingerprint(&runs[0]);
+    let degraded = fingerprint(&runs[1]);
+    assert_eq!(active.len(), degraded.len(), "两条候选两个回合都在");
+    for (index, (before, after)) in active.iter().zip(degraded.iter()).enumerate() {
+        assert_eq!(before.0, after.0, "第 {index} 位的模型 id 相同 → id 次序不变");
+        assert_eq!(before.2, after.2, "第 {index} 位的 compatibility 相同 → 基线不据 state 改分");
+        assert_eq!(before.3, after.3, "第 {index} 位的 confidence 相同");
         assert_eq!(
-            ranked.candidates().len(),
-            1,
-            "{expected_note}：候选仍在表里（「可见但不禁」）"
+            before.4, after.4,
+            "第 {index} 位的 family 相同 → 基线不据 state 改族"
         );
-        assert_eq!(
-            ranked.selected().state(),
-            expected_state,
-            "{expected_note}：`state()` 读出的就是过闸门后的那个状态"
-        );
-        assert_eq!(
-            ranked.selected().reason().notes(),
-            &[String::from(expected_note)],
-            "{expected_note}：状态在 `reason` 里看得到——策略据此可以降权"
-        );
+        assert_eq!(before.5, after.5, "第 {index} 位的 matched 相同");
+        assert_eq!(before.6, after.6, "第 {index} 位的 missing 相同");
+        assert_eq!(before.7, after.7, "第 {index} 位的 notes 相同");
     }
+
+    // 非行为：state **不进** `reason.notes()`（被否决的那条路）。它的家在 `ExecutionCandidate.state`。
+    assert!(
+        degraded.iter().all(|item| item.7.is_empty()),
+        "state 不进 `reason.notes()`——它的家是 `ExecutionCandidate.state`，写进 `reason` 是重复"
+    );
 
     tx.commit().unwrap();
 }
