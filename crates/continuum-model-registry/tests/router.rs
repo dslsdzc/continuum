@@ -823,14 +823,19 @@ fn confidence_breaks_a_compatibility_tie() {
 /// （设计 §5.3：§19 的「优先同一 model family」）。
 ///
 /// **这条用例是补上来的，不在计划 Step 2 的清单里**（来历记在此处，免得被当成漏项或越权）：
-/// 计划把这一档的照片派给了 Task 12（`:1247` 的 `same_family_candidates_rank_before_cross_family_ones`），
-/// **该派单已撤回**——这一档长在本 task 的代码里（`compare` 的缺省实现里 `family_rank`
+/// 计划把这一档的照片派给了 Task 12 的 `same_family_candidates_rank_before_cross_family_ones`，
+/// **这一半派单已撤回**——这一档长在本 task 的代码里（`compare` 的缺省实现里 `family_rank`
 /// 那一行），它的两个操作数都是本 task 的候选，输入也在本 task 的夹具射程内。
 /// 实跑变异「删掉第三档」（M7）时本 task 原有用例**全绿**：那些用例里并列的候选 `family`
-/// 全是 `SameFamily`，这一档从未决定过任何次序。故在此补一条照片，不再推给 Task 12。
+/// 全是 `SameFamily`，这一档从未决定过任何次序。故在此补一条照片。
 ///
-/// （此处的互引按**名字**写：本文件先前一处互引写的是 `src/router.rs:458`，本次改动在模块头
-/// 加了行，那个行号随即失效——行号式互引会漂，名字不会。）
+/// **Task 12 那条用例不删、只换夹具**：它独有「**族由请求的偏好算出**」那半边
+/// （`OpenAiPreferred` 时同族优先、`Auto` 时全部视为 `SameFamily`），本用例钉的只是
+/// 「`reason.family` 不同的两条候选怎么排」。删了它，那半边就没有照片。
+///
+/// （此处的互引按**名字**写：这里早先引的是计划的行号 `:1247`，那是一处 bash 围栏
+/// ——该用例在计划里记作 `:1283`；本文件另一处引的 `src/router.rs:458` 也在本次改动
+/// 加了模块头行之后失效。行号式互引会漂，名字不会；两个错引的行号留在这里作来历。）
 ///
 /// 夹具的形态是承重的：两条候选的 `compatibility`（0.5）与 `confidence`（画像列的 0.5）
 /// **全同**，前两档都判不了；按 `ModelId` **升序**喂入（`model-alpha` 在前），而期望的表头是
@@ -838,15 +843,25 @@ fn confidence_breaks_a_compatibility_tie() {
 ///
 /// **两侧对钉**：把 `model-bravo` 也改成 `CrossFamily`（两族关系相同）→ 第三档同样判不了，
 /// 次序回到兜底档的 id 升序，表头是 `model-alpha`。这一侧钉的是「**两族关系相同时第三档交出
-/// `Equal`**、次序交还给兜底档」：一个对并列的操作数不返回 `Equal` 的第三档只会在这一侧暴露，
-/// 因为方向一的输入本就是 id 升序，那种实现在方向一上是碰巧绿的。
+/// `Equal`**、次序交还给兜底档」，且**必须按两种输入顺序各来一遍**（2a 升序 / 2b 倒序），
+/// 只留一种就会漏掉下面那两类里的一类：
 ///
-/// **实测提醒（写在这里，免得后来者去查一个不存在的问题）**：把第三档改成恒返回
-/// `Ordering::Greater` 的变异体（M7b）**在方向一就红了**，与上面那句「碰巧绿」的预告相反。
-/// 原因是那种比较器**不是全序**（`cmp(a,b)` 与 `cmp(b,a)` 都返回 `Greater`），
-/// `sort_by` 在它下面的行为不由它单独决定——故 M7b 红在哪一条**不能**当作
-/// 「方向一能抓住并列档」或「方向二能抓住它」的证据。方向二的价值在上面那句判据上，
-/// 不在 M7b 的观察上。
+/// - **2a**（按 id 升序喂入）：一个「并列时返回 `Less`」的第三档在这里红——`is_less` 恒真 →
+///   交换 → 输出 `["model-bravo", "model-alpha"]`；
+/// - **2b**（按与 id 升序的相反顺序喂入 `["model-bravo", "model-alpha"]`）：一个「**只在并列时**
+///   返回 `Greater`」的第三档（记作 T）在这里红——`is_less` 恒 false → 稳定排序保序 →
+///   输出仍是 `["model-bravo", "model-alpha"]`。正确实现在 2b 上探的是
+///   `is_less(alpha, bravo)`，并列时第三档交出 `Equal`、第四档判出 `Less` → 交换 → 得到期望。
+///   **T 在方向一与 2a 上都是绿的**（那两处的输入次序恰好落在它的输出上），故 2b 是它唯一的照片。
+///
+/// 措辞说准：**只在并列时不返回 `Equal`** 的第三档只会在这一侧暴露；一个**恒**返回 `Greater`
+/// 的第三档不在此列，它连方向一都过不去（机制见下）。
+///
+/// **恒 `Greater`（M7b）的机制与实测**：恒 `Greater` ⇒ `is_less` 恒 `false` ⇒ 稳定排序保序，
+/// 且第四档被遮蔽。故它对**任何**依赖排序的期望都保不住——实测 M7b 同时染红方向一
+/// （`["model-alpha","model-bravo"]`，保序的结果）与本用例，`shuffling_…` 与 `tied_…` 也一并变红。
+///
+/// 红的条件：删掉第三档（M7）、或把它写反（`CrossFamily` 在前）、或让它在并列时不交出 `Equal`。
 ///
 /// 红的条件：删掉第三档、或把它写反（`CrossFamily` 在前），本条即红。
 #[test]
@@ -886,22 +901,35 @@ fn family_breaks_a_compatibility_and_confidence_tie() {
         "前两档全同时按 family 排：同族的在前，尽管它是 id 更大的那个"
     );
 
-    // 二、把 `model-bravo` 也改成跨族：两族关系相同，第三档判不了，次序回到兜底档的 id 升序。
+    // 二、把 `model-bravo` 也改成跨族：两族关系相同，第三档判不了，次序交还给兜底档的 id 升序。
+    //     **两种输入顺序各来一遍**（同 `shuffling_the_input_does_not_change_the_output` 的形态）：
+    //     2a 按 id 升序、2b 按与 id 升序相反的次序，期望**不变**。两类「并列时不交 `Equal`」的
+    //     第三档分别落在两处：恒 `Less` 类在 2a 红，**只在并列时**返回 `Greater` 的 T 在 2b 红
+    //     （它在 2a 上是绿的）——只留一种就漏掉一类。
     let both_cross = StubPolicy::new(vec![
         ("model-alpha", 0.5, FamilyRelation::CrossFamily),
         ("model-bravo", 0.5, FamilyRelation::CrossFamily),
     ]);
-    let ranked = rank(&request, &models, &both_cross).expect("两个候选都应过");
-    let ordered: Vec<&str> = ranked
-        .candidates()
-        .iter()
-        .map(|candidate| candidate.model().as_str())
-        .collect();
-    assert_eq!(
-        ordered,
-        vec!["model-alpha", "model-bravo"],
-        "两族关系相同时第三档不决定次序，落到兜底档的 ModelId 升序"
-    );
+    for (label, order) in [
+        ("2a 按 id 升序喂入", ["model-alpha", "model-bravo"]),
+        ("2b 按与 id 升序相反喂入", ["model-bravo", "model-alpha"]),
+    ] {
+        let models: Vec<RoutableModel> = order
+            .iter()
+            .map(|model| routable(&tx, model, LifecycleState::Active))
+            .collect();
+        let ranked = rank(&request, &models, &both_cross).expect("两个候选都应过");
+        let ordered: Vec<&str> = ranked
+            .candidates()
+            .iter()
+            .map(|candidate| candidate.model().as_str())
+            .collect();
+        assert_eq!(
+            ordered,
+            vec!["model-alpha", "model-bravo"],
+            "{label}：两族关系相同时第三档不决定次序，交付兜底档的 ModelId 升序（与输入顺序无关）"
+        );
+    }
 
     tx.commit().unwrap();
 }
