@@ -618,8 +618,14 @@ impl RoutableModel {
 **`degraded` 仍可路由，且它不是 `ProviderHealth` 的那个同名变体。** 判据是出处：`DEGRADED` 出现在 §249 的
 **模型生命周期异常态清单**里（`docs/spec/05-normative.md:868-871`），与 `ProviderHealth::Degraded`
 （`crates/continuum-core/src/model.rs:83-87`，那是**供应商侧的可用性**）是两个轴上的两个东西，只是名字撞了。
-本设计**不因这次撞名而动它**：§249 列了它，本轮裁定没有点它，故它保持可路由，状态原样带进候选的 `reason`
-（§5.2），让策略可以据此降权——**可见但不禁**。
+本设计**不因这次撞名而动它**：§249 列了它，本轮裁定没有点它，故它保持可路由。
+状态**住在 `ExecutionCandidate.state`（不是 `reason`，§5.2 有订正）**，故它对策略**可见**
+（`ExecutionCandidate::state()`），但**基线不据它改序**——**可见而不禁**。
+
+> **一处订正，来历留在原地**：本段原话是「状态原样带进候选的 **`reason`**（§5.2），让策略可以据此降权」。
+> **两句都错，已订正**：`reason` 里没有 state 字段（§5.2 的骨架只有四个字段），而 `reason` 里也没有任何
+> 「能让策略降权」的读口；且「基线据此降权」与 §11 第 24 条（**降权判据规范未给**）相抵。
+> 正确的两分说法（「可见」= 有访问器；「不禁」= 基线不据它改序）见 §5.3 的裁决注记。
 
 ## 4.3 谁迁移
 
@@ -782,7 +788,7 @@ impl RankedExecutionCandidates {
 
 pub struct ExecutionCandidate {
     model: ModelId,
-    state: RoutableState,     // §249 的状态对策略可见（degraded 据此降权，见 §4.2）
+    state: RoutableState,     // §249 的状态：**对策略可见，但基线不据它改序**（§4.2、§5.3 的两分说法）
     compatibility: Ratio,     // §84
     confidence: Ratio,        // §84
     reason: RoutingReason,    // §84
@@ -875,9 +881,13 @@ pub trait RankingPolicy {
 **但本设计交付一个具名基线策略**，使 §4.4 的完成判据「Router 输出带 confidence 的候选排序」**现在就可拍**：
 
 ```rust
-/// 只用**已定义**的输入：§248 维度的**有无**（不读分数）、§247 的 confidence、§19 的家族偏好、
-/// 以及 §249 的状态（**只把它放进 `ExecutionCandidate.state`，不据它排序**）。
-/// **不读**：`score` 的数值、`cost_profile` / `latency_profile`、`failure_modes`（它们都没有可用的判据）。
+/// **基线的输入**只有三项，都是「已定义」的：§248 维度的**有无**（不读分数）、§247 的 confidence、
+/// §19 的家族偏好。**不读**：`score` 的数值、`cost_profile` / `latency_profile`、
+/// `failure_modes`（都没有可用的判据），以及 **§249 的状态**（理由见下）。
+///
+/// **§249 的状态不是基线的输入，它是「策略可读」的候选字段**——两分说法见 `ExecutionCandidate`
+/// 的 `state()`：**「可见」= 有访问器**（`ExecutionCandidate::state()`，§4.2 的「可见但不禁」靠它兑现）；
+/// **「不禁」= 基线不据它改序**（§11 第 24 条没给降权判据，故基线不读）。
 pub struct BaselineRankingPolicy;
 ```
 
@@ -887,6 +897,17 @@ pub struct BaselineRankingPolicy;
 - `confidence` = 画像上的 `confidence`（§247）。
 - `reason` 记 `matched` / `missing` / `family`（**不含 state**，见下）。
 - family 偏好按 §19 排在数值之前：`SameFamily` 优先于 `CrossFamily`（`Auto` 时全部视为 `SameFamily`）。
+
+> **一处订正，来历留在原地**（本项目既有做法；由 Task 12 的评审报出，与 §5.2 那条 state 订正**同一结论**）。
+> 第一版稿子把「§249 的状态」列在 `BaselineRankingPolicy` 的**输入清单**里（原话：「只用**已定义**的输入：
+> …… §19 的家族偏好、**以及 §249 的状态**」），而同一节又说 `reason` 不含 state、基线不据它排序——
+> **同一节里一处说有输入、一处说没有**。
+> **裁决（2026-10-06，协调者）**：**state 不是基线的输入，它是「策略可读」的候选字段。**
+> **两分判据**（这是本条唯一要记住的一句）：
+> **「可见」= 有访问器**（`ExecutionCandidate::state()` 必须在，§4.2 的「可见但不禁」靠它兑现）；
+> **「不禁」= 基线不据它改序**（§11 第 24 条**没给降权判据**，故基线不读）。
+> **两者不矛盾**：可见性面向**策略的实现者**（它想读就读得到），「不读」面向**基线的这一份实现**
+> （它没有判据可用）。把两者混成一句「state 是/不是输入」，就会像原句那样自相抵。
 
 > **一处订正，来历留在原地**（本项目既有做法；由 Task 12 的实现者报回）。第一版稿子这句写的是
 > 「`reason` 记 `matched` / `missing` / family / **state**」，而 §5.2 的 `RoutingReason` 骨架只有
@@ -1451,7 +1472,10 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     （不可用即不是执行候选），`Healthy` 与 `Degraded` 都进候选集、**基线不为 `Degraded` 改变排序**；
     `Degraded` 该不该降权、降多少，**§250 只说「考虑」、§84 没有给这一维的算法**，故不发明。
     健康度**已在 `RoutingRequest.availability` 里**，策略要读就读得到（订正：原句写「它原样带进 `reason`」，
-    那是错的——`reason` 没有这个字段，理由见 §5.3 的订正注记）。**收件人：规范维护者**。
+    那是错的——`reason` 没有这个字段，理由见 §5.3 的订正注记）。
+    **这一条同样带 §5.3 那个两分界**：缺判据的后果是**「基线不读 state」**，
+    而**「可见」由 `ExecutionCandidate::state()` 访问器兑现**（§4.2 的「可见但不禁」）——
+    两件事分开记，不要合成一句「state 是/不是输入」。**收件人：规范维护者**。
 25. **「一个模型属于哪个家族」的判据规范未给**（§5.3）。**这是一个真空，不是口味问题**：
     §19 给的是**用户偏好**清单，没说模型如何**归属**家族；§247 的十二个字段里**没有 family**；
     唯一沾边的 `provider` 其词表也未定义（§2.1）。故**任何**实现都必须自己发明一条
@@ -1463,3 +1487,4 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     而两者都「合规」）；且 §19 的 `Custom` 一族在基线下**永远不会被任何模型匹配到**，
     即「自定义家族」这条偏好在实现上**是一个恒不命中的分支**。
     **收件人：规范维护者**（给出家族归属的判据，或明说它由实现自定）。
+    **若判据给出**，它落进 `RankingPolicy` 的实现（§5.3）——`ModelProfile` / `RoutingRequest` 都不动。
