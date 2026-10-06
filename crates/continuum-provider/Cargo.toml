@@ -21,3 +21,11 @@ thiserror = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 futures-core = { workspace = true }
+# Task 4 起的使用点：`tests/invoke_tool.rs` 的夹具要起一个真库、经 `Tx` 调
+# `continuum_capability::authorize` 取一枚真的 `AuthorizedTool`（`authorize` 收 `&Tx<'_>`），
+# 而 `invoke_tool` 的门禁正是「手里得先有那一枚」。**dev 边在这里登记**——
+# 「边由用它的那个 task 加」，Task 3 时还没有用例用得上它。
+# `cargo tree --edges all` 把 dev 边算进依赖，故 `dependency_direction.rs` 的 provider
+# 条目**同批**补成三元素：只改一处，逐对断言即红。
+continuum-persist = { path = "../continuum-persist" }
+tempfile = { workspace = true }

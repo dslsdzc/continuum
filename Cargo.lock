@@ -207,8 +207,10 @@ dependencies = [
  "async-trait",
  "continuum-capability",
  "continuum-core",
+ "continuum-persist",
  "futures-core",
  "serde_json",
+ "tempfile",
  "thiserror",
  "tokio",
 ]

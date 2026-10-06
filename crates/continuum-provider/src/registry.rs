@@ -4,10 +4,12 @@
 //! 也不引用任何实现类型——持有的只有 `Arc<dyn …>`（设计 §4.1）。
 
 use crate::model::ModelProvider;
-use crate::tool::ToolProvider;
+use crate::tool::{AuthorizedToolInvocation, ToolProvider};
+use continuum_capability::AuthorizedTool;
 use continuum_core::model::ModelId;
-use continuum_core::tool::{ToolDescriptor, ToolId};
+use continuum_core::tool::{ToolDescriptor, ToolId, ToolResult};
 use continuum_core::ProviderError;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -65,7 +67,7 @@ pub enum ToolCallError {
 ///
 /// **暴露面两侧不对称，理由是强制点 (1) 只覆盖工具**（设计 §3.1）：模型侧 `model_for` 直接
 /// 交出裸 `Arc<dyn ModelProvider>`；工具侧只开只读入口（`list_tools` / `describe_tool`）与
-/// 唯一的调用入口 `invoke_tool`（后者在 Task 4），**不交出适配器**——**没有 `tool_for`、
+/// 唯一的调用入口 `invoke_tool`（后者 Task 4 起落地），**不交出适配器**——**没有 `tool_for`、
 /// 也没有 `tool_providers()`**。后两者缺席的证据归 Task 6 的编译失败样例，**本处不对此作任何主张**
 /// ——本处没有能证明「这两个名字编不过」的用例。
 ///
@@ -185,5 +187,43 @@ impl ProviderRegistry {
             .get(id)
             .ok_or_else(|| ToolCallError::Unregistered { id: id.clone() })?;
         Ok(adapter.describe_tool(id).await?)
+    }
+
+    /// **工具侧唯一的调用入口**（设计 §7.1）。解析与调用是同一步。
+    ///
+    /// 工具 id **只有这一个来源**：`authorized.tool_id()`。本函数**不另收 `ToolId`**
+    /// （旧类型 `ToolInvocation` 已裁删，见 §7.5、§12 第 22 条），故「出示的 id 与被授权的
+    /// id 不是一个」这一种可能不存在。
+    ///
+    /// **未登记的 id 不构成本次调用失败**，它是**配置缺陷**（[`ToolCallError::Unregistered`]）
+    /// ——调用方**不得**把它当作可重试（设计 §5.1）。
+    ///
+    /// **它交出的是结果，不是适配器**：注册表**不提供** `tool_for`、也**不提供**
+    /// `tool_providers()` 枚举（设计 §7.1）。那两条入口的缺席由 Task 6 的编译失败样例钉，
+    /// **本处不对此作任何主张**——本处没有能证明「这两个名字编不过」的用例。
+    ///
+    /// **顺序**：先按 id 路由（未命中即返 `Unregistered`，**适配器一次都没被碰过**——
+    /// 路由的权威是 `tools` 表，不是去逐个问适配器的 `list_tools()`，与
+    /// [`ProviderRegistry::describe_tool`] 同一条口径），构造请求，再调适配器。
+    /// [`AuthorizedToolInvocation`] **在本函数内部构造**——调用方只传 `&AuthorizedTool`
+    /// 与 `input`，不构造也不命名那个类型。该类型的构造入口是 `pub(crate)`（裁决 C2），
+    /// 故**本函数是全仓唯一的构造点**。
+    ///
+    /// **`Ok` / `Err` 一律按适配器给的转出去**：工具跑起来了但自身失败该报成
+    /// `Ok(ToolResult { is_error: true, .. })` 是 **C 加在适配器上的约定**，§316 里没有出处、
+    /// 也没有强制（设计 §7.1）；本函数**不替适配器做这个分流**——那样做等于把适配器
+    /// 自己的判断覆盖掉，而本层没有依据判断它跑没跑成。
+    pub async fn invoke_tool(
+        &self,
+        authorized: &AuthorizedTool,
+        input: Value,
+    ) -> Result<ToolResult, ToolCallError> {
+        let id = authorized.tool_id();
+        let adapter = self
+            .tools
+            .get(id)
+            .ok_or_else(|| ToolCallError::Unregistered { id: id.clone() })?;
+        let call = AuthorizedToolInvocation::new(authorized, input);
+        Ok(adapter.invoke(call).await?)
     }
 }

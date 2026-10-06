@@ -14,9 +14,10 @@ use serde_json::Value;
 ///
 /// **可见性三件套（裁决 C2，2026-10-05；设计 §7.5 的「可见性」段）**：
 /// **类型 `pub`**——它出现在**公开 trait 的方法签名**里，必须 `pub`；
-/// **构造入口 `pub(crate)`**——**归 Task 4，本 task 时点上尚不存在**：届时那唯一的构造点是
-/// `ProviderRegistry::invoke_tool`（见 [`crate::ProviderRegistry`] 的文档），且必须写成
-/// `pub(crate)`，只有 `continuum-provider` 内的注册表构造它。**为什么不是 `pub`**：若它是
+/// **构造入口 `pub(crate)`**——**Task 4 起已落地**（Task 3 的时点上它还不存在，构造入口
+/// 与唯一调用方同批落地）：唯一的构造点是 `ProviderRegistry::invoke_tool`
+/// （见 [`crate::ProviderRegistry`] 的文档），写成 `pub(crate)`，只有 `continuum-provider`
+/// 内的注册表构造它。**为什么不是 `pub`**：若它是
 /// `pub`，任何持有一枚真 [`AuthorizedTool`] 的代码都能自行拼出请求、直接调裸适配器的
 /// [`ToolProvider::invoke`]——那就是「同一件事两个产生点」，而两条路**都编译得过**。
 /// （此处只作文字指引、不作 `[`…::invoke_tool`]` 形式的链接。）
@@ -39,6 +40,20 @@ pub struct AuthorizedToolInvocation<'a> {
 }
 
 impl<'a> AuthorizedToolInvocation<'a> {
+    /// 构造入口（Task 4 起落地）。**`pub(crate)`，且全仓唯一的构造点是
+    /// [`crate::ProviderRegistry::invoke_tool`]**——裁决 C2 把可见性定成这样，正是为了让
+    /// 「谁构造请求」只有一个产生点。crate 外的代码即使持一枚真的 [`AuthorizedTool`]
+    /// 也构造不出它（照片：Task 6 的编译失败样例，预期 `E0603`）。
+    ///
+    /// **它不做任何校验**：进来的 [`AuthorizedTool`] 本身就是「已获准」的证明，
+    /// 本类型只是把它与输入装在一起，故没有可失败的地方、也不返回 `Result`。
+    pub(crate) fn new(authorization: &'a AuthorizedTool, input: Value) -> Self {
+        Self {
+            authorization,
+            input,
+        }
+    }
+
     /// 这次调用获准了什么。**消费方是工具适配器**（[`ToolProvider`] 的实现）：它在 `invoke` 的
     /// 实现体内逐枚取 `Capability::scope()`，把这次动作限定在该作用域内。
     /// **F 只持有并下传整枚值，不读 `granted()`**（设计 §7.5；`AuthorizedTool::tool_id()` 由注册表取，用于路由）。
