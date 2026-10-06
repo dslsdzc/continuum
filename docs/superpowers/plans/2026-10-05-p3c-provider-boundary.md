@@ -582,7 +582,7 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 >   `call.authorization().tool_id()`）。
 >
 > 另两条性质的照片在 **Task 6**：样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate
-> 持一枚真的 `AuthorizedTool` 仍构造不出**，`E0603`）。
+> 持一枚真的 `AuthorizedTool` 仍构造不出**，`E0624`）。
 > 本 task 自己的判据是**编译**：Step 1 的消费者先改、Step 2 看它失败、Step 4 看全量绿。
 
 - [ ] **Step 1: 把消费者先改到新形状（写「用例」这一步在本 task 就是改夹具）**
@@ -620,7 +620,7 @@ timeout 900 cargo build --workspace --all-targets
 /// 1. **没有 [`AuthorizedTool`] 就构造不出它**，而 `pub(crate)` 让这条**更强**：**crate 外的代码
 ///    即使手里有一枚真的 `AuthorizedTool`，也构造不出这个请求**——它只能把证明交给注册表，
 ///    由注册表替它构造。「谁构造」是注册表一个产生点，与「谁持有证明」（F）是两件事。
-///    （照片：Task 6 的样例 4，预期 `E0603`。）
+///    （照片：Task 6 的样例 4，预期 `E0624`。）
 /// 2. **工具 id 只有一个来源**：授权证明的 `AuthorizedTool::tool_id()`。本类型**不另收 `ToolId`**，
 ///    故「出示的 id 与被授权的 id 不是一个」这一种可能**不存在**。（照片：Task 6 的样例 3。）
 ///
@@ -997,7 +997,7 @@ git commit -m "test(provider): 两个登记点不一致的两向照片"
    use continuum_provider::AuthorizedToolInvocation;
 
    fn build(auth: &AuthorizedTool) -> AuthorizedToolInvocation<'_> {
-       AuthorizedToolInvocation::new(auth, serde_json::json!({}))   // 预期 E0603：`new` 是私有的
+       AuthorizedToolInvocation::new(auth, serde_json::json!({}))   // 预期 E0624：`new` 是私有的
    }
    fn main() {}
    ```
@@ -1005,6 +1005,26 @@ git commit -m "test(provider): 两个登记点不一致的两向照片"
    **预期报错是 `E0603`（associated function `new` is private），不是 E0061 / E0308。**
    这一点是本样例的判据：**「少传一个参数」也能编译失败**，但那是另一回事——
    本样例要钉的是「**有**授权也构造不出」，故 `.stderr` 必须落在 `E0603` 上。
+
+   > **订正注记（2026-10-06，Task 6 实测 + 本计划扫同类）。** **原话照留**：上面那两句里的
+   > **`E0603`**，以及代码块里那行注释 `// 预期 E0603：`new` 是私有的`。
+   > **码错在哪**：`E0603` 是「**按路径**访问私有**条目**」（自由函数 / 模块成员）的码；
+   > 本样例走的是 `AuthorizedToolInvocation` 的**关联函数** `new`，rustc 实报的是
+   > **`E0624`：associated function `new` is private**。**两码之间只差「私有条目」与「私有关联函数」这一处。**
+   > **代码块里那行注释随之改为 `// 预期 E0624`**，`.stderr` 钉的也是 `E0624`。
+   > **那条判据的实质不变**：本样例钉的是「**私有**」（有授权也够不着构造入口），
+   > **不是**「元数不合（`E0061`）」或「类型不合（`E0308`）」——这一点原话成立，未动。
+   > **独立复核（本计划作者自己跑的 rustc 探针，`--edition 2024`）**：
+   > `mod m { fn f() {} } fn main() { m::f(); }` → **`E0603`**；
+   > `mod m { pub struct S; impl S { fn g() {} } } fn main() { m::S::g(); }` → **`E0624`**。
+   > **落地现状**：Task 6 的实现者已按实跑生成 `.stderr`（`E0624`），并把这段来历写进了样例文件的
+   > 模块文档；**计划此处是跟着改**。
+   >
+   > **判据（本项目通用，写进原地）**：**凡「预期报错码」这类断言，必须来自实跑**——
+   > `E0603` 与 `E0624` 只差「私有条目」与「私有关联函数」这一处，**凭印象写必错**。
+   > 而 **`.stderr` 不会替你报错**：它是 rustc 的逐字输出，写错了它照样让用例绿——
+   > 因为「因为别的原因编译失败」也会满足它。故**生成之后必须逐份读回**（见 Step 2），
+   > 而不是只看 trybuild 通过。
 5. `authorized_tool_invocation_fields_are_private.rs`：结构体字面量构造（字段名写对时）被拒 ——
    字段私有，绕开构造入口这条路不存在（与 P3A 的 `authorized_tool_cannot_be_built.rs` 同形）。
 
@@ -1204,7 +1224,7 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 模型侧登记后按 id 发现 | Task 1 `a_registered_model_is_found_by_id` |
 | 模型侧：登记 id 与 `list_models` 不一致（§3.3 代价一） | Task 1 `a_registered_id_may_be_absent_from_the_adapters_own_list_models` |
 | 工具侧：公开面清单里没有返回裸适配器的入口 | 公开面清单（**评审读**）+ Task 6 样例 1、2 |
-| 工具侧：授权证明进不到该进的地方 | Task 6 样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate 持真 `AuthorizedTool` 仍构造不出**，`E0603`）、样例 5（字段私有） |
+| 工具侧：授权证明进不到该进的地方 | Task 6 样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate 持真 `AuthorizedTool` 仍构造不出**，`E0624`）、样例 5（字段私有） |
 | 工具侧：门禁内的正常路径 | Task 4 `a_registered_tool_is_invoked_and_its_result_returned`；**新请求类型的两条性质也由它与其兄弟用例观测**（Task 4 的 `the_adapter_is_handed_the_authorization_that_was_passed_in`） |
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | Task 7 两条（**钉夹具，不钉真实适配器**） |
 | 两个登记点不一致，向一 | Task 5 `…passes_authorize_then_fails_to_route` |
@@ -1330,7 +1350,7 @@ list_tools 的并集语义    设计只说「并集」，未写同一 ToolId 由
 FakeTool 三态化          设计 §11 写「用 FakeTool」，而一个单元结构体产不出两条失败通道。
                        本计划把它改成带失败通道的三态夹具（Task 7）。**是对夹具形状的读数，不是判据。**
 AuthorizedToolInvocation  裁决 C2 已定：**构造入口 pub(crate)**，crate 外即使持一枚真
-  的构造入口            AuthorizedTool 也构造不出（照片：Task 6 样例 4，E0603）。故它**不是**未决，
+  的构造入口            AuthorizedTool 也构造不出（照片：Task 6 样例 4，**`E0624`**——**原写 `E0603`，2026-10-06 按实跑订正**）。故它**不是**未决，
                        也不再有「两条路都编译得过」的残留——设计 §7.5 说的「构造点一处」由此成立。
                        仍成立的残留只有一条（设计 §7.1）：**适配器照着 id 做**这件事类型层管不住。
 模块面守卫的第四种逃逸    **已由裁决 C7 关掉**：守卫在匹配前折叠空白（空格 / tab / 换行折成一个空格），
