@@ -27,9 +27,22 @@
 //! **Task 11 给 [`RoutableModel`] 这一侧接上了消费者，而下面那三个新类型仍然不派生**
 //! ——`rank` 的用例走的是访问器，不是整值比对。**要加的那一天，连同一个真用得上的用例一起加。**
 //!
-//! **唯一的例外是 [`FamilyRelation`]**：用例要断言「是哪一枚」（`assert_eq!` 要
-//! `Debug` ＋ `PartialEq`），且 `family()` 按值返回它（`Copy`）——四项派生各有一个当天用得上的
-//! 消费方，故它带派生。这是本模块**唯一**带派生的类型，不是一次口味上的放宽。
+//! **唯一的例外是 [`FamilyRelation`]**：`#[derive(...)]` 那张清单写了**五项**，
+//! 逐项按「有没有当天用得上的消费方」判，**留四项、去掉一项**：
+//!
+//! | 派生 | 当天消费方 |
+//! |---|---|
+//! | `Debug` | `tests/router.rs` 的 `assert_eq!`——断言「是哪一枚」时要打印两边的值 |
+//! | `PartialEq` | 同上，它就是 `assert_eq!` 的比较本身 |
+//! | `Copy` | [`RoutingReason::family`] **按值**返回它（与 [`crate::lifecycle::RoutableState`] 的 `state()` 同形；不 `Copy` 则那一行是 E0507） |
+//! | `Clone` | **没有直接消费方**；留着的真因是它是 `Copy` 的编译期前提（`Copy: Clone`），不是「将来可能有人用」 |
+//! | `Eq` | **没有**——`assert_eq!` 只要 `Debug` ＋ `PartialEq`，故**不派生**（判据与 [`BudgetView`] / [`RoutableModel`] 同：没有消费方就不加） |
+//!
+//! 这是本模块（`router.rs`）**唯一**带派生的类型，不是一次口味上的放宽。
+//! **这句是声明性的，没有编译期照片**：Rust 没有反射，「本模块只有这一个类型带派生」拍不成
+//! 用例。能拍的是它的逐类型对偶——请求面那三个类型各自不带派生，由它们各自的用例钉住
+//! （走访问器而不是整值比对）；可机械复核的是
+//! `grep -n '^#\[derive' crates/continuum-model-registry/src/router.rs` 在本次改动后**只有一行**。
 //!
 //! # Task 11 的落点（设计 §5.2、§5.3、§5.4）
 //!
@@ -219,12 +232,14 @@ pub struct RoutingRequest {
 /// （§19「优先同一 model family」）。**顺序的判据写在一个显式的 rank 函数里**，
 /// 不靠变体的声明序——声明序是一种「没说出口的规格」。
 ///
-/// # 派生集
+/// # 派生集（逐项判据见模块头的那张表）
 ///
-/// `Debug` / `PartialEq` 供用例断言「是哪一枚」（`assert_eq!` 两者都要）；`Eq` 由
-/// 「两个变体之外没有第三个取值」成立；`Clone` 由 `Copy` 要求；`Copy` 供
-/// [`RoutingReason::family`] 按值返回（与 [`crate::lifecycle::RoutableState`] 的 `state()` 同形）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// 五项里**留四项**：`Debug` / `PartialEq` 供用例断言「是哪一枚」（`assert_eq!` 两者都要）；
+/// `Copy` 供 [`RoutingReason::family`] 按值返回；`Clone` **没有直接消费方**，留着的真因是
+/// 它是 `Copy` 的编译期前提（`Copy: Clone`）；`Eq` **没有消费方，故不派生**——`assert_eq!`
+/// 只要 `Debug` ＋ `PartialEq`。「两个变体之外没有第三个取值」只是**能派生 `Eq` 的前提**，
+/// 不是**有消费方**的证据，两者别混。
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FamilyRelation {
     /// 候选与请求偏好同族（§19 的 `Auto` 下全部视为这一档，那一条落在 Task 12）。
     SameFamily,

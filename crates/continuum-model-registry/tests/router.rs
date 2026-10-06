@@ -447,7 +447,11 @@ impl RankingPolicy for StubPolicy {
 /// 三个候选的 `compatibility` 递减，故表头就是最高的那个；`confidence` 的取值**不参与**
 /// 这个次序（它只在 `compatibility` 并列时起作用）。
 ///
-/// 红的条件：`rank` 不排序即红（表头会随输入顺序漂移）。
+/// 红的条件：`selected()` 不返回表头（例如取表尾），或候选的兼容度读错字段、使期望次序不成立。
+///
+/// **本处不承担「输入顺序无关」这条照片**：夹具按期望次序喂入，故删掉 `rank` 的 `sort_by`
+/// 本用例照样绿。那条照片归 `shuffling_the_input_does_not_change_the_output`（三种输入顺序）
+/// 与 `tied_candidates_are_ordered_by_model_id`（按与 id 升序相反的顺序喂入）。
 #[test]
 fn the_result_is_ordered_and_selected_is_its_head() {
     let (_dir, db) = db();
@@ -815,6 +819,82 @@ fn confidence_breaks_a_compatibility_tie() {
     tx.commit().unwrap();
 }
 
+/// **`compatibility` 与 `confidence` 都并列时，`family` 决定次序**——`compare` 的第三档
+/// （设计 §5.3：§19 的「优先同一 model family」）。
+///
+/// **这条用例是补上来的，不在计划 Step 2 的清单里**（来历记在此处，免得被当成漏项或越权）：
+/// 计划把这一档的照片派给了 Task 12（`:1247` 的 `same_family_candidates_rank_before_cross_family_ones`），
+/// **该派单已撤回**——这一档长在本 task 的代码里（`compare` 的缺省实现，`src/router.rs:458`），
+/// 它的两个操作数都是本 task 的候选，输入也在本 task 的夹具射程内。实跑变异「删掉第三档」
+/// （M7）时本 task 原有用例**全绿**：那些用例里并列的候选 `family` 全是 `SameFamily`，
+/// 这一档从未决定过任何次序。故在此补一条照片，不再推给 Task 12。
+///
+/// 夹具的形态是承重的：两条候选的 `compatibility`（0.5）与 `confidence`（画像列的 0.5）
+/// **全同**，前两档都判不了；按 `ModelId` **升序**喂入（`model-alpha` 在前），而期望的表头是
+/// **同族的 `model-bravo`**——它是 id 更大的那个。故删掉第三档（落到兜底档的 id 升序）即红。
+///
+/// **两侧对钉**：把 `model-bravo` 也改成 `CrossFamily`（两族关系相同）→ 第三档同样判不了，
+/// 次序回到兜底档的 id 升序，表头是 `model-alpha`。缺了这一侧，一个「第三档恒返回
+/// `Greater`」的实现会在上面那条断言上**恰好绿**（输入本就是 id 升序），故这一侧是承重的。
+///
+/// 红的条件：删掉第三档、或把它写反（`CrossFamily` 在前），本条即红。
+#[test]
+fn family_breaks_a_compatibility_and_confidence_tie() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+
+    // 一、两族关系不同：同族的 `model-bravo` 在前，尽管它是 id 更大的那个。
+    let split = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::CrossFamily),
+        ("model-bravo", 0.5, FamilyRelation::SameFamily),
+    ]);
+    let ranked = rank(&request, &models, &split).expect("两个候选都应过");
+    let ordered: Vec<&str> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+    assert_eq!(
+        ordered,
+        vec!["model-bravo", "model-alpha"],
+        "前两档全同时按 family 排：同族的在前，尽管它是 id 更大的那个"
+    );
+
+    // 二、把 `model-bravo` 也改成跨族：两族关系相同，第三档判不了，次序回到兜底档的 id 升序。
+    let both_cross = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::CrossFamily),
+        ("model-bravo", 0.5, FamilyRelation::CrossFamily),
+    ]);
+    let ranked = rank(&request, &models, &both_cross).expect("两个候选都应过");
+    let ordered: Vec<&str> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+    assert_eq!(
+        ordered,
+        vec!["model-alpha", "model-bravo"],
+        "两族关系相同时第三档不决定次序，落到兜底档的 ModelId 升序"
+    );
+
+    tx.commit().unwrap();
+}
+
 /// 同一个 `ModelId` 的两个候选 → `Err(RoutingError::DuplicateModelCandidate { id })`，
 /// **断言是哪一枚、id 是哪一个**。
 ///
@@ -851,13 +931,16 @@ fn the_same_model_twice_is_rejected_with_the_id() {
     tx.commit().unwrap();
 }
 
-/// **一个候选都没有 → `Err(NoEligibleCandidate)`，三条例各一条**（设计 §5.3、§5.4）。
+/// **一个候选都没有 → `Err(NoEligibleCandidate)`**（设计 §5.3、§5.4）。
 ///
-/// 三条路径都汇到同一枚 `Err`：
-/// 1. **空输入**（一个模型都没登记）；
-/// 2. **全部被闸门挡下**——`RoutableModel::try_new` 对 `stale` 失败，故候选集为空
-///    （被挡下的模型进不了 `&[RoutableModel]`，闸门在类型上就把它拦住了）；
-/// 3. **唯一候选不可用**——被可用性过滤清空。
+/// 两份**互不相同**的 `rank` 输入汇到同一枚 `Err`：
+/// 1. **空输入**（一个模型都没登记）：`(&empty, &[])`；
+/// 2. **唯一候选不可用**——过闸门了，但被可用性过滤清空。
+///
+/// 中间夹着一条**闸门侧**的配对断言（`RoutableModel::try_new` 对 `stale` 失败）：它证明
+/// 「被挡下的模型进不了 `&[RoutableModel]`」，故「全部被闸门挡下」这一路径**没有自己的
+/// `rank` 输入**——候选切片只能是空的，它落到 `rank` 上的就是第 1 条那次调用（**逐字节相同**）。
+/// 本用例不把它算作第三份输入。
 ///
 /// `NoEligibleCandidate` **不合并进 `NotRoutable`**：前者是「没有可用的」，后者是
 /// 「有一枚被点名挡下了」，调用方（§110 的流程）对两者的处置不同。
@@ -879,7 +962,8 @@ fn no_eligible_candidate_is_its_own_error() {
         "一个候选都没有时返回 NoEligibleCandidate，不是空列表"
     );
 
-    // 二、全部被闸门挡下：`stale` 构造不出 `RoutableModel`，故它在候选集里无处安放。
+    // 二、闸门侧：`stale` 构造不出 `RoutableModel`，故「全部被闸门挡下」时候选集**只能是空的**
+    //     ——它落回上面那次 `rank(&empty, &[])`，不构成另一份 `rank` 输入。
     assert_eq!(
         RoutableModel::try_new(profile_of(&tx, "model-alpha"), LifecycleState::Stale).err(),
         Some(RoutingError::NotRoutable {
@@ -890,7 +974,7 @@ fn no_eligible_candidate_is_its_own_error() {
     assert_eq!(
         rank(&empty, &[], &policy).err(),
         Some(RoutingError::NoEligibleCandidate),
-        "被闸门挡下之后候选集为空，与「一个模型都没登记」汇到同一枚 Err"
+        "候选切片为空（挡下的模型进不来），与「一个模型都没登记」是同一份输入、同一枚 Err"
     );
 
     // 三、唯一候选不可用：过闸门了，但被可用性过滤清空。
