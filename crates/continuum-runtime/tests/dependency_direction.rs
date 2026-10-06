@@ -174,9 +174,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `src/tool_call.rs` / `src/tool_cmd.rs` 用 `continuum_provider` 的 `ToolCallError` /
     // `ProviderRegistry`，两份 tests 也各引一处。**`events` 仍无引用**（`grep -rln
     // continuum_events crates/continuum-runtime/` 无命中），故那句话的射程收成「events
-    // 至今无引用」。**原句是过宽的说法**，订正的来历记此，免得下一轮扫查照着它得出错的结论
-    // （设计 §10.1 点名要求本处随实现同步订正）。表的取值不变——本表本就不按使用点派生，
-    // 变的只是这段注释的真假。
+    // 至今无引用」。**原句是过宽的说法，自本 task 起不再成立**（它出现在一份正要引入那个
+    // 引用的计划里——「至今无任何引用」这种状态陈述自带到期日，本 task 就是兑现它的那一天）。
+    // 订正的来历记此，免得下一轮扫查照着它得出错的结论（设计 §10.1 点名要求本处随实现同步订正）。
+    // 表的取值不变——本表本就不按使用点派生，变的只是这段注释的真假。
+    //
+    // **本 task 未新增/删减任何 workspace 成员之间的边**（实测：`crates/continuum-runtime/Cargo.toml`
+    // 的 `[dependencies]` 一字未动；新增的 `async-trait` 是**外部** crate 的 **dev 边**，不进本表
+    // ——本表断言的是工作区成员之间的边）。故上面 `("continuum-runtime", &[…])` 那一行**不动**，
+    // 本文件两个方向（已声明而越界、本表列了却没用到）的断言全绿。
     // 反向的边（真依赖却没登记）由本文件的断言抓住，不会静默。
     (
         "continuum-runtime",
