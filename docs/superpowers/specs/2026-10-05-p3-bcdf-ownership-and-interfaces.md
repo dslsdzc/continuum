@@ -53,12 +53,32 @@ list_models / describe_model / invoke / stream / cancel / usage / health
 list_tools / describe_tool / invoke / cancel
 ```
 
-类型在 `crates/continuum-core/src/tool.rs`：`ToolId`、`ToolDescriptor`、`ToolInvocation`、`ToolResult`。
+类型在 `crates/continuum-core/src/tool.rs`：`ToolId`、`ToolDescriptor`、`ToolResult`。
+**`invoke` 的请求类型不在那里**——它是 `continuum-provider` 的 `AuthorizedToolInvocation`（见下方订正）。
 
 **订正（2026-10-05，裁决 §五）**：`ToolInvocation` **删除**——`invoke` 的请求侧被 C 设计 §7.5 的新请求类型
 （`AuthorizedToolInvocation`）取代，旧类型不再有生产调用方，留着就是**同一个概念两个类型**。
-删在 §7.5 那次改动里同批做，**连测试夹具 `crates/continuum-provider/tests/fake_provider.rs` 一起**。
+删在 §7.5 那次改动里同批做，**连测试夹具一起**。
 `ToolId` / `ToolDescriptor` / `ToolResult` 三个**不动**。
+（上面那句「连测试夹具 `crates/continuum-provider/tests/fake_provider.rs` 一起」是 2026-10-05 的原话，
+**该路径到落地时已经不对了**：Task 1 / Task 2 把 `FakeModel`、`FakeTool` 搬进了
+`tests/common/mod.rs`，Task 2 又新造了 `tests/registry_tools.rs`（内含两个 `impl ToolProvider`）。
+**要改的是三处**：`tests/common/mod.rs` 与 `tests/registry_tools.rs` 的两个 `impl`。原话照留为来历。）
+
+**落地（2026-10-06，P3 子项目 C 的 Task 3，commit `a0a8a07`）**：
+上述删除与请求面换血已完成。`AuthorizedToolInvocation<'a>` 落在 `crates/continuum-provider/src/tool.rs`
+（类型 `pub`、构造入口 `pub(crate)`、字段私有——C 设计 §7.5 的「可见性三件套」）。
+
+**订正（2026-10-07，P3 子项目 C 的 Task 9 查出；原话照留）**：本段原写「`grep -rnw ToolInvocation crates/` 已**零命中**」——
+**那句在写下的当天为真，此后必然变假**，并且**是本仓自己的规矩让它变假的**：Task 4/Task 6 按「**把错误说法与来历留在原地**」
+在注释里写下了这个名字（「旧形状 `ToolInvocation` 已删」之类），**而注释里的名字照样被 `grep` 命中**。
+**故判据要写对**：**`crates/` 里不再有「非注释」的 `ToolInvocation` 引用**——
+裸 `grep -rnw` **不是**判据（它必然命中那些来历注释，且**随注释增减而漂**）；
+判据是**逐处读命中的那几行、确认它们都在注释里**（与「grep 只用来定位、结论以通读为准」同一条）。
+**来历**：同一句错误断言还被抄进了 F 的计划（`docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md:52`，
+期望该命令「无输出，exit 1」），**已另行告知 F**。
+**判据留档**：**「某名字零命中」是对一个**开放**语料（全仓文本）的断言，而本仓**要求**把删掉的名字留在注释里**——
+**故凡「零命中」类判据，先问「本仓的哪条规矩会往那个语料里加字」**。
 
 **注意一处既有事实**：`ToolId` **同时**是 §252 的 `Tool.id`——P3 子项目 A 判为同一个类型并**复用它**
 （`crates/continuum-capability/src/lib.rs:40` 有说明）。**再不要造第二个 `ToolId`。**

@@ -1,0 +1,10 @@
+error[E0624]: associated function `new` is private
+  --> tests/compile_fail/a_foreign_crate_cannot_build_authorized_tool_invocation.rs:22:31
+   |
+22 |     AuthorizedToolInvocation::new(auth, serde_json::json!({}))
+   |                               ^^^ private associated function
+   |
+  ::: src/tool.rs
+   |
+   |     pub(crate) fn new(authorization: &'a AuthorizedTool, input: Value) -> Self {
+   |     -------------------------------------------------------------------------- private associated function defined here

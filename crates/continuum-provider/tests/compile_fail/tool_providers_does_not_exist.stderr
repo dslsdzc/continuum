@@ -1,0 +1,5 @@
+error[E0599]: no method named `tool_providers` found for struct `ProviderRegistry` in the current scope
+  --> tests/compile_fail/tool_providers_does_not_exist.rs:12:22
+   |
+12 |     let _ = registry.tool_providers();
+   |                      ^^^^^^^^^^^^^^ method not found in `ProviderRegistry`

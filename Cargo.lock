@@ -205,10 +205,15 @@ name = "continuum-provider"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "continuum-capability",
  "continuum-core",
+ "continuum-persist",
  "futures-core",
  "serde_json",
+ "tempfile",
+ "thiserror",
  "tokio",
+ "trybuild",
 ]
 
 [[package]]

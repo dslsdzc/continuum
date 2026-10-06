@@ -24,9 +24,15 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
 `docs/superpowers/specs/2026-10-05-p3-bcdf-set-decisions.md`（**第五节：删 `ToolInvocation`**）；
 写计划前的**八条接缝裁决**转录在 `docs/superpowers/p3bcdf-followups.md` **§七**（那一节是**权威转录**；
 原始接缝分析所在的 `.superpowers/sdd-p3bcdf/impl-seam-map.md` 是 gitignore 的 scratch，**随时会丢**，
-故本计划**不引它当约束来源**）。其中**对本计划承重的四条已逐条抄进下面正文**：
-§七 第 5 条（请求类型的构造点唯一归 C）、第 6 条（`effect_class`/`trust`/工具侧 `cost`·`latency` 落遗留）、
+故本计划**不引它当约束来源**）。其中**对本计划承重的五条已逐条抄进下面正文**：
+§七 第 1 条（`save_tool` 的登记期不变量归 F——写在 Global Constraints 与 `## 遗留`（二）里）、
+第 5 条（请求类型的构造点唯一归 C）、第 6 条（`effect_class`/`trust`/工具侧 `cost`·`latency` 落遗留）、
 第 7 条（多写者单文件各自登记自己那几条）、第 8 条（C 的 `FakeTool` 与 F 的库级夹具是两份副本，不合并）。
+
+> **订正注记（2026-10-07）。** **原话照留**：上面那半句「对本计划承重的**四条**」。
+> **应为五条**——本计划**确实引了 §七 第 1 条**（`Global Constraints` 的 `save_tool` 那条与
+> `## 遗留`（二）同款一条），而「四条」的清单里没有它。**来历**：那句写于第 1 条的引用落进
+> `Global Constraints` 之前，**「一处事实改了两处、清单只跟着改了一处」**。
 
 ## Global Constraints
 
@@ -45,6 +51,11 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
   **外部 crate（`thiserror` / `tempfile` / `trybuild` / `tokio` / `serde_json` / `futures-core` / `async-trait`）
   按需加进 `Cargo.toml`，不进这张表、也不构成这条约束意义上的「依赖边」**（设计 §10 末段）。
   **本计划里凡写「不新增依赖边」的地方，一律按「不新增内部 crate 的边」读**——外部 crate 是另一回事。
+- **清单要自足（2026-10-06 立）**：**凡新增依赖（内部或外部）的 task，Files 里必须带上 `Cargo.lock`；
+  凡改动公开夹具的构造形状的 task，Files 里必须列出它的全部构造点。**
+  **判据**：**漏项不靠读清单发现，靠编译器发现**——故这一类的检查是
+  **`grep` 构造点 / `grep` 依赖，再逐个列回清单**，不是把清单读一遍。
+  与其靠别处的兜底句，不如让清单自足。
 - **多写者单文件，各自登记自己那几条**（`p3bcdf-followups.md` §七 第 7 条）：
   `dependency_direction.rs` 的 `ALLOWED`、`main.rs` 的注册、workspace `members` 是**单一文件、多写者**，
   四份计划都要碰。故**不设集中登记 task**，**每份计划各自登记自己那几条**（照 P3A 的 Tasks 3/4/5 做法），
@@ -91,11 +102,52 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
    `ToolInvocation` 的删除）→ **全量套件**；其余分支 → **受影响 crate 的包级套件**，且报告里须**标明证据强度较低**
    并列出「这一条可能漏掉的跨 crate 观察点」。
 2. **凡注释写绝对措辞，必须有对应用例**；写不出的就改成名副其实的说法，或**明写它为什么没有照片**。
-   **枚举式绝对断言须逐项有照片**——本计划有三处「逐项」：`list_tools` 的**每个**已登记适配器各调用一次（Task 2）、
-   `invoke_tool` 的**每一条**失败通道各一条用例（Task 4）、编译失败样例的**每一份**各钉住预期报错（Task 6）。
+   **枚举式绝对断言须逐项有照片**——本计划**另有若干处逐项断言，例如**：`list_tools` 的**每个**
+   已登记适配器各调用一次（Task 2）、`invoke_tool` 的**每一条**失败通道各一条用例（Task 4）、
+   编译失败样例的**每一份**各钉住预期报错（Task 6）、归一化对**三种**空白输入各折一次（Task 8 的
+   `the_guard_folds_whitespace_before_matching`）。
    判据：用例里的值字面量是**手工写的**还是**被测函数返回的**——前者钉格式，后者钉路径。
-3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。本计划的失败面有三处，**一个都不能只写 `is_err()`**：
-   `RegistryError::NotFound` / `RegistryError::Duplicate` / `ToolCallError::Unregistered` / `ToolCallError::Provider`。
+   **本处刻意不给数目（2026-10-07）**：**原话写的是「本计划有三处『逐项』」**，而**「本计划里哪些地方
+   用了逐项断言」这个集合是开放的**（每加一个 task 就可能加一处，Task 8 那处就是后加的）。
+   **判据：能穷举的才数，不能穷举的别数**——对照：第 1 条的「变异的三条失效形态」、Task 7 的
+   「三种输入」、`invoke_tool` 的「三条结果」都是**闭合**的（形态集 / 输入集 / 类型的两支），可以数；
+   **「本计划里哪些地方用了逐项断言」不是闭合的**。
+   **本条的限制（2026-10-06，Task 5 独立评审给出）——**「有照片」还不够，那条照片还必须是守卫**：
+   **一条断言是守卫，当且仅当在它实际所处的位置上，存在一个「被测代码」的变异使它会红。**
+   **恒真型**（不存在这样的变异体）与**蕴含型**（变异体存在，但同体内在它之前的断言先红并蕴含它）
+   **同等处置：删**；**不许靠调序制造第二个落点**，除非两条断言钉的是互不相交的变异集。
+   **位置是判据的一部分**——同一条断言文本可以在一处是守卫、在另一处不是。完整叙述与两条实例
+   见 **Task 5 Step 1 的「统一判据」段**（那里有第一向/第二向与 Task 4 那条的对照）。
+   **合并来历（2026-10-07）**：这一块**原以「2 之补」单列在三条纪律之后**，使本节标题下的
+   块数变成四块（1 / 2 / 2 之补 / 3），而标题写的是「三条」。**它本来就不是第四条并列的纪律，
+   而是第 2 条的限制**（「有照片」是第 2 条的要求，「照片还必须是守卫」是对该要求的加严），
+   故**并入第 2 条**，并保留这段来历。
+3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。**下列四个变体各要有一条用例，
+   一个都不能只写 `is_err()`**：`RegistryError::NotFound` / `RegistryError::Duplicate` /
+   `ToolCallError::Unregistered` / `ToolCallError::Provider`。
+   **订正注记（2026-10-07）**：**原话是「本计划的失败面有三处，一个都不能只写 `is_err()`」**——
+   **数目 3 与紧跟列出的四个变体名不符，且「三处」指哪三处读不出来**。改法是**删掉那个读不出来的数目、
+   直接点名四个变体**：能穷举的是**变体集**（它闭合），不是「失败面有几处」。
+   **但「断言是哪一种」不等于「把互斥的另一臂也否一遍」**：`matches!(A)` 之后再加 `!matches!(B)`
+   （`A`/`B` 是同一个枚举的两个变体）是**蕴含型**，按第 2 条的限制**删**。
+
+**两种红，判据相反（2026-10-06 立；本轮最重要的一条区分）**：本计划的每个 task 都会说「红」，
+而**两件不同的事都叫「红」**，**判据相反**，故凡说「红」的地方都要说清是哪一种：
+
+- **红阶段（TDD）的红**：**编译失败是正当的**——判据是「**红的原因是该接口 / 该类型尚不存在**」
+  （Task 1 / Task 2 / Task 4 属于这类）；**若有中间态可造，则优选中间态**
+  （如 Task 7 的「结构在位、行为未接」——夹具先落结构、`invoke` 暂不读 `outcome`，
+  于是两条断言各自红，而不是一跑就绿）。
+- **变异的红**：**编译失败不算红**——判据是「**变异体编得过，且红在该用例自己的断言上**」
+  （与纪律 1(c) 同一条：`could not compile` / `error[E….` 都不是「变红」）。
+
+**混用这两种判据的两个方向都会出错**：**把编译失败当成变异红 ⇒ 假红**；
+**要求一个被测对象尚不存在的 task 给出断言红 ⇒ 无谓返工**。
+
+**这条二分怎么用（一条落地口径）**：差别在**「有没有中间态可造」，不在「哪个 task 更严」**。
+Task 7 有中间态（夹具的形状可以先落、行为后接），故它**不该**以编译失败为红——实现者按中间态做
+是对的；Task 1 / Task 2 / Task 4 **没有**中间态（整个 API 尚不存在，造不出「结构在位、行为未接」），
+**故它们以编译失败为红是正当的**。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），
 **命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志——
@@ -208,6 +260,15 @@ Cargo.lock                                               随依赖变化（见 G
 - Modify: `crates/continuum-provider/tests/fake_provider.rs`（改为 `mod common;`）
 - Create: `crates/continuum-provider/tests/registry_models.rs`
 
+> **订正注记（2026-10-06，本计划扫同类；原话照留）。** **这份清单漏了两项**：
+> **`crates/continuum-provider/Cargo.toml`（`[dependencies]` 加一行 `thiserror`）
+> 与 `Cargo.lock`（随之 +1 行）**。本 task 的代码块用 `#[derive(thiserror::Error)]`，
+> 而本 crate 当时没有这个依赖；Step 5 的 `git add crates/continuum-provider` 能兜住这份清单，
+> 但**清单本身漏了**，下一个人仍要从编译错误里反推。
+> **来历**：补 `Cargo.toml` 的指令原先只住在 Task 1 那段订正注记里，**Files 五行没跟着改**。
+> 按 Global Constraints 的「清单要自足」那条，**补进 Files**（依赖类漏项的判据是 `grep` 依赖，
+> 不是把清单读一遍）。
+
 **Interfaces:**
 - Consumes: 既有的 `continuum_core::model::ModelId`、**`continuum_core::tool::ToolId`**
   （`ToolCallError::Unregistered { id }` 要用它）、`continuum_provider::model::ModelProvider`、
@@ -287,11 +348,19 @@ Cargo.lock                                               随依赖变化（见 G
 timeout 300 cargo test -p continuum-provider --test registry_models
 ```
 
+**这一处是「红阶段（TDD）的红」，编译失败正当**——被测对象（`ProviderRegistry`）正是本 task 新建的，
+**没有中间态可造**，故红只能来自「该类型尚不存在」。**别把它与变异红混用**（变异红要求变异体编得过），
+见「两条纪律」之后的**「两种红，判据相反」**那段。
+
 预期：**`E0432`**（`unresolved imports`：`continuum_provider::ProviderRegistry` 不存在）
 ——**这个码取自实跑**（`.superpowers/sdd-p3c-impl/task-1-report.md` 第 2 节，日志 `.tmp/step2-red.log`）。
 **订正（2026-10-06）**：本节原写 `E0433`，是照「类型不存在」推测的；实跑的写法是
-`use continuum_provider::{ProviderRegistry, ..};`，那是 **`E0432`（unresolved imports）**，
-全限定路径才会给 `E0433`。**凡计划里写错误码的地方一律以实跑为准**（本计划其余处的码同此例）。
+`use continuum_provider::{ProviderRegistry, ..};`，那是 **`E0432`（unresolved imports）**。
+**「全限定路径才会给 `E0433`」那半句原样留在这里，但它是未实测的对照说法**（写它的时候没跑过）
+——**已改为不写码的说法**：**同一处「类型不存在」在不同的写法下会给不同的码，故以实跑读回的
+`.stderr` 为准**。**凡计划里写错误码的地方一律以实跑为准**（本计划其余处的码同此例）。
+**判据留档**：**「未见实跑记录」的报错码，比写错的码只差一步**——两者都是**凭印象写下的、
+看起来像事实的东西**；处置统一：**要么实跑、要么不写码**。
 
 - [ ] **Step 4: 实现**
 
@@ -412,8 +481,34 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
 
 - `a_registered_tool_is_described_by_id`：登记 `echo → FakeTool`，`describe_tool("echo")` 给出的
   `ToolDescriptor.id` 与 `list_tools()` 里那条一致。
-- `an_unregistered_tool_id_is_reported_as_unregistered`：`describe_tool("nope")` →
-  `matches!(_, Err(ToolCallError::Unregistered { .. }))`——**不是** `ToolCallError::Provider`（纪律 3）。
+- `an_unregistered_tool_id_is_reported_as_unregistered`：**夹具布置写死——沿用上一条已登记的
+  `echo → FakeTool`，只把查询的 id 换成 `nope`**（**注册表非空**，这一点是判据的一部分，
+  理由见下方的订正注记）→ `matches!(_, Err(ToolCallError::Unregistered { .. }))`——
+  **不是** `ToolCallError::Provider`（纪律 3）。**本用例的承重断言是「未命中返的是哪一种 `Err`」**
+  （`Unregistered` 与 `Provider` 分别描述「路由 / 配置缺陷」与「provider 调用失败」，设计 §5.2）。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「**不是** `ToolCallError::Provider`（纪律 3）」——**「蕴含型」，删**：同上，枚举互斥，
+  > 前一条 `matches!(…Unregistered { .. })` 成立即蕴含它、不可能独立变红。
+  > **落地现状：代码里仍在**（`tests/registry_tools.rs` 该用例里那一条
+  > `!matches!(err, ToolCallError::Provider(_))`；**按用例名 + 断言内容找**），**协调者已另派删除**。
+  > **这一处是本条注记自己犯的**：上一轮我为了把「未命中返哪一种 `Err`」这条承重说清，
+  > **顺手把互斥的另一臂也否了一遍**——正是我刚在 Task 5 那段里判为「蕴含型、要删」的形状。
+  > **来历照留在此**，因为它比一句干净的话有用：**「把承重说清」与「多否一臂」是两件事，
+  > 前者靠一条能独立变红的断言，后者只会让报告里多一条永远绿的记录。**
+  > **删后承重不变**：本用例余下的是 `Unregistered` 那一条，「报成 `Provider`」的变异**仍使它会红**
+  > ——承重本来就是它。
+
+  > **订正注记（2026-10-06，协调者裁定）**：本节原只写「`describe_tool("nope")` → …」，
+  > **没写注册表里当时有什么**。若实现者按字面「什么都不登记」，注册表为空，
+  > 于是「先扫各适配器的 `list_tools()` 再判未命中」这个变异体**在这里退化**（两版都扫零个适配器、
+  > 都给 `Unregistered`），**永远绿**——与 Task 4 那条同一条成因。
+  > **故把布置写死**：先登记 `echo → FakeTool`，再查 `nope`。
+  > **落地核对**：Task 2 **早已实现并过审**，其 `crates/continuum-provider/tests/registry_tools.rs` 里
+  > 该用例**正是这么布置的**（先 `register_tool(vec![tool("echo")], Arc::new(FakeTool))`，再
+  > `describe_tool(&tool("nope"))`），与本注记一致——**故这是把计划的布置补齐，不是要改测试字节**。
+  > **判据同前一条**：凡「某条用例不构造 X」的指令，先问「不构造它之后，我要钉的那个变异体
+  > 还区分得出来吗」。
 - `list_tools_is_the_union_of_every_registered_adapter`：登记两个各出一个工具的适配器 →
   `list_tools()` 长度 2，**顺序 = 登记顺序**，且**逐个**断言各自的 `id`（枚举式断言逐项有照片）。
 - `list_tools_keeps_the_first_entry_when_two_adapters_declare_the_same_id`：两个适配器都声明 `echo`
@@ -421,17 +516,39 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
 - `list_tools_reports_an_adapter_failure_as_provider`：把 `FakeTool` 换成一个 `list_tools` 返
   `Err(ProviderError::Transport(..))` 的适配器 → `matches!(_, Err(ToolCallError::Provider(_)))`，
   且**不是** `Unregistered`。**同一个适配器的失败不许被跳过**（跳过会让一个坏适配器静默消失）。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「且**不是** `Unregistered`」——**「蕴含型」，删**：`Provider` 与 `Unregistered` 枚举互斥，
+  > 前一条成立即蕴含它，它不可能独立变红。**落地现状：代码里仍在**
+  > （`tests/registry_tools.rs` 该用例里那一条 `!matches!(err, ToolCallError::Unregistered { .. })`；
+  > **按用例名 + 断言内容找**），**协调者已另派删除**。
+  > **删后承重不变**：余下的 `Provider(_)` 那条仍钉「适配器失败不许被跳过」这件事
+  > ——「跳过失败适配器、返回 `Ok(空)`」的变异会使它红。
 - `describe_tool_routes_by_registration_not_by_the_adapters_list_tools`：**设计 §3.1「只读入口的
   权威是已登记的适配器，不是登记表本身」的照片**——把 `FakeTool` 登记到它 `list_tools()` **不含**的 id
   （`"m"`）：`describe_tool("m")` **路由到适配器**，于是得到适配器自己的
   `Err(ProviderError::Unavailable("m"))`，包在 `ToolCallError::Provider` 里。
   **这条用例证明路由不查 `list_tools()`**——反序实现（先查 `list_tools` 再路由）在它上面会红。
 
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** 本用例在实现里另写了一条
+  > `assert!(!matches!(routed, ToolCallError::Unregistered { .. }), "命中了登记的适配器，就不该报
+  > Unregistered——报了就说明路由查的是 list_tools()")`（`tests/registry_tools.rs`；
+  > **按用例名 + 断言内容找**）。**它是「蕴含型」，删**：紧挨在它前面的那条断的是
+  > `matches!(routed, ToolCallError::Provider(ProviderError::Unavailable(_)))`，而两个变体**枚举互斥**
+  > ——前一条成立即蕴含它。而它那句注释里点出的判别力（「反序实现会给 `Unregistered`」）
+  > **本来就落在前一条上**：反序变异下前一条先红。故它**不可能独立变红**，**协调者已另派删除**。
+  > **删后承重不变**：本用例余下的正是 `Provider(Unavailable(_))` 那条——它就是「路由不查
+  > `list_tools()`」这条性质的守卫。
+
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
 timeout 300 cargo test -p continuum-provider --test registry_tools
 ```
+
+**这一处是「红阶段（TDD）的红」，编译失败正当**——被测的 `register_tool` / `list_tools` / `describe_tool`
+正是本 task 新建的，**没有中间态可造**，故红只能来自「该接口尚不存在」。**别把它与变异红混用**
+（变异红要求变异体编得过、且红在该用例自己的断言上），见「两条纪律」之后的**「两种红，判据相反」**那段。
 
 - [ ] **Step 3: 实现**
 
@@ -491,6 +608,8 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 - Modify: `crates/continuum-provider/Cargo.toml`（**normal 只加 `continuum-capability`**）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（**`ALLOWED` 的 provider 条目**，
   本 task 的终值 `["continuum-capability", "continuum-core"]`；`continuum-persist` 由 Task 4 增量加）
+- Modify: `Cargo.lock`（新增内部依赖 `continuum-capability` 随之变化；**Global Constraints 只说「按本行办」，
+  按「清单要自足」那条在此列出**）
 - Modify: `crates/continuum-provider/tests/common/mod.rs`（`FakeTool::invoke` 换参）
 
 **Interfaces:**
@@ -530,7 +649,7 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 >   `call.authorization().tool_id()`）。
 >
 > 另两条性质的照片在 **Task 6**：样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate
-> 持一枚真的 `AuthorizedTool` 仍构造不出**，`E0603`）。
+> 持一枚真的 `AuthorizedTool` 仍构造不出**，`E0624`）。
 > 本 task 自己的判据是**编译**：Step 1 的消费者先改、Step 2 看它失败、Step 4 看全量绿。
 
 - [ ] **Step 1: 把消费者先改到新形状（写「用例」这一步在本 task 就是改夹具）**
@@ -568,7 +687,7 @@ timeout 900 cargo build --workspace --all-targets
 /// 1. **没有 [`AuthorizedTool`] 就构造不出它**，而 `pub(crate)` 让这条**更强**：**crate 外的代码
 ///    即使手里有一枚真的 `AuthorizedTool`，也构造不出这个请求**——它只能把证明交给注册表，
 ///    由注册表替它构造。「谁构造」是注册表一个产生点，与「谁持有证明」（F）是两件事。
-///    （照片：Task 6 的样例 4，预期 `E0603`。）
+///    （照片：Task 6 的样例 4，预期 `E0624`。）
 /// 2. **工具 id 只有一个来源**：授权证明的 `AuthorizedTool::tool_id()`。本类型**不另收 `ToolId`**，
 ///    故「出示的 id 与被授权的 id 不是一个」这一种可能**不存在**。（照片：Task 6 的样例 3。）
 ///
@@ -638,8 +757,16 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
 **Files:**
 - Modify: `crates/continuum-provider/src/registry.rs`、`src/lib.rs`
 - Modify: `crates/continuum-provider/Cargo.toml`（**dev** + `continuum-persist`、`tempfile`）
+- Modify: `crates/continuum-provider/tests/common/mod.rs`（**加一个「把收到的授权回吐出来」的记录型夹具**，
+  供 `the_adapter_is_handed_the_authorization_that_was_passed_in` 用）
+- Modify: `Cargo.lock`（dev 依赖变化，按「清单要自足」列出）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（provider 条目加 `continuum-persist`，补成三元素）
 - Create: `crates/continuum-provider/tests/invoke_tool.rs`
+
+> **订正注记（2026-10-06，本计划扫同类；原话照留）。** **这份清单漏了 `tests/common/mod.rs`**：
+> 本节正文 Step 1 明写「这条要一个『把收到的授权回吐出来』的适配器（**`common` 里加一个记录型 fixture**）」，
+> 而 Files 四项里没有它。**与 Task 7 的 `FakeTool` 三态化同形**（动公开夹具的形状，清单必须跟着列），
+> 故按 Global Constraints 的「清单要自足」那条补进 Files。
 
 **Interfaces:**
 - Consumes: Task 1 的 `ProviderRegistry`、Task 3 的 `AuthorizedToolInvocation`、
@@ -674,8 +801,42 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
   `matches!(_, Err(ToolCallError::Unregistered { .. }))`，**且不是 `Provider(..)`**。
   **这条只钉路由本身**（本文件的 `db()` 照用，但**不调 `register_tool`**）；「`tool` 表有行、注册表无适配器」那一向
   是**另一个命题**，它在 Task 5，**不在这里重复**。
+
+  > **订正注记（2026-10-06，Task 4 实现者实测 + 协调者裁定采纳偏离）。**
+  > **原文照留**：上面那半句「本文件的 `db()` 照用，但**不调 `register_tool`**」。
+  > **它错在哪**：照它办，**这条守卫就失去了主语**——注册表里一个适配器都没有时，
+  > 「先逐个问遍所有适配器、再判未命中」与「直接查表判未命中」这两版**问的是零个适配器**，
+  > 于是那个本该被抓的**变异体退化成了等价变异体**（纪律 1(b)：举不出「这两版在哪个入参上会给出不同结果」），
+  > **永远绿**——而派单要求它在变异下必须红。
+  > **实现改成**：该用例**登记一个服务于另一个 id 的 `RecordingTool`**（它记录自己有没有被调用），
+  > 断言 `invoke_tool` 仍返回 `Unregistered` **且 `recorder.touches() == 0`**。
+  > 「被测 id 无适配器」这一条**没有被削弱**；被钉住的命题仍是**路由**那一件事，
+  > 对 `tool` 表**仍是零主张**（本用例要避开的「`tool` 表有行、注册表无适配器」那一向仍在 Task 5，不在此重复）。
+  >
+  > **判据（本项目通用，不限于本条）**：**凡「某条用例不构造 X」这类指令，先问一句
+  > 「**不构造它之后，我要钉的那个变异体还区分得出来吗**」**——把 X 拿掉如果让变异体**退化**
+  > （两版在所有入参上给出同一结果），**那条守卫就等于没写**，而它在报告里仍会显示为绿。
+  > 「为了让用例隔离，就不构造某样东西」是这类指令的常见形态，代价往往就落在变异体上。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「`matches!(…Unregistered { .. })`，**且不是 `Provider(..)`**」。
+  > **它是「蕴含型」，从计划里删掉**：`ToolCallError` 的 `Unregistered` 与 `Provider`
+  > **枚举互斥**，故前一条成立**即蕴含**它——它**不可能独立变红**，本该出声的输入
+  > （报成 `Provider`）已被前一条抢先红掉，而前一条的消息里已带 `{err:?}`。
+  > **落地现状**：Task 4 的实现者在派单下**已自行删掉**这一条（`tests/invoke_tool.rs` 里留了注记）。
+  > **计划必须跟着改**，否则后来者照计划又写回去。
+  > **删后承重不变**：本用例余下的是 `Unregistered` 那条断言与 `recorder.touches() == 0`
+  > ——「未命中臂改成别的结果」的变异**仍使前一条红**。
 - `the_adapter_failure_is_reported_as_provider`：适配器 `invoke` 返 `Err(ProviderError::Transport(..))` →
   `matches!(_, Err(ToolCallError::Provider(_)))`，**且不是 `Unregistered`**。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「**且不是 `Unregistered`**」——**它是「蕴含型」，删**：两个变体枚举互斥，前一条成立即蕴含它，
+  > 它不可能独立变红。**落地现状：代码里仍在**（`tests/invoke_tool.rs` 的该用例里那一条
+  > `!matches!(err, ToolCallError::Unregistered { .. })`；**按用例名 + 断言内容找，行号会漂**），
+  > **协调者已另派删除**。**删后承重不变**：余下的 `Provider(Transport(..))` 那条仍钉着
+  > 「适配器的失败原样经 `Provider` 透出」，`recorder.seen_tool_id() == Some(..)` 那条另钉
+  > 「这一条走的确实是适配器那条路」。
 - `the_adapter_is_handed_the_authorization_that_was_passed_in`：适配器侧读
   `call.authorization().tool_id()`，与 `auth.tool_id()` 相同——**证明路由用的 id 与被下传的授权是同一枚**，
   亦即「工具 id 只有一个来源」这条性质在**调用面**上的照片（设计 §7.5；Task 3 拍不到它，理由见 Task 3）。
@@ -687,6 +848,10 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
 ```bash
 timeout 300 cargo test -p continuum-provider --test invoke_tool
 ```
+
+**这一处是「红阶段（TDD）的红」，编译失败正当**——被测的 `invoke_tool` 正是本 task 新建的，
+**没有中间态可造**（整个方法尚不存在），故红只能来自「该接口尚不存在」。**别把它与变异红混用**，
+见「两条纪律」之后的**「两种红，判据相反」**那段。
 
 - [ ] **Step 3: 实现**
 
@@ -758,12 +923,100 @@ git commit -m "feat(provider): invoke_tool——工具侧唯一受门禁的调�
   `save_tool` 登记了、注册表**没**登记 → `authorize` **返回 `Ok`**（拿到 `AuthorizedTool`），
   随后 `invoke_tool` 返回 `Err(ToolCallError::Unregistered { .. })`。
   **两半都要断言**：只断后一半会让「authorize 也能挡住它」这条假说法活下来。
+
+  > **分工写死（2026-10-06，协调者裁定）：本用例是一条第「序列 + 结果」的用例，不承担路由机制的变异守卫。**
+  >- **它钉的是**：`authorize` **通过**（返回 `Ok`）**而**路由**未命中**这条**序列**，以及「未命中报的是
+  >  `Unregistered` 这一种 `Err`」这个**结果**。
+  >- **它真正能红的变异体**（两条，都是本 task Step 3 的档）：**(i)** 把 `invoke_tool` 的未命中臂改成
+  >  别的结果（如静默返 `Ok(ToolResult { is_error: true, .. })`，或返 `Provider(..)`）——前一半的
+  >  `Ok` 断言与后一半的变体断言各会红；**(ii)** 让 `authorize` 那半失败（如把 `tool` 表的行撤掉）
+  >  ——第一半的 `Ok` 断言会红。
+  >- **有一条变异体在它上面红不了，据实写明**：**路由机制**那个变异体（「先逐个问遍所有适配器、
+  >  再判未命中」）——本用例的注册表里**一个适配器都没有**，两版问的都是零个，**它在这里退化成
+  >  等价变异体**。**那条机制的照片在 Task 4 的 `an_unregistered_tool_is_not_called_at_all` 上**
+  >  （该用例登记一个服务于**另一个 id** 的 `RecordingTool`，并断言 `recorder.touches() == 0`）。
+  >- **故本用例不另配 `RecordingTool`**：同一件事的**第二个落点**正是本仓反对的形状——路由机制的
+  >  证据只有 Task 4 那一份，此处**只**承担序列与结果。**点名到用例名，不引行号。**
 - `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`（**第二向**）：
   注册表**登记了**适配器、`tool` 表**没** `save_tool` → `authorize` 返回
   `Err(CapabilityError::UnknownTool { .. })`，**在 `invoke_tool` 之前**。
   断言里写明：这条路径上 `ProviderRegistry` 一次都没被碰过。
 
+  > **订正注记（2026-10-07，终审后的改名）。** **原话照留**：上面那一行的用例名
+  > **`an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`**。
+  > **改名后是 `an_adapter_without_a_row_in_the_table_fails_authorize`**（**去掉 `_before_any_call`**）。
+  > **理由**：**那个名字声称的比断言多**——承载「`before_any_call`」那半的断言
+  > （`recorder.touches() == 0` 等）**已在 `072ac71` 被按「恒真」删掉**，而**函数自己的文档
+  > 早就写着那一半没有断言**。**类型 / 断言改了它不会报错**——名字不在编译器管得着的地方。
+  > **旧名留在函数文档里作来历。**
+  >
+  > **判据（本计划通用，写在此处一次）**：**用例名也是一种断言——它声称的东西必须与断言实际覆盖的
+  > 相等。** **当断言被删 / 收窄而名字没跟上时，名字就成了最持久的一句假话**：它出现在计划、报告、
+  > 别人的引用里，而**没有任何工具会因为它不对而报错**（与「绝对措辞须有用例」是同一族，只是
+  > 这一族的载体是**标识符**，改断言时最容易漏）。
+  > **与「两种红，判据相反」那段的互指**：那一段讲的是**步骤顺序不成立时红从哪来**，
+  > 本条讲的是**名字与断言射程不等**——**同属「文档声称的比事实多」那一族**，只是缺口的载体不同
+  > （那边是步骤，这边是标识符）。
+
+  > **订正注记（2026-10-06，Task 5 独立评审 + 本计划的产物瑕疵）。** **原话照留**：上面那半句
+  > 「**断言里写明：这条路径上 `ProviderRegistry` 一次都没被碰过**」——**正是这一句生出了两条非守卫的断言**。
+  > 按它写出来的实现（评审前的版本）在第二向里放了 `RecordingTool` 与
+  > `assert_eq!(recorder.touches(), 0, …)`、`assert_eq!(recorder.seen_tool_id(), None, …)`。
+  > **这两条是「恒真型」**：`touches` / `seen_tool_id` 由**用例自身的控制流**决定——本用例在
+  > `authorize` 被拒之后**压根不发任何调用**，`register_tool` 也不碰适配器，故**没有任何被测代码的
+  > 变异能移动那个计数**。它在所有变异下都绿，**不是守卫**。**处置：删**（它该出声的输入不存在）。
+  > **删后承重不变**：第二向余下的是 `authorize` 报 `UnknownTool` 那一条——Step 3 的变异 2
+  > （把 `save_tool` 挪到 `authorize` 之前）**仍使它会红**，那个方向仍被钉住。
+  >
+  > **同一条判据下另删的一条（第一向）**：第一向的实现（评审前）另写了
+  > `assert!(!matches!(err, ToolCallError::Provider(_)), …)`。**它是「蕴含型」**：
+  > `ToolCallError` 的 `Unregistered` 与 `Provider` **枚举互斥**，故前一条
+  > `matches!(Unregistered { id } if id == "t1")` 成立**即蕴含**它——它**不可能独立变红**，
+  > 而它本该出声的输入（报成 `Provider`）已被前一条抢先红掉（前一条的消息里已带 `{err:?}`）。
+  > **处置同样：删**，且**不得靠调序**把它挪到前一条之前来「救活」——两条断言钉的是
+  > **同一个**变异集，不是互不相交的两个。**删后承重不变**：第一向余下 `authorize` 成功（`Ok`）
+  > 与 `Unregistered` 那条；Step 3 的变异 1（未命中臂改成别的结果）**仍使它会红**。
+  >
+  > **那条「惰性断言」据实标注（本计划自身的产物瑕疵，不删）**：本向的 `save_tool` 调用
+  > **对本用例的断言是惰性的**（只有它的 `.unwrap()` 会跑），且位于全部断言**之后**——
+  > 它存在只为让 Step 3 的变异 2 成为**字面意义的「挪」**（把这一句移到 `authorize` 之前）
+  > 而非「凭空插入」。**这是计划 Step 3 定下的产物，保留并据实标注**；它不是守卫，别当证据读。
+  >
+  > **保留的对照——同一条断言文本，一处是守卫、一处不是**：Task 4 的
+  > `an_unregistered_tool_is_not_called_at_all` 里有**同名**的 `recorder.touches() == 0`
+  > 断言，**那边是真守卫**：该用例登记了服务于**另一个 id** 的 `RecordingTool`，
+  > 「先逐个问遍所有适配器、再判未命中」的变异体会**碰它**而红。**差别只在位置上**——
+  > 那边有「会被碰到的适配器」，这边没有。
+
 两条用例是**同一条事实的两向**（设计 §3.3 代价三的表），故两条必须**同时存在**。
+
+> **统一判据（2026-10-06，Task 5 独立评审给出；本项目通用，比「绝对措辞须有用例」更具体）**：
+>
+> **一条断言是守卫，当且仅当在它实际所处的位置上，存在一个「被测代码」的变异使它会红。**
+>
+> **更利落的最终形式**（评审后来给的，比上面这句更准）：
+> 设同一条用例里断言 `B`，`A` 是**同体内排在 `B` 之前的全部断言**。
+> **`B` 是守卫 ⟺ 能举出一个具体的、仍能编译的变异体 `M`，使得在 `M` 下 `A` 仍通过、而 `B` 失败。**
+> **关键在「`M` 是否真的存在」，而不是「`M` 是否被这一轮跑过」**——举不出来的就是非守卫，
+> 哪怕这一轮没人去试；举得出来的就是守卫，哪怕它今天恰好没红。
+>
+> 两种形态同等处置，**都删**：
+> - **恒真型**：不存在这样的变异体（该断言由**用例自身的控制流**或**夹具的构造**决定，例如
+>   「本用例从不发某种调用」时去断言「那种调用没发生」）；
+> - **蕴含型**：变异体存在，但**同一体内在它之前的断言先红并蕴含它**（例如枚举两变体互斥时，
+>   先断 `matches!(A)` 再断 `!matches!(B)`）。
+>
+> **不许靠调序制造第二个落点**，除非两条断言钉的是**互不相交的变异集**。
+> **位置是判据的一部分**：同一条断言文本，在一处有「会被碰到的对象」时是守卫，在另一处没有时
+> 就不是——本节第一向/第二向与 Task 4 那条的对照即是它的证据。
+>
+> **反向的误用要一并防住——下面四条按本判据核过，是守卫，别顺手删**（协调者另列「别误删」清单）：
+> Task 4 `an_unregistered_tool_is_not_called_at_all` 的 `recorder.touches() == 0`（那边有**会被碰到的
+> 适配器**，「先逐个问遍所有适配器」的变异体会碰它）；Task 4
+> `the_adapter_failure_is_reported_as_provider` 的 `recorder.seen_tool_id() == Some(..)`；
+> Task 1 `registering_the_same_id_twice_is_rejected_as_duplicate` 的「**原条目不变**」（`Arc::ptr_eq`）
+> ——存在「**先插后判**」这一变异体使它**单独变红**（`Duplicate` 那条仍通过，而条目已被改写）；
+> Task 8 的 `the_guard_sees_the_source_tree`（那是守卫**自身**的正控制，防的是「什么都没读到也全绿」）。
 
 - [ ] **Step 2: 先写反的那一版，跑一次，确认两向都红**
 
@@ -839,7 +1092,7 @@ git commit -m "test(provider): 两个登记点不一致的两向照片"
    use continuum_provider::AuthorizedToolInvocation;
 
    fn build(auth: &AuthorizedTool) -> AuthorizedToolInvocation<'_> {
-       AuthorizedToolInvocation::new(auth, serde_json::json!({}))   // 预期 E0603：`new` 是私有的
+       AuthorizedToolInvocation::new(auth, serde_json::json!({}))   // 预期 E0624：`new` 是私有的
    }
    fn main() {}
    ```
@@ -847,6 +1100,28 @@ git commit -m "test(provider): 两个登记点不一致的两向照片"
    **预期报错是 `E0603`（associated function `new` is private），不是 E0061 / E0308。**
    这一点是本样例的判据：**「少传一个参数」也能编译失败**，但那是另一回事——
    本样例要钉的是「**有**授权也构造不出」，故 `.stderr` 必须落在 `E0603` 上。
+
+   > **订正注记（2026-10-06，Task 6 实测 + 本计划扫同类）。** **原话照留**：上面那两句里的
+   > **`E0603`**，以及代码块里那行注释 `// 预期 E0603：`new` 是私有的`。
+   > **码错在哪**：`E0603` 是「**按路径**访问私有**条目**」（自由函数 / 模块成员）的码；
+   > 本样例走的是 `AuthorizedToolInvocation` 的**关联函数** `new`，rustc 实报的是
+   > **`E0624`：associated function `new` is private**。**两码之间只差「私有条目」与「私有关联函数」这一处。**
+   > **代码块里那行注释随之改为 `// 预期 E0624`**，`.stderr` 钉的也是 `E0624`。
+   > **那条判据的实质不变**：本样例钉的是「**私有**」（有授权也够不着构造入口），
+   > **不是**「元数不合（`E0061`）」或「类型不合（`E0308`）」——这一点原话成立，未动。
+   > **补一句（2026-10-06）**：**`E0061` 那一式未实测，故它在本处只作否定式对照、不作判据**
+   > （`E0308` 另说：样例 3 的 `.stderr` 实跑就是它）。后来者别把「不是 `E0061`」当结论引用。
+   > **独立复核（本计划作者自己跑的 rustc 探针，`--edition 2024`）**：
+   > `mod m { fn f() {} } fn main() { m::f(); }` → **`E0603`**；
+   > `mod m { pub struct S; impl S { fn g() {} } } fn main() { m::S::g(); }` → **`E0624`**。
+   > **落地现状**：Task 6 的实现者已按实跑生成 `.stderr`（`E0624`），并把这段来历写进了样例文件的
+   > 模块文档；**计划此处是跟着改**。
+   >
+   > **判据（本项目通用，写进原地）**：**凡「预期报错码」这类断言，必须来自实跑**——
+   > `E0603` 与 `E0624` 只差「私有条目」与「私有关联函数」这一处，**凭印象写必错**。
+   > 而 **`.stderr` 不会替你报错**：它是 rustc 的逐字输出，写错了它照样让用例绿——
+   > 因为「因为别的原因编译失败」也会满足它。故**生成之后必须逐份读回**（见 Step 2），
+   > 而不是只看 trybuild 通过。
 5. `authorized_tool_invocation_fields_are_private.rs`：结构体字面量构造（字段名写对时）被拒 ——
    字段私有，绕开构造入口这条路不存在（与 P3A 的 `authorized_tool_cannot_be_built.rs` 同形）。
 
@@ -889,6 +1164,32 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 - Modify: `crates/continuum-provider/tests/common/mod.rs`（`FakeTool` 加失败通道）
 - Create: `crates/continuum-provider/tests/contract.rs`
 
+> **订正注记（2026-10-06，Task 7 复核；原话照留）。** **这份清单漏了项**：把 `FakeTool` 三态化
+> **打断了七个构造点、横跨五个文件**（下面按**用例名 / 代码内容**写；行号只是当时那一次读数的快照）：
+>
+> **订正注记（2026-10-07）。** **原话照留**：上面那半句「横跨**四个**文件」——**应为五个**
+> （`common/mod.rs` ＋ `fake_provider.rs` ＋ `invoke_tool.rs` ＋ `registry_tools.rs` ＋ `two_registries.rs`；
+> 下面表格里那行 `—` 就是 `common/mod.rs`，它也是文件之一）。
+> **这层来历值得留**：**原写「四个」，是协调者派单里的数写错了——而同一条里列出的五个文件名才是对的**。
+> **判据**：**「数」与「名单」同处出现时，两处都要逐项对一遍**——**名单对了不代表数对了**，反之亦然。
+>
+> | # | 文件 | 那一个构造点 |
+> |---|---|---|
+> | — | `tests/common/mod.rs` | 定义本身：`FakeTool` 由单元结构体改为带 `outcome` 字段，**外加三个构造入口** |
+> | 1 | `tests/fake_provider.rs` | `fake_implementations_satisfy_the_frozen_interfaces` 里那个 `let t = FakeTool;` → `FakeTool::echo()` |
+> | 2 | `tests/invoke_tool.rs` | `a_registered_tool_is_invoked_and_its_result_returned` 里的 `register_tool(.., Arc::new(FakeTool))` |
+> | 3 | `tests/registry_tools.rs` | `a_registered_tool_is_described_by_id` 里那处 |
+> | 4 | `tests/registry_tools.rs` | `an_unregistered_tool_id_is_reported_as_unregistered` 里那处 |
+> | 5 | `tests/registry_tools.rs` | `list_tools_reports_an_adapter_failure_as_provider` 里那处 |
+> | 6 | `tests/registry_tools.rs` | `describe_tool_routes_by_registration_not_by_the_adapters_list_tools` 里那处 |
+> | 7 | `tests/two_registries.rs` | `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` 里那处（**该用例 2026-10-07 已改名为 `…_fails_authorize`——去掉 `_before_any_call`**，理由见 Task 5 Step 1 那条注记） |
+>
+> **正文原先只点了 `fake_provider.rs` 那一处**（在 Step 1 里），其余六处没有任何指令**——
+> 它们是**编译错误逼出来的**（`FakeTool` 不再是单元结构体，`Arc::new(FakeTool)` 一处都过不去）。
+> **这是清单类缺陷的典型形态：漏项不靠读清单发现，靠编译器发现**；但**清单漏了就得补**，
+> 否则下一次改动的人仍要从编译错误里反推。**判据：凡动公开夹具的构造形状，先 grep 一遍它的构造点
+> （`grep -rn "FakeTool" crates/continuum-provider/tests/`），把命中的用例逐个列进 Files。**
+
 **Interfaces:**
 - Consumes: Task 4 的 `invoke_tool`
 - Produces: 无新公开面
@@ -903,6 +1204,16 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 `tests/common/mod.rs` 的 `FakeTool` 从单元结构体改为带一个失败通道字段，三个构造入口：
 `FakeTool::echo()`（今天的行为）、`FakeTool::failing_at_tool_level()`（`Ok(ToolResult { is_error: true })`）、
 `FakeTool::failing_at_provider_level()`（`Err(ProviderError::Transport(..))`）。
+
+**补一处计划缺口（2026-10-06，Task 7 复核）：工具级失败那一支的 `ToolResult.output` 该取什么值，
+本节原稿与设计都没给。** 本计划取**一个固定的、非回显的值**（实现里取
+`json!({"error": "工具跑起来了但自身失败"})`），理由两条：
+**(a)** 若让它**回显 `input`**，`output` 会在两臂上**完全相同**，`is_error` 就成了两条用例之间
+**唯一的区分轴**——而本 task 要钉的正是「两条不是等价变异体」，把区分轴收窄到一根，
+等于让「`output` 那一路也分得开」这件事**没有照片**；**(b)** 回显还会把一个**用例自造的载荷
+升格成看似规范的东西**（读代码的人会以为「工具级失败时 `output` 就是输入」是一条约定，
+而它哪里都不是）。**标明：这是本计划的选择，不是规范要求**——§316 对 `output` 在失败时的取值
+**没有任何规定**，适配器可以任意取；取固定值只是让本用例的断言更硬。
 `tests/fake_provider.rs` 里**那个 `let t = FakeTool;`**（`fake_provider.rs` 的第二个 `#[tokio::test]` 之前的
 那个用例体内；**按那一行代码找，不按行号**）改为 `FakeTool::echo()`。
 
@@ -924,6 +1235,13 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 - `a_provider_level_failure_is_err`：适配器返 provider 级失败 →
   `invoke_tool` 得 `Err(ToolCallError::Provider(_))`，**不是 `Ok(is_error: true)`**。
 
+  > **这两句「不是 …」是期望的措辞，不是第二条断言（2026-10-06，协调者裁定）。**
+  > 写成 `assert!` 就是**蕴含型**：`Ok(..)` 与 `Err(..)` 是对立的两支，前一条
+  > `matches!(Ok(ToolResult { is_error: true, .. }))` 成立即蕴含「不是 `Err`」，
+  > 反之亦然——**两者都不可能独立变红**。故**每个用例只写一条断言**，
+  > 用 `matches!` 把要钉的那一支与它的载荷一并断在**同一条**里（`is_error` 的真假即载荷）。
+  > 这条口径与 Task 5 Step 1 的「统一判据」段同源。
+
 **这两条不是等价变异体**，判据（纪律 1(b)）是「这两版在哪个入参上会给出不同结果」：
 把 `invoke` 的实现从 `Ok(ToolResult { is_error: true, .. })` 改成 `Err(Protocol)`（或反过来），
 在**同一条输入**上给出的是**不同的结果**（`Ok` vs `Err`）。写报告时把这句写出来，
@@ -937,6 +1255,29 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 ```bash
 timeout 300 cargo test -p continuum-provider --test contract
 ```
+
+> **订正注记（2026-10-06，Task 7 复核；原话照留）。** **上面 Step 1 → Step 2 → Step 3 作为一个
+> 「红—绿」序列是执行不了的**：**被测对象正是 Step 1 自己引入的夹具**——照写，Step 3 一跑就绿，
+> **没有红可看**。这不是「红写得少」，而是**这个序列在本 task 上根本不成立**。
+>
+> **实际做法（实现者的拆分，评审判为对意图的正当读法）**：**先落夹具的「结构」**——枚举、
+> 三个构造入口、以及上面表里那七个调用点**全部到位**，**而 `invoke` 暂不读 `outcome`
+> （一律走 `Echo` 那一支）**；于是**两条用例各自在自己的断言上红**（工具级那条拿到
+> `is_error: false`、provider 级那条拿到 `Ok` 而不是 `Err`）；**再把 `invoke` 接上 `outcome`**，
+> 两例转绿。**两次红都不是编译失败**，都是断言失败，且**各自红在该用例自己的断言上**。
+>
+> **按「两种红，判据相反」那段重看这一处（2026-10-06）**：本 task **有中间态可造**——夹具的形状
+> 可以先落、行为后接——**故它不该以编译失败为红**，实现者按中间态做是**对的**。
+> 这与 Task 1 / Task 2 / Task 4 的处境**恰好相对**：那三处**没有**中间态可造（整个 API 尚不存在），
+> **故它们以编译失败为红是正当的**。**差别在「有没有中间态可造」，不在「哪个 task 更严」**——
+> 谁都不该在**有**中间态时偷懒用编译失败当红，谁也不必在**没有**中间态时硬造一个。
+>
+> **判据（本项目通用，写进原地）**：**当被测对象在同一个 task 里被造出来时，「先写用例看它红」
+> 这个序列产不出红——红必须来自一个中间态（结构在位、行为未接）。**
+> **判据是「红来自断言、且红在该用例自己的断言上」，不是「必须按某个步骤顺序」。**
+> **反过来也成立**：若某个 task 声称「先写用例、再看它红」而被测对象正是它自己新建的，
+> 那么那个「红」**要么来自中间态、要么就是假的**——`file not found`、`could not compile`
+> 都不是这个意义上的红（与纪律 1(c) 同一条判据）。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -985,11 +1326,18 @@ git commit -m "test(provider): is_error 与 Err 的分流（夹具约定）"
 **留一种不归一就是没关严**」）：匹配前**把连续空白（空格 / `\t` / `\n`）折成一个空格**再比对。
 上面那三种写法因此与一个字面拼法**是同一个拼法**，**不再是逃逸面**。
 
-**归一化之后仍逃逸的三种**（它们不是同一个拼法，而是换了写法；设计 §4.1 末段）：
+**归一化之后仍逃逸的：例如以下三种**（它们不是同一个拼法，而是换了写法；设计 §4.1 末段）：
 全限定 trait 路径（`impl crate::model::ModelProvider for DeepSeek`）、`use … as` 别名后实现、
-把实现 `include!` 进来。故归一化后的守卫仍是**一个下界，不是封闭判定**；这三种写法**没有照片**，
+把实现 `include!` 进来。故归一化后的守卫仍是**一个下界，不是封闭判定**；这几种写法**没有照片**，
 落在评审。上界要解析 trait 路径（需要 `syn` 之类的新 dev 依赖），**本阶段不做**（设计 §12 第 21 条）。
-**文件头要把上面这两段一并写明**：归一化关掉了什么、还剩哪三种。
+
+> **这份清单不是穷尽的，别把它当封闭枚举读（2026-10-07，Task 8 评审）。** 原话写的是「仍逃逸的**三种**」
+> ——**按枚举读就偏穷尽**，而它不是：`impl<T> ModelProvider for Foo<T>`、`impl/*c*/ModelProvider for`
+> 这一类同样逃逸。**往清单里加第四项是输的游戏**（每加一项都还有别的写法）；该做的是**把清单标成
+> 非穷尽的说法**。**设计侧 §4.1 那张清单同理**（**已另派设计作者改，本计划不代改**）——
+> 本计划引它时，**一律按「例如」读，不按「就是这三种」读**。
+
+**文件头要把上面这两段一并写明**：归一化关掉了什么、**还有哪些（例如那几种）仍逃逸**。
 
 - [ ] **Step 2: 运行，确认通过（这是本 task 的正常态）**
 
@@ -1003,6 +1351,74 @@ timeout 300 cargo test -p continuum-provider --test neutrality
 **故意用两个空格**：这样这一次红同时是**空白归一化生效**的照片（若归一化漏了，它会假绿）。
 **这次红要留日志路径**（纪律 1：每次变异用独立日志路径）——它是这条守卫唯一的物证。
 若这一步**不红**，先查归一化，**不要**去改字面拼法。
+
+  > **上面那个 `…` 得展开成明文，且要给出可编译的填充体（2026-10-07，Task 8 评审）。**
+  > `ModelProvider` 有**七个必需方法**（`crates/continuum-provider/src/model.rs` 的
+  > `list_models` / `describe_model` / `invoke` / `stream` / `cancel` / `usage` / `health`），
+  > 故**照 `impl ModelProvider for Probe { … }` 字面抄是编不过的**——**而这条变异必须编得过**
+  > （见下面的通则）。**只写「补齐七个方法」还不够**：不写方法体，下一个读者仍可能写出编不过的 impl。
+  > **本步要临时落进 `src/` 的那份探针，全文如下**（`struct Probe;` ＋ 七个必需方法，**方法体一律
+  > `unimplemented!()`**——`async fn` 照样编得过）。
+  >
+  > **两处落法要说准（否则「编得过」是句空话）**：探针**必须真的进编译**——追加到 `src/lib.rs` 末尾，
+  > **或**新建 `src/probe.rs` 并在 `lib.rs` 里**临时**加一行 `mod probe;`。
+  > **只加文件、不声明模块，rustc 根本不读它**——那时「编得过」无从谈起，而**文本守卫照样会红**。
+  > 另：`Probe` 与它的实现无人使用，会出 `dead_code` 警告——**这里只要求 0 error**，警告不管。
+  > **`ModelProvider` 走 `crate::`**：探针在 `src/` 内，**不能用 `continuum_provider::` 自称本 crate**。
+  >
+  > ```rust
+  > use async_trait::async_trait;
+  > use continuum_core::model::{
+  >     CallId, InvokeRequest, InvokeResponse, ModelDescriptor, ModelId, ModelStream, ProviderHealth,
+  >     Usage,
+  > };
+  > use continuum_core::ProviderError;
+  >
+  > use crate::model::ModelProvider;
+  >
+  > struct Probe;
+  >
+  > #[async_trait]
+  > impl  ModelProvider for Probe {
+  >     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn describe_model(&self, id: &ModelId) -> Result<ModelDescriptor, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn stream(&self, request: InvokeRequest) -> Result<ModelStream, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn cancel(&self, call: &CallId) -> Result<(), ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn usage(&self) -> Result<Usage, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn health(&self) -> ProviderHealth {
+  >         unimplemented!()
+  >     }
+  > }
+  > ```
+  >
+  > **`impl` 与 `ModelProvider` 之间是两个空格**（探针的要点就在这）。**用完即删，不提交。**
+  
+> **本块未经实跑**（本计划的作者不碰 `crates/`，故没把它加进去编一遍）——**故 Step 2 的第一件事
+> 就是把它落进 `src/` 并确认 `cargo build -p continuum-provider --all-targets` 报 0 error**，
+> 再跑那条用例。**没编过就不要往下走**：变异体编不过时这条守卫的红证明不了任何东西。
+> 导入清单已按本仓既有写法核过，但**仍是示意，实现时以源码为准**（未经证实的手写导入清单是重灾区）。
+  > **这一段是本计划里唯一「必须照抄进文件、且必须编得过」的代码块**——它与前面那些
+  > 「Step 3: 实现」的**签名示意**块不是一回事（那些照抄本就编不过，见「关于本计划的代码块」）。
+  >
+  > **通则（2026-10-07 立，一次性关掉同类坑的那一侧）**：**变异体必须编得过；本步的红必须是
+  > 「断言红」，不得是「编译失败型红」**——**编译失败型红区分不出「守卫有效」与「守卫恒绿」**
+  > （两者在这条 guard 上都表现为「用例没红」或「压根没跑」）。**这条是「两种红，判据相反」
+  > 那一段（见「三条纪律」之后）在「守卫类 task」上的具体落点**：那边区分的是 TDD 红与变异红，
+  > 这边说的是**这个 task 的红只能是后者意义上的红**——因为 Task 8 **有中间态可造**
+  > （探针就是中间态），故它**不该**以编译失败为红。
 
 - [ ] **Step 3: 运行全部测试并提交**
 
@@ -1032,6 +1448,17 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 （外加 `async-trait` / `serde_json` / `tokio` / `futures-core` / `tempfile` / `trybuild` 六个外部 crate——
 它们**不进 `ALLOWED`**，那张表只逐对断言 workspace 成员之间的边）。
 
+> **订正注记（2026-10-07，Task 9 实读；原话照留）。** **上面那「六个外部 crate」是七个**——
+> 漏了 **`thiserror`**（`crates/continuum-provider/Cargo.toml` 的 `[dependencies]` 里那一行，
+> Task 1 为 `RegistryError` / `ToolCallError` 的 `thiserror::Error` 派生加的）。
+> **完整的七个**：`async-trait` / `serde_json` / `thiserror` / `tokio` / `futures-core` /
+> `tempfile` / `trybuild`。
+> **结论不变**：三个 workspace 成员精确、外部不进 `ALLOWED`——**变的只是清单本身**。
+> **判据（与 Task 1/3/4 补 `Cargo.toml` / `Cargo.lock` 是同一条）**：**清单要自足，且要与事实
+> 逐项相等**——`grep` 一遍 `Cargo.toml` 再逐个列，不凭印象写数目。
+> **来历**：那句「六个」写成时 `thiserror` 还没进这份清单（它是 Task 1 后加的一行，
+> 而这段预期是最早写的）——**一处事实改了两处，只有一处跟着改**。
+
 - [ ] **Step 2: 逐条核对完成判据（找不到证据的不得标注为覆盖）**
 
 | 判据（设计 §11 的行） | 照片 |
@@ -1039,12 +1466,13 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 模型侧登记后按 id 发现 | Task 1 `a_registered_model_is_found_by_id` |
 | 模型侧：登记 id 与 `list_models` 不一致（§3.3 代价一） | Task 1 `a_registered_id_may_be_absent_from_the_adapters_own_list_models` |
 | 工具侧：公开面清单里没有返回裸适配器的入口 | 公开面清单（**评审读**）+ Task 6 样例 1、2 |
-| 工具侧：授权证明进不到该进的地方 | Task 6 样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate 持真 `AuthorizedTool` 仍构造不出**，`E0603`）、样例 5（字段私有） |
+| 工具侧：授权证明进不到该进的地方 | Task 6 样例 3（裸 `ToolId` 传不进 `invoke_tool`）、样例 4（**外部 crate 持真 `AuthorizedTool` 仍构造不出**，`E0624`）、样例 5（字段私有） |
 | 工具侧：门禁内的正常路径 | Task 4 `a_registered_tool_is_invoked_and_its_result_returned`；**新请求类型的两条性质也由它与其兄弟用例观测**（Task 4 的 `the_adapter_is_handed_the_authorization_that_was_passed_in`） |
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | Task 7 两条（**钉夹具，不钉真实适配器**） |
 | 两个登记点不一致，向一 | Task 5 `…passes_authorize_then_fails_to_route` |
-| 两个登记点不一致，向二 | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` |
-| 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，三种换写法的逃逸写在文件头 |
+| 两个登记点不一致，向二 —— 前一半：`authorize` 报哪一种 `Err` | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize`（**2026-10-07 由 `…_fails_authorize_before_any_call` 改名**——旧名声称的比断言多，理由见 Task 5 Step 1 那条注记）——断言 `Err(CapabilityError::UnknownTool { id })`（**设计该行的前半**） |
+| 两个登记点不一致，向二 —— 后一半：**「在 `invoke_tool` 之前」** | **结构事实（读类型签名）**：`invoke_tool` 只收 `&AuthorizedTool`，而 `AuthorizedTool` 的唯一铸造通道是 `authorize`（P3A 的性质，其照片在 capability 侧）——**没有授权就构造不出调用**，故**没有可写的运行用例**。**不标为有照片**（与 `cancel` 行同形）。Task 5 曾用 `recorder.touches() == 0` 拍它，而**那条断言是恒真的**（计数由本用例自身的控制流决定），已按守卫判据删除，**来历见 `crates/continuum-provider/tests/two_registries.rs` 文件头那段（按内容找，行号会漂）** |
+| 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，**换写法的逃逸（例如那几种）**写在文件头——**不是封闭枚举** |
 | 模型侧未登记 id | Task 1 `an_unregistered_model_id_is_reported_as_not_found` |
 | 工具侧未登记 id | Task 2 `an_unregistered_tool_id_is_reported_as_unregistered` |
 | 重复登记同一 id | Task 1 `registering_the_same_id_twice_is_rejected_as_duplicate` |
@@ -1053,6 +1481,14 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 中立性（`ALLOWED` 逐对精确） | 既有 `every_crate_depends_only_on_its_allowed_set` |
 | `cancel` 对非流式不可达 | **结构事实**，照片是类型签名（设计 §5.3、§9），**不写运行用例** |
 | `ToolInvocation` 的删除 | Task 3 Step 2 的 `cargo build --workspace --all-targets` 失败 + Step 4 全量绿 |
+
+> **为什么其它同形处不必拆（2026-10-07，本计划终审逐行复查全表后的结论：「只有上面拆开的那一行是表比事实宽」）。**
+> **第 11 行（工具侧未登记 id）**设计原文带「（不是 `Provider(..)`）」——那条断言在 `189f6c5` 被删，
+> 但它与保留的 `matches!(Unregistered { .. })` **是互斥变体、被严格蕴含**：任何违反它的变异体同样
+> 让保留的那条红 ⇒ **不是缺口，无需拆**。
+> **与上面那一行的区别是**：那一行那半说的是「**一次没发生的调用的顺序**」，**不被 authorize 那条蕴含**。
+> **判据（本仓「蕴含型 vs 恒真型」那条判据用在「表」上的形态）**：
+> **「被保留的断言严格蕴含」的删掉的断言不是缺口；「说了另一件事」的删掉的断言是缺口。**
 
 - [ ] **Step 3: 复核「无生产调用方」这一栏（据实记，不粉饰）**
 
@@ -1063,7 +1499,9 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 - [ ] **Step 4: 残余落到有版本的文档**
 
 `.superpowers/` 是 gitignore 的，**只写在报告或 ledger 里的结论会随 branch 消失**。
-把本计划 `## 遗留` 里**属于实现期新发现**的那几条（尤其是 Task 1 / Task 2 / Task 3 的三处「设计未给判据」的读数）
+把本计划 `## 遗留` 里**属于实现期新发现**的那几条（尤其是 Task 1 / Task 2 / Task 3 那几处「设计未给判据」
+的读数——**本处刻意不给数目（2026-10-07）**：**原话写的是「三处」**，而 `## 遗留`（三）的条目
+**随实现推进逐条增加**（现已有七项，见那一节），这个集合**不闭合**）
 折进 `docs/superpowers/p3bcdf-followups.md` 的**第三节**（仍开着的规范级缺口），
 **并标明它们是「实现期取读」而非「规范给的判据」**。
 
@@ -1131,8 +1569,10 @@ P1 的 Resource 义务     要求「P3 的 Router 必须为 RESOURCE 显式给�
 实现被写进中立 crate     §4.2 形态 4 的那条路径**没有行为照片**；守卫是 `src/lib.rs` 开头那句「不含实现」的
   内部                   定位声明
   内部                   + Task 8 的模块面断言 + 评审。Task 8 之后那三个字面拼法（**含空白变体**，
-                       归一化之后是同一个拼法）会被红掉；**全限定路径 / 别名 / include! 三种仍全绿**
-                       （设计 §4.1 末段；裁决 C7 已把空白变体从逃逸清单里划掉）。
+                       归一化之后是同一个拼法）会被红掉；**换写法的仍全绿——例如全限定路径 / 别名 /
+                       include!**（**原写「三种仍全绿」，「三种」是闭合读法、已证为假**：
+                       `impl<T> ModelProvider for Foo<T>`、`impl/*c*/ModelProvider for` 一样逃逸；
+                       **2026-10-07 与 Task 8 正文对齐**，设计 §4.1 末段，裁决 C7 已把空白变体从逃逸面划掉）。
 save_tool 登记期不变量   C 不接（设计 §7.4 接缝二、§12 第 15 条）：它约束的是 tool 表的**写入**，
                        属 continuum-capability。**裁决：所有者是 F**（`p3bcdf-followups.md` §七 第 1 条）。
 凭据要不要也交给         设计 §12 第 23 条：本阶段不做；若做，会引入 continuum-provider
@@ -1165,12 +1605,15 @@ list_tools 的并集语义    设计只说「并集」，未写同一 ToolId 由
 FakeTool 三态化          设计 §11 写「用 FakeTool」，而一个单元结构体产不出两条失败通道。
                        本计划把它改成带失败通道的三态夹具（Task 7）。**是对夹具形状的读数，不是判据。**
 AuthorizedToolInvocation  裁决 C2 已定：**构造入口 pub(crate)**，crate 外即使持一枚真
-  的构造入口            AuthorizedTool 也构造不出（照片：Task 6 样例 4，E0603）。故它**不是**未决，
+  的构造入口            AuthorizedTool 也构造不出（照片：Task 6 样例 4，**`E0624`**——**原写 `E0603`，2026-10-06 按实跑订正**）。故它**不是**未决，
                        也不再有「两条路都编译得过」的残留——设计 §7.5 说的「构造点一处」由此成立。
                        仍成立的残留只有一条（设计 §7.1）：**适配器照着 id 做**这件事类型层管不住。
 模块面守卫的第四种逃逸    **已由裁决 C7 关掉**：守卫在匹配前折叠空白（空格 / tab / 换行折成一个空格），
                        `impl  ModelProvider for` 一类空白变体因此**是同一个字面拼法**，不再逃逸。
-                       **仍逃逸的只剩三种**（全限定路径 / 别名 / include!），设计 §4.1 末段列明。
+                       **仍逃逸的：例如全限定路径 / 别名 / include!**——**原写「只剩三种」**，
+                       **那是闭合读法、已证为假**（`impl<T> ModelProvider for Foo<T>`、
+                       `impl/*c*/ModelProvider for` 一样逃逸）；**2026-10-07 与 Task 8 正文对齐**：
+                       **这份清单不是穷尽的**，设计 §4.1 那张清单同理（已另派设计作者改）。
                        归一化本身的照片在 Task 8 的
                        `the_guard_folds_whitespace_before_matching`，以及 Step 2 那条
                        「两个空格」的探针（归一化若漏了，它会假绿）。
