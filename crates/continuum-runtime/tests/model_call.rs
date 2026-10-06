@@ -44,11 +44,27 @@ fn each_provider_error_variant_maps_to_its_class() {
 
 /// **两侧对钉**：同一次转换里，`Cancelled` 得 `None`、`Transport` 得 `Some(..)`。
 ///
-/// **为什么这条要单列**：只钉「四个失败臂各得类别」会漏掉 fail-open 的那一侧——
-/// 一个「什么都返回 `Some(Transient)`」的实现让那四条全绿，只有本条的 `None` 那一侧会红。
-/// 反过来，一个「什么都返回 `None`」的实现让 `None` 那一侧绿，只有本条的 `Some(..)`
-/// 那一侧会红。**两侧各挡一边，故两侧都要在**（判据：一个只钉一侧的用例，
-/// 挡不住「一侧恒真」的实现）。
+/// **为什么这条要单列**：只钉「四个失败臂各得类别」会漏掉另一侧——
+/// 本条的 `None` 那一侧把「取消不是失败」这条判定放进了**体**里。
+/// **两侧各挡一边，故两侧都要在**：一个只钉一侧的用例挡不住「某一侧恒真」的实现
+/// （两个方向各举得出一个仍能编译的变异体，红分别落在本条的哪一侧，见下）。
+///
+/// **爆炸面据实写：不是「只有本条会红」，是跨用例三处。** 两个方向的变异各红三处：
+///
+/// - 把 `classify` 的 `Cancelled` 那一臂改成 `Some(FailureClass::Transient)` ⇒ 红在
+///   `each_provider_error_variant_maps_to_its_class` 里 `Cancelled` 那条断言、
+///   **本条的 `None` 那一侧**、以及 `the_error_type_carries_the_provider_error_verbatim`
+///   里 `Cancelled` 那一臂的 `panic!`（它拿到的是 `Provider { class: Transient, … }`）；
+/// - 把 `Transport` 那一臂改成 `None` ⇒ 红在 `each_…` 里 `Transport` 那条断言、
+///   **本条的 `Some(..)` 那一侧**、以及 `the_error_type_…` 里 `Transport` 那一臂的 `panic!`。
+///
+/// **三处的成因**：`each_…` 的第五条断言与 `the_error_type_…` 的第五臂断的是同一件事，
+/// 而 `into_call_error` 的类别与分支都取自 `classify`，故表一改、类型的搬运跟着改。
+/// **故本条的价值不在「唯一会红的用例」**，而在把两侧放进**同一个体**——
+/// 只有这样才能对「某一侧恒真」的实现在同一处同时立起两侧守卫。
+///
+/// **上文的「红在哪一处」用断言锚点写、不写行号**：行号会被本文件的下一次编辑平移
+/// （本注释自己就在被引断言的上方），锚点不会。
 #[test]
 fn a_cancelled_call_is_not_a_failure() {
     let cancelled = classify(&ProviderError::Cancelled("调用方发起的取消".into()));

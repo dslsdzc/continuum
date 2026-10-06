@@ -124,6 +124,16 @@ pub enum TaskError {
 /// **分类与转换不在这里**：那张表与 `ProviderError` → 本类型的转换在
 /// [`crate::model_call`]——本文件是 F 与 G 共写的，误改的形状是两边在同一段文字上
 /// 各改各的，故 G 的增量落在不与 F 共写的模块里。
+///
+/// **两个派生是随本文件的约定，不是随手加的**：`Debug` 是本 crate 的用例需要的
+/// （`tests/model_call.rs` 里用 `{other:?}` 打印未预期的变体）；`Error` 与同文件的
+/// `TaskError` 派生的是同一个 `#[derive(Debug, Error)]`。
+///
+/// **本文件里见到的写法是这两种**：`TaskError` 的**那五个 `#[from]` 变体**都是元组变体，
+/// 它的**具名 `source` 字段**不写属性（`Context { source: Box<TaskError> }`）。
+/// 本类型照同一个形状落：`Routing` / `Storage` 这两个元组变体**手写 `#[source]`**
+/// （本类型不为这两个错误提供 `From` 转换），`Provider` / `Cancelled` 的 `source` 字段
+/// **不写属性**，`Deadline` 没有来源字段、也不写。
 #[derive(Debug, Error)]
 pub enum ModelCallError {
     /// D 的排序失败。**带出 D 的错，不压平成一枚同名的变体**——那会是同一件事两个类型。
