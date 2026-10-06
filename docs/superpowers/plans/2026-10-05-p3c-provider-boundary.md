@@ -94,8 +94,16 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
    **枚举式绝对断言须逐项有照片**——本计划有三处「逐项」：`list_tools` 的**每个**已登记适配器各调用一次（Task 2）、
    `invoke_tool` 的**每一条**失败通道各一条用例（Task 4）、编译失败样例的**每一份**各钉住预期报错（Task 6）。
    判据：用例里的值字面量是**手工写的**还是**被测函数返回的**——前者钉格式，后者钉路径。
+2 之补（2026-10-06，Task 5 独立评审给出）——**「有照片」还不够，那条照片还必须是守卫**：
+   **一条断言是守卫，当且仅当在它实际所处的位置上，存在一个「被测代码」的变异使它会红。**
+   **恒真型**（不存在这样的变异体）与**蕴含型**（变异体存在，但同体内在它之前的断言先红并蕴含它）
+   **同等处置：删**；**不许靠调序制造第二个落点**，除非两条断言钉的是互不相交的变异集。
+   **位置是判据的一部分**——同一条断言文本可以在一处是守卫、在另一处不是。完整叙述与两条实例
+   见 **Task 5 Step 1 的「统一判据」段**（那里有第一向/第二向与 Task 4 那条的对照）。
 3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。本计划的失败面有三处，**一个都不能只写 `is_err()`**：
    `RegistryError::NotFound` / `RegistryError::Duplicate` / `ToolCallError::Unregistered` / `ToolCallError::Provider`。
+   **但「断言是哪一种」不等于「把互斥的另一臂也否一遍」**：`matches!(A)` 之后再加 `!matches!(B)`
+   （`A`/`B` 是同一个枚举的两个变体）是**蕴含型**，按第 2 之补**删**。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），
 **命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志——
@@ -418,6 +426,18 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
   **不是** `ToolCallError::Provider`（纪律 3）。**本用例的承重断言是「未命中返的是哪一种 `Err`」**
   （`Unregistered` 与 `Provider` 分别描述「路由 / 配置缺陷」与「provider 调用失败」，设计 §5.2）。
 
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「**不是** `ToolCallError::Provider`（纪律 3）」——**「蕴含型」，删**：同上，枚举互斥，
+  > 前一条 `matches!(…Unregistered { .. })` 成立即蕴含它、不可能独立变红。
+  > **落地现状：代码里仍在**（`tests/registry_tools.rs` 该用例里那一条
+  > `!matches!(err, ToolCallError::Provider(_))`；**按用例名 + 断言内容找**），**协调者已另派删除**。
+  > **这一处是本条注记自己犯的**：上一轮我为了把「未命中返哪一种 `Err`」这条承重说清，
+  > **顺手把互斥的另一臂也否了一遍**——正是我刚在 Task 5 那段里判为「蕴含型、要删」的形状。
+  > **来历照留在此**，因为它比一句干净的话有用：**「把承重说清」与「多否一臂」是两件事，
+  > 前者靠一条能独立变红的断言，后者只会让报告里多一条永远绿的记录。**
+  > **删后承重不变**：本用例余下的是 `Unregistered` 那一条，「报成 `Provider`」的变异**仍使它会红**
+  > ——承重本来就是它。
+
   > **订正注记（2026-10-06，协调者裁定）**：本节原只写「`describe_tool("nope")` → …」，
   > **没写注册表里当时有什么**。若实现者按字面「什么都不登记」，注册表为空，
   > 于是「先扫各适配器的 `list_tools()` 再判未命中」这个变异体**在这里退化**（两版都扫零个适配器、
@@ -435,11 +455,29 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
 - `list_tools_reports_an_adapter_failure_as_provider`：把 `FakeTool` 换成一个 `list_tools` 返
   `Err(ProviderError::Transport(..))` 的适配器 → `matches!(_, Err(ToolCallError::Provider(_)))`，
   且**不是** `Unregistered`。**同一个适配器的失败不许被跳过**（跳过会让一个坏适配器静默消失）。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「且**不是** `Unregistered`」——**「蕴含型」，删**：`Provider` 与 `Unregistered` 枚举互斥，
+  > 前一条成立即蕴含它，它不可能独立变红。**落地现状：代码里仍在**
+  > （`tests/registry_tools.rs` 该用例里那一条 `!matches!(err, ToolCallError::Unregistered { .. })`；
+  > **按用例名 + 断言内容找**），**协调者已另派删除**。
+  > **删后承重不变**：余下的 `Provider(_)` 那条仍钉「适配器失败不许被跳过」这件事
+  > ——「跳过失败适配器、返回 `Ok(空)`」的变异会使它红。
 - `describe_tool_routes_by_registration_not_by_the_adapters_list_tools`：**设计 §3.1「只读入口的
   权威是已登记的适配器，不是登记表本身」的照片**——把 `FakeTool` 登记到它 `list_tools()` **不含**的 id
   （`"m"`）：`describe_tool("m")` **路由到适配器**，于是得到适配器自己的
   `Err(ProviderError::Unavailable("m"))`，包在 `ToolCallError::Provider` 里。
   **这条用例证明路由不查 `list_tools()`**——反序实现（先查 `list_tools` 再路由）在它上面会红。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** 本用例在实现里另写了一条
+  > `assert!(!matches!(routed, ToolCallError::Unregistered { .. }), "命中了登记的适配器，就不该报
+  > Unregistered——报了就说明路由查的是 list_tools()")`（`tests/registry_tools.rs`；
+  > **按用例名 + 断言内容找**）。**它是「蕴含型」，删**：紧挨在它前面的那条断的是
+  > `matches!(routed, ToolCallError::Provider(ProviderError::Unavailable(_)))`，而两个变体**枚举互斥**
+  > ——前一条成立即蕴含它。而它那句注释里点出的判别力（「反序实现会给 `Unregistered`」）
+  > **本来就落在前一条上**：反序变异下前一条先红。故它**不可能独立变红**，**协调者已另派删除**。
+  > **删后承重不变**：本用例余下的正是 `Provider(Unavailable(_))` 那条——它就是「路由不查
+  > `list_tools()`」这条性质的守卫。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -704,8 +742,26 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
   > 「**不构造它之后，我要钉的那个变异体还区分得出来吗**」**——把 X 拿掉如果让变异体**退化**
   > （两版在所有入参上给出同一结果），**那条守卫就等于没写**，而它在报告里仍会显示为绿。
   > 「为了让用例隔离，就不构造某样东西」是这类指令的常见形态，代价往往就落在变异体上。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「`matches!(…Unregistered { .. })`，**且不是 `Provider(..)`**」。
+  > **它是「蕴含型」，从计划里删掉**：`ToolCallError` 的 `Unregistered` 与 `Provider`
+  > **枚举互斥**，故前一条成立**即蕴含**它——它**不可能独立变红**，本该出声的输入
+  > （报成 `Provider`）已被前一条抢先红掉，而前一条的消息里已带 `{err:?}`。
+  > **落地现状**：Task 4 的实现者在派单下**已自行删掉**这一条（`tests/invoke_tool.rs` 里留了注记）。
+  > **计划必须跟着改**，否则后来者照计划又写回去。
+  > **删后承重不变**：本用例余下的是 `Unregistered` 那条断言与 `recorder.touches() == 0`
+  > ——「未命中臂改成别的结果」的变异**仍使前一条红**。
 - `the_adapter_failure_is_reported_as_provider`：适配器 `invoke` 返 `Err(ProviderError::Transport(..))` →
   `matches!(_, Err(ToolCallError::Provider(_)))`，**且不是 `Unregistered`**。
+
+  > **订正注记（2026-10-06，本计划扫同类 + 协调者裁定）。** **原话照留**：上面那半句
+  > 「**且不是 `Unregistered`**」——**它是「蕴含型」，删**：两个变体枚举互斥，前一条成立即蕴含它，
+  > 它不可能独立变红。**落地现状：代码里仍在**（`tests/invoke_tool.rs` 的该用例里那一条
+  > `!matches!(err, ToolCallError::Unregistered { .. })`；**按用例名 + 断言内容找，行号会漂**），
+  > **协调者已另派删除**。**删后承重不变**：余下的 `Provider(Transport(..))` 那条仍钉着
+  > 「适配器的失败原样经 `Provider` 透出」，`recorder.seen_tool_id() == Some(..)` 那条另钉
+  > 「这一条走的确实是适配器那条路」。
 - `the_adapter_is_handed_the_authorization_that_was_passed_in`：适配器侧读
   `call.authorization().tool_id()`，与 `auth.tool_id()` 相同——**证明路由用的 id 与被下传的授权是同一枚**，
   亦即「工具 id 只有一个来源」这条性质在**调用面**上的照片（设计 §7.5；Task 3 拍不到它，理由见 Task 3）。
@@ -807,7 +863,65 @@ git commit -m "feat(provider): invoke_tool——工具侧唯一受门禁的调�
   `Err(CapabilityError::UnknownTool { .. })`，**在 `invoke_tool` 之前**。
   断言里写明：这条路径上 `ProviderRegistry` 一次都没被碰过。
 
+  > **订正注记（2026-10-06，Task 5 独立评审 + 本计划的产物瑕疵）。** **原话照留**：上面那半句
+  > 「**断言里写明：这条路径上 `ProviderRegistry` 一次都没被碰过**」——**正是这一句生出了两条非守卫的断言**。
+  > 按它写出来的实现（评审前的版本）在第二向里放了 `RecordingTool` 与
+  > `assert_eq!(recorder.touches(), 0, …)`、`assert_eq!(recorder.seen_tool_id(), None, …)`。
+  > **这两条是「恒真型」**：`touches` / `seen_tool_id` 由**用例自身的控制流**决定——本用例在
+  > `authorize` 被拒之后**压根不发任何调用**，`register_tool` 也不碰适配器，故**没有任何被测代码的
+  > 变异能移动那个计数**。它在所有变异下都绿，**不是守卫**。**处置：删**（它该出声的输入不存在）。
+  > **删后承重不变**：第二向余下的是 `authorize` 报 `UnknownTool` 那一条——Step 3 的变异 2
+  > （把 `save_tool` 挪到 `authorize` 之前）**仍使它会红**，那个方向仍被钉住。
+  >
+  > **同一条判据下另删的一条（第一向）**：第一向的实现（评审前）另写了
+  > `assert!(!matches!(err, ToolCallError::Provider(_)), …)`。**它是「蕴含型」**：
+  > `ToolCallError` 的 `Unregistered` 与 `Provider` **枚举互斥**，故前一条
+  > `matches!(Unregistered { id } if id == "t1")` 成立**即蕴含**它——它**不可能独立变红**，
+  > 而它本该出声的输入（报成 `Provider`）已被前一条抢先红掉（前一条的消息里已带 `{err:?}`）。
+  > **处置同样：删**，且**不得靠调序**把它挪到前一条之前来「救活」——两条断言钉的是
+  > **同一个**变异集，不是互不相交的两个。**删后承重不变**：第一向余下 `authorize` 成功（`Ok`）
+  > 与 `Unregistered` 那条；Step 3 的变异 1（未命中臂改成别的结果）**仍使它会红**。
+  >
+  > **那条「惰性断言」据实标注（本计划自身的产物瑕疵，不删）**：本向的 `save_tool` 调用
+  > **对本用例的断言是惰性的**（只有它的 `.unwrap()` 会跑），且位于全部断言**之后**——
+  > 它存在只为让 Step 3 的变异 2 成为**字面意义的「挪」**（把这一句移到 `authorize` 之前）
+  > 而非「凭空插入」。**这是计划 Step 3 定下的产物，保留并据实标注**；它不是守卫，别当证据读。
+  >
+  > **保留的对照——同一条断言文本，一处是守卫、一处不是**：Task 4 的
+  > `an_unregistered_tool_is_not_called_at_all` 里有**同名**的 `recorder.touches() == 0`
+  > 断言，**那边是真守卫**：该用例登记了服务于**另一个 id** 的 `RecordingTool`，
+  > 「先逐个问遍所有适配器、再判未命中」的变异体会**碰它**而红。**差别只在位置上**——
+  > 那边有「会被碰到的适配器」，这边没有。
+
 两条用例是**同一条事实的两向**（设计 §3.3 代价三的表），故两条必须**同时存在**。
+
+> **统一判据（2026-10-06，Task 5 独立评审给出；本项目通用，比「绝对措辞须有用例」更具体）**：
+>
+> **一条断言是守卫，当且仅当在它实际所处的位置上，存在一个「被测代码」的变异使它会红。**
+>
+> **更利落的最终形式**（评审后来给的，比上面这句更准）：
+> 设同一条用例里断言 `B`，`A` 是**同体内排在 `B` 之前的全部断言**。
+> **`B` 是守卫 ⟺ 能举出一个具体的、仍能编译的变异体 `M`，使得在 `M` 下 `A` 仍通过、而 `B` 失败。**
+> **关键在「`M` 是否真的存在」，而不是「`M` 是否被这一轮跑过」**——举不出来的就是非守卫，
+> 哪怕这一轮没人去试；举得出来的就是守卫，哪怕它今天恰好没红。
+>
+> 两种形态同等处置，**都删**：
+> - **恒真型**：不存在这样的变异体（该断言由**用例自身的控制流**或**夹具的构造**决定，例如
+>   「本用例从不发某种调用」时去断言「那种调用没发生」）；
+> - **蕴含型**：变异体存在，但**同一体内在它之前的断言先红并蕴含它**（例如枚举两变体互斥时，
+>   先断 `matches!(A)` 再断 `!matches!(B)`）。
+>
+> **不许靠调序制造第二个落点**，除非两条断言钉的是**互不相交的变异集**。
+> **位置是判据的一部分**：同一条断言文本，在一处有「会被碰到的对象」时是守卫，在另一处没有时
+> 就不是——本节第一向/第二向与 Task 4 那条的对照即是它的证据。
+>
+> **反向的误用要一并防住——下面四条按本判据核过，是守卫，别顺手删**（协调者另列「别误删」清单）：
+> Task 4 `an_unregistered_tool_is_not_called_at_all` 的 `recorder.touches() == 0`（那边有**会被碰到的
+> 适配器**，「先逐个问遍所有适配器」的变异体会碰它）；Task 4
+> `the_adapter_failure_is_reported_as_provider` 的 `recorder.seen_tool_id() == Some(..)`；
+> Task 1 `registering_the_same_id_twice_is_rejected_as_duplicate` 的「**原条目不变**」（`Arc::ptr_eq`）
+> ——存在「**先插后判**」这一变异体使它**单独变红**（`Duplicate` 那条仍通过，而条目已被改写）；
+> Task 8 的 `the_guard_sees_the_source_tree`（那是守卫**自身**的正控制，防的是「什么都没读到也全绿」）。
 
 - [ ] **Step 2: 先写反的那一版，跑一次，确认两向都红**
 
@@ -967,6 +1081,13 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
   `invoke_tool` 得 `Ok(ToolResult { is_error: true, .. })`，**不是 `Err`**。
 - `a_provider_level_failure_is_err`：适配器返 provider 级失败 →
   `invoke_tool` 得 `Err(ToolCallError::Provider(_))`，**不是 `Ok(is_error: true)`**。
+
+  > **这两句「不是 …」是期望的措辞，不是第二条断言（2026-10-06，协调者裁定）。**
+  > 写成 `assert!` 就是**蕴含型**：`Ok(..)` 与 `Err(..)` 是对立的两支，前一条
+  > `matches!(Ok(ToolResult { is_error: true, .. }))` 成立即蕴含「不是 `Err`」，
+  > 反之亦然——**两者都不可能独立变红**。故**每个用例只写一条断言**，
+  > 用 `matches!` 把要钉的那一支与它的载荷一并断在**同一条**里（`is_error` 的真假即载荷）。
+  > 这条口径与 Task 5 Step 1 的「统一判据」段同源。
 
 **这两条不是等价变异体**，判据（纪律 1(b)）是「这两版在哪个入参上会给出不同结果」：
 把 `invoke` 的实现从 `Ok(ToolResult { is_error: true, .. })` 改成 `Err(Protocol)`（或反过来），
