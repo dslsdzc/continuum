@@ -1,0 +1,9 @@
+error[E0277]: the trait bound `TaskSkillRequirement: From<Vec<SkillDimension>>` is not satisfied
+  --> tests/compile_fail/a_requirement_cannot_be_built_by_conversion.rs:18:35
+   |
+18 |     let _: TaskSkillRequirement = vec![SkillDimension::Coding].into();
+   |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ---- required by a bound introduced by this call
+   |                                   |
+   |                                   the trait `From<Vec<SkillDimension>>` is not implemented for `TaskSkillRequirement`
+   |
+   = note: required for `Vec<SkillDimension>` to implement `Into<TaskSkillRequirement>`

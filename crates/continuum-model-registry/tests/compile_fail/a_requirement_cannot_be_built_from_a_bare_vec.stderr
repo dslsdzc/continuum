@@ -1,0 +1,7 @@
+error[E0451]: field `dimensions` of struct `TaskSkillRequirement` is private
+  --> tests/compile_fail/a_requirement_cannot_be_built_from_a_bare_vec.rs:19:9
+   |
+18 |     let _ = TaskSkillRequirement {
+   |             -------------------- in this type
+19 |         dimensions: vec![SkillDimension::Coding],
+   |         ^^^^^^^^^^ private field

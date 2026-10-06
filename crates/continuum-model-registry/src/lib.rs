@@ -27,17 +27,20 @@
 //! （[`LifecycleError::ProfileBeforeVerified`]）；Task 8 补 `model_skill_score` 一表的行级读写
 //! （[`save_skill_observation`] / [`load_skill_vector`] / [`load_skill_series`]），并让
 //! [`load_profile`] **组合** [`load_skill_vector`] 填上画像的第十二个字段——三张表的行级读写
-//! 至此齐了；Task 9 补 §333 的只读预算投影 [`BudgetView`]（[`budget`]）。
-//! 路由与阶梯各自在后续 task 落在自己的模块里。
+//! 至此齐了；Task 9 补 §333 的只读预算投影 [`BudgetView`]（[`budget`]）；
+//! Task 10 补 §250 的**请求面**——非空需求 [`TaskSkillRequirement`]、
+//! family 偏好 [`FamilyPreference`] 与请求 [`RoutingRequest`]（[`router`]）。
+//! 候选集、输出与排序策略在 Task 11，阶梯在后续 task，各自落在自己的模块里。
 
 pub mod budget;
 pub mod error;
 pub mod lifecycle;
 pub mod persist;
 pub mod profile;
+pub mod router;
 
 pub use budget::BudgetView;
-pub use error::{LifecycleError, ProfileError, RoutingError};
+pub use error::{LifecycleError, ProfileError, RequirementError, RoutingError};
 pub use lifecycle::{transition, LifecycleState, RoutableModel, RoutableState};
 pub use persist::{
     load_lifecycle, load_profile, load_skill_series, load_skill_vector, p3d_model_migrations,
@@ -47,3 +50,4 @@ pub use profile::{
     current_observation, ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore,
     SkillVector,
 };
+pub use router::{FamilyPreference, RoutingRequest, TaskSkillRequirement};

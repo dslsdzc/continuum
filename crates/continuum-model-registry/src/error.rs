@@ -139,3 +139,39 @@ pub enum RoutingError {
     #[error("状态 {state:?} 不可进入自动路由路径（§249 的三态 ＋ 已裁的 stale）")]
     NotRoutable { state: LifecycleState },
 }
+
+/// 需求侧的构造错误（设计 §5.1 的「空需求」一段）。
+///
+/// # 为什么单独一枚，而不并进 [`RoutingError`]
+///
+/// 判据与 [`ProfileError`] 一致：**产生方不同**。[`RoutingError`] 标的是「这次路由请求不合法」，
+/// 产生方全在 `rank` 的调用栈里；这一枚标的是「这个**值**根本不是合法取值」，
+/// 产生方是 [`crate::router::TaskSkillRequirement::try_new`]，**在请求被装配之前**。
+/// 调用方对两者的处置不同：前者要改请求的组装，后者要问「这个任务为什么没有能力需求」。
+///
+/// **它不进 [`RoutingError`]**（设计 §5.4 明写不收 `Requirement(#[from] RequirementError)`）：
+/// `RoutingRequest` 装的是一个**已构造的** `TaskSkillRequirement`，故「空需求」这条路径
+/// **到不了 `rank`**——收了它，`RoutingError` 里就多一枚永远产不出的变体，
+/// 而唯一的产生方在别处。本仓对「没有产生方的变体」的处置是删或写明理由。
+///
+/// # 只有一枚变体
+///
+/// 设计 §5.1 只给了 `RequirementEmpty`。**非空是唯一的构造约束**——本设计**不带权重、
+/// 不带阈值**（两者都是规范没有的数，加了就是发明），故没有第二个失败来源
+/// （「没有产生方的变体不先铺开」，与 [`LifecycleError`] 同一条纪律）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum RequirementError {
+    /// 一个需求维度都没有。
+    ///
+    /// **不做成默认值、不规定「空需求时 `compatibility = 1.0`」**：`compatibility = matched / required`
+    /// 在 `required` 为空时是 `0/0`，而 `CandidateScore.compatibility: Ratio` **拒 NaN**、
+    /// `evaluate` **不返回 `Result`**——实现者只剩 panic 或编一个值两条路，**两条都能过其余全套用例**。
+    /// 而「一次不需要任何能力的任务」是不是一个合法任务，规范**没有说**；
+    /// 类型层拒掉它比替它选一个数诚实（设计 §5.1 末段）。
+    ///
+    /// **具体是哪一种 `Err`，有用例**（`crates/continuum-model-registry/tests/router.rs` 的
+    /// `an_empty_requirement_is_rejected`）——只断言「返回了 Err」的话，
+    /// 把这枚换掉不会有任何用例变红。
+    #[error("需求维度集合为空：一次路由请求至少要有一个 §248 维度")]
+    RequirementEmpty,
+}

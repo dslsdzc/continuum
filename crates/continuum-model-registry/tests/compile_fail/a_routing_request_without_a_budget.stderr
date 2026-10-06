@@ -1,0 +1,5 @@
+error[E0063]: missing field `budget` in initializer of `RoutingRequest`
+  --> tests/compile_fail/a_routing_request_without_a_budget.rs:25:5
+   |
+25 |     RoutingRequest {
+   |     ^^^^^^^^^^^^^^ missing `budget`
