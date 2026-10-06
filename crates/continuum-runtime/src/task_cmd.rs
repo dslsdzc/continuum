@@ -16,7 +16,7 @@
 //! 6. 按命令的退出形态写终态：退出码 0 → `COMMITTED`，非 0 → `FAILED`
 //!    （[`finish_declared_effects`]）；
 //! 7. **命令成功且给了 `--apply`**：按第 4 步那次裁决决定是否铸造批准值
-//!    （[`crate::tool_call::mints`]）→ 经 Gate 应用。**这一支不清理工作区**（见下）；
+//!    （[`continuum_runtime::tool_call::mints`]）→ 经 Gate 应用。**这一支不清理工作区**（见下）；
 //! 8. **未给 `--apply`，或命令退出码非 0**：`discard_task_workspace` 成功之后再
 //!    `remove_workspace`，失败则不删记录。
 //!
@@ -31,14 +31,15 @@
 //!
 //! P2 那条裁定（见上文「策略只查一次」）的对象是**集成**的裁决：`--apply` 那一支第 7 步
 //! 复用第 4 步的那一次，上下文里 `effect_type` 缺省。**本处是逐条效应的裁决**，上下文里
-//! `effect_type` 填着这一条效应的类型（[`crate::tool_call::policy_context_for_effect`]）。两者问的不是同一
+//! `effect_type` 填着这一条效应的类型（`policy_context_for_effect`）。两者问的不是同一
 //! 件事——「这次集成准不准」对「这条效应准不准」——两处各自裁一次、互不复用同一个
 //! [`Decision`]。**策略表只从库里读一次**（第 4 步那一读），两个问题用同一张表各裁一次；
 //! 「只查一次」要防的是同一个裁决有两个产生点，不是同一张表被问两个问题。
 //!
 //! ## 裁决到「铸不铸」的映射只有一个产生点
 //!
-//! 三个臂（`Allow` / `RequireApproval` / `Deny`）的判定**复用** [`crate::tool_call::mints`]——那张六格表的
+//! 三个臂（`Allow` / `RequireApproval` / `Deny`）的判定**复用**
+//! [`continuum_runtime::tool_call::mints`]——那张六格表的
 //! 唯一落点。本处**不重写**它，也不引入 `Verdict` / `Grant` 之类的中间裁决类型
 //! （Task 2 已按「签发点不重判」删除它们）：映射的产物就是「铸出的一枚
 //! [`Capability`](continuum_capability::Capability)，或一次拒绝」。
@@ -461,8 +462,8 @@ fn effect_key(intent: &IntentId, spec: &EffectSpec) -> String {
 ///
 /// **生产代码**不读回、不校验本字段（测试会读它，以钉住写入的内容与格式）。它是留给
 /// 对账与审计的记录，不是一道强制。**本字段记的仍是集成那次裁决**
-/// （[`crate::tool_call::policy_context`]，`effect_type` 缺省），与强制点 (2) 逐条效应的
-/// 裁决（[`crate::tool_call::policy_context_for_effect`]，`effect_type` 已填）是两个问题、
+/// （[`continuum_runtime::tool_call::policy_context`]，`effect_type` 缺省），与强制点 (2)
+/// 逐条效应的裁决（`policy_context_for_effect`，`effect_type` 已填）是两个问题、
 /// 两处各裁一次。**P3 起驱动确实有了 Capability 的输入**（强制点 (2) 已接上，见模块
 /// 文档），但那条路径**不读回本字段**、也不靠它——本字段本身仍不被任何生产代码校验。
 /// 校验属 Capability（P3）与 Authority（长期）的职责，其中 Capability 那一半落在

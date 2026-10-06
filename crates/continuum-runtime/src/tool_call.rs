@@ -5,7 +5,7 @@
 //! 1. **时钟**（[`now_millis`]）与**能力寿命**（[`CAPABILITY_LIFETIME_MS`]）；
 //! 2. **强制点 (2) 的铸币判定**（[`mint_declared_effects`]）；
 //! 3. 它带过来的那几个判定小件（[`explicit_current_rule`] / [`arbitrate`] / [`mints`] /
-//!    [`decision_name`] / [`policy_context`] / [`policy_context_for_effect`]）。
+//!    [`decision_name`] / [`policy_context`] / `policy_context_for_effect`）。
 //!
 //! # 为什么整批搬进 lib
 //!
@@ -190,7 +190,7 @@ pub fn decision_name(decision: Decision) -> &'static str {
 /// 值——编出来的值会让引用它的规则开始匹配，那正是第 5.6 节点名的变更风险。
 ///
 /// **这是集成那次裁决的上下文**（第 4 步的 `decision`，第 7 步复用），`effect_type` 缺省。
-/// 逐条效应那次用 [`policy_context_for_effect`]——两者问的不是同一件事，见 `task_cmd` 的
+/// 逐条效应那次用 `policy_context_for_effect`——两者问的不是同一件事，见 `task_cmd` 的
 /// 模块文档「与『策略只查一次』不冲突」。
 pub fn policy_context(approved: bool) -> PolicyContext {
     PolicyContext {
@@ -207,7 +207,19 @@ pub fn policy_context(approved: bool) -> PolicyContext {
 ///
 /// 这个字段可观察：一条按 `{"fact":"effect_type","eq":"charge"}` 限定的规则只在
 /// `--effect` 为 `charge` 时成立，而集成那次裁决（`effect_type` 缺省）不会被它匹配。
-pub fn policy_context_for_effect(approved: bool, effect_type: EffectType) -> PolicyContext {
+///
+/// # 只对 crate 内公开（`pub(crate)`，不是 `pub`）
+///
+/// 本模块的公开面里其余几个判定小件都必须是 `pub`（bin 的生产代码或 bin 的用例在调它们，
+/// 而 bin 是另一个 crate），**本函数是唯一例外**：`grep` 全量 bin 侧调用点，它只出现在
+/// `task_cmd.rs` 的两条**文档注释**里，没有任何代码取用它——lib 内唯一的调用者是
+/// [`mint_declared_effects`]。故它收窄到 `pub(crate)`，那个用例零成本。
+///
+/// 收窄的连带面：`mint_declared_effects` 与 [`policy_context`] 的文档原先以
+/// `[`policy_context_for_effect`]` 链接它，而公开项的文档链到私有项会触发
+/// `rustdoc::private_intra_doc_links`——那两处已按本仓处理 rustdoc 警告的既有办法
+/// **降级为代码跨度**（名字仍是同一个，只是不再是链接）。
+pub(crate) fn policy_context_for_effect(approved: bool, effect_type: EffectType) -> PolicyContext {
     PolicyContext {
         explicit_current: approved.then_some(ExplicitApproval),
         effect_type: Some(effect_type),
@@ -226,7 +238,7 @@ pub fn policy_context_for_effect(approved: bool, effect_type: EffectType) -> Pol
 ///
 /// # 逐条效应各问一次策略
 ///
-/// 每条声明用**它自己**的 [`policy_context_for_effect`]（`effect_type` 已填）裁决一次；
+/// 每条声明用**它自己**的 `policy_context_for_effect`（`effect_type` 已填）裁决一次；
 /// 「铸不铸」复用 [`mints`]（六格表唯一的落点，见其文档），**不重写**。铸得出就用
 /// [`CapabilityKind::for_effect`] 取 kind、以该效应的**目标**为作用域铸一枚能力
 /// （§253 的 `git.push:origin/main` 即此形），并配成 [`AuthorizedEffect`]。
