@@ -60,10 +60,8 @@
 //! 故「全序」这件事仍由本层的那四档负责。**两处选择写在该类型的文档里**：家族由 `provider` 判
 //! （§19 未给判据），以及被否掉的两个打分法。
 //!
-//! **§249 的状态不是基线的输入**：它住在 [`ExecutionCandidate::state`]（§5.2 的顶层字段），
-//! **不进 `reason`**——同一个事实在两个落点是本项目一贯判为缺陷的那一类（设计 §5.3 的订正注记）。
-//! §4.2 的「**可见但不禁**」因此分两半兑现：**可见** = [`ExecutionCandidate::state`] 这个访问器
-//! 读得到；**不禁** = 基线**不据它改序**（§11 第 24 条未给降权判据）。
+//! **§249 的状态不是基线的输入**，而 §4.2 的「可见但不禁」怎么分两半兑现、
+//! 以及完整的不读清单，都写在 [`BaselineRankingPolicy`] 的类型文档里（**此处不重述**）。
 
 use std::cmp::Ordering;
 
@@ -622,8 +620,15 @@ fn family_relation(family: &FamilyPreference, provider: &str) -> FamilyRelation 
 /// - `reason` 记 `matched` / `missing` / family（[`FamilyRelation`] 字段）**三样**——
 ///   **不含 state**（见下）。
 ///
-/// **不读**：`score` 的数值、`cost_profile` / `latency_profile`、`failure_modes`
-/// （它们都还没有可用的判据）。它**也不读 `budget`**（见下）。
+/// **不读**：`score` 的数值——照片是 `tests/router.rs` 的
+/// `changing_a_score_value_does_not_change_the_order`（只改数值不改有无，排序不变）；
+/// `ModelProfile` 的 `cost_profile` / `latency_profile` / `failure_modes` **本策略不使用**——
+/// 三者的量纲／词表规范未给（设计 §11 第 8 / 9 条、§333），**判据不在本层**。
+/// 它**也不读 `budget`**（见下）。
+///
+/// 「不使用」与「不读」是两句话，**别混**：前者是**关于规范的说法**（没有判据可用，故不需要照片），
+/// 后者是**关于实现的否定**——按本仓规矩，一句否定要么有「读它就会红」的用例，要么改成
+/// 「为什么不用」。故上面三条写成「不使用」而不是「不读」。
 ///
 /// # §249 的状态**不是**基线的输入——「可见但不禁」分两半兑现
 ///
