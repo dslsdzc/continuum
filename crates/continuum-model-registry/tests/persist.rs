@@ -1310,6 +1310,209 @@ fn the_cost_and_latency_columns_distinguish_absent_from_registered() {
     tx.commit().unwrap();
 }
 
+/// 列表列是**表外取值**（不是 JSON 字符串数组）→ `load_profile` 报**具体** `Err`，**不取默认值**。
+///
+/// # 三个列表列各一条，且**分属两个解码函数**
+///
+/// `modalities` / `failure_modes` 走 [`decode_string_list`]，`tools` 走 [`decode_tool_ids`]
+/// ——**这不是一条分支能代表的一类**：前者收 `Vec<String>`，后者收 `Vec<String>` 再逐个
+/// `ToolId::new`。三条各钉一次，故两个函数各自的「容器坏了即报错」都有照片。
+///
+/// # 不取默认值的判据
+///
+/// 把坏容器静默换成空列表，会让「这个模型没有登记任何模态」与「这一列的内容是垃圾」
+/// 在库里长得一样（与 `Ratio::parse` 给 `None` 同一条理由）。
+///
+/// 红的条件：任一解码函数改成 `unwrap_or_default()`（吞掉容器错误）即红。
+#[test]
+fn a_list_column_that_is_not_a_json_string_array_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    register_model(&tx, &id("model-a")).unwrap();
+    seed_profile_row(&tx, "model-a");
+
+    // 三条各错一个列：非 JSON（`modalities`）、JSON 但不是数组（`tools`）、
+    // 是数组但元素不是字符串（`failure_modes`）。
+    //
+    // **每条只留一个列坏、其余先写回合法值**：`row_to_profile` 按列序解码，前一个列坏着的话
+    // 后面那条会先撞上前一个列的错误，断言就点不到本条要验的那个列。
+    for (column, raw, legal) in [
+        ("modalities", "not-json", MODALITIES),
+        ("tools", r#"{"a":1}"#, TOOLS),
+        ("failure_modes", "[1,2]", FAILURE_MODES),
+    ] {
+        tx.execute(
+            &format!("UPDATE model_profile SET {column} = ?1 WHERE id = ?2"),
+            &[Value::text(raw), Value::text("model-a")],
+        )
+        .unwrap();
+
+        match load_profile(&tx, &id("model-a")) {
+            Err(PersistError::Database(m)) => assert!(
+                m.contains(column) && m.contains("不是字符串数组") && m.contains(raw),
+                "{column} 的容器坏掉时应点名该列与该串，实际 {m}"
+            ),
+            Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+            Ok(read) => panic!(
+                "{column} = {raw:?} 应被拒，实际读回成功（is_some={}）",
+                read.is_some()
+            ),
+        }
+
+        tx.execute(
+            &format!("UPDATE model_profile SET {column} = ?1 WHERE id = ?2"),
+            &[Value::text(legal), Value::text("model-a")],
+        )
+        .unwrap();
+    }
+
+    // 对照臂：三个列写回合法容器后读得到——挡住的是那三个取值，不是这一行。
+    tx.execute(
+        "UPDATE model_profile SET modalities = ?1, tools = ?2, failure_modes = ?3 WHERE id = ?4",
+        &[
+            Value::text(MODALITIES),
+            Value::text(TOOLS),
+            Value::text(FAILURE_MODES),
+            Value::text("model-a"),
+        ],
+    )
+    .unwrap();
+    assert!(
+        load_profile(&tx, &id("model-a")).unwrap().is_some(),
+        "对照臂：三个列都合法时应读得到"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// `cost_profile` / `latency_profile` 是**表外字面量** → `load_profile` 报**具体** `Err`，**不取默认值**。
+///
+/// # 这一条与 `confidence` 那一条**共用同一个转换点**
+///
+/// 三列都经 [`decode_literal`]（`type_name` 与 `parse` 是参数）。**据实写明**：这两条用例钉的是
+/// **两个不同的 `parse` 闭包**（`Cost::parse` / `Latency::parse` 只认空串），不是两条独立分支——
+/// 把 `decode_literal` 的 `.ok_or_else` 改成取默认值，两条用例会**一起**红。
+/// 故「四类表外取值互不相同」这句在代码分支上只说对了两类：**列表列那类**与**其余三类**。
+///
+/// 红的条件：`Cost::parse` / `Latency::parse` 被放宽成「什么都收」即红
+/// （如 `|_| Some(Cost)`）——那会让「已登记」与「登记了个表外串」在库里长得一样。
+#[test]
+fn a_cost_or_latency_column_that_is_not_the_presence_literal_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    register_model(&tx, &id("model-a")).unwrap();
+    seed_profile_row(&tx, "model-a");
+
+    for (column, type_name, raw) in [
+        ("cost_profile", "Cost", "default"),
+        ("latency_profile", "Latency", "1ms"),
+    ] {
+        tx.execute(
+            &format!("UPDATE model_profile SET {column} = ?1 WHERE id = ?2"),
+            &[Value::text(raw), Value::text("model-a")],
+        )
+        .unwrap();
+
+        match load_profile(&tx, &id("model-a")) {
+            Err(PersistError::Database(m)) => assert!(
+                m.contains(&format!("未知 {type_name}")) && m.contains(raw),
+                "{column} 的表外字面量应报「未知 {type_name}: {raw}」，实际 {m}"
+            ),
+            Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+            Ok(read) => panic!(
+                "{column} = {raw:?} 应被拒，实际读回成功（is_some={}）",
+                read.is_some()
+            ),
+        }
+
+        // 写回合法值再进下一轮：`cost_profile` 在 `latency_profile` 之前解码，
+        // 留着上一轮那个坏值会让第二条断言先撞上第一条的错误。
+        tx.execute(
+            &format!("UPDATE model_profile SET {column} = ?1 WHERE id = ?2"),
+            &[Value::text(""), Value::text("model-a")],
+        )
+        .unwrap();
+    }
+
+    // 对照臂：两列写回**唯一合法的那个字面量**（空串）后读得到。
+    tx.execute(
+        "UPDATE model_profile SET cost_profile = ?1, latency_profile = ?2 WHERE id = ?3",
+        &[
+            Value::text(""),
+            Value::text(""),
+            Value::text("model-a"),
+        ],
+    )
+    .unwrap();
+    let read = load_profile(&tx, &id("model-a")).unwrap().expect("应读得到");
+    assert_eq!(read.cost_profile(), Some(Cost), "对照臂：空串解出 `Some(Cost)`");
+    assert_eq!(
+        read.latency_profile(),
+        Some(Latency),
+        "对照臂：空串解出 `Some(Latency)`"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// `evidence_count` 是**负数** → `load_profile` 报**具体** `Err`，**不取默认值**。
+///
+/// 列声明成 `INTEGER NOT NULL`，SQLite 不禁止负整数，故这一格构得出（裸 SQL 写 `-1`）；
+/// 而 §247 的 `evidence_count` 是**证据条数**，负数不是条数。把负值折算成 0 或绝对值，
+/// 就是替规范发明一个它没给的处置（同「不取默认值」这条一贯判据）。
+///
+/// 红的条件：`u64::try_from` 换成 `unwrap_or(0)` / `max(0)` 即红。
+#[test]
+fn a_negative_evidence_count_in_the_column_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    register_model(&tx, &id("model-a")).unwrap();
+    seed_profile_row(&tx, "model-a");
+
+    // 两个负值各一条：`-1` 与 `i64::MIN`（后者是「取绝对值」这类处置会溢出的那一格）。
+    for raw in [-1_i64, i64::MIN] {
+        tx.execute(
+            "UPDATE model_profile SET evidence_count = ?1 WHERE id = ?2",
+            &[Value::Int(raw), Value::text("model-a")],
+        )
+        .unwrap();
+
+        match load_profile(&tx, &id("model-a")) {
+            Err(PersistError::Database(m)) => assert!(
+                m.contains("evidence_count 是负数") && m.contains(&raw.to_string()),
+                "负的 evidence_count 应点名该值，实际 {m}"
+            ),
+            Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+            Ok(read) => panic!(
+                "evidence_count = {raw} 应被拒，实际读回成功（is_some={}）",
+                read.is_some()
+            ),
+        }
+    }
+
+    // 对照臂：写回 `0` 与 `42` 都读得到——零条证据是合法条数。
+    for raw in [0_i64, 42] {
+        tx.execute(
+            "UPDATE model_profile SET evidence_count = ?1 WHERE id = ?2",
+            &[Value::Int(raw), Value::text("model-a")],
+        )
+        .unwrap();
+        assert_eq!(
+            load_profile(&tx, &id("model-a"))
+                .unwrap()
+                .expect("应读得到")
+                .evidence_count(),
+            raw as u64,
+            "对照臂：{raw} 是合法条数"
+        );
+    }
+
+    tx.commit().unwrap();
+}
+
 /// 登记项的行数（`registering_the_same_id_twice…` 与 `a_transition_on_an_unknown_model…`
 /// 用它断言「不得新增行」）。
 fn count_registry(tx: &Tx<'_>) -> i64 {

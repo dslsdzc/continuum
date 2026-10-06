@@ -288,15 +288,21 @@ pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), Lifecycle
 /// 按 id 读一份画像。**没有这一行返回 `Ok(None)`**，不是 `Err`（同 [`load_lifecycle`]；
 /// 设计 §2.1 把这条反例定为「画像必须来自库」的照片）。
 ///
-/// # 读回来的画像里 `skill_vector` 是**空的**
+/// # 读回来的画像里 `skill_vector` **今天**是空的
 ///
 /// 不是默认值，也不是本函数漏读一列：`skill_vector` 根本不在 `model_profile` 表里
-/// （见 [`save_profile`] 末节）。它由 `load_skill_vector` 单独装载（后续 task），
-/// 消费方把两份合起来用。**本函数不替它拼**——拼一次就等于有第二个「画像从哪来」的路径，
-/// 而那正是设计 §2.1 要掐掉的东西。故 `try_new` 收到的是
+/// （见 [`save_profile`] 末节）。它的装载者是 `load_skill_vector`（`model_skill_score` 表的
+/// **唯一**装载者，Task 8 交付），本 task 里那个函数还不存在，故 `try_new` 收到的是
 /// [`SkillVector::from_current`] 的空向量（九维全 `None`，即「尚无观测」——`None` 不是 0）。
 ///
-/// # 表外取值一律具体 `Err`
+/// **协调者已裁（2026-10-06，见计划 `## 遗留` 的「load_profile 的 skill_vector」条）**：
+/// Task 8 交付 `load_skill_vector` 时**一并让本函数调它来填这个字段**，故本函数读回的画像
+/// 到那时十二个字段齐全。**「组合」不等于「第二个装载者」**：查 `model_skill_score` 的只有
+/// `load_skill_vector` 一个，本函数只是把它的结果放进画像。
+/// **本 task 不预先铺这条通路**（`load_skill_vector` 还不存在），也**不要**在这里自己写一遍
+/// 那张表的查询——那是把唯一装载者拆成两个。
+///
+/// # 表外取值一律具体 `Err`（四类，逐类有照片）
 ///
 /// 四类表外取值**逐条转成具体 `Err`，不取默认值**——把表外串猜成某一枚会成为第二份表示
 /// （同 `LifecycleState::parse` 的理由）：(a) 三个列表列不是 JSON 字符串数组、
@@ -304,11 +310,16 @@ pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), Lifecycle
 /// (c) `confidence` 不是 `[0,1]` 内的十进制串（[`Ratio::parse`] 给 `None`）、
 /// (d) `evidence_count` 是负数。非文本的列值另报 [`PersistError::ColumnType`]。
 ///
-/// **照片只覆盖 (c)**：`tests/persist.rs` 的 `an_out_of_range_confidence_in_the_column_is_rejected`
-/// 三个入参逐条钉住。**(a) / (b) / (d) 三类的照片本 task 没有**——本 task 的用例清单由计划钉死
-/// （只列了 confidence 那一类），而这三类的转出点分别是 [`decode_string_list`] / [`decode_tool_ids`]、
-/// [`decode_literal`]、`u64::try_from`，与 (c) 同形；**据实写在这里，别把「注释写了」读成「已覆盖」**。
-/// 若要补，代价是一次裸 SQL 更新那一列＋一条 `match Err(PersistError::Database(..))`。
+/// 照片：`tests/persist.rs` 的 `a_list_column_that_is_not_a_json_string_array_is_rejected`（a）、
+/// `a_cost_or_latency_column_that_is_not_the_presence_literal_is_rejected`（b）、
+/// `an_out_of_range_confidence_in_the_column_is_rejected`（c）、
+/// `a_negative_evidence_count_in_the_column_is_rejected`（d）。
+///
+/// **但「四类」是按出错形状分的，不是按代码分支分的**——据实写在下面，
+/// 免得把「四条用例」读成「四条互不相同的守卫」：
+/// (b) 与 (c) **共用同一个转换点** [`decode_literal`]（`type_name` 与 `parse` 是参数），
+/// 把那里的 `.ok_or_else` 改成取默认值，两条用例**一起**红；(a) 与 (d) 各自独占一个转换点
+/// （[`decode_string_list`] / [`decode_tool_ids`]，以及 `u64::try_from`）。故**代码分支只有三处**。
 pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError> {
     let rows = tx.query(
         &format!("SELECT {PROFILE_COLUMNS} FROM model_profile WHERE id = ?1"),
