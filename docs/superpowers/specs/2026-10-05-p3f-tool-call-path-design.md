@@ -104,7 +104,10 @@
   与 `EffectType::parse` 同一条判据）。
 - `--effect <类型>:<目标>`（可零次、可多次）：**这条工具调用计划施加的外部效应**。与命令路径同一个
   `EffectSpec::parse`（`cli.rs:145`），不在本子项目另立一套声明语法。
-- `--intent`（可选，只一次）：效应幂等键的第一段（`task_cmd.rs:512` 的 `effect_key`）。
+- `--intent`（可选，只一次）：效应幂等键的第一段（`effect_key`，**锚点用函数名**）。
+  **订正（2026-10-07）**：原稿在此引 `task_cmd.rs:512`——该函数随 F 的 Task 3 **搬进 lib 的
+  `tool_call`**（工具路径的调用点在 lib、定义在 bin，前者调不到后者）；且**实测**它在搬家前的树上
+  （**`dfefb54^`**）位于 `task_cmd.rs:446`，`:512` 这个读数对不上。
 - `--approve`（可选，开关）：与命令路径同一个含义（第 2 级显式确认，`task_cmd.rs:728` 的
   `explicit_current_rule`）。
 - **不接受** `--base` / `--exec` / `--apply` / `--sandbox`：解析期一律 `UnknownOption`
@@ -231,8 +234,24 @@ fn mint_declared_effects(
   来历留此**（plan-f 第 1 条）。
 - **`Cargo.toml` 并非「不动」**（plan-f 第 8 条）：库级夹具要实现 `#[async_trait]` 的 `ToolProvider`，
   故 `continuum-runtime` 需要 **`async-trait` 的 dev 边**。它是**外部 crate**，
-  故 `ALLOWED`（内部边表）与 `Cargo.lock` 都不受影响——**「不新增任何 crate 边」这句话的射程是
+  故 `ALLOWED`（内部边表）不受影响——**「不新增任何 crate 边」这句话的射程是
   `ALLOWED` 那张内部边表，不是 `Cargo.toml` 的全部**（§10.1 据此加限定）。
+  **订正（2026-10-07，回灌 F Task 3 的实测）**：本行原写「`ALLOWED`（内部边表）与 **`Cargo.lock`**
+  都不受影响」。**`Cargo.lock` 那一半是假的**——dev 边同样写进锁文件（`[[package]] continuum-runtime`
+  的 `dependencies` 多一行 `"async-trait"`）；**实测** Task 3 的提交 `dfefb54` 对 `Cargo.lock` 的改动
+  为 **`1 +`**。**旧话留此**，免得后来者照它断言「锁不变」。
+- **随搬家一并进 lib 的判定小件，以及本设计里引它们的行号（2026-10-07 据实测补记）**：
+  把共享函数搬进 lib **不止搬它自己**——它的**函数体**要调 `arbitrate` / `mints` / `decision_name` /
+  `policy_context`（逐条效应那次用 `policy_context_for_effect`），而 bin 的 `task_cmd.rs` 仍在调
+  `arbitrate` / `policy_context` / `mints` / `decision_name` / `explicit_current_rule`。**函数体在 lib、
+  调用方分处两个 crate** ⇒ 这些定义必须跟着进 lib 并取 **`pub`**（bin 看不见 `pub(crate)`；唯一例外是
+  `policy_context_for_effect`，bin 侧只在注释里提它，收窄为 `pub(crate)`）。**这是「行为不变」的必要条件，
+  不是新增 API**（实现计划 Task 2 的 Produces 已记）。
+  **由此，本设计里凡引 `task_cmd.rs:` 来定位 `mint` / `mints` / `arbitrate` / `policy_context` /
+  `policy_context_for_effect` / `explicit_current_rule` 的，都是「搬家前」的读数**（§2.1 的 `:728`、
+  §2.2 的 `:814`、§3.2 段内的 `:459-463`、§4.3 的 `:459-463`、§5.1 的 `:459`、§5.3 的 `:563`、
+  §8.1 的 `:459-463`），**引用时以函数名为锚**；本文档不逐一改写这些历史读数，记此以免后来者照着
+  去 `task_cmd.rs` 里找它们。
 
 **由此得到一条「承重」性质**（原稿即有，现在才真的成立）：步骤 4 与 5 用**同一个事务**，一次 `commit`。
 故「工具已获准」的审计行与「效应已在执行」的 `EXECUTING` 行**要么都在、要么都不在**：不存在
@@ -678,10 +697,16 @@ F 只负责**把整枚 `AuthorizedTool` 放进构造处**。故本节的措辞�
 `Effect` 记录体（§267，`crates/continuum-effect/src/effect.rs`）＋ `PLANNED → AUTHORIZED → EXECUTING`
 → `COMMITTED` / `FAILED`（§269）。
 
-- **`id` 与 `idempotency_key` 同源**：复用 `effect_key(intent, spec)`（`task_cmd.rs:512`），
-  **不在本路径另派一次**（理由与 `task_cmd.rs:499-504` 逐字相同：不给「这条记录是谁」立第二个来源）。
+- **`id` 与 `idempotency_key` 同源**：复用 `effect_key(intent, spec)`（**锚点用函数名**），
+  **不在本路径另派一次**（理由与 `effect_key` 自己文档里那条逐字相同：不给「这条记录是谁」立第二个来源）。
+  **订正（2026-10-07，回灌 F Task 3 的实测）**：原稿在此引 `task_cmd.rs:512`（以及 `:499-504` 的
+  文档）。**该函数与它的文档、单元用例随 F 的 Task 3 一并搬进 lib 的 `tool_call`**——本路径在 lib、
+  定义在 bin 时前者调不到后者，就地再写一份就是同一件事两个产生点；`task_cmd.rs` 改为 `use` 它。
+  故**锚点用函数名**，不再引 bin 的行号（`dfefb54^` 上它在 `task_cmd.rs:446`）。
 - **`authorization` 字段**：复用同一编码形状 `approve=<bool>;policy=<裁决名>`
-  （`authorization_field`，`task_cmd.rs:537`），但**填的是这条效应自己的那次裁决**——即 §3.2 那个共享
+  （`authorization_field`，**锚点用函数名**；**订正 2026-10-07**：原稿引 `task_cmd.rs:537`，该函数与
+  `effect_key` 同批搬进 lib 的 `tool_call`，见上一条——`dfefb54^` 上它在 `task_cmd.rs:472`），
+  但**填的是这条效应自己的那次裁决**——即 §3.2 那个共享
   函数**成对返回**的 `Decision`（`(AuthorizedEffect, Decision)` 的后一项），而不是像 `task` 那样填集成
   那次裁决：**工具调用没有集成裁决这一回事**，凭空造一次（`effect_type` 缺省的裁决）就是一次没有意义
   的判定。**它也不是本路径第二次 `arbitrate` 出来的**——那正是 §5.1 禁止的第二个判定点；
@@ -768,7 +793,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | 编号 | 验什么 | 怎么验 |
 |---|---|---|
 | P-1 | 铸不出能力 ⇒ **工具一次都没被调用**、零效应行、零审计 | 空策略表；夹具适配器断言调用次数为 0；读 `effect` 与 `audit_log` 行数 |
-| P-2 | 幂等键已存在 ⇒ 拒整条、零新行；**且第一条调用的记录里读得回它给的 `--intent`** | 先跑一次成功调用（带 `--intent i1`），再跑同一条声明；**读回第一条的 `effect.idempotency_key`，断言它带有长度前缀 `<意图字节长>:<意图>:` 且该段就是 `i1`**（键形见 `task_cmd.rs:512-520`）。**这一读是 §2.2 那条「`--intent` 可观察」的照片**：没有它，「条件必填」的理由就只是一句话 |
+| P-2 | 幂等键已存在 ⇒ 拒整条、零新行；**且第一条调用的记录里读得回它给的 `--intent`** | 先跑一次成功调用（带 `--intent i1`），再跑同一条声明；**读回第一条的 `effect.idempotency_key`，断言它带有长度前缀 `<意图字节长>:<意图>:` 且该段就是 `i1`**（键形见 `effect_key`；原稿引 `task_cmd.rs:512-520`，该函数随 F 的 Task 3 搬进 lib 的 `tool_call`，见 §7.2）。**这一读是 §2.2 那条「`--intent` 可观察」的照片**：没有它，「条件必填」的理由就只是一句话 |
 | P-3 | 未登记的工具 ⇒ `UnknownTool`，工具未被调用 | 库里有 `tool` 表但无该 id |
 | P-4 | 出示了未声明的能力 ⇒ `UndeclaredCapability` | 登记项声明能力 A，声明 `--effect` 铸出能力 B |
 | P-5 | 缺声明的能力 ⇒ `MissingCapability` | 登记项声明 A+B，只声明铸出 A 的那条 `--effect` |
@@ -809,8 +834,16 @@ payload 用例覆盖，本路径不重复。
 `AuthorizedToolInvocation<'_>` 亦在此 crate，**后者由库级夹具 `impl ToolProvider` 的签名用到**）、`continuum-policy`（沿用）、
 `continuum-effect`（沿用）、`continuum-persist`（沿用）。**故不改 `ALLOWED` 表**（那张表记的是**内部**
 crate 边）。**`Cargo.toml` 的射程要限定**（plan-f 第 8 条）：内部依赖清单不动，但**要加 `async-trait` 的 dev 边**
-（库级夹具实现 `#[async_trait]` 的 `ToolProvider` 需要它）——它是**外部** crate，故 `ALLOWED` 与
-`Cargo.lock` 都不受影响。**原稿在此处写「也不改 `Cargo.toml`」，那是过宽的说法，已限定。**
+（库级夹具实现 `#[async_trait]` 的 `ToolProvider` 需要它）——它是**外部** crate，故 **`ALLOWED` 不受影响**。
+**原稿在此处写「也不改 `Cargo.toml`」，那是过宽的说法，已限定。**
+
+**订正（2026-10-07，回灌 F Task 3 的实测）——本行原写「故 `ALLOWED` 与 `Cargo.lock` 都不受影响」，
+「`Cargo.lock` 不受影响」那一半是假的**：**dev 边也写进锁文件**——`Cargo.lock` 里
+`[[package]] continuum-runtime` 的 `dependencies` 列表**会多出一行 `"async-trait"`**（该**包**本身早已
+在锁里，多的是这条**边**）。**实测**：Task 3 的提交 `dfefb54` 对 `Cargo.lock` 的改动是 **`1 +`**，
+正是这一行；故实现计划的 Task 3 Step 11 **必须把 `Cargo.lock` 一并 `git add`**（否则锁与
+`Cargo.toml` 不一致、锁过期）。**旧话留此。**（同一条假句子在设计 §3.2 与实现计划的 Global Constraints
+里各有一处，已同批订正。）
 
 **但有两处注释会变成假的，必须就地订正**（本仓的既有做法：订正时把错误说法的来历留在原地）：
 `dependency_direction.rs:121` 写着「core / events / provider 在 runtime 内**至今无任何引用**」
