@@ -66,7 +66,7 @@ const PROFILE_COLUMNS: &str = "id, version, provider, model_revision, modalities
 
 /// 画像**已产出**、允许存正式画像的六态（设计 §4.3）。
 ///
-/// 三个异常态（`stale` / `degraded` / `quarantined` / `disabled`）在允许集里：它们改的是画像的
+/// 四个异常态（`stale` / `degraded` / `quarantined` / `disabled`）在允许集里：它们改的是画像的
 /// **可用性**，不是撤销它——§249 只禁它们进入自动路由，没说不许有画像。**逐项列出**而不是
 /// 写成「`verified` 之后都行」：拒绝集 `{discovered, unprofiled, researched, probed}` 与它
 /// 互不相交且合并即为十态（`tests/persist.rs` 的
@@ -298,11 +298,17 @@ pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), Lifecycle
 ///
 /// # 表外取值一律具体 `Err`
 ///
-/// 三个列表列不是 JSON 字符串数组、`cost_profile` / `latency_profile` 不是 `Cost` / `Latency`
-/// 的那一个字面量、`confidence` 不是 `[0,1]` 内的十进制串（[`Ratio::parse`] 给 `None`）、
-/// `evidence_count` 是负数——**逐条转成具体 `Err`，不取默认值**：把表外串猜成某一枚会成为
-/// 第二份表示（同 `LifecycleState::parse` 的理由）。非文本的列值另报
-/// [`PersistError::ColumnType`]。
+/// 四类表外取值**逐条转成具体 `Err`，不取默认值**——把表外串猜成某一枚会成为第二份表示
+/// （同 `LifecycleState::parse` 的理由）：(a) 三个列表列不是 JSON 字符串数组、
+/// (b) `cost_profile` / `latency_profile` 不是 `Cost` / `Latency` 的那一个字面量、
+/// (c) `confidence` 不是 `[0,1]` 内的十进制串（[`Ratio::parse`] 给 `None`）、
+/// (d) `evidence_count` 是负数。非文本的列值另报 [`PersistError::ColumnType`]。
+///
+/// **照片只覆盖 (c)**：`tests/persist.rs` 的 `an_out_of_range_confidence_in_the_column_is_rejected`
+/// 三个入参逐条钉住。**(a) / (b) / (d) 三类的照片本 task 没有**——本 task 的用例清单由计划钉死
+/// （只列了 confidence 那一类），而这三类的转出点分别是 [`decode_string_list`] / [`decode_tool_ids`]、
+/// [`decode_literal`]、`u64::try_from`，与 (c) 同形；**据实写在这里，别把「注释写了」读成「已覆盖」**。
+/// 若要补，代价是一次裸 SQL 更新那一列＋一条 `match Err(PersistError::Database(..))`。
 pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError> {
     let rows = tx.query(
         &format!("SELECT {PROFILE_COLUMNS} FROM model_profile WHERE id = ?1"),

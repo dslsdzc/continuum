@@ -86,7 +86,8 @@ pub enum LifecycleError {
     /// # 允许集与拒绝集（十态的一个二分，不是抽样）
     ///
     /// 允许集 `{verified, active, stale, degraded, quarantined, disabled}`——画像已产出，
-    /// 三个异常态只是改了它的**可用性**，不是撤销它。拒绝集
+    /// 四个异常态（`stale` / `degraded` / `quarantined` / `disabled`）只是改了它的
+    /// **可用性**，不是撤销它。拒绝集
     /// `{discovered, unprofiled, researched, probed}`——画像流水线尚未走完。
     /// 依据是 §22 的顺序「生成初步画像 → 执行 Active Probe → Verifier → **生成正式 Profile**」：
     /// 正式画像在 Verifier 之后，故 `probed` 及以前都不许有正式画像行。

@@ -749,7 +749,7 @@ fn seed_profile_row(tx: &Tx<'_>, model: &str) {
     insert_profile_row(tx, model, MODALITIES, TOOLS, FAILURE_MODES, Some(""), None);
 }
 
-/// 逐字段比对本 crate 落库的那**十一列**，期望值全部是**手写字面量**。
+/// 逐字段比对本 crate 落库的那**十一列**，期望值全部由**调用点手写**（非被测函数返回值）。
 ///
 /// 十二个字段里 `skill_vector` 不在这里：它落 `model_skill_score` 表（设计 §3.1），
 /// `load_profile` 读回来的画像里它恒为空向量——那一条单独断言，不混进本函数（免得
@@ -1193,9 +1193,9 @@ fn the_three_list_columns_round_trip_as_json_arrays() {
 
 /// 列里的 `confidence` 是表外取值 → `load_profile` 报**具体** `Err`，**不取默认值**。
 ///
-/// `Ratio::parse` 对非数值、非有限、越界一律给 `None`，`persist` 把它转成具体 `Err`
-/// （设计 §2.4：构造失败在构造期就被拒，不走默认值）。三个入参各一条，覆盖三类失败：
-/// 越界（`1.5`）、非数值（`abc`）、下界之外（`-0.1`）。
+/// `Ratio::parse` 对非数值、非有限、越界给 `None`，`persist` 把它转成具体 `Err`
+/// （设计 §2.4：构造失败在构造期就被拒，不走默认值）。四个入参各一条，覆盖四类失败：
+/// 越界（`1.5`）、非数值（`abc`）、下界之外（`-0.1`）、非有限（`NaN`）。
 ///
 /// 把表外串当成 0 或当成区间端点，正是设计要拦的（`Ratio::parse` 的注释）。
 #[test]
@@ -1206,7 +1206,7 @@ fn an_out_of_range_confidence_in_the_column_is_rejected() {
     register_model(&tx, &id("model-a")).unwrap();
     seed_profile_row(&tx, "model-a");
 
-    for raw in ["1.5", "abc", "-0.1"] {
+    for raw in ["1.5", "abc", "-0.1", "NaN"] {
         tx.execute(
             "UPDATE model_profile SET confidence = ?1 WHERE id = ?2",
             &[Value::text(raw), Value::text("model-a")],
