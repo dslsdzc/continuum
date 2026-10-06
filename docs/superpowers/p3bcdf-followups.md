@@ -74,6 +74,63 @@
 
 ---
 
+## 三之二、**实现期取读**：设计/裁决未给判据，C 的实现取了读数（2026-10-07）
+
+上面 §三 的四条是**设计已写明「不发明」的规范级缺口**。本节各条**性质不同**：
+**设计与裁决都没有给判据，是子项目 C 的实现自己取的读数**。单列一节、并逐条标明
+「**实现期取读**」而非「**规范给的判据**」，是为了不让读者把它们当成规范的要求——
+它们**可以改**，改的时候要动的只有 C 的那几条用例。
+
+列进本节的理由与 §三 相同：`.superpowers/` 是 gitignore 的 scratch，
+**只留在实现报告里的取读会随 branch 消失**；而这几条都是**没有任何规范判据、却已经写进代码与用例**的口径。
+
+> **凡本节各条，收件人一律是「规范维护者」（要不要定一条判据）与「本 crate 的后续轮次」（要不要改这个读数）。**
+> **附加判据（本节自定）**：凡是**实现期取读**落进本文档，**必须同时写下「照片在哪」与
+> 「取读若被改，哪条用例要跟着改」**——只写取读不写照片，等于把它变成一句无人可验的断言。
+
+1. **`RegistryError::Duplicate` 的字段形状**（**裁决 C5 明写「归遗留、不发明」**）。
+   C 取 `Duplicate { id: String }`——`ModelId` 与 `ToolId` **共用同一个变体**，
+   是哪一个登记表（模型侧 / 工具侧）**由调用点可知**（`register_model` / `register_tool`）。
+   另注：它与 `OperatorError::Duplicate`（`crates/continuum-operator/src/registry.rs:10-11`）
+   **同的只是「有一个具名 `Duplicate` 变体」这一取向，不是字段形状**（那里两个字段都是强类型）。
+   **照片**：`crates/continuum-provider/tests/registry_models.rs` 的
+   `registering_the_same_id_twice_is_rejected_as_duplicate`、`registry_tools.rs` 的
+   `registering_the_same_tool_id_twice_is_rejected_as_duplicate`（两条都只断「是 `Duplicate` 这一种 `Err`」，
+   **不断字段形状**，故形状改动**不会**让它们红）。
+   **若判据改成强类型 id**：两个登记表要各分一个臂，此变体的形状随之改，**上面两条用例不必改**。
+
+2. **`register_*` 的原子性**（设计未写「一组 id 里有一个撞车时是否部分登记」；**裁决 C3 接受计划的取法**）。
+   C 取**先全查后全插**——组内任一 id 已被占用则**一个都不登记**。
+   **照片**：`registry_models.rs` 的 `registering_a_group_of_ids_is_all_or_nothing`、
+   `registry_tools.rs` 的 `registering_a_group_of_tool_ids_is_all_or_nothing`
+   （两条都同时断「整组被拒」与「组内未被占用的那个也没进去」，即半登记可观察）。
+   **若判据改成「部分登记可接受」**：**这两条用例要改写**——它们是这条取读的唯一照片。
+
+3. **`list_tools` 的并集语义**（设计只说「并集」，未写同一 `ToolId` 由多个适配器声明时保留哪一条；**裁决 C4**）。
+   C 取**首次出现者胜**（按登记次序）。
+   **照片**：`registry_tools.rs` 的 `list_tools_keeps_the_first_entry_when_two_adapters_declare_the_same_id`。
+   **两侧要分开读**：模型侧**没有**这条读数——`model_providers()` 已裁删（2026-10-06），
+   模型侧今天根本没有枚举入口，**别照工具侧的读数去补模型侧**。
+   **若判据改成「后者胜」或「报冲突」**：改上面那一条用例。
+
+4. **`FakeTool` 的三态化**（设计 §11 只写「用 `FakeTool`」，而一个单元结构体产不出两条失败通道）。
+   C 把夹具改成带失败通道的三态（正常 / 工具级失败 / provider 级失败，Task 7 的两条用例）。
+   **这是对夹具形状的读数，不是判据**——它不构成对任何实现的要求；
+   **真实适配器**如何分流仍无照片（设计 §9 末段、§7.1 已如此声明）。
+   **收件人**：本节其余各条的收件人之外，若将来有真实适配器，**本条的照片要换成它**。
+
+5. **`register_tool([])`（空 id 列表）的语义**（设计未规定；**本条出自 Task 2 的实现报告，
+   不在计划的 `## 遗留` 里**，转录以免随 branch 消失）。
+   C 取：**登记表不动**（与 `register_model` 同形），但适配器**仍进 `tool_adapters`**——
+   于是它在 `list_tools()` 的并集里照常出现（收进的是它自己声明的那些 id），
+   而那些 id 没有任何路由指向它，故 `describe_tool` 对它们报 `ToolCallError::Unregistered`
+   （`crates/continuum-provider/src/registry.rs` 的 `register_tool` 文档段写死了这条）。
+   **照片：没有**。触发它需要一次零 id 的登记，而现有调用点全是本模块的测试、每个都显式给非空列表。
+   **代价**：这一条今天**既无判据、又无照片**，是本节各条里**最容易静默漂移**的一条。
+
+> **本节与 §三 的界**：§三 说的是「**规范没有这条判据**」；本节说的是「**设计/裁决没有这条判据，
+> 实现自己取了读数**」。两者的共同后果一样——**该口径会随实现漂移，而没有规范侧的东西钉它**。
+
 ## 四、给实现阶段的四条硬提醒（都是本轮花了代价换来的）
 
 1. **`ALLOWED` 是逐对断言的，且覆盖 dev-dependency**（`every_crate_depends_only_on_its_allowed_set` 跑
