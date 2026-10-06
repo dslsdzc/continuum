@@ -904,8 +904,14 @@ pub fn load_skill_series(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension)
 **本 task 还交付一步（协调者裁决，2026-10-06，见 `## 遗留` 的同名条）**：交付 `load_skill_vector` 的同时，
 **让 `load_profile` 调它来填画像的 `skill_vector`**——`load_profile` 现在读回的画像十二个字段齐全。
 **两条一起写进文档注释，不许含糊**：
-- **`load_skill_vector` 是 `model_skill_score` 表的唯一装载者**；`load_profile` **组合**它，
-  **不自己再查一遍那张表**（那就是同一数据的第二个装载者，等同一次重复产生点）；
+- **`load_profile` 填 `skill_vector` 时，那个字段的唯一来源是 `load_skill_vector`**；`load_profile` **组合**它，
+  **不自己再查 `model_skill_score`**（那就是同一字段的第二个来源，等同一次重复产生点）。
+  **口径必须说准（订正注记）**：协调者裁决 A 的原话是「`load_skill_vector` 是 `model_skill_score` 表的
+  唯一装载者」——**那句是关于整张表的，而它是假的**：同一个文件里 `load_skill_series` 也读那张表。
+  本意是「`load_profile` 不另查那张表」，**故收窄为关于 `skill_vector` 这个字段的说法**。
+  判据：**关于整张表的断言 ≠ 关于一个字段的断言**——前者要穷举该表的所有读函数，后者只要钉住一条路径。
+  **该表另有一个读函数 `load_skill_series`**（§82 行为指纹用，按 `score_version` 升序返回整条序列），
+  它与本处不冲突：它读的是**序列**，不是「当前值」；
 - 故 `load_profile` 的返回值变为 `Result<Option<ModelProfile>, PersistError>` **不变**，
   但**它现在可能因技能表里的表外取值而失败**（`PersistError`，与画像列的表外取值同一条通路）——
   这条要补进它的文档注释，并补一条用例：**画像列全合法、技能列有表外取值 → `load_profile` 返回具体 `Err`**。
@@ -1071,7 +1077,8 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 **夹具的这一步不写出来，本 task 的所有用例都无从下笔**——它不是测试技巧，是设计 §2.1 那条保证的直接后果。
 
 **关于画像里的 `skill_vector`（原稿在此点名的缺口，已由协调者裁定，2026-10-06）**：`load_profile`
-现在会调 `load_skill_vector` 把观测填进画像（唯一装载者是后者，`load_profile` 只是组合，见 `## 遗留` 的同名条），
+现在会调 `load_skill_vector` 把观测填进画像（`skill_vector` 这个字段的唯一来源是后者，`load_profile`
+只是组合它，且不另查 `model_skill_score`；见 `## 遗留` 的同名条），
 故**夹具在播下画像之后还要按用例需要播 0 / 1 / N 维观测**（`save_skill_observation`，Task 8）。
 **夹具还必须为每个候选给出一条 `availability` 条目**（`Healthy` 或缺省的那一档）：`rank` 对
 「列表里没有条目」的候选返回 `UnknownAvailability`，故漏给会以 `Err` 的形式而不是断言的形式失败，
@@ -1491,12 +1498,16 @@ skill_vector 与 rank      **由 Task 8 交付 `load_skill_vector` 时一并让 
 的输入面                  **判据三条**：(1) 设计 §247 说 `ModelProfile` 有十二个字段（§2.1 的表里
                           `skill_vector` 是其中之一）——**存储分成两张表是存储的事**，不该让对象少一个字段；
                           (2) **`rank` 的签名不变**（仍收 `&[RoutableModel]`），故**不必动 `RoutableModel` 的形状**，
-                          改动面最小；(3) **观测值只有一个装载者**（`load_skill_vector`），`load_profile` 只是
+                          改动面最小；(3) **`skill_vector` 这个字段只有一个来源**（`load_skill_vector`），`load_profile` 只是
                           **组合**它——若 `load_profile` 自己再查一遍 `model_skill_score`，就成了同一数据的
-                          两个装载者，而这正是本设计掐别的重复产生点时的同一判据。
+                          两个来源，而这正是本设计掐别的重复产生点时的同一判据。
+                          **口径订正（2026-10-06）**：本条初版写的是「`load_skill_vector` 是 `model_skill_score`
+                          **表的唯一装载者**」——**那是关于整张表的断言，而它是假的**（同文件的
+                          `load_skill_series` 也读那张表）。**关于整张表的断言 ≠ 关于一个字段的断言**：
+                          前者要穷举该表的所有读函数，后者只要钉住一条路径。原话与订正一并留此。
                           **原稿把它记为「缺口，未闭」，三条候选出路照留作前史**：
                           (i) `load_profile` 一并装载（**取的就是它**；当时担心的「多一个装载点」由判据 (3) 化解：
-                          装载者仍是 `load_skill_vector`，这里是组合）；
+                          来源仍是 `load_skill_vector`，这里是组合）；
                           (ii) `RoutableModel` 改装 `(ModelProfile, SkillVector)`——**未取**，判据 (2)：动形状没有必要；
                           (iii) 由调用方（G）在构造候选集前合并——**未取**，它需要一条新的 crate 内入口。
                           **遗留里不再有未决项**；Task 8 与 Task 11/12 的落点见各自正文。
