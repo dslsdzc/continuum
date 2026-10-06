@@ -4,10 +4,12 @@
 //! 一部分夹具。本仓要求 0 warning，故整模块关掉 `dead_code`：否则「本目标用不到、模块里又
 //! 没有别人引用」的夹具会在那一份编译里报出来。
 //!
-//! **据实记（本轮实测，见 task 报告的 m0 一轮）**：Task 1 时点上 `FakeModel` 与 `OnceStream`
-//! 都还有人引用（后者经 `FakeModel::stream`），把下面这行删掉跑
-//! `cargo test -p continuum-provider` **不会**出警告。它提前关掉，是因为本模块的用法就是被多个
-//! 目标共用，后续 task 搬进来的夹具（工具侧的 `FakeTool`）不会每个目标都用得上。
+//! **据实记（Task 1 实测）**：Task 1 时点上 `FakeModel` 与 `OnceStream` 都还有人引用
+//! （后者经 `FakeModel::stream`），把下面这行删掉跑 `cargo test -p continuum-provider`
+//! **不会**出警告。**订正（Task 2 实测，2026-10-06）**：`FakeTool` 搬进来之后那句**变真了**——
+//! 把下面这行删掉跑 `cargo build -p continuum-provider --all-targets`，`registry_models` 那一份
+//! 编译即报 `warning: struct \`FakeTool\` is never constructed`（日志 `.tmp/t2-dead-code-allow-check.log`）。
+//! **同一句绝对措辞在不同 task 的时点上可以一真一假**，故本轮把时点补进这句话本身。
 #![allow(dead_code)]
 
 use async_trait::async_trait;
@@ -15,9 +17,12 @@ use continuum_core::model::{
     CallId, InvokeRequest, InvokeResponse, ModelDescriptor, ModelId, ModelStream, ProviderHealth,
     StreamChunk, Usage,
 };
+use continuum_core::tool::{ToolDescriptor, ToolId, ToolInvocation, ToolResult};
 use continuum_core::ProviderError;
 use continuum_provider::model::ModelProvider;
+use continuum_provider::tool::ToolProvider;
 use futures_core::Stream;
+use serde_json::json;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -90,5 +95,42 @@ impl ModelProvider for FakeModel {
 
     async fn health(&self) -> ProviderHealth {
         ProviderHealth::Healthy
+    }
+}
+
+/// 工具侧夹具（Task 2 从 `tests/fake_provider.rs` 原样搬来）。
+///
+/// 它声明一个工具 `echo`，`describe_tool` 对声明之外的 id 返 `ProviderError::Unavailable`
+/// ——**这正是设计 §5.2 记的那个既有实例**：工具侧没有 `UnknownModel` 那样的「不是我的」取值，
+/// 故适配器只能把「无此工具」报成一个瞬时类。注册表要做的正是别让它污染路由层的判据。
+pub struct FakeTool;
+
+#[async_trait]
+impl ToolProvider for FakeTool {
+    async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, ProviderError> {
+        Ok(vec![ToolDescriptor {
+            id: ToolId::new("echo"),
+            description: "回显输入".into(),
+            input_schema: json!({"type": "object"}),
+        }])
+    }
+
+    async fn describe_tool(&self, id: &ToolId) -> Result<ToolDescriptor, ProviderError> {
+        self.list_tools()
+            .await?
+            .into_iter()
+            .find(|t| &t.id == id)
+            .ok_or_else(|| ProviderError::Unavailable(id.as_str().to_owned()))
+    }
+
+    async fn invoke(&self, call: ToolInvocation) -> Result<ToolResult, ProviderError> {
+        Ok(ToolResult {
+            output: call.input,
+            is_error: false,
+        })
+    }
+
+    async fn cancel(&self, _call: &continuum_core::model::CallId) -> Result<(), ProviderError> {
+        Ok(())
     }
 }

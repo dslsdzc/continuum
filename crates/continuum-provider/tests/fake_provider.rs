@@ -1,47 +1,14 @@
 mod common;
 
 use async_trait::async_trait;
-use common::FakeModel;
+use common::{FakeModel, FakeTool};
 use continuum_core::connector::{ConnectorDescriptor, ConnectorId, ConnectorOp};
-use continuum_core::model::{CallId, InvokeRequest, ModelId, ProviderHealth};
-use continuum_core::tool::{ToolDescriptor, ToolId, ToolInvocation, ToolResult};
+use continuum_core::model::{InvokeRequest, ModelId, ProviderHealth};
 use continuum_core::ProviderError;
 use continuum_provider::connector::Connector;
 use continuum_provider::model::ModelProvider;
 use continuum_provider::tool::ToolProvider;
 use serde_json::json;
-
-struct FakeTool;
-
-#[async_trait]
-impl ToolProvider for FakeTool {
-    async fn list_tools(&self) -> Result<Vec<ToolDescriptor>, ProviderError> {
-        Ok(vec![ToolDescriptor {
-            id: ToolId::new("echo"),
-            description: "回显输入".into(),
-            input_schema: json!({"type": "object"}),
-        }])
-    }
-
-    async fn describe_tool(&self, id: &ToolId) -> Result<ToolDescriptor, ProviderError> {
-        self.list_tools()
-            .await?
-            .into_iter()
-            .find(|t| &t.id == id)
-            .ok_or_else(|| ProviderError::Unavailable(id.as_str().to_owned()))
-    }
-
-    async fn invoke(&self, call: ToolInvocation) -> Result<ToolResult, ProviderError> {
-        Ok(ToolResult {
-            output: call.input,
-            is_error: false,
-        })
-    }
-
-    async fn cancel(&self, _call: &CallId) -> Result<(), ProviderError> {
-        Ok(())
-    }
-}
 
 struct FakeConnector;
 
