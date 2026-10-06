@@ -29,6 +29,13 @@ fn db() -> (tempfile::TempDir, Db) {
 /// `required_capabilities` 同时含单字动作与多词动作（`Git(WorktreeWrite)`），
 /// 后者在落库编码里必须写成 `git_worktree_write`——**不是** `action()` 的
 /// `worktree.write`（点号不满足落库约定）。
+///
+/// **`effect_class` 恒取 `Some(DeleteRemote)`，故凡用它构造的登记项，能力表里必须含
+/// `for_effect(DeleteRemote) = Git(DeleteRemote)`**——登记期不变量（Task 1）就长在
+/// `save_tool` 上。经 [`sample`] 的三处用例因此都带上那一枚；直接调 `tool()` 的两处
+/// 各自在调用点写明处置（`required_capabilities_round_trip` 的空表支改用 `None`）。
+/// **不把 `effect_class` 改成 `None` 来回避**：`Some` 那一侧的往返照片
+/// （`tool_round_trips` 的注释明写，设计 §10 第 9 条）不许被弄没。
 fn tool(id: &str, required: Vec<CapabilityKind>) -> Tool {
     Tool::new(
         ToolId::new(id),
@@ -41,12 +48,16 @@ fn tool(id: &str, required: Vec<CapabilityKind>) -> Tool {
     )
 }
 
+/// 承 [`tool`] 的 `Some(DeleteRemote)`，故第三枚能力是它对应的 `Git(DeleteRemote)`：
+/// 少了它，凡经本夹具（`registered` / `unregistered`）的 `save_tool` 都会被登记期
+/// 不变量拒掉。前两枚是编码面的样本（单字动作 + 多词动作），第三枚是覆盖面的样本。
 fn sample(id: &str) -> Tool {
     tool(
         id,
         vec![
             CapabilityKind::Filesystem(FsAction::Read),
             CapabilityKind::Git(GitAction::WorktreeWrite),
+            CapabilityKind::Git(GitAction::DeleteRemote),
         ],
     )
 }
@@ -214,9 +225,11 @@ fn enum_columns_use_the_lowercase_encoding() {
 
     // `required_capabilities` 的**容器**是 JSON 字符串数组（同 `continuum-graph` 的
     // `adfir_node.capabilities` 列）；**元素**取自 `CapabilityKind::as_str`。
+    // 三枚：前两枚是编码面的样本，第三枚是 `sample()` 为满足登记期不变量补的
+    // `Git(DeleteRemote)`（见 `sample()`），故这里的字面量必须同步。
     assert_eq!(
         text_of(&rows[0][0]),
-        r#"["filesystem_read","git_worktree_write"]"#,
+        r#"["filesystem_read","git_worktree_write","git_delete_remote"]"#,
         "元素编码应为小写、多词以 _ 连接"
     );
     // effect_class 复用 continuum-effect 既有的 EffectType 编码，不自建第二份
@@ -234,6 +247,7 @@ fn enum_columns_use_the_lowercase_encoding() {
     for kind in [
         CapabilityKind::Filesystem(FsAction::Read),
         CapabilityKind::Git(GitAction::WorktreeWrite),
+        CapabilityKind::Git(GitAction::DeleteRemote),
     ] {
         let encoded = kind.as_str();
         assert!(
@@ -291,12 +305,15 @@ fn required_capabilities_round_trip() {
     let (_dir, db) = db();
     let tx = db.begin().unwrap();
 
-    // 顺序与重复项都照存：这条列是列表，不是集合
+    // 顺序与重复项都照存：这条列是列表，不是集合。
+    // 末一枚 `Git(DeleteRemote)` 是 `tool()` 的 `Some(DeleteRemote)` 所要求的覆盖项
+    // （登记期不变量），放在**末尾**以免打乱前四枚那条「顺序与重复项照存」的样本。
     let kinds = vec![
         CapabilityKind::Git(GitAction::Push),
         CapabilityKind::Filesystem(FsAction::Read),
         CapabilityKind::Payment(PaymentAction::Charge),
         CapabilityKind::Git(GitAction::Push),
+        CapabilityKind::Git(GitAction::DeleteRemote),
     ];
     let profile = ToolProfile::new(tool("a", kinds.clone()), None, None, Trust);
     save_tool(&tx, &profile).unwrap();
@@ -313,11 +330,29 @@ fn required_capabilities_round_trip() {
         .unwrap();
     assert_eq!(
         text_of(&raw[0][0]),
-        r#"["git_push","filesystem_read","payment_charge","git_push"]"#
+        r#"["git_push","filesystem_read","payment_charge","git_push","git_delete_remote"]"#
     );
 
-    // 空表是另一侧：空列表往返成空列表，不是 NULL，也不是一条空串元素
-    let empty = ToolProfile::new(tool("b", vec![]), None, None, Trust);
+    // 空表是另一侧：空列表往返成空列表，不是 NULL，也不是一条空串元素。
+    //
+    // **这一支**不用 `tool()`（它是 `Some(DeleteRemote)`，空能力表会被登记期不变量
+    // 拒掉），也不能「补一枚能力」——那一补恰好把「空列表往返」这个样本弄没。故在此
+    // **直接构造** `effect_class: None` 的工具（与 `pure()` 同法）：本支的对象是空
+    // 容器的编码，与效应无关，前提不成立时不变量无结论。
+    let empty = ToolProfile::new(
+        Tool::new(
+            ToolId::new("b"),
+            "1.2.3".to_owned(),
+            json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            json!({"type": "boolean"}),
+            vec![],
+            None,
+            true,
+        ),
+        None,
+        None,
+        Trust,
+    );
     save_tool(&tx, &empty).unwrap();
     let back = load_tool(&tx, &ToolId::new("b")).unwrap().unwrap();
     assert!(
@@ -362,6 +397,126 @@ fn saving_the_same_id_twice_is_rejected() {
     // 挡住的是同 id，不是全部写入：换个 id 仍能写
     save_tool(&tx, &registered("c")).unwrap();
     assert_eq!(count_tools(&tx), 2);
+
+    tx.commit().unwrap();
+}
+
+/// 一条自定义 `effect_class` 与 `required_capabilities` 的登记项。
+///
+/// 三条不变量用例共用它：`tool()` 夹具恒取 `Some(DeleteRemote)`，钉不出别的组合。
+fn with_effect(
+    id: &str,
+    required: Vec<CapabilityKind>,
+    effect: Option<EffectType>,
+) -> ToolProfile {
+    ToolProfile::new(
+        Tool::new(
+            ToolId::new(id),
+            "1".to_owned(),
+            json!({}),
+            json!({}),
+            required,
+            effect,
+            true,
+        ),
+        None,
+        None,
+        Trust,
+    )
+}
+
+/// 登记期不变量的**被拒那一侧**：声明了 `Some(Charge)` 而能力表里没有
+/// `for_effect(Charge) = Payment(Charge)`，`save_tool` 必须返回 `Err`。
+///
+/// **且一行都不写**（「写都不写」，不是「写了再删」）：表里既没有那一行，行数也不增。
+/// 只断 `Err` 会放过「先 INSERT 再回滚/再 DELETE」的实现——那在本用例里虽然等价，
+/// 但它依赖调用方的事务边界，而不变量要的是**本函数自己**不写。
+#[test]
+fn saving_a_tool_whose_effect_class_is_not_covered_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    let uncovered = with_effect(
+        "uncovered",
+        vec![CapabilityKind::Filesystem(FsAction::Read)],
+        Some(EffectType::Charge),
+    );
+
+    // 断言**是哪一种** Err（变体 + 消息指出缺的那枚能力），不是「返回了 Err」
+    let err = save_tool(&tx, &uncovered).unwrap_err();
+    match &err {
+        PersistError::Database(m) => assert!(
+            m.contains(CapabilityKind::for_effect(EffectType::Charge).as_str()),
+            "错误信息应指出缺的那枚能力，实际 {m}"
+        ),
+        other => panic!("应为 PersistError::Database 变体，实际 {other:?}"),
+    }
+
+    assert_eq!(count_tools(&tx), 0, "被拒的登记不得写入任何行");
+    assert!(
+        load_tool(&tx, &ToolId::new("uncovered")).unwrap().is_none(),
+        "被拒的登记不得留下那一行"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **方向相反的那一半**：`Some(Charge)` + `[Payment(Charge)]` 必须被接受，且读得回来。
+///
+/// 缺了这一条，一个「恒拒绝」的实现也能让上面那条用例全绿。
+#[test]
+fn a_declared_effect_class_covered_by_the_capabilities_is_accepted() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    let covered = with_effect(
+        "covered",
+        vec![
+            CapabilityKind::Filesystem(FsAction::Read),
+            CapabilityKind::Payment(PaymentAction::Charge),
+        ],
+        Some(EffectType::Charge),
+    );
+    save_tool(&tx, &covered).unwrap();
+
+    assert_eq!(count_tools(&tx), 1, "被接受的登记应恰写一行");
+    let back = load_tool(&tx, &ToolId::new("covered"))
+        .unwrap()
+        .expect("被接受的登记应能读回");
+    assert_eq!(back, covered, "读回的登记项应与写入逐字段相同");
+
+    tx.commit().unwrap();
+}
+
+/// 不变量的**射程**：它形如 `effect_class == Some(t) ⇒ required 含 for_effect(t)`，
+/// **前提不成立（`None`）时无结论**——`None` 的工具不受本不变量约束。
+///
+/// 这一条钉的是射程本身：把判定写成「`effect_class` 为空也必须出示点什么」或
+/// 「`None` 也要比一轮」的实现，在本用例上红。
+#[test]
+fn a_tool_without_an_effect_class_may_declare_anything() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    // 空表：`None` + `[]`
+    let pure = with_effect("pure", vec![], None);
+    save_tool(&tx, &pure).unwrap();
+    assert_eq!(count_tools(&tx), 1, "`None` 的空表应被接受");
+
+    // 与任何效应都无关的能力表：`None` + `[Filesystem(Read)]`
+    // （这一枚的 `effect()` 是 `Option::None`，故它连「哪条效应」都指不出）
+    let unrelated = with_effect(
+        "unrelated",
+        vec![CapabilityKind::Filesystem(FsAction::Read)],
+        None,
+    );
+    save_tool(&tx, &unrelated).unwrap();
+    assert_eq!(count_tools(&tx), 2, "`None` 的任意能力表都应被接受");
+
+    let back = load_tool(&tx, &ToolId::new("pure")).unwrap().unwrap();
+    assert_eq!(back.tool().effect_class(), None);
+    let back = load_tool(&tx, &ToolId::new("unrelated")).unwrap().unwrap();
+    assert_eq!(back, unrelated, "`None` 侧的登记应逐字段读回");
 
     tx.commit().unwrap();
 }
