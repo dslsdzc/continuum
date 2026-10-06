@@ -948,11 +948,31 @@ git commit -m "feat(model-registry): 技能观测的落库与「当前值」"
 **那段随着本条裁决一并作废**（它是同一个病：给一个没有实现体的类型找变异点）；**该性质的守卫点在消费端，
 见 `## 遗留` 的「`BudgetView` 的 `None` ≠ `Some(0)` 谁守」一条。**
 
-`tests/budget.rs` 的形态：**用字面量构造一个 `BudgetView`**（`const` 项，如
-`const _: BudgetView = BudgetView { money: Some(11), … };`），**五维的名字与类型由这次构造穷举钉住**。
+`tests/budget.rs` 的形态：**用字面量构造两个 `BudgetView` `const` 项**——
+
+```rust
+// 五维各给一个值：类型后缀是**承重的**，见下。
+const _: BudgetView = BudgetView {
+    money: Some(11i64), wall_time: Some(60i64), token: Some(4096i64),
+    gpu_time: Some(1i64), network_transfer: Some(0i64),
+};
+// 五维全 `None`：**类型参数同样必须写出来**，否则 `None` 不钉任何东西。
+const _: BudgetView = BudgetView {
+    money: None::<i64>, wall_time: None::<i64>, token: None::<i64>,
+    gpu_time: None::<i64>, network_transfer: None::<i64>,
+};
+```
+
+**那两处 `i64` 后缀（含 `None::<i64>` 的类型参数）是承重的，不是风格**——Task 9 实现者的变异实测：
+整数字面量**随字段类型推断**，故把 `Option<i64>` 改成 `Option<u32>` 时，不带后缀的
+`Some(11)` / `None` **照样编译**（**变异 M5 存活**）；写全类型才让那次改动**在编译期红**。
+**来历与理由留在此处，因为它是一条看着像「钉住了类型」而其实没钉住的实例化——只有变异能证明这一点。**
+
 **它证明的东西是真的编译期事实**：`tests/` 是**独立的 crate**，**它能字面量构造出 `BudgetView`，
-就证明了「字段 `pub`、无强制闸门」**——实测的实证是 M2 的 **`E0616`**（字段私有），
-即把任何一维改成私有，这个文件就**编译不过**。**判据是编译通过本身，不是任何 `assert`。**
+就证明了「字段 `pub`、无强制闸门」**——实测的实证是 **`E0451`**（结构体字面量构造撞上私有字段，
+与 Task 3 的 `model_profile_cannot_be_built.rs` 同一个码），即把任何一维改成私有，这个文件就**编译不过**。
+（「读私有字段」那种形态是另一个码 `E0616`，本计划先前在此错引过它；**错误码一律以实跑为准**，
+见「关于本计划的代码块」一节。）**判据是编译通过本身，不是任何 `assert`。**
 **不定义 trait 也是刻意的**（一个没有实现者的 trait 是**假接口**，设计 §6.1）——它的照片同样在这里：
 文件里不出现任何 trait 名。
 若 `const` 构造因某种理由写不出来，退路是一个 `#[test]` 里**只做构造、不做断言**——**判据仍是编译通过**。
@@ -1370,8 +1390,34 @@ git commit -m "feat(model-registry): §251 阶梯的数据形状"
 
 **Files:**
 - Modify: `crates/continuum-model-registry/**`（仅在复核发现缺口时）
+- Modify: `crates/continuum-model-registry/src/persist.rs`、`src/lib.rs`、`tests/persist.rs`（本步新增 `list_registered`）
 
-- [ ] **Step 1: 全量验证**
+- [ ] **Step 1: 补 `list_registered`（G 的设计查出的硬缺口，2026-10-06，**本步排在最前**）**
+
+**判据**：**候选集只能从登记表出发**。G 的候选集必须**先知道「哪些模型存在」**，而 D 今天交付的持久化函数
+**没有一个能列出 `model_registry` 的行**（`load_lifecycle` / `load_profile` / `load_skill_vector` / `load_skill_series`
+**全都要求先给 id**）。不补的后果有且只有两条，**两条都是本项目一直在收的形状**：G 从配置拿 id
+（→「哪些模型存在」出现**第二个来源**），或 G **裸查 D 的表**（→ 同一张表**第二个读写点**）。
+
+**做法**：新增一个读函数，**同一次读里取 id 与状态**（G 的候选集两样都要）：
+
+```rust
+/// §21 的登记表全量读出：已登记的每个模型及其当前状态，按 id 升序。
+/// **本函数是「哪些模型存在」的唯一来源**——调用方（子项目 G）凭它建候选集，
+/// 不从配置拿 id、也不裸查 `model_registry`（那会造出第二个来源／第二个读写点）。
+pub fn list_registered(tx: &Tx<'_>) -> Result<Vec<(ModelId, LifecycleState)>, PersistError>;
+```
+
+`LifecycleState` 走它自己的 `parse`，**表外取值返回具体 `Err`**（与本文件其余读函数同一条纪律）；
+**不过滤状态**（闸门在 `RoutableModel::try_new`，不在这里——此处滤掉会让「哪些模型存在」与
+「哪些能路由」两件事混成一件）。
+
+**照片一条**：`list_registered_lists_every_registered_model`——**登记两行，两行都在**，按 id 升序，
+且各自的 `LifecycleState` 是登记后的那个值。**红的条件**：漏行、漏状态、或把未登记的 id 也列进来即红。
+
+**收件人：D 的实现者**（本 task 的实施者）。G 的设计 §13 已把这条记为**对 D 的请求**，接续见 `## 遗留` 的同名条。
+
+- [ ] **Step 2: 全量验证**
 
 ```bash
 timeout 1500 cargo test --workspace --no-fail-fast
