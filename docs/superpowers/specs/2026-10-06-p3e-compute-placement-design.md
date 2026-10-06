@@ -44,7 +44,7 @@
 
 | 东西 | 现状 | 出处 |
 |---|---|---|
-| `PrivacyClass`（§243 的五档） | **已存在、已落库**。`Public / Personal / Private / Secret / LocalOnly` 五枚，`ALL` 是五枚，`as_str`／`parse` 是编码的唯一产生点，`parse` 对表外串返回 `None` | `crates/continuum-artifact/src/artifact.rs:87`（枚举）、`:100`（`ALL`）、`:119`（`as_str`）、`:137`（`parse`）。**订正（2026-10-06，定点复核查出；原话照留）**：本行初稿写 `:112`／`:129`——**那是同文件 `ArtifactType` 那一套**（`:47`／`:68`）。**这是四处同类错号里唯一落在本表内的一处**，也是复审上轮点名的那一处；我上一轮改了另外三处（§5.4 通道 (a)(c)、§8 第 5 条）**偏偏漏了这一行**。根因与订正块见 §5.4。 |
+| `PrivacyClass`（§243 的五档） | **已存在、已落库**。`Public / Personal / Private / Secret / LocalOnly` 五枚，`ALL` 是五枚，`as_str`／`parse` 是编码的唯一产生点，`parse` 对表外串返回 `None` | `crates/continuum-artifact/src/artifact.rs:87`（枚举）、`:100`（`ALL`）、`:119`（`as_str`）、`:137`（`parse`）。**订正（2026-10-06，定点复核查出；原话照留）**：本行初稿写 `:112`／`:129`。**这是四处同类错号里唯一落在本表内的一处**，也是复审上轮点名的那一处；我上一轮改了另外三处（§5.4 通道 (a)(c)、§8 第 5 条）**偏偏漏了这一行**。**根因**见 §5.4 的订正块（那里同时订正了一条**不成立**的根因说法）。 |
 | `privacy_class` 的落库列 | `NOT NULL`，读出错串即 `PersistError`——**不是默认档次** | `crates/continuum-artifact/src/persist.rs:14-15`、`:120-123` |
 | `Artifact` | `pub privacy_class: PrivacyClass`（**不是 `Option`**） | `crates/continuum-artifact/src/artifact.rs:179` |
 | D 的 Router 输出面 | **已落地**（Task 11）：`rank`、`RankedExecutionCandidates`（`selected`／`alternatives`／`candidates`）、`ExecutionCandidate` 的五个访问器、`RoutingReason`、`RankingPolicy` | `crates/continuum-model-registry/src/router.rs`：`:394`（`RankedExecutionCandidates`）、`:403`（`selected`）、`:345`（`ExecutionCandidate`）、`:355-376`（`model`／`reason` 等访问器）、`:276`（`RoutingReason`）、`:424`（`RankingPolicy`）、`:512`（`rank`）。**行号按 2026-10-06 的**工作树**取**——该文件当时有未提交改动，较 `c46477f` 整体下移约 15 行（见 §6.3 末段） |
@@ -517,7 +517,7 @@ fn strictest(a: TransferRule, b: TransferRule) -> TransferRule {
 过滤后为空即 `Err(NoPlaceableNode)`。
 
 **`LocalOnly` 由此一概上不了非 personal、或未被信任的节点**——包括调用方把五档全写成 `AnyNode`
-的情形。这条绝对措辞的照片在 §9 第 3 行（最宽策略下的反例），不是靠读代码。
+的情形。这条绝对措辞的照片在 §9 的「**闸门不可被策略放宽**」那一格（最宽策略下的反例），不是靠读代码。
 
 **「云端节点」怎么落**：§4.4 的判据（`docs/02-工程.md:262`）用的是「云端节点」，
 而 §287 没有这个轴（§3.2）。本设计取 **`class ≠ Personal`**，判据是 §40
@@ -538,13 +538,31 @@ fn strictest(a: TransferRule, b: TransferRule) -> TransferRule {
 | **(c) 字符串解码** | **E 从不经字符串读隐私等级**——进来的就是 `PrivacyClass` 值 | 唯一解码点是 `PrivacyClass::parse`（`artifact.rs:137`），表外串返回 `None`，落库侧把它翻成 `PersistError`（`persist.rs:120-123`）。故「未知等级」到不了 E。列 NOT NULL 使得「没有等级」也不可表达（`persist.rs:15`） |
 
 > **行号订正（2026-10-06，定点复核查出；原话照留）**：本节初稿在这三处引的是
-> `artifact.rs` 的 `:112`／`:129`／`:112-124`。**四个号全错**——它们指向的是**同文件里
-> `ArtifactType` 的那一套**（`as_str` 在 `:47`、`parse` 在 `:68`），而 `PrivacyClass` 的那一套在
-> `:119`／`:137`，注释在 `:110-111`。**来历**：这四个号是**上一轮**从我这里写下的，且被复审的
-> 「清白清单」判为「逐条属实」而**未被重取**——即一次错误的背书让错号躲过了一轮核对；
-> 本轮由定点复核逐条重取后改正。**教训与 §1.2 的订正块同族**：`file:line` 无论写在哪一份文件里
-> （被评审的设计、还是评审报告），**都要自己打开那一行**。**订正不放宽任何断言**：三条通道的
-> 机制与结论一字未动。
+> `artifact.rs` 的 `:112`／`:129`／`:112-124`。**四个号全错**——`PrivacyClass` 的那一套在
+> `:119`（`as_str` 的本体）／`:137`（`parse` 的本体），注释在 `:110-111`。**来历**：这四个号是
+> **上一轮**从我这里写下的，且被复审的「清白清单」判为「逐条属实」而**未被重取**——即一次错误的
+> 背书让错号躲过了一轮核对；本轮由定点复核逐条重取后改正。**教训与 §1.2 的订正块同族**：
+> `file:line` 无论写在哪一份文件里（被评审的设计、还是评审报告），**都要自己打开那一行**。
+> **订正不放宽任何断言**：三条通道的机制与结论一字未动。
+
+> **再订正：本条订正块自己写的「根因」不成立**（2026-10-06，计划阶段由协调者实测查出；
+> **原话照留、不删**）。上面那条订正原本还写着「它们指向的是**同文件里 `ArtifactType` 的那一套**
+> （`as_str` 在 `:47`、`parse` 在 `:68`）」——**这句是假的**，实读如下：
+>
+> | 号 | 实际是什么 | 在哪 |
+> |---|---|---|
+> | `:112` | `PrivacyClass::as_str` **自己文档注释里的一行**（一个空注释行，注释块 `:108-118`） | `impl PrivacyClass`（`:95`）**之内** |
+> | `:129` | `parse` 的**文档注释首行**（注释块 `:129-136`） | 同上 |
+> | `:119` / `:137` | 两个函数的**本体** | 同上 |
+>
+> `ArtifactType` 的那一套（`impl` 在 `:23`、`as_str` `:47`、`parse` `:68`）**与这两个号无关**。
+> **真正的错法是「取了同一个 `impl` 内的文档注释行，而不是函数本体的行」**——不是「抄了别的类型」。
+> **为什么这段要留档**：它是**我自己在 §1.2 写下那句话的实例**——「**一个不成立的来历比没有来历
+> 更坏**，后来者会信它」。上面那段假根因在 `22c9e04` 里躺了一版，读者会据此去 `ArtifactType` 那边
+> 找原因，而错处本就在同一个 `impl` 里。**故本条同时是那条纪律的第二个实例，与 §1.2 的假 `grep`
+> 来历同族**：两次都是「把一种听起来合理的机制写成了来历」。
+> **另记一条更一般的**：这四处错号**不是笔误，而是「引用一个函数时取注释行的号」**——
+> 在 Rust 里这两类行相差 3–20 行，且**文档注释与函数体同属一个符号**，故单看「有没有出处」查不出。
 
 > **注**：本行初稿引的是 `persist.rs:14`——**那一行是 `producer_node TEXT,`，是那张表里唯一可空的列**
 > （M1，2026-10-06 评审查出）；`NOT NULL` 在 `:15` 的 `privacy_class TEXT NOT NULL,`。已改。
@@ -583,7 +601,7 @@ pub enum RulesError {
 1. **`try_new` 的覆盖率判据仍强制它存在**（少一档即 `Err(MissingLevel)`），
    故「五格都有意义」是错的读法——**第一格是给 `PrivacyClass::ALL` 的完整性用的，不是给判据用的**。
 2. **它是接口上的坑，不是安全问题**：一个以为「把 `LocalOnly` 填成 `AnyNode` 就放开了」的调用方
-   会发现放不开（§9 第 3 行正是这个反例，**这条照片因此有第二重用处**）。
+   会发现放不开（§9 的「**闸门不可被策略放宽**」那一格正是这个反例，**这条照片因此有第二重用处**）。
 
 **被否掉的替代**：让 `PlacementRules` 只收其余四档、把 `LocalOnly` 从槽里去掉。
 否掉的理由是那会**松开 (b) 通道**——一张不覆盖全档的表正是「未归类」的形状，
@@ -689,7 +707,7 @@ pub enum PlacementError {
 **`NoPlaceableNode` 不区分「因为隐私被滤掉」与「本来就没节点」**，判据：区分它需要把
 「哪几个节点因哪一条被滤掉」记成一个输出（D 的 `RoutingReason` 那样的类型），而 §243／§291
 **没有要求放置输出一个理由**（§84 要求 Router 输出 reason，放置没有对偶句）。故不立这个类型。
-**代价**：判据 §4.4 的照片必须写成**一对**（§9 第 1、2 行），单看「只有云节点 → `Err`」这一条
+**代价**：判据 §4.4 的照片必须写成**一对**（§9 的「判据 §4.4」与「判据 §4.4 的否定面」两格），单看「只有云节点 → `Err`」这一条
 分不清两种失败。
 
 ## 5.9 确定性
@@ -702,7 +720,14 @@ pub enum PlacementError {
 `ComputeNodeId` 是 `String` 的 newtype，两两可比且**在同一份 `nodes` 里无相等**——后者由
 `DuplicateNode` 这条 `Err` 保证。
 
-照片：把同一组节点按不同顺序放进 `nodes`，三次调用返回同一个节点（§9 第 4 行）。
+照片：把同一组节点按不同顺序放进 `nodes`，三次调用返回同一个节点（§9 的「**确定性**」那一格）。
+
+> **本节与 §5.3／§5.4 的交叉引用一律改为按用例名引（2026-10-06，计划作者查出；判据如下）**：
+> 初稿用的是「§9 第 N 行」，而 I1 与 C4 两次补行之后它们**静默失真**了——「第 3 行」指的
+> 那一格现在是第 5 行（第 3 行是被补进去的「放行侧」），确定性格从第 4 行变成第 8 行。
+> **按行号互相引用，会在表中间插行时静默失真**：数字全都还「看着像对的」，没有任何一处会报错。
+> 改法是**换引用方式，不是把数字改成新的数字**——用例名是稳定的，插行不改变它。
+> （本条是「两处记法各自漂移」的又一实例：表在长、引用不动，两边就分了家。）
 
 ---
 
@@ -794,8 +819,22 @@ crates/continuum-node/
   src/registry.rs   NodeRegistry、NodeRegistryError
   src/placement.rs  PlacementRequest、TransferRule、PlacementRules、PlacementPolicy、place
   src/error.rs      PlacementError、RulesError
-  tests/{node,registry,placement,rules}.rs
+  tests/node.rs
+  tests/registry.rs
+  tests/placement.rs
+  tests/rules.rs
+  tests/type_level.rs         §9 的「字段私有 ⇒ 写不出字面量」那条（补漏，见下）
+  tests/compile_fail/*.rs     同上那条的 trybuild 样例与其 .stderr
 ```
+
+**补漏（2026-10-06，计划作者查出）**：本清单初稿只写到 `tests/{node,registry,placement,rules}.rs`
+一行，**漏了两样**——§9 自己要的那条 trybuild 用例（`tests/type_level.rs` 与
+`tests/compile_fail/*`），以及 `Cargo.toml` 里 `trybuild` 的 **dev 依赖**。
+两样都是清单该点名却没有点名的东西；本条按实补全，**不是新增交付物**（那条用例本就在 §9 里）。
+**为什么这处值得留档**：`C` 那边的同类重灾区也是「文件清单漏一处 / `ALLOWED` 里的 dev 边漏登记」
+（`docs/superpowers/p3bcdf-followups.md` §四.1：`Cargo.toml` 加了、`ALLOWED` 没加会红，反之亦然）——
+**`Cargo.toml` 的依赖清单与文件清单是两处、必须分别写全**。`trybuild` 是**外部** crate，
+故 `ALLOWED` 不受影响（那里只列内部 crate）。
 
 **为什么是一个新 crate，而不是落进 `continuum-runtime`**：G 的设计 §10.1 论证 G 不新建 crate
 （它是 Runtime 的一条**路径**，且 runtime 的 `ALLOWED` 已含它需要的全部 crate）。本设计与那条判据
@@ -980,10 +1019,10 @@ continuum-artifact  ──→ continuum-node
 | 重复 id | `nodes` 里同一 `ComputeNodeId` 两次 → `Err(DuplicateNode { id })`，并断言是哪一枚 |
 | 空节点集 | `nodes` 为空 → `Err(NoPlaceableNode)` |
 | 无制品 | `artifacts` 为空 → 不过滤任何节点（`LocalOnly` 的判据不适用），返回兜底档选中的那个 |
-| 五种 `class` × `trust` 组合 | 二值 × 二值逐项：只有 `(Personal, TrustedPersonal)` 通过 `LocalOnly` 的闸门 |
+| 四种 `class` × `trust` 组合（`NodeClass` 两枚 × `NodeTrust` 两枚） | 逐项：只有 `(Personal, TrustedPersonal)` 通过 `LocalOnly` 的闸门。**订正（2026-10-06，计划作者查出；原话照留）**：本格初稿的标签写「**五种**」，与本格自己的口径「二值 × 二值」相抵——**两枚 × 两枚 = 4**。已按口径改为四种 |
 | **`PlacementRules` 的覆盖** | 逐档：少一档 → `Err(MissingLevel { level })`（**五档各一条**）；重复一档 → `Err(DuplicateLevel { level })`；全五档 → `Ok` |
 | 注册表 | 登记成功、二次登记同一 id → `Err(Duplicate { id })`、`nodes()` 保持登记顺序 |
-| `ComputeNode` 不可外部构造 | trybuild 样例：crate 外写不出字段字面量（与 D 的 `RoutableModel`、P3A 的 `AuthorizedTool` 同形） |
+| 字段私有 ⇒ 写不出字段字面量（预期 `E0451`） | trybuild 样例：crate 外写不出 `ComputeNode` 的字段字面量（与 D 的 `RoutableModel`、P3A 的 `AuthorizedTool` 同形）。**订正（2026-10-06，计划作者查出；原话照留）**：本格初稿的标签写「`ComputeNode` **不可外部构造**」——**与 §3.5 相抵**：§3.5 明写 `new` 是 `pub`，**构造点是存在的**，被挡住的只是「绕过 `new` 直接写字面量」。已把标签收到正文的口径（**只钉字段私有**）。**为何值得改**：一个「不可构造」的标签会让人以为本 crate 外部拿不到 `ComputeNode`（§3.5 的访问器与 §4 的注册表都要求拿得到），而那与设计本意相反 |
 | 策略可替换 | 同一组用例换一份测试策略（按 `capabilities` 标签数排序）重跑，结果随之改变——**钉「排序真的读策略」，不钉「哪个策略对」** |
 
 ---
