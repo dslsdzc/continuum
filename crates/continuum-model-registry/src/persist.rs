@@ -1,22 +1,27 @@
 //! 三张表的迁移（设计 §3.1、§3.3）。
 //!
-//! 表定义与行级读写同址（同 P3A 的 `continuum-capability/src/persist.rs`）。**本 task 只落
-//! 迁移**：`p3d_model_migrations()` 建出 §3.1 的三张表；`save_profile` / `load_profile` /
-//! `save_skill_observation` / `load_skill_vector` / `load_skill_series` / `register_model` /
-//! `load_lifecycle` / `transition`（设计 §3.2）由后续 task 落进本文件。
+//! 表定义与行级读写同址（同 P3A 的 `continuum-capability/src/persist.rs`）。
+//! Task 5 落迁移：`p3d_model_migrations()` 建出 §3.1 的三张表。Task 6 落
+//! **`model_registry` 一表的行级读写**：`register_model` / `load_lifecycle` /
+//! `transition_in_tx`（设计 §3.2）。**`model_profile` / `model_skill_score` 两表的行级读写
+//! 仍由后续 task 落进本文件**（`save_profile` / `load_profile` / `save_skill_observation` /
+//! `load_skill_vector` / `load_skill_series`）。
 //!
 //! # 三处判据
 //!
-//! 前两条是**表结构对后续读写函数的约束**，其照片在那些函数自己的 task 里（本 task 的
-//! 三条用例只钉表结构，故这两条此处**没有照片**，别读成已被覆盖）。
+//! 三条都是**表结构对读写函数的约束**，照片在**有产生方**的那一处；本文件如实标出各自
+//! 已有与尚缺的照片，别把「注释写了」读成「已覆盖」。
 //!
 //! 1. **`model_skill_score` 挂 `model_profile` 而不挂 `model_registry`**（设计 §3.1 第 1 条）：
 //!    观测是画像的一部分，没有画像就没有观测。落在 `load_skill_vector`（后续 task）上，
 //!    即它不可能是「对未画像的模型返回空向量」，只能是「返回该画像的向量」。
-//! 2. **主键 `(model_id, dimension, score_version)` 是「同一维度的同一版本只有一次观测」的
-//!    落点**（设计 §3.1 第 2 条）。落在写入函数（后续 task）上，即 `model_skill_score` 与
-//!    `model_registry` 的写入一律**裸 `INSERT`**、不 `OR REPLACE`——否则「补记一次观测」
-//!    会静默覆盖历史，而 §24 要的正是历史。
+//! 2. **主键「同一维度的同一版本只有一次观测」的落点**（设计 §3.1 第 2 条）：`model_skill_score`
+//!    与 `model_registry` 的写入一律**裸 `INSERT`**、不 `OR REPLACE`——否则「补记一次观测」
+//!    会静默覆盖历史，而 §24 要的正是历史。**`model_registry` 那一半已有照片**：本表的写入
+//!    入口是 [`register_model`]（裸 `INSERT`），照片是
+//!    `tests/persist.rs` 的 `registering_the_same_id_twice_is_rejected_and_the_row_is_unchanged`
+//!    （原行先被迁离初值，故 `OR REPLACE` 会被区分出来）。**`model_skill_score` 那一半仍无照片**，
+//!    随它的写入函数在后续 task 落地。
 //! 3. **三个列表列取 JSON 数组容器**（`modalities` / `tools` / `failure_modes`），与 P3A 的
 //!    `tool.required_capabilities` 同形；**不建子表**是因为它们**没有逐元素属性**——与
 //!    `model_skill_score` 的分界是判据（版本、样本数、时间窗），不是「谁更长」。
@@ -24,7 +29,11 @@
 //! 枚举列的落库编码（`lifecycle_state` 取 [`crate::LifecycleState::as_str`]、`dimension` 取
 //! [`crate::SkillDimension::as_str`]）挂在各自的类型上，**不在本文件另建一份表**（全局约束）。
 
-use continuum_persist::Migration;
+use continuum_core::model::ModelId;
+use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
+
+use crate::error::LifecycleError;
+use crate::lifecycle::{LifecycleState, transition};
 
 /// 本 crate 注册的迁移：§3.1 的三张表全在**一条**迁移里。
 ///
@@ -78,4 +87,83 @@ pub fn p3d_model_migrations() -> Vec<Migration> {
             PRIMARY KEY (model_id, dimension, score_version)
         );",
     )]
+}
+
+/// §21 的「发现即登记」：新模型进 Registry，初始状态 `discovered`。
+///
+/// **裸 `INSERT`，不是 `INSERT OR REPLACE`**：同 id 的第二次登记由主键拒绝，判据在库层
+/// 而非调用方自查（与 P3A 的 `save_tool` 同一判据，设计 §3.1 第 2 条）。这一点有照片——
+/// `tests/persist.rs` 的 `registering_the_same_id_twice_is_rejected_and_the_row_is_unchanged`
+/// 先把原行迁离初值再重登记，故 `OR REPLACE` 会被区分出来（若原行停在初值，
+/// 「被拒后仍是初值」在 `OR REPLACE` 下照样成立）。
+///
+/// 初值经 [`LifecycleState::as_str`] 编码，不写 SQL 字面量（全局约束：本 crate 的枚举列编码
+/// 挂在类型上，且不依赖 serde、不用 `Debug`）。
+pub fn register_model(tx: &Tx<'_>, id: &ModelId) -> Result<(), PersistError> {
+    tx.execute(
+        "INSERT INTO model_registry (id, lifecycle_state) VALUES (?1, ?2)",
+        &[
+            Value::text(id.as_str()),
+            Value::text(LifecycleState::Discovered.as_str()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 读一个登记项的当前状态。**没有这一行返回 `Ok(None)`**，不是 `Err`
+/// （`LifecycleError::UnknownModel` 用在**转移**上——没有登记项可改）。
+///
+/// 表外取值（列里不是十态之一）返回**具体** `Err`，**不取默认值**：把串猜成另一枚状态
+/// 会成为第二份表示（同 `LifecycleState::parse` 与 P3A 的 `decode_capabilities` 的理由），
+/// 且会掩盖「有人往库里写了别的东西」。非文本的列值另报 [`PersistError::ColumnType`]。
+pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState>, PersistError> {
+    let rows = tx.query(
+        "SELECT lifecycle_state FROM model_registry WHERE id = ?1",
+        &[Value::text(id.as_str())],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let raw = match row.into_iter().next() {
+        Some(Value::Text(s)) => s,
+        other => {
+            return Err(PersistError::ColumnType {
+                index: 0,
+                actual: other.as_ref().map(kind_name).unwrap_or("missing"),
+            });
+        }
+    };
+    LifecycleState::parse(&raw)
+        .map(Some)
+        .ok_or_else(|| PersistError::Database(format!("未知 LifecycleState: {raw}")))
+}
+
+/// §4.1 迁移表的落库版：读当前状态 → 内存 [`transition`] → 写回。
+///
+/// **返回的是迁移前的旧态（`from`）**，不是 `to`（设计 §3.2 的定稿；理由同内存版）。
+/// 落库的是 `to`，经 [`LifecycleState::as_str`] 编码。
+///
+/// # 失败不留下半写的行
+///
+/// 两次失败都在**写之前**返回：没有登记项时 [`LifecycleError::UnknownModel`]（**不静默创建**
+/// ——登记是 [`register_model`] 的活），非法对时 [`LifecycleError::Illegal`]。
+/// 故「失败路径只断言是哪一种 `Err`」之外，还要断言库里的行没动——
+/// `tests/persist.rs` 的 `an_illegal_transition_leaves_the_row_unchanged` 读回库里的值，
+/// 专治「先写 `to`、再去查表」这种先斩后奏（它的返回值同样是 `Illegal`，只断言 `Err` 看不出）。
+///
+/// 读与写在同一事务里（`Tx` 由调用方开），故「读到的旧态」与「写回的那一行」是同一行。
+pub fn transition_in_tx(
+    tx: &Tx<'_>,
+    id: &ModelId,
+    to: LifecycleState,
+) -> Result<LifecycleState, LifecycleError> {
+    let from = load_lifecycle(tx, id)?
+        .ok_or_else(|| LifecycleError::UnknownModel { id: id.clone() })?;
+    // 非法对在此返回——**在下面那次 execute 之前**，故失败不留半写的行。
+    let from = transition(from, to)?;
+    tx.execute(
+        "UPDATE model_registry SET lifecycle_state = ?1 WHERE id = ?2",
+        &[Value::text(to.as_str()), Value::text(id.as_str())],
+    )?;
+    Ok(from)
 }

@@ -6,6 +6,9 @@
 //! [`RoutingError`] 标「这次路由请求不合法」。判据是**产生方不同**——
 //! 把「值非法」与「操作非法」并成一枚，调用方就分不出该退回去修数据还是修动作。
 
+use continuum_core::model::ModelId;
+use continuum_persist::PersistError;
+
 use crate::lifecycle::LifecycleState;
 
 /// 画像侧取值类型的构造错误（设计 §2.4）。
@@ -54,13 +57,14 @@ pub enum ProfileError {
 /// `RegistryError`（`NotFound` / `Duplicate`，是适配器注册表的错误）。两件事一个名字会让
 /// 调用方与后来者混淆，与「同一件事两个词汇表」是同一种病灶的两面。
 ///
-/// # 只有一枚变体：其余三枚随产生方落地
+/// # 四枚变体的到位情况
 ///
 /// 设计 §4.1 列了四枚（`Illegal` / `ProfileBeforeVerified` / `UnknownModel` / `Persist`）。
-/// 本 task 只落 `Illegal`——**没有产生方的变体不先铺开**（本仓对这类变体的处置是删或写明理由）。
-/// 另三枚的产生方与到位的 task：`ProfileBeforeVerified`（`save_profile`，Task 7）、
-/// `UnknownModel { id }` 与 `Persist(#[from] PersistError)`（`transition_in_tx` 等落库读写，Task 6）。
-/// 到那时它们在这里增补，**不提前铺开**：一枚永不出现的变体会让 `match` 的穷尽臂说谎。
+/// Task 4 落 `Illegal`（内存版 `transition` 的失败值）；Task 6 随落库读写补上
+/// `UnknownModel { id }` 与 `Persist(#[from] PersistError)`（`persist::transition_in_tx` 的两个
+/// 失败来源：没有登记项可改、以及读写出错）。
+/// **`ProfileBeforeVerified` 仍未落地**：它的产生方是 `save_profile`（Task 7）——
+/// **没有产生方的变体不先铺开**，一枚永不出现的变体会让 `match` 的穷尽臂说谎。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LifecycleError {
     /// 迁移对不在 §4.1 的表里。`from` / `to` 原样带出（形状取自 `continuum-graph` 的同名变体
@@ -72,6 +76,26 @@ pub enum LifecycleError {
         from: LifecycleState,
         to: LifecycleState,
     },
+
+    /// 登记项不存在，没有状态可迁移。`id` 原样带出。
+    ///
+    /// **产生方只有落库版**（`persist::transition_in_tx`）：内存版 `transition` 收的是
+    /// 两个状态，没有「哪个模型」这一维。**不静默创建**——登记是 `register_model` 的活
+    /// （设计 §3.2）；把一次笔误的 id 变成一行新登记项，会让「未见过的模型」与「打错字的
+    /// 模型」在库里长得一样。
+    ///
+    /// **读路径不用这一枚**：`load_lifecycle` 对未登记的 id 返回 `Ok(None)`——
+    /// 读一个不存在的模型是「没有」，不是「出错」。
+    #[error("登记项 {id:?} 不存在，没有生命周期状态可迁移")]
+    UnknownModel { id: ModelId },
+
+    /// 落库读写出错（`#[from]`，供 `?` 直接升格）。
+    ///
+    /// 与 [`LifecycleError`] 另三枚的分界：那三枚说的是「这次生命周期操作不合法」，
+    /// 这一枚说的是「库这一次没读成或没写成」——调用方对两者的处置不同
+    /// （修动作／报基础设施故障），故不并成一枚（同 `ProfileError` 与 `RoutingError` 分开的理由）。
+    #[error("生命周期落库读写出错: {0}")]
+    Persist(#[from] PersistError),
 }
 
 /// 路由侧的错误（设计 §5.3）。
