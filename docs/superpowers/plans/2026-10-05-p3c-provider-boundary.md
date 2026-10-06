@@ -1073,6 +1073,26 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 - Modify: `crates/continuum-provider/tests/common/mod.rs`（`FakeTool` 加失败通道）
 - Create: `crates/continuum-provider/tests/contract.rs`
 
+> **订正注记（2026-10-06，Task 7 复核；原话照留）。** **这份清单漏了项**：把 `FakeTool` 三态化
+> **打断了七个构造点、横跨四个文件**（下面按**用例名 / 代码内容**写；行号只是当时那一次读数的快照）：
+>
+> | # | 文件 | 那一个构造点 |
+> |---|---|---|
+> | — | `tests/common/mod.rs` | 定义本身：`FakeTool` 由单元结构体改为带 `outcome` 字段，**外加三个构造入口** |
+> | 1 | `tests/fake_provider.rs` | `fake_implementations_satisfy_the_frozen_interfaces` 里那个 `let t = FakeTool;` → `FakeTool::echo()` |
+> | 2 | `tests/invoke_tool.rs` | `a_registered_tool_is_invoked_and_its_result_returned` 里的 `register_tool(.., Arc::new(FakeTool))` |
+> | 3 | `tests/registry_tools.rs` | `a_registered_tool_is_described_by_id` 里那处 |
+> | 4 | `tests/registry_tools.rs` | `an_unregistered_tool_id_is_reported_as_unregistered` 里那处 |
+> | 5 | `tests/registry_tools.rs` | `list_tools_reports_an_adapter_failure_as_provider` 里那处 |
+> | 6 | `tests/registry_tools.rs` | `describe_tool_routes_by_registration_not_by_the_adapters_list_tools` 里那处 |
+> | 7 | `tests/two_registries.rs` | `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` 里那处 |
+>
+> **正文原先只点了 `fake_provider.rs` 那一处**（在 Step 1 里），其余六处没有任何指令**——
+> 它们是**编译错误逼出来的**（`FakeTool` 不再是单元结构体，`Arc::new(FakeTool)` 一处都过不去）。
+> **这是清单类缺陷的典型形态：漏项不靠读清单发现，靠编译器发现**；但**清单漏了就得补**，
+> 否则下一次改动的人仍要从编译错误里反推。**判据：凡动公开夹具的构造形状，先 grep 一遍它的构造点
+> （`grep -rn "FakeTool" crates/continuum-provider/tests/`），把命中的用例逐个列进 Files。**
+
 **Interfaces:**
 - Consumes: Task 4 的 `invoke_tool`
 - Produces: 无新公开面
@@ -1087,6 +1107,16 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 `tests/common/mod.rs` 的 `FakeTool` 从单元结构体改为带一个失败通道字段，三个构造入口：
 `FakeTool::echo()`（今天的行为）、`FakeTool::failing_at_tool_level()`（`Ok(ToolResult { is_error: true })`）、
 `FakeTool::failing_at_provider_level()`（`Err(ProviderError::Transport(..))`）。
+
+**补一处计划缺口（2026-10-06，Task 7 复核）：工具级失败那一支的 `ToolResult.output` 该取什么值，
+本节原稿与设计都没给。** 本计划取**一个固定的、非回显的值**（实现里取
+`json!({"error": "工具跑起来了但自身失败"})`），理由两条：
+**(a)** 若让它**回显 `input`**，`output` 会在两臂上**完全相同**，`is_error` 就成了两条用例之间
+**唯一的区分轴**——而本 task 要钉的正是「两条不是等价变异体」，把区分轴收窄到一根，
+等于让「`output` 那一路也分得开」这件事**没有照片**；**(b)** 回显还会把一个**用例自造的载荷
+升格成看似规范的东西**（读代码的人会以为「工具级失败时 `output` 就是输入」是一条约定，
+而它哪里都不是）。**标明：这是本计划的选择，不是规范要求**——§316 对 `output` 在失败时的取值
+**没有任何规定**，适配器可以任意取；取固定值只是让本用例的断言更硬。
 `tests/fake_provider.rs` 里**那个 `let t = FakeTool;`**（`fake_provider.rs` 的第二个 `#[tokio::test]` 之前的
 那个用例体内；**按那一行代码找，不按行号**）改为 `FakeTool::echo()`。
 
@@ -1128,6 +1158,23 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 ```bash
 timeout 300 cargo test -p continuum-provider --test contract
 ```
+
+> **订正注记（2026-10-06，Task 7 复核；原话照留）。** **上面 Step 1 → Step 2 → Step 3 作为一个
+> 「红—绿」序列是执行不了的**：**被测对象正是 Step 1 自己引入的夹具**——照写，Step 3 一跑就绿，
+> **没有红可看**。这不是「红写得少」，而是**这个序列在本 task 上根本不成立**。
+>
+> **实际做法（实现者的拆分，评审判为对意图的正当读法）**：**先落夹具的「结构」**——枚举、
+> 三个构造入口、以及上面表里那七个调用点**全部到位**，**而 `invoke` 暂不读 `outcome`
+> （一律走 `Echo` 那一支）**；于是**两条用例各自在自己的断言上红**（工具级那条拿到
+> `is_error: false`、provider 级那条拿到 `Ok` 而不是 `Err`）；**再把 `invoke` 接上 `outcome`**，
+> 两例转绿。**两次红都不是编译失败**，都是断言失败，且**各自红在该用例自己的断言上**。
+>
+> **判据（本项目通用，写进原地）**：**当被测对象在同一个 task 里被造出来时，「先写用例看它红」
+> 这个序列产不出红——红必须来自一个中间态（结构在位、行为未接）。**
+> **判据是「红来自断言、且红在该用例自己的断言上」，不是「必须按某个步骤顺序」。**
+> **反过来也成立**：若某个 task 声称「先写用例、再看它红」而被测对象正是它自己新建的，
+> 那么那个「红」**要么来自中间态、要么就是假的**——`file not found`、`could not compile`
+> 都不是这个意义上的红（与纪律 1(c) 同一条判据）。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
