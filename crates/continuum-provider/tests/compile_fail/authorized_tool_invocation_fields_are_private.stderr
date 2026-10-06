@@ -1,9 +1,9 @@
 error[E0451]: fields `authorization` and `input` of struct `AuthorizedToolInvocation` are private
-  --> tests/compile_fail/authorized_tool_invocation_fields_are_private.rs:20:9
+  --> tests/compile_fail/authorized_tool_invocation_fields_are_private.rs:32:9
    |
-19 |     continuum_provider::AuthorizedToolInvocation {
+31 |     continuum_provider::AuthorizedToolInvocation {
    |     -------------------------------------------- in this type
-20 |         authorization: auth,
+32 |         authorization: auth,
    |         ^^^^^^^^^^^^^ private field
-21 |         input: serde_json::json!({}),
+33 |         input: serde_json::json!({}),
    |         ^^^^^ private field
