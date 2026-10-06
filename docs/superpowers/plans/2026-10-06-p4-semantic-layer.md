@@ -1686,6 +1686,12 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
 - Create: `crates/continuum-budget/Cargo.toml`
 - Create: `crates/continuum-budget/src/{lib.rs,dimensions.rs,account.rs,tree.rs,ledger.rs,persist.rs,error.rs}`
 - Create: `crates/continuum-budget/tests/{tree,persist}.rs`
+- Create: `crates/continuum-budget/tests/type_level.rs`（trybuild 驱动）
+- Create: `crates/continuum-budget/tests/compile_fail/{allocation,reservation,remaining}_has_no_public_constructor.rs`
+  ＋ 三个同名 `.stderr`（**逐角色各一对**：三反例三文件，**不合并成一份**）
+- Create: `crates/continuum-budget/tests/compile_fail/{allocation,reservation,remaining}_is_not_the_other_two_roles.rs`
+  ＋ 三个同名 `.stderr`（`the_three_roles_are_three_types` 的**逐角色**形态：每份样例以**一个角色**为主语，
+  断言它当不了另外两个——三个角色一个不落，不抽代表）
 - Modify: `Cargo.toml`（members）、`crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED`）
 
 **Interfaces:**
@@ -1712,21 +1718,30 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
 
 - [ ] **Step 2: 写用例**
 
-- `the_three_roles_are_three_types`（§12.1 的「三角色三类型」）：
-  照片机制 = **trybuild 反例**：`let _: Allocation = remaining;` / `let _: Remaining = allocation;` 编译不过
-  （`.stderr` 各份实跑取值）；**正控制**：三者各自的读法可用。
+- `the_three_roles_are_three_types`（§12.1 的「三角色三类型」）：**逐角色一对文件、共三对**——
+  `allocation_is_not_the_other_two_roles`（样例内两条：`let _: Reservation = allocation;` /
+  `let _: Remaining = allocation;`）、`reservation_…`、`remaining_…` 同形；
+  各份 `.stderr` 实跑取值。**逐角色的理由同上一条**（三合一或抽代表时，其中一个角色漂了照样绿）；
+  **正控制三条**：三者各自的读法可用（`Allocation` 由分配方给、`Reservation` 由 `reserve` 给、
+  `Remaining` 由 `remaining()` 给）。
   三个 newtype 各包一个 `Dimensions`，**类型不共用**——故「把余量填进上限的位置」在类型上不可写。
   **明写**：编译期照片，运行期无照片（纯数据声明）。
 - `each_role_has_exactly_one_constructor_and_no_second_public_path`（**§12.1 :1540-1544 点名给
-  `plan-p4` 的那一条**）：三个角色**逐个**断言，各一条 trybuild 反例 ——
-  在 crate 外**构造** `Allocation` / `Reservation` / `Remaining`（各用元组构造形式 `Allocation(dims)`）
-  ⇒ **编译不过**，且 `.stderr` 钉住的是**它该有的那个错**（字段私有；
-  **形态照 P3A 对 `AuthorizedTool` 的样例**，判据是「失败必须落在私有性上」，不是拼错名字之类的别的错）。
-  **三个角色各一份反例，共三份、三份 `.stderr` 各不相同**（错误码一律以实跑为准、不许凭记忆写）。
-  **正控制三条**（**缺了它们，「三个角色根本不存在」也照样绿**）：设计指定的那个入口各一条——
-  分配方给 `Allocation`、`reserve` 给 `Reservation`、`remaining()` 给 `Remaining`，三条都编译通过。
-  **六条合起来才算钉住**（三反例 ＋ 三正控制）：只钉反例，「三个角色的入口被删光」照样绿；
+  `plan-p4` 的那一条**）：**逐角色各一条，不合并、不抽代表**——三个角色三个用例名：
+  `allocation_has_no_public_constructor` / `reservation_has_no_public_constructor` /
+  `remaining_has_no_public_constructor`。**每个角色各一对文件**（`tests/compile_fail/*.rs` ＋
+  同名 `.stderr`），**共三对、三份 `.stderr` 各不相同**：在 crate 外**构造** `Allocation` /
+  `Reservation` / `Remaining`（元组构造形式 `Allocation(dims)`）⇒ **编译不过**，
+  且 `.stderr` 钉住的是**它该有的那个错**（字段私有；**形态照 P3A 对 `AuthorizedTool` 的样例**，
+  判据是「失败必须落在私有性上」，不是拼错名字之类的别的错）。**错误码一律以实跑为准、不许凭记忆写。**
+  **为什么必须逐角色各一条（写进注释，这是本条的要害）**：**三合一（或抽一个代表）时，
+  其中一个角色漂了照样绿**——例如 `Remaining` 后来开了公开构造函数而 `Allocation` 没有，
+  一条合并的样例仍会过。这与「枚举断言须逐项有照片」是同一条纪律，故**三个用例名、三对文件，
+  一个不少**。**正控制三条**（**缺了它们，「三个角色的入口被删光」照样绿**）：设计指定的那个入口
+  各一条——分配方给 `Allocation`、`reserve` 给 `Reservation`、`remaining()` 给 `Remaining`，
+  三条都编译通过。**六条合起来才算钉住**（三反例 ＋ 三正控制）：只钉反例，「入口被删光」照样绿；
   只钉正控制，「crate 外随手能造一个」照样绿。
+  **本 task 的三对样例名逐条写进 Files**（不写在正文里让实现者自己拆）。
   **并写明这条断言的作用域与时点**：「除设计指定的那个入口外无第二个公开**构造路径**」是**在本 task 结束时**
   由这六份样例钉住的；**三个角色私有、无公开构造函数**这一句在 P4 落地前只是**设计写死的承诺**
   （代码层面当时只能核「设计承诺了」），本 task 是它第一次有代码层的照片。
