@@ -11,7 +11,10 @@
 //! [`NodeTrust`]（[`node`] 模块），并以 `tests/type_level.rs` ＋
 //! `tests/compile_fail/compute_node_fields_are_private.rs` 钉住「crate 外写不出 `ComputeNode`
 //! 的字段字面量」这条不可表达性。
-//! `src/registry.rs`、`src/placement.rs`、`src/error.rs` 三个模块与它们的导出面由后续
+//! Task 3 补 §4 的进程内注册表 [`NodeRegistry`] / [`NodeRegistryError`]（[`registry`] 模块），
+//! 并以 `tests/registry.rs` 的两条**源码文本守卫**钉住「这个模块里不出现某三个名字」——
+//! 守卫的判据与证明力边界写在那份测试的文件头。
+//! `src/placement.rs`、`src/error.rs` 两个模块与它们的导出面由后续
 //! task 各自登记自己那几行。
 //!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
@@ -28,5 +31,7 @@
 //! （设计 §7.3）；它在 `Cargo.toml` 的 `[dev-dependencies]` 里，由 Task 2 登记。
 
 pub mod node;
+pub mod registry;
 
 pub use node::{ComputeNode, ComputeNodeId, NodeClass, NodeTrust};
+pub use registry::{NodeRegistry, NodeRegistryError};
