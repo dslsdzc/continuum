@@ -1641,16 +1641,38 @@ pub enum BudgetError {
 }
 ```
 
-**三个使用者与它们各自可能返回哪几枚**（写死，免得再出现「三处三个集合」）：
+**四个入口与它们各自可能返回哪几枚**（写死，免得再出现「三处三个集合」）：
 
-| 函数 | 可能返回 |
-|---|---|
-| `reserve` | `Insufficient`、`UnknownOwner` |
-| `settle` | `NegativeAmount`、`UnknownOwner` |
-| `check`（§12.4） | `NegativeAmount`、`UnknownOwner` |
+| 函数 | 吃的 `Dimensions` 是哪一份 | 可能返回 |
+|---|---|---|
+| `allocate`（父给子） | 子节点的**上限** | `Insufficient`、`NegativeAmount`、`UnknownOwner` |
+| `reserve` | 本次**预扣** | `Insufficient`、`NegativeAmount`、`UnknownOwner` |
+| `settle` | 本次**实际** | `NegativeAmount`、`UnknownOwner` |
+| `check`（§12.4） | 计划的**估计** | `NegativeAmount`、`UnknownOwner` |
 
-**`check` 为什么也拒负 `estimate`**：负的估计会让 §12.4 的比较**恒为 `Within`**——
-那是一处与 `settle` 负值**同形的 fail-open**（计划不因它被拦下）。故两处共用同一枚。
+**四个入口，凡是吃一份 `Dimensions` 的，都在同一口径下**——§12.4 第 2 条那句
+「**负值不是『不合理』而是『不可能』**」是**全层**的，它自己就把这四处全括了进来。
+故**每个入口都收下这条口径（不做豁免）**，理由逐处：
+
+- **`settle` 的 `actual`**：负值使 `settled` 变小、`available` 变大——**fail-open**（§12.2 已写）。
+- **`reserve` 的 `dims`**：负值使 `reserved(n,d)` 变负、`available` 变大——
+  **与 `settle` 完全同形**（2026-10-06，评审查出：本表初版漏了这一行，而口径自己把它括了进来）。
+- **`check` 的 `estimate`**：负估计让 §12.4 的比较**恒为 `Within`**，计划不因它被拦下——同形。
+- **`allocate` 的分配额**：负分配**让 I2 更易满足**（危害小一档），但**同样得处置**——
+  **本设计取「收下这条口径」（拒收），不取「显式豁免」**。判据：①**同一个口径管辖四个入口，
+  逐个豁免会让口径退化成一张白名单**（本仓对「口径 + 例外」一贯要求例外也具名且有理由，
+  而这里拒收的成本是零——产生方是规划方，负的分配额本就是它的 bug）；
+  ②`settle` / `reserve` / `check` 三处都拒，**唯独 `allocate` 收下负值，会是一条无理由的不一致**。
+
+**`allocate` 与 `reserve` 也返回 `Insufficient`，这正是 I2 的强制点**：
+`allocate` 要求 `Σ 子节点分配额 ≤ 父的可用额`（§12.2 的 I2）——**超分配在分配那一刻就被拒**，
+而不是等到某个子节点 `reserve` 时才拦。**`settle` 不返回 `Insufficient`**：
+实际超过预扣是 §110 的**运行期超支**，它是 `SettleOutcome::Over` 而**不是** `Err`（见上）。
+
+> **订正（2026-10-06，评审查出）**：本表初版**四行缺两行**——`allocate` 整行没有，
+> `reserve` 那行的可返回枚少了 `NegativeAmount`。**而漏的正是口径自己括进来的**（见上）。
+> **判据**：这不是「要不要第四枚」，是**表与口径脱钩**——改名之后 `NegativeAmount` 的语义本就通用，
+> **补这一行的成本是零，所以它是疏漏而非取舍**。原句留在此处。
 
 > **订正（2026-10-06，计划作者同步时查出）**：先前 `BudgetError` **三处各列一套**——
 > §12.2 正文写 `Insufficient{dimension}`、§12.2 的枚举只列 `UnknownOwner` ＋ `NegativeActual`、
@@ -1905,7 +1927,7 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 
    **故三行里只有第 3 行今天真的会响**；第 1、2 行都是**约定**。
    **若要第 1 行由编译器保证，须先把 clippy 纳入门禁**——那是一件**独立的事**（它会影响全仓，
-   不只是这两行），**不在本设计范围**。
+   不只是这两行），**不在本设计范围**；**但那条缺口已具名**：**收件人：协调者／仓维护者**（§16 第 35 条）。
 
    > **订正（2026-10-06，计划作者同步时查出）**：本表初稿把第 1 行写成「**编译器** …… 编译不过」。
    > **那一格今天是空的**——那张牌要靠 clippy，而 clippy 不在门禁里，
@@ -2200,7 +2222,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 恢复链（§332 §107） | 只改指名字段、**其余字段逐项不变**；失败路径断言**四张表无半写行**（不只断言 `Err` 哪一种） |
 | Constraint Validator（§225 §6） | §225 的 MAY 七条逐项放行 ＋ MUST NOT 三条逐项拦下（第四条见 `ViolatesRequired`）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下；**三侧**：悬空键 `Err(UnknownConstraintKey)` 一条 ＋ `constraints` 为空不是 `Err` 一条 ＋ **命中 `PREFERRED` 键不是 `Err`、也不拦下一条**（第三条钉住「判据与 `class` 无关」） |
 | 两道门分离（§2.2） | §11.5 的三条（两条 `ALLOWED` 条目 + 方法集断言） |
-| 预算不变量（§12.2 §12.2.1） | `BudgetError` 的**三枚各一条**（别处不再另列）；`reserve` 返回**具体哪一维**（逐维五条）；I1 / I2 / I3 **各一条**违规断言；**`check` 的负 `estimate`**：一条 `Err(NegativeAmount{..})`（与 `settle` 同枚）；`settle` 的 `Over` 断言 `dimension` 与 `by`；**`actual` 负值**：一条 `Err(NegativeAmount{dimension,value})` **并断言账本未变**（无半写副作用）＋ **反例**一条（各维为 0 ⇒ `Ok(Within)` 且全额退回） |
+| 预算不变量（§12.2 §12.2.1） | `BudgetError` 的**三枚各一条**（别处不再另列）；**四个入口的负 `Dimensions` 各一条**（`allocate` / `reserve` / `settle` / `check`，各断言 `Err(NegativeAmount{dimension,value})` 且**账本未变**）；`reserve` 返回**具体哪一维**（逐维五条）；I1 / I2 / I3 **各一条**违规断言，其中 **I2 的强制点在 `allocate`**（超分配 ⇒ `Err(Insufficient{dimension})`）；`settle` 的 `Over` 断言 `dimension` 与 `by`；**反例一条**（`settle` 各维为 0 ⇒ `Ok(Within)` 且全额退回，只钉拒绝那侧会让「`0` 也被拒」漂过去） |
 | 无读数按预扣（§12.3） | 三条（流式 / 恢复 / **有读数时不按预扣**） |
 | Budget Validator（§110） | `Within` 一条；`Exceeds` **逐维五条**；判据是 `remaining` 不是 `allocation`（构造一个「按 allocation 判会放行、按 remaining 判超支」的用例） |
 | 探索预算（§334） | 四个默认判据**各两条**（放行/门控，共八条）；策略收紧一条；`has_external_effect` 那一格 `dimension` 为 `None` |
@@ -2462,3 +2484,15 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     本设计**不建它**（它要引入一处读源码的测试，且今天没有产生方）。
     **本设计已做的是把「谁保证」逐格写明**（§12.6.1 的表），不再由「编译器」三个字替一个约定背书。
     **收件人：实现者**（落地时决定是否补那条检查；若补，须同时说明它读的是哪个文件的哪两行）。
+35. **「把 clippy 纳入门禁」这件事本身**（§12.6.1 的「谁保证」表）：
+    断言一那两行解构的「不得带 `..`」，**今天没有任何东西保证**——
+    那张牌是 `#![deny(clippy::rest_pat_in_fully_bound_structs)]`，
+    **而本仓的门禁是 `cargo test` ＋ `cargo build`，不含 clippy**，`clippy::` tool lint 在 `cargo test` 下不生效。
+    **实测确认（2026-10-06）**：无 `.github/`、无 `Makefile` / `justfile` / `xtask`，
+    根 `Cargo.toml` 里 `clippy` 与 `[lints]` 均零命中。
+    **缺的是哪一步**：**把 clippy 纳入本仓的验证命令**——那是一件**独立的事**
+    （它影响全仓，不只是那两行），**故不由 P4 的设计单方面定**；
+    但按本仓「被披露的缺口必须具名」的纪律，这一条要有收件人，不能推给「独立的事」了事。
+    **一旦纳入，第 1 行即由编译器保证**（今天只有站点注释 ＋ 复审）；
+    **第 2 行（部分绑 ＋ `..`）即便纳入也不由编译器保证**——那条 lint 本就只管全绑那一格。
+    **收件人：协调者／仓维护者。**
