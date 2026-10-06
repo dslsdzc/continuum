@@ -1696,14 +1696,14 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
 
 **Interfaces:**
 - Consumes: `continuum_semantics::IntentId`（预算树的 owner 取它）；`continuum_persist::{Tx, Migration, Db, Value}`
-- Produces: `continuum_budget::{DimensionKind, Dimensions, Allocation, Reservation, Remaining, BudgetOwner, LedgerKind, BudgetError, reserve, settle, SettleOutcome, allocate_child, remaining, dangling_reservations, p4_budget_migrations}`
+- Produces: `continuum_budget::{DimensionKind, Dimensions, Allocation, Reservation, Remaining, BudgetOwner, LedgerKind, BudgetError, allocate, reserve, settle, SettleOutcome, remaining, dangling_reservations, p4_budget_migrations}`
 
-> **开工前置（核一处设计相抵）**：`BudgetError` 的变体在设计的**三处**说法不同（§12.2 的散文写
-> `Insufficient { dimension }`、§12.2 的枚举只列 `UnknownOwner` ＋ `NegativeActual`、§12.4 的枚举
-> 只列 `UnknownOwner` 并写「只收一种」）。**本计划按三处的并集取三枚**
-> （`UnknownOwner` / `Insufficient` / `NegativeActual`），逐枚注明出处，见 `## 遗留` 第一节第 5 条；
-> 开工前先核设计是否已把它定死，未定则**照本计划的并集落地并回报**（不擅自删任何一枚——
-> 「`reserve` 返回具体哪一维不足」是 §12.2 正文与 §14 表格都写着的判据，删了它那五条照片没有承载）。
+> **本轮无开工前置**：`BudgetError` 的三处不一致**已由设计闭合** —— 设计新增 **§12.2.1** 给出
+> **唯一一份三枚清单**（`UnknownOwner` / `Insufficient` / `NegativeAmount`）并附
+> **「使用者 × 可返回枚」四行表**（`allocate` / `reserve` / `settle` / `check`）。
+> **本 task 一律照 §12.2.1 写**：`NegativeAmount` 这个名字（不是本计划先前按并集取的 `NegativeActual`）、
+> 四行各自的枚数、以及「**四个吃 `Dimensions` 的入口一律拒负值，不做豁免**」这条口径。
+> 来历见 `## 遗留` 第一节的已闭清单。
 
 - [ ] **Step 1: 现场核对迁移号 120 为空号，登记 members 与 `ALLOWED`**
 
@@ -1761,7 +1761,30 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
   红条件：返回笼统的 `Exceeds`（**取反档**——五条全红，因为拿不到具体维）。
   **依据**：ENG-005 的「没有预留，§110 这一步就没有判据」落在这一行上。
 - `i1_a_reserve_beyond_the_available_amount_is_rejected`：`available(n,d) ≥ 0` 的违规一条（**fail-closed 侧**）。
-- `i2_a_child_allocation_beyond_the_parent_available_is_rejected`：违规一条。
+- `i2_is_enforced_at_allocation_time`（**I2 的强制点，设计点名的入口是 `allocate`**）：
+  父的可用额不足以给出这次分配 ⇒ `allocate(parent, child, dims)` 得
+  `Err(BudgetError::Insufficient { dimension })`，`dimension` 是**那一维**。
+  **依据**：I2 要求 `Σ 子节点分配额 ≤ 父的可用额`——**超分配在分配那一刻就被拒**，
+  而不是等到某个子节点 `reserve` 时才拦（§12.2.1 末段）。
+  红条件：把 I2 挪到 `reserve` 才判（**取反档**——本用例红，且超分配会静默进树）。
+- **四个入口各一条、四个用例名（不抽代表、不合并）**：`reserve_rejects_a_negative_dimension` /
+  `allocate_rejects_a_negative_dimension` / `settle_rejects_a_negative_dimension` /
+  `check_rejects_a_negative_dimension`（`check` 那条落在 Task 18）。
+  每条：各喂一份**含负值**的 `Dimensions` ⇒ 断言 `Err(BudgetError::NegativeAmount { dimension, value })`
+  （`dimension` 是**那一维**、`value` 是**那个负数**），**并各断言账本未变**
+  （`reserve` 是否仍活跃、`settled` 逐维、`budget_ledger` 行数）。
+  **口径写进注释**：设计 §12.2.1 定「**四个吃 `Dimensions` 的入口在同一口径下，一律拒收、不做豁免**」——
+  判据是「同一个口径管辖四个入口，逐个豁免会让口径退化成一张白名单」，且
+  「三处都拒、唯独 `allocate` 收下负值会是一条无理由的不一致」。
+  红条件：某一入口按 `0` 截断或放行（**移除档**——那一条红，其余三条仍绿，
+  **这正是四条必须各写一条的理由**）。
+- **另一侧同样四个用例名**：`reserve_accepts_an_all_zero_dimension` /
+  `allocate_accepts_an_all_zero_dimension` / `settle_accepts_an_all_zero_dimension` /
+  `check_accepts_an_all_zero_dimension`。各喂一份**各维为 0** 的 `Dimensions` ⇒ **不是 `Err`**：
+  `allocate` / `reserve` 得 `Ok`（额度为零的分配／预扣是合法的），`settle` 得 `Ok(Within { .. })`，
+  `check` 得 `Ok(Within)`。**不能省**——只钉拒绝那侧会让「`0` 也被拒」漂过去
+  （`0` 不是负数；§12.2.1 拒的是**负**值）。
+  **§14 的表格只点名了 `settle` 的这条反例，本计划**按「守卫两侧都钉」逐入口各补一条**——记在 `## 遗留` 第四节。
 - `i3_settled_plus_reserved_beyond_the_allocation_is_rejected`：违规一条。
   **三条各自一条违规断言，不合并**——它们钉的是三条不同的算术恒等式。
   **I2 的措辞差别要写进注释**：ENG-005 原文说「兄弟节点的活跃预留之和 ≤ 父的剩余」，
@@ -1773,7 +1796,7 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
 - `settle_over_reports_the_dimension_and_the_amount`：`Ok(SettleOutcome::Over { dimension, by })` 一条，
   断言 `dimension` 与 `by`（**不是笼统的「超了」**）。
 - `a_negative_actual_is_rejected_and_the_ledger_is_untouched`（**§12.2 照片 (a)，失败路径两件事都断言**）：
-  `actual` 某一维为负 ⇒ `Err(BudgetError::NegativeActual { dimension, value })`，
+  `actual` 某一维为负 ⇒ `Err(BudgetError::NegativeAmount { dimension, value })`，
   `dimension` 是**那一维**、`value` 是**那个负数**；**并断言账本未变**——
   `reserve` 仍活跃（`dangling_reservations` 里还在）、`settled` 逐维未动、`budget_ledger` 行数不变。
   红条件：按 `0` 截断（**移除档**——那时返回 `Ok` 且账面被悄悄改小；
@@ -1845,18 +1868,24 @@ impl Remaining {
 pub fn reserve(owner: BudgetOwner, dims: Dimensions) -> Result<Reservation, BudgetError>;
 
 /// 结算。**`Over` 不写第二行账**——运行期超支的裁决不在本层。
-/// **`actual` 的某一维为负 ⇒ `Err(NegativeActual { dimension, value })`——拒收，不截断**（§12.2）。
+/// **`actual` 的某一维为负 ⇒ `Err(NegativeAmount { dimension, value })`——拒收，不截断**（§12.2）。
 pub fn settle(r: Reservation, actual: Dimensions) -> Result<SettleOutcome, BudgetError>;
 
-/// §12.2 的错误面。**本计划按设计三处的并集取三枚**（见本 task 的开工前置与 `## 遗留` 第一节第 5 条）。
+/// §12.2.1 的**唯一一份**清单，**恰好三枚**——§12.4 与 §14 一律引用这里，不另列。
 pub enum BudgetError {
     /// 树上没有该 owner 的分配记录（`budget_node` 里查不到它）。**fail-closed**：不给 `Within`。
     UnknownOwner { owner: BudgetOwner },
-    /// `reserve` 时某一维的可用额不足（§12.2 正文与 §14 的逐维五条照片靠它）。
+    /// 预扣／分配时某一维余量不足。**承载「是哪一维」**（I1 与 I2 的判据点）。
     Insufficient { dimension: DimensionKind },
-    /// `actual` 的某一维为负。**拒收，不按 0 截断**。
-    NegativeActual { dimension: DimensionKind, value: i64 },
+    /// 一个本该非负的量纲取了负值。**四个吃 `Dimensions` 的入口共用本枚**
+    /// （`allocate` / `reserve` / `settle` / `check`）——语义同为「本该非负却取了负」，故一律拒收、不做豁免。
+    NegativeAmount { dimension: DimensionKind, value: i64 },
 }
+
+/// 父给子的分配（§12.2 的 I2 的强制点）。**超分配在分配那一刻就被拒**：
+/// `Σ 子节点分配额 ≤ 父的可用额`，不满足 ⇒ `Err(Insufficient { dimension })`。
+/// 负分配额同样拒（`NegativeAmount`）——「负分配让 I2 更易满足」不是豁免的理由（§12.2.1）。
+pub fn allocate(parent: BudgetOwner, child: BudgetOwner, dims: Dimensions) -> Result<Allocation, BudgetError>;
 
 /// §12.2 的「有一条 `reserve` 而没有对应的 `settle` 或 `release`」——可检出。
 /// **本函数是设计 §12.3 第 2 处的输入**（恢复钩子按预扣结算它）。
@@ -1913,6 +1942,10 @@ git commit -m "feat(budget): 预算树、三个角色的类型与 I1/I2/I3"
 **Budget Validator（§110）**：
 
 - `within_and_exceeds_each_have_a_photo`：`Within` 一条、`Exceeds` 一条。
+- `check_rejects_a_negative_dimension`（**§12.2.1 的表把 `check` 也列进那四行**，用例名与 Task 17 那一组对齐）：
+  `estimate` 某一维为负 ⇒ `Err(BudgetError::NegativeAmount { dimension, value })`，**并断言账本未变**；
+  **反例** `check_accepts_an_all_zero_dimension`：各维为 0 ⇒ `Ok(Within)`（`0` 不是负值）。**依据**：负估计会让 §12.4 的比较**恒为 `Within`**，
+  计划不因它被拦下——与 `settle` 的负 `actual` 同形（§12.2.1 末段）。
 - `an_unknown_owner_is_not_within`（**§12.4 第 3 条，fail-closed 侧**）：
   树上查不到该 owner 的分配记录 ⇒ `Err(BudgetError::UnknownOwner { owner })`，**不是 `Within`**。
   红条件：查不到就返回 `Within`（**放宽档**——那等于对一棵不存在的子树放行）。
@@ -2298,9 +2331,9 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
 设计 §16 的 **34** 条**本计划一条都不发明**——收件人照原文，逐条落在下节第五节
 （第 34 条的收件人是**实现者**，本计划已就它作出取舍，见第五节）。
 
-### 一、设计问题：**已由设计闭合的七条** ＋ **仍开着的六条**（发现即报，本计划一处都不替设计补写）
+### 一、设计问题：**已由设计闭合的八条** ＋ **仍开着的五条**（发现即报，本计划一处都不替设计补写）
 
-**已闭合的七条（留格是为了让「一处说法被订正」可查；闭合处逐条点名，免得后来者按旧报告去找）**：
+**已闭合的八条（留格是为了让「一处说法被订正」可查；闭合处逐条点名，免得后来者按旧报告去找）**：
 
 - **§4 没有「显式约束集」的类型与「满足」判据** —— **已闭**：设计新增 **§4.1.1**
   （`ExplicitConstraint` 三枚 `Scope`/`EntityKind`/`BoundTo`、`ResolutionScope` 九值、`EntityKind` 四枚、
@@ -2321,7 +2354,14 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
 - **§12.4 的 `check` 没有 `Err` 判据** —— **已闭**：设计 §12.4 补出三条（超支不是 `Err`；
   量纲不是 `Err`；`UnknownOwner` fail-closed）。Task 18 已照此补了 `an_unknown_owner_is_not_within`。
 
-**仍开着的六条**：
+- **`BudgetError` 的变体在三处各列一套，且「`reserve` 返回具体哪一维不足」没有变体承载** —— **已闭**：
+  设计新增 **§12.2.1「`BudgetError` 的唯一一份变体清单」**（`UnknownOwner` / `Insufficient` / `NegativeAmount`，
+  **恰好三枚**）＋**「使用者 × 可返回枚」四行表**（`allocate` / `reserve` / `settle` / `check`），
+  并写明「先前三处各列一套」的来历、把 `NegativeActual` 改名为 `NegativeAmount`（它现在有两个以上使用者）。
+  **同一次改动还补了两行**：`allocate` 整行（此前没有）与 `reserve` 行的 `NegativeAmount`
+  （设计自称「本表初版四行缺两行」）。Task 17／18 已照 §12.2.1 写。
+
+**仍开着的五条**（**编号沿用上一版**：原第 5 条 `BudgetError` 已闭合、移入上面的已闭清单，故现第 5 条是原第 6 条）：
 
 1. **`Remaining` 的 crate 归属相抵**（**两处相抵，仍未闭合**）：§2.1 的组件表、§2.2 的依赖边表与 §12.1 都把
    `Remaining` 放在 **`continuum-budget`**；而 §12.6.1、裁定文件
@@ -2340,7 +2380,7 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
    **收件人：协调者。**
 3. **§12.1 的「三个 newtype 各自私有、无公开构造函数」与 §12.6.1 的按名解构相抵**（**部分闭合**）：
    §12.1 已把解构写死为**两步**（并补了「`pub` 字段会不会削弱保证」之判，结论是不会），
-   **而 §12.6.1 的代码块 :1821 仍是单步按名解构** `let Remaining { money, … } = unproject(&v);`
+   **而 §12.6.1 的代码块 :1819-1821 仍是单步按名解构** `let Remaining { money, … } = unproject(&v);`
    ——那一行**在 crate 外写不出来**（`Remaining` 是元组 newtype 且字段私有）。
    **本计划按 §12.1 办**：Task 19 经 **`dims()` 读法**取 `&Dimensions` 再穷尽解构它（**两步都不带 `..`**）。
    **收件人：设计作者 ＋ 复审者**（要改的是 §12.6.1 的 :1819-1821 三行）。
@@ -2350,18 +2390,7 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
    （`dims()` 与五个逐维读者），跨 crate 的穷尽解构走它；**这是本计划自定的一处 API 形状**
    （设计只给了 `r.money()` 一类逐维读者，没给 `dims()`），记在第四节。
    **收件人：设计作者**（§12.1 的那行要不要注明作用域）。
-5. **`BudgetError` 的变体在三处不一致，且 `reserve` 的「哪一维不足」没有变体承载**（**没写清 ＋ 判据缺口**）：
-   §12.2 的**正文** :1569 写 `reserve(...) -> Result<Reservation, BudgetError::Insufficient { dimension }>`、
-   §14 的表格 :2124 也要求「`reserve` 返回**具体哪一维**（逐维五条）」；而 §12.2 的**枚举** :1588-1593
-   只列 `UnknownOwner` ＋ `NegativeActual`（**没有 `Insufficient`**），§12.4 的**枚举** :1669-1672
-   只列 `UnknownOwner` 并写「`BudgetError` 只收**一种**」。**三处不能同真。**
-   **本计划的取舍**：按三处的**并集**取三枚（`UnknownOwner` / `Insufficient` / `NegativeActual`），
-   逐枚注明出处；**不删 `Insufficient`**——「返回具体哪一维」是 §12.2 正文与 §14 表格都写着的判据，
-   删了它那五条照片没有承载。已写在 Task 17 的开工前置里。
-   **翻转条件**：若裁定「`reserve` 的失败不区分维度」，则 §12.2 正文与 §14 表格要一并改，
-   而那会掉两条判据（ENG-005「没有预留，§110 就没有判据」那一行的可观察后果）。
-   **收件人：设计作者 ＋ 复审者。**
-6. **§16 第 34 条说「编译器保证」的那一格，在本仓的验证命令下不成立**（**新增，本计划查出**）：
+5. **§16 第 34 条说「编译器保证」的那一格，在本仓的验证命令下不成立**（**新增，本计划查出**）：
    设计 §12.6.1 的「谁保证」表第 1 行写「全绑 ＋ `..` —— **编译器**（需 crate 级
    `#![deny(clippy::rest_pat_in_fully_bound_structs)]`）｜编译不过」。
    而 **本仓跑的是 `cargo test` ＋ `cargo build`，不含 clippy**（Global Constraints 的验收命令即此），
@@ -2411,6 +2440,11 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
 - **三个角色的公开读法 `dims()`**（Task 17）：设计给了逐维读者（`r.money()` 一类）而**没给 `dims()`**，
   而跨 crate 的穷尽解构要一个能拿到 `&Dimensions` 的读法（三个角色字段私有，见第一节第 3、4 条）。
   **代价**：多一个公开读者；**收益**：不必把角色的字段开成 `pub`（那会与 §12.1 的私有承诺相抵）。
+- **「四个入口 × 负值」的**两侧**都补成逐入口各一条**（Task 17／18）：§14 的表格只点名了 `settle` 的
+  「各维为 0 ⇒ `Ok`」那条反例，而本计划按「守卫两侧都钉」给**四个入口**各补一条零值反例
+  （`0` 不是负值，只钉拒绝那侧会让「`0` 也被拒」漂过去）。**这是一处计划侧的加强**，不是设计要求的。
+- **`allocate` 的命名**：设计 §12.2.1 的表用的名字是 **`allocate`**，本计划先前自造的 `allocate_child`
+  **已改名对齐**（故它不再是「本计划自定」的一项，从本节其余条目里去掉）。
 - **`#![deny(clippy::rest_pat_in_fully_bound_structs)]` 写进测试文件头**（Task 19）：
   本仓无 clippy 门禁，故它**今天不生效**；写它是为了让「将来纳入 clippy 时立刻生效」这件事**不依赖记忆**。
   **不建**那条读源码的检查，理由见第五节第 34 条。
@@ -2424,7 +2458,7 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
 设计 §16 的 34 条**逐条以「收件人」结尾**，本计划**不重述其内容**
 （重述就是第二份转录，正是本项目出错最多之处）。
 
-**第 34 条是唯一一条收件人写着「实现者」的**，本计划的取用写在 Task 19 与第一节第 6 条：
+**第 34 条是唯一一条收件人写着「实现者」的**，本计划的取用写在 Task 19 与第一节第 5 条：
 它要的那条自定义检查（在测试里读那两行源码、断言不含 `..`）**本计划不建**，
 理由是它会引入一处**读源码的测试**、而本仓已有一处人工复核点（Task 21 Step 3 的源码面复核）——
 把「那两行不得带 `..`」加进那张清单，比再造一个自指的断言便宜。
