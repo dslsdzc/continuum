@@ -9,7 +9,9 @@
 //! Task 6 起本文件另钉 `model_registry` 的**行级读写**：`register_model` / `load_lifecycle` /
 //! `transition_in_tx`（设计 §3.2）；Task 7 起另钉 `model_profile` 的**行级读写**：
 //! `save_profile` / `load_profile`（设计 §4.3）；Task 8 起另钉 `model_skill_score` 的**行级读写**：
-//! `save_skill_observation` / `load_skill_vector` / `load_skill_series`（设计 §3.1、§24、§248）。
+//! `save_skill_observation` / `load_skill_vector` / `load_skill_series`（设计 §3.1、§24、§248）；
+//! Task 14 起另钉 `model_registry` 的**全量读出**：`list_registered`（「列出已登记的模型」
+//! 这个问题的入口，子项目 G 的候选集从它出发）。
 //!
 //! # 编码的格式在这三条链上被钉死（不是靠单条用例）
 //!
@@ -36,8 +38,9 @@ use continuum_core::model::ModelId;
 use continuum_core::tool::ToolId;
 use continuum_model_registry::{
     LifecycleError, LifecycleState, ModelProfile, Ratio, SkillDimension, SkillObservation,
-    SkillScore, load_lifecycle, load_profile, load_skill_series, load_skill_vector,
-    p3d_model_migrations, register_model, save_profile, save_skill_observation, transition_in_tx,
+    SkillScore, list_registered, load_lifecycle, load_profile, load_skill_series,
+    load_skill_vector, p3d_model_migrations, register_model, save_profile, save_skill_observation,
+    transition_in_tx,
 };
 use continuum_persist::{Db, Migration, PersistError, Tx, Value, builtin_migrations};
 
@@ -504,6 +507,80 @@ fn an_unknown_model_has_no_lifecycle() {
         load_lifecycle(&tx, &id("model-absent")).unwrap(),
         Some(LifecycleState::Discovered),
         "对照臂：登记之后同一 id 读得到状态"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// §21 的登记表**全量**读出：登记两行、**两行都在**，按 id 升序，各自的 `LifecycleState`
+/// 是登记后的那个值（不是初值 `discovered`）。
+///
+/// # 三处都做了「可分辨」的准备，否则三种坏法不会红
+///
+/// - **漏行**：两行都登记，故「少列一行」与「列全」结果不同（只有一行时两者同形）；
+/// - **漏状态 / 状态取错来源**：两行**分别迁到不同状态**（`researched` / `unprofiled`），
+///   且**都不等于初值 `discovered`**——若状态恒取初值、或两行取了同一个状态，都变红；
+/// - **夹带未登记的 id**：库里另有一个**只用于对照**的未登记 id，清单里不该出现它。
+///
+/// # 顺序那一半靠「登记序与 id 序相反」才可分辨
+///
+/// 先登记 `model-b`、后登记 `model-a`，而 id 升序是 `model-a` 在前：若把 `ORDER BY id ASC`
+/// 删掉（SQLite 会按 rowid／插入序给行），返回的是 `[model-b, model-a]`，与期望值不同。
+/// 两行若按同一序登记，这两版**等价**，那条断言就没有区分力。
+///
+/// # 空表也要覆盖
+///
+/// 首条断言是空库得**空清单**：少了它，「没有登记项时返回一个空元素／`None` 之类」不会被区分。
+#[test]
+fn list_registered_lists_every_registered_model() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    assert_eq!(
+        list_registered(&tx).unwrap(),
+        vec![],
+        "还没有登记项时应给出空清单，不是 `Err`、也不是一项空的"
+    );
+
+    // 登记序与 id 序**相反**（见文档头）；两行各自迁离初值，且迁到**不同**的状态。
+    register_model(&tx, &id("model-b")).unwrap();
+    assert_eq!(
+        transition_in_tx(&tx, &id("model-b"), LifecycleState::Unprofiled).unwrap(),
+        LifecycleState::Discovered,
+        "先把 `model-b` 迁离初值：状态那一半才有区分力"
+    );
+    register_model(&tx, &id("model-a")).unwrap();
+    // §4.1 的表里没有 `discovered → researched` 这条边，故经 `unprofiled` 走两步。
+    assert_eq!(
+        transition_in_tx(&tx, &id("model-a"), LifecycleState::Unprofiled).unwrap(),
+        LifecycleState::Discovered,
+        "同上；两行取**不同**状态，故「两行都报同一枚状态」这类坏法也红"
+    );
+    assert_eq!(
+        transition_in_tx(&tx, &id("model-a"), LifecycleState::Researched).unwrap(),
+        LifecycleState::Unprofiled,
+        "第二步：`model-a` 落在 `researched`，与 `model-b` 的 `unprofiled` 不同"
+    );
+
+    // 对照臂：表里只有上两行，`model-absent` 未登记——清单里不得出现它。
+    assert_eq!(
+        load_lifecycle(&tx, &id("model-absent")).unwrap(),
+        None,
+        "对照臂：`model-absent` 未登记"
+    );
+
+    assert_eq!(
+        list_registered(&tx).unwrap(),
+        vec![
+            (id("model-a"), LifecycleState::Researched),
+            (id("model-b"), LifecycleState::Unprofiled),
+        ],
+        "两行都在、按 id 升序，且状态是登记后的那个值（不是初值、不是同一个值）"
+    );
+    assert_eq!(
+        count_registry(&tx),
+        2,
+        "对照臂：清单长度应与表里的行数一致"
     );
 
     tx.commit().unwrap();

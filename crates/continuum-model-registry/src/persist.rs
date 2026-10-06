@@ -174,18 +174,67 @@ pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState
     let Some(row) = rows.into_iter().next() else {
         return Ok(None);
     };
-    let raw = match row.into_iter().next() {
-        Some(Value::Text(s)) => s,
-        other => {
-            return Err(PersistError::ColumnType {
-                index: 0,
-                actual: other.as_ref().map(kind_name).unwrap_or("missing"),
-            });
-        }
-    };
-    LifecycleState::parse(&raw)
-        .map(Some)
-        .ok_or_else(|| PersistError::Database(format!("未知 LifecycleState: {raw}")))
+    // 两个转换点都走上文与下文那些共用函数（`text_at` 的 `ColumnType`、`decode_literal` 的
+    // **具体** `Err`），不在这里另建一份：本文件初版在此处**内联**构造过 `ColumnType`
+    // 与那枚 `Database`，而 `column_at` 的文档写着它「只在本函数里构造一处」——**那句当时是假的**，
+    // 现在是取列的唯一通路（Task 14 的复核收口；两条既有照片
+    // `a_non_text_lifecycle_state_column_is_rejected` 与
+    // `an_unknown_lifecycle_state_in_the_column_is_rejected` 逐字不变地仍钉着这两个转换点）。
+    decode_literal(
+        &text_at(&row, 0)?,
+        "LifecycleState",
+        LifecycleState::parse,
+    )
+    .map(Some)
+}
+
+/// §21 的登记表全量读出：已登记的每个模型及其当前状态，按 id 升序。
+///
+/// # 「哪些模型存在」这个问题的入口，范围有限定
+///
+/// **本函数是「列出已登记的模型」这个问题的入口**：碰 `model_registry` 的其余三处**都要求
+/// 调用方先给出 id**——[`load_lifecycle`]（按 id 取一行的状态）、[`register_model`]（按 id 插
+/// 一行）、[`transition_in_tx`]（按 id 读改写），故没有别的函数能回答「哪些模型存在」。
+/// **限定语是那个问题，不是「读 `model_registry` 这张表」**：同一张表另有读者与写者（就是上面
+/// 这三个），本函数不是它们的唯一入口。（来历：本句初版写成无限定的「本函数是「哪些模型存在」
+/// 的唯一来源」，而它紧接着给的理由却是「其余读函数都要求先给 id」——**理由的范围比结论窄**，
+/// 此处按理由收窄。结论本身仍是一句关于**本 crate 有哪些函数、它们的入参里有没有 id** 的话，
+/// 不是任何一次调用的行为：一条用例只能断言可观察的行为，而「不存在第二个枚举函数」不产生
+/// 可观察的行为，故**造不出会因它不再成立而变红的用例**；可查的证据是上面逐个点名的三处读法。
+/// 本函数**自身**那一半——列全、不漏、不夹带——有照片，见下。）
+///
+/// 调用方（子项目 G）凭本函数建候选集，**不从配置拿 id、也不裸查 `model_registry`**：
+/// 那两条路分别会造出「哪些模型存在」的第二个来源，与同一张表的第二个读写点。
+///
+/// # 不过滤状态
+///
+/// 十态**全部**列出，包括四个不可路由的异常态：闸门在 [`crate::RoutableModel::try_new`]，
+/// 不在这里。此处滤掉会让「哪些模型存在」与「哪些能路由」两件事**混成一件**，
+/// 而 G 的候选集要的是前者（后者由 `rank` 的入参形状表达）。
+///
+/// # 表外取值一律具体 `Err`
+///
+/// `lifecycle_state` 走 [`LifecycleState::parse`]（经 [`decode_literal`]，与本文件其余读函数
+/// 同一条纪律）：表外串**不取默认值**——把串猜成另一枚状态会成为第二份表示，且会掩盖
+/// 「有人往库里写了别的东西」。非文本的列值另报 [`PersistError::ColumnType`]（同 [`load_lifecycle`]）。
+///
+/// 照片：`tests/persist.rs` 的 `list_registered_lists_every_registered_model`——登记两行、
+/// **两行都在**、按 id 升序、各自的 `LifecycleState` 是登记后的那个值；漏行 / 漏状态 /
+/// 夹带未登记的 id 三种坏法各有一枚变异体在那条用例上变红。
+pub fn list_registered(tx: &Tx<'_>) -> Result<Vec<(ModelId, LifecycleState)>, PersistError> {
+    let rows = tx.query(
+        "SELECT id, lifecycle_state FROM model_registry ORDER BY id ASC",
+        &[],
+    )?;
+    rows.iter().map(|row| row_to_registration(row)).collect()
+}
+
+/// 一行 → `(id, 状态)`。两个转换点与 [`load_lifecycle`] 同一对（[`text_at`] ＋ [`decode_literal`]），
+/// 故「列坏了怎么办」这条判据只写一遍。
+fn row_to_registration(row: &[Value]) -> Result<(ModelId, LifecycleState), PersistError> {
+    let id = ModelId::new(text_at(row, 0)?);
+    let state = decode_literal(&text_at(row, 1)?, "LifecycleState", LifecycleState::parse)?;
+    Ok((id, state))
 }
 
 /// §4.1 迁移表的落库版：读当前状态 → 内存 [`transition`] → 写回。

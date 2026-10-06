@@ -39,6 +39,10 @@
 //! Task 13 补 §251 的**升级阶梯的数据形状**——五档 [`EscalationStep`] 与「下一档」这个
 //! 纯函数 [`next_step`]（`escalation`）；**触发不在本层**（设计 §7.1）。
 //! 阶梯的消费者（升级触发）在后续子项目，各自落在自己的模块里。
+//! Task 14 收尾：补 [`list_registered`]——「哪些模型存在」这个问题的入口（子项目 G 的候选集
+//! 从它出发，见计划 `## 遗留` 的同名条），并对全子项目逐条复核一遍完成判据。
+//! 复核另收掉一处注释与实现不符：`persist.rs` 里 `column_at` 声称 `PersistError::ColumnType`
+//! 「只在本函数里构造一处」，而 `load_lifecycle` 当时**内联**构造了第二处——已收拢。
 
 pub mod budget;
 pub mod error;
@@ -53,8 +57,8 @@ pub use error::{LifecycleError, ProfileError, RequirementError, RoutingError};
 pub use escalation::{EscalationStep, next_step};
 pub use lifecycle::{transition, LifecycleState, RoutableModel, RoutableState};
 pub use persist::{
-    load_lifecycle, load_profile, load_skill_series, load_skill_vector, p3d_model_migrations,
-    register_model, save_profile, save_skill_observation, transition_in_tx,
+    list_registered, load_lifecycle, load_profile, load_skill_series, load_skill_vector,
+    p3d_model_migrations, register_model, save_profile, save_skill_observation, transition_in_tx,
 };
 pub use profile::{
     current_observation, ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore,

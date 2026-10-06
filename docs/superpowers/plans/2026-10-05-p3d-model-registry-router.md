@@ -1560,6 +1560,15 @@ pub fn list_registered(tx: &Tx<'_>) -> Result<Vec<(ModelId, LifecycleState)>, Pe
 
 **收件人：D 的实现者**（本 task 的实施者）。G 的设计 §13 已把这条记为**对 D 的请求**，接续见 `## 遗留` 的同名条。
 
+**落地订正（2026-10-06，Task 14 实施时）**：上面代码块里那句**「本函数是「哪些模型存在」的唯一来源」
+按范围收窄了**——它是一句无范围限定的绝对句，而 `persist.rs` 里**读 `model_registry` 的另有其人**
+（`load_lifecycle` / `transition_in_tx` / `register_model`，三者都要求调用方**先给出 id**）。
+「唯一」为真的范围是**「列出已登记的模型」这个问题**，**不是「读 `model_registry` 这张表」**，
+按后者那句是假的。落地时写成「在『列出已登记的模型』这个问题上，本函数是全仓唯一的入口」，
+并在函数文档里写下**为什么这句话没有照片**（它是关于「crate 里有哪些函数、入参里有没有 id」的话，
+不产生可观察的行为，造不出会因它不再成立而变红的用例；可查的证据是逐个点名的三处读法）。
+**代码块是示意、正文措辞才是约束**，故此处按正文的判据（「唯一来源」要钉得住）收窄，而不是照抄代码块。
+
 - [ ] **Step 2: 全量验证**
 
 ```bash
@@ -1740,6 +1749,21 @@ list_registered 与         **已补**：Task 14 Step 1（2026-10-06）。D 原�
                           ＋ 一条「登记两行、两行都在」的照片，**收件人是 D 的实现者**。
                           **接续**：G 拿它建候选集之后的其余义务仍在 G 侧（取 `ProviderHealth` 快照、
                           调 `rank`、发 `invoke` / `stream`），本计划只交付这一个读函数。**收件人：子项目 G。**
+CandidateScore 的         **Task 14 复核发现的缺口（2026-10-06）**：Step 4 的完成判据「§4.4 不依赖单一总分」
+「无总分子段」无照片      列了三条证据，其中第三条「Task 11 的 `CandidateScore` 无总分子段」**没有照片**——
+                          **判据**：全仓没有一处用例或编译失败样例断言 `CandidateScore` **没有** `overall` 之类的
+                          总分子段——`grep -rn CandidateScore crates/continuum-model-registry` 的命中里，
+                          类型声明（`src/router.rs:338`）、两个构造点（`src/router.rs:703`、`tests/router.rs:494`）
+                          与文档引用各占其半，**没有一处是在断言「读不到总分」**。
+                          **它为什么算缺口而不是「本来就不必拍」**：这条断言**拍得成**，且形状与本 crate 已有的
+                          九份 `tests/compile_fail/` 样例**同形**——写一份读 `score.overall` 的样例，期望
+                          `E0609`（no field on struct），与 `overall_score_cannot_be_read.rs` 钉 `ModelProfile`
+                          的 `E0599` 是同一类。故**不是造不出用例，是没造**。
+                          另两条证据是实的，`overall_score_cannot_be_read`（E0599，画像上读不到总分）与
+                          `the_model_profile_has_no_total_score_column`（库侧无该列）——**本条的缺口只在
+                          `CandidateScore` 这一侧**，不是整条判据没有证据。
+                          **本 task 不自行补这份样例**（Step 4 的处置是「据实报告缺口」，不就地扩审）。
+                          **收件人：协调者（决定是否补）＋ 复审者。**
 ExecutionProfile 的         **D 的计划里没有据此写下的错话**（已逐处核过）：全篇提到 `ExecutionProfile` 的两处
 实读订正                    是 `cost_budget`（§246 的**真**字段，设计 §6.3 判给「D 落地时」而 D 明写不做）
                             与 `retry_policy`（§246 的重试参数），**两处都没有声称该表有 `model` / `provider` /
