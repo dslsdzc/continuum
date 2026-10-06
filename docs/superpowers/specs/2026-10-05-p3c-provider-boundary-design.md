@@ -136,7 +136,14 @@ list_tools / describe_tool / invoke / cancel
 ## 3.1 决定：进程内注册表，按 id 显式登记，装配期填装
 
 **注册表**建在 `continuum-provider` 内，一个 `ProviderRegistry` 结构体，持两张表：`ModelId → Arc<dyn ModelProvider>`
-与 `ToolId → Arc<dyn ToolProvider>`，另各持一份登记顺序的适配器列表（供枚举）。
+与 `ToolId → Arc<dyn ToolProvider>`。**另持一份登记顺序的工具适配器列表**——工具侧的 `list_tools()`
+是已登记适配器各自 `list_tools()` 的并集（见下），故它要能遍历。**模型侧不持这份列表**：它的枚举入口
+已裁删（见下），留一份没人遍历的列表就是同一种「建好没人用」。
+
+**订正（2026-10-06）**：本句初稿写「**另各持**一份登记顺序的适配器列表（**供枚举**）」——**「各」是错的**，
+订正为「只工具侧持」。**来历**：那句是在 `model_providers()` 还在的前提下写的；该方法裁删之后（§3.1 下文），
+模型侧不再有枚举入口，也就没有遍历它的消费方。**这一处一个字都没写 `model_providers`**，
+故按名字 grep 扫不到它——删一个方法，要扫的是**它的描述**。
 
 **注册**在**装配期**由驱动（`continuum-runtime` 的装配点，今天 `main.rs`）调用，形如
 「把这一组 id 登记给这个适配器」——**id 由登记方显式给出**，不由注册表去问适配器。
