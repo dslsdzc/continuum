@@ -27,14 +27,16 @@
 //! （[`LifecycleError::ProfileBeforeVerified`]）；Task 8 补 `model_skill_score` 一表的行级读写
 //! （[`save_skill_observation`] / [`load_skill_vector`] / [`load_skill_series`]），并让
 //! [`load_profile`] **组合** [`load_skill_vector`] 填上画像的第十二个字段——三张表的行级读写
-//! 至此齐了。
-//! 路由、阶梯、预算各自在后续 task 落在自己的模块里。
+//! 至此齐了；Task 9 补 §333 的只读预算投影 [`BudgetView`]（[`budget`]）。
+//! 路由与阶梯各自在后续 task 落在自己的模块里。
 
+pub mod budget;
 pub mod error;
 pub mod lifecycle;
 pub mod persist;
 pub mod profile;
 
+pub use budget::BudgetView;
 pub use error::{LifecycleError, ProfileError, RoutingError};
 pub use lifecycle::{transition, LifecycleState, RoutableModel, RoutableState};
 pub use persist::{
