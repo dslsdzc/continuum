@@ -97,8 +97,19 @@ Budget Validator（§110 §333 §334）。
 三条推论，全部有既有守卫可钉：
 
 1. **依赖边在 `ALLOWED` 表里可见**。`crates/continuum-runtime/tests/dependency_direction.rs:22-160`
-   的 `ALLOWED` 逐对断言，本层三个 crate 的允许集只含 `continuum-persist`（＋层内前驱）。
+   的 `ALLOWED` 逐对断言（`:265-283` 用 `cargo tree --depth 1 --edges all` 逐对比对），
+   且 `:252-257` 强制每个 workspace 成员都必须在表里出现
+   （「workspace 成员 {name} 未列入 ALLOWED，它的依赖方向不会被检查」）——
+   **故本层新增的 crate 不可能漏登记，漏了即红**。
+   本层三个 crate 的允许集只含 `continuum-persist`（＋层内前驱）。
    **任何一条指向 graph／capability／provider／connector／model-registry／policy 的边都会当场变红**。
+
+   **这条判据的粒度是「直接边」，不是传递闭包**（评审查出应写明）：
+   `cargo tree --depth 1` 看不到传递可达，故「经一个中间 crate 间接够到 P1」不会被这条断言抓住。
+   **但本仓不因此留缺口**：Rust 的 crate 可见性要求**直接声明**才能 `use`，
+   未写进 `Cargo.toml` 的传递依赖写不出 `use continuum_graph::…`。
+   **故「直接边」恰是这条规则的完整粒度，不必另设闭包断言**——
+   把这一点写出来，是为了不让上面那句读起来像在说传递闭包（那会是一条假保证）。
 2. **§9.1 的箭头因此保持单向**：按 §1.2.0 的约定，§9.1 里以本层为被依赖者的边
    **有两条**——`语义层 → 执行层` 与 `语义层 → 资源层`（`docs/02-工程.md:570-571`），
    即**执行层与资源层都可以依赖本层**，而本层不依赖它们中任何一个。
@@ -131,17 +142,45 @@ Budget Validator（§110 §333 §334）。
 **「判定属 P4」说的是判定的归属，不是依赖边的归属**——P1 交出的是结构，本层交出的是判定，
 两侧都不需要 `use` 对方。本设计按这条办。
 
+**但第 3 行有一处「以值传进来」的边界要说清**（评审查出）：
+`Node.constraints: Vec<String>`（`node.rs:15`）的**词汇表属执行层**——§236 只给字段名，
+§2.1 也没把它的语义判给本层。本层按 §11.2 的读法把它当作「Constraint 的引用键」，
+那**是在下层给定的语义下**做的判定。故：
+
+> **本层保证的是「同一个串的行为一致」，不保证该语义正确。**
+> §1.2.1 那句「本层的每一条判定，其真值来源都在本层与规范里」**在这一处不成立**——
+> 这里有一份语义是从下层随值带进来的。**这是 §1.2.1 的一个例外，据实列出，不掩盖。**
+
 ## 1.3 本层的入度：§9.2 与 §2.3 的一处相抵
 
 §9.2 的表把**Input Canonicalization** 与 **Intent 存储** 都列为「不依赖任何其他组件」的源点
 （`docs/02-工程.md:596`），而 §2.3 写的是 `Specification 编译 ← Intent 存储（经 Canonicalization）`
 （`docs/02-工程.md:116`）。
 
-**本设计的处置**：把「Intent 存储 ← Canonicalization」**按类型依赖读，不按判定依赖读**——
-Intent 存的 `goal` 是规范化后的表示（§270 的 `Canonical Representation` 在 `Intent Compiler` 之前），
-故 Intent 表的外键面依赖 `EntityId` 这一个类型，而 Intent 的**任何判定**都不查 Canonicalization。
-以此为准，`continuum-semantics ← continuum-canonical` 是一条「类型边」（§1.2.0 的约定）。
-**§9.2 那一格与 §2.3 的相抵据实记在 §16，收件人：规范维护者**（两处都要改一处，本设计不改文档）。
+**先纠正本节的定性**：`:596` 讲的是「入度为零的**源点**」，`:116` 讲的是「**层内依赖边**」——
+**两个问题**，不是一处并列的矛盾。相抵**只在**把「（经 Canonicalization）」读成
+「Intent 存储 ← Canonicalization」时才出现。
+
+**两种读法都写出**（免得下一个人重新发现同一处）：
+
+- **读法甲（本设计采纳）**：把它读成**类型依赖**——Intent 存的 `goal` 是规范化后的表示
+  （§270 的 `Canonical Representation` 在 `Intent Compiler` 之前），
+  故 Intent 表的外键面依赖 `EntityId` 这一个类型，而 Intent 的**任何判定**都不查 Canonicalization。
+  于是 `continuum-semantics ← continuum-canonical` 是一条「类型边」（§1.2.0 的约定），
+  §9.2 与 §2.3 同时成立。
+- **读法乙**：把它读成**次序说明**——「经 Canonicalization」只是说 Intent 的**内容来自**那条前置流程，
+  不是一条组件间的依赖边。于是 `continuum-semantics` 不必依赖 `continuum-canonical`，
+  两处的字面也能同时成立（代价是 `Intent.goal` 的类型要与 `continuum-canonical` 的产物**重复定义**，
+  那是「同一概念两个类型」）。
+
+**本设计采纳读法甲**，理由是读法乙的代价落在类型重复上。**两种读法都是本设计的判断，不是规范给的**
+——故 §9.2 那一格与 §2.3 的相抵据实记在 §16 第 1 条，**收件人：规范维护者**
+（两处须择一改，本设计不改文档）。
+
+> **订正（2026-10-06，评审查出）**：本节初稿写「两处同时成立的**唯一**读法」，并把相抵定性为
+> 「一处相抵」。**「唯一」越界了**——`§9.2` 的源点表与 `§2.3` 的依赖边表回答的是两个问题，
+> 而在「经 Canonicalization」这一短语上至少有两种自洽读法（上面列出）。
+> 初稿只给出一种并称其唯一，会让后来者以为另一读法已被排除。**原句与错因留在此处。**
 
 ---
 
@@ -182,6 +221,17 @@ continuum-budget     ← continuum-semantics, continuum-persist
 | `semantics ← persist` | 五张表经 `Tx`；状态迁移与 `Event` 同事务（§5.3） | 同上 |
 | `budget ← semantics` | 预算树的 owner 取 `IntentId`（§12.2） | 同上 |
 | `budget ← persist` | 账本表经 `Tx`；`RecoveryHook`（`recovery.rs:39`）的读写在恢复路径上（挂 `MarkLostExecutions` 态，§13.1） | 同上 |
+| `model-registry ← semantics` | **仅当 §13.2 的类型裁定取「`BudgetView` 与 `Remaining` 合一」这一条出路时**——那时 `.model-registry` 直接收 `continuum_semantics::Remaining`（§12.6 第 2 点） | 由做那次合并的 task 登记 |
+
+**上表最后一行是唯一一条跨层边，且它是条件性的**：取「不合一」那条出路时**不登记它**。
+它与 §1.2.2 规则 2（「本层不登记指向下层的边」）**不冲突**——那条边指向的是**本层**，
+方向是 §9.1 已声明的 `语义层 → 资源层`（§1.2.0 的约定下读作「资源层依赖语义层」）。
+
+> **订正（2026-10-06，评审查出）**：初稿的 §13.4 里出现过「允许 `graph → semantics`」这个说法，
+> 而本表里没有对应行，§1.2.2 规则 2 又说「跨层边一条都不登记」——**三处各说一套**。
+> 已按上面的条件行收敛：跨层边**可以**登记，前提是方向从本层出发（§1.2.0），
+> 且**由那次改动的 task 自己登记**。初稿那句 `graph → semantics` 的箭头也是反的（见 §1.2.0 的约定），
+> 已随本节重写一并改掉。
 
 > **订正（2026-10-06，评审查出）**：本表初稿五行写的是 `canonical → persist` 这种形式，
 > 与 §1.2.0 的约定相反。**含义没变**（左依赖右），改的是箭头的朝向与标题的注明，
@@ -189,8 +239,13 @@ continuum-budget     ← continuum-semantics, continuum-persist
 
 **按「叶子 crate 的条目记实际依赖」的既有口径**（`crates/continuum-runtime/tests/dependency_direction.rs:104-108`）：
 上表的边**逐条由用它的 task 登记**，不预先声明齐。**没有一条指向 `continuum-core`**——
-本设计对 `continuum-core` 的公开面（`ModelId` / `ToolId` / `ConnectorId` / `Usage`）**一次都不引用**，
-理由见 §1.2.2 的规则 3。
+本层的 crate **不 `use`** `ModelId` / `ToolId` / `ConnectorId` / `Usage` 这四个类型，理由见 §1.2.2 的规则 3。
+
+> **措辞订正（2026-10-06，评审查出）**：初稿写「本设计对 `continuum-core` 的公开面……**一次都不引用**」。
+> **作用域过宽**：同篇 §12.3 与 §13.4 两次点名 `continuum_core::model::Usage`
+> （`crates/continuum-core/src/model.rs:51`）并以它立论。**事实对（不 `use`），措辞要说准**——
+> 「不 `use`」讲的是依赖边为零，「不引用」讲的是整篇不出现，两者不是一件事。
+> 原句留在此处。
 
 **事件与审计不新增 crate**：`EventType` 与 `AuditKind` 是 `continuum-events` 的类型，
 本层经 `continuum-persist` 的 `Tx::append_event` / `Tx::append_audit` 写它们
@@ -219,7 +274,9 @@ continuum-budget     ← continuum-semantics, continuum-persist
 > **「实测」是假的**：P3 实际只占了 **50 与 80** 两个号——
 > 60（B 的连接器）与 70（C 的 Provider）**至今没有迁移**（`continuum-connector/src` 与
 > `continuum-provider/src` 里没有 `persist.rs`），90（E）也没有。
-> 50/60/70/80/90 那个列表是 `docs/superpowers/p3bcdf-followups.md` §七.4 的**号段分配**，
+> 50/60/70/80/90 那个列表是**协调者的号段裁定**
+> （`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md:456`：
+> 「一个子项目一个十位档——A 50、B 60、C 70、D 80、E 90」），
 > 不是实际占用——**分配与占用是两件事**，初稿把它们写成了一句「实测」。
 > 原句留在此处。
 
@@ -466,7 +523,8 @@ pub struct ResolutionRisk {
 
 ## 5.1 数据模型
 
-§222（`docs/spec/05-normative.md:130-169`）的十四个字段逐项处置：
+§222（`docs/spec/05-normative.md:130-169`）的**十五个字段**逐项处置
+（下表十三行，`created_at`/`updated_at` 与 `parent_intent?`/`child_intents[]` 各一行两字段）：
 
 | §222 字段 | 本设计的类型 | 说明 |
 |---|---|---|
@@ -703,23 +761,61 @@ OPEN-001 的三个可选方向（a/b/c）一个都不选，本层只把字段**�
 |---|---|---|
 | `added` | `(requirement id)` 在 vN 无、vN+1 有 | §226 的名字 |
 | `removed` | 在 vN 有、vN+1 无 | 同上 |
-| `strengthened` | 同 id 两边都有，且 `class` 的**序**上升 | `UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`——**这个序是 `class` 四值的自然序**（§5 的四类含义本身是「约束强度」的排序，`docs/总纲 §2.3`）；`class` 相同时 `expression` 变了则**不下判**（见下） |
+| `strengthened` | 同 id 两边都有，且 `class` 的**序**上升 | 序是 `UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`；`class` 相同时 `expression` 变了则**不下判**（见下） |
 | `weakened` | 同 id 两边都有，且 `class` 的序下降 | 同上 |
+
+**那个序是本设计定的，不是原文给的**：
+
+> **订正（2026-10-06，评审查出）**：初稿把它写成「**这个序是 `class` 四值的自然序**」并引
+> `docs/总纲 §2.3`。**该处（`docs/01-总纲.md:153-160`）只给四类的含义，未给序**，
+> 且总纲的列举顺序与上表的序**相反**。这恰是 §16 第 12 条自认「本设计的判定」的那一条，
+> 而初稿的措辞读起来像转录。**原句留在此处。**
+> **序的依据是四类含义的强弱**（「必须满足」＞「尽量满足」＞「可调整」＞「未指定」），
+> 那是本设计从含义推出来的，**「自然」二字不成立**。
+> **后果**：若复审判定此序不成立，则 `strengthened` / `weakened` **无判据**——
+> 两类的判定会整个落进下面的 `unjudged`（§16 第 12 条）。
 
 **`class` 相同时的 `expression` 变化不下判**——这是本设计**刻意留下的未判定**：
 §224 没有给表达式的语法（§7.1），故「`duration >= 4K` 改成 `duration >= 2K`」这种
-**语义上的削弱无法判定**。本设计**不发明一套表达式语言**去判它，而是：
-`ContractDiff` 增加一个第五类 `ExpressionChanged { id }`，**它不是 §226 的四类之一**，
-是「本层判不了、必须由上位的语义比较来判」的**显式标记**（§16 第 12 条，收件人：规范维护者）。
-**「四类差异」这一句因此据实有一个缺口：四类是 §226 给的，第五类是本层的诚实标记，不是第五种差异。**
+**语义上的削弱无法判定**。本设计**不发明一套表达式语言**去判它。
+
+**未判定另立并列字段，不进差异类**：
+
+```rust
+/// §226 的四类差异。**恰好四枚**，与 §226 的枚举一一对应。
+pub enum DiffClass { Added, Removed, Strengthened, Weakened }
+
+pub struct DiffEntry { requirement_id: RequirementId, class: DiffClass }
+
+/// 本层判不了的变更。**不是差异类**——它是「记录」，不是「判定」。
+pub struct UnjudgedChange { requirement_id: RequirementId, reason: UnjudgedReason }
+
+pub struct ContractDiff {
+    from: ContractRef,
+    to: ContractRef,
+    entries: Vec<DiffEntry>,          // 恰好 §226 的四类
+    unjudged: Vec<UnjudgedChange>,    // 并列字段，**不并入 entries**
+}
+```
+
+> **订正（2026-10-06，评审查出）**：初稿写「`ContractDiff` 增加一个**第五类** `ExpressionChanged { id }`，
+> 它不是 §226 的四类之一」。**「不是四类之一」与「是第五类」是矛盾的**：
+> §226 给的是一个**规范枚举**，把它放进**同一个类别域**——无论措辞怎么声明——
+> 类型上就是第五种差异，下游（用例名、将来执行层的 `match`）也必然这么读。
+> **判据**：只要那一项不在规范的枚举位置上，它就是「记录」；一旦成为 diff 类型的第五个变体，
+> 它就是「差异类」。故改为上面那个形状：四类留在 `DiffClass`，未判定走并列字段 `unjudged`。
+> 原句留在此处。**这一改同时收敛了 §16 第 32 条的三条路**（见该条）。
+
+**照片**：`DiffClass` 的四枚各一条用例；`unjudged` 一条用例，
+且**断言它不出现在 `entries` 里**——这条断言把「记录 vs 差异类」的分界钉死。
 
 ## 8.2 输出被第 3 层消费：接口形状与「谁施加」
 
 §226 的「受影响的 ADFIR 节点 MUST 被重新判定有效性」是一个**跨层义务**。
 分工按 §1.2.3：
 
-- **本层产出**：`ContractDiff { from: ContractRef, to: ContractRef, entries: Vec<DiffEntry> }`。
-  `DiffEntry` 带 `requirement_id` 与差异类。
+- **本层产出**：`ContractDiff { from, to, entries: Vec<DiffEntry>, unjudged: Vec<UnjudgedChange> }`（§8.1）。
+  `DiffEntry` 带 `requirement_id` 与 `DiffClass`；`UnjudgedChange` 是**并列字段**，不是差异类。
 - **执行层施加**：由**持有图的一侧**把 `DiffEntry` 映射到节点（§235 的 `ADFIRGraph.contract_id`、
   §236 的 `Node.constraints` / `Node.execution_policy`）并调 `propagate_invalidation`
   （`crates/continuum-graph/src/invalidation.rs:15`）。
@@ -798,8 +894,12 @@ pub struct ReviewIndependence {
 
 - 两个 class 逐项照片。
 - `affected_scope` **§230 未给取值域** → `Opaque`（§16 第 15 条）。
-- §230 的十一个例（五个 MINOR、五个 MATERIAL，原文实为五个 MATERIAL）
+- §230 的十个例（**五个 MINOR ＋ 五个 MATERIAL**，`docs/spec/05-normative.md:396-415`）
   **逐条给一条分类用例**——「枚举断言须逐项有照片」。
+
+  > **订正（2026-10-06，评审查出）**：初稿写「**十一个**例（五个 MINOR、五个 MATERIAL，原文实为五个 MATERIAL）」。
+  > **「十一」与括号里自己写的「五个＋五个」相抵**，括号那半句本身也读不通（原文本来就是两个五）。
+  > 错因是把数数错了又用一句解释去圆它。**原句留在此处。**
 - **MATERIAL 的判定需要看的量（权限、成本、架构）从哪来**：`权限扩大` 与 `成本显著扩大`
   需要计划侧声明的影响面（§11.2 的 `PlanFootprint`）。故 `PlanChange` 的分类函数输入是
   `(&Plan, &Plan, &PlanFootprint, &PlanFootprint)`。**「显著扩大」的阈值规范未给** → §16 第 15 条。
@@ -953,17 +1053,47 @@ pub struct PlanFootprint {
 - `Node.constraints` 的**词汇表没有规范来源**（§236 只给字段名，`docs/spec/05-normative.md:558-580`）
   → 本层把每个串当作**一个 REQUIRED 约束的引用键**（按字符串比对 Contract 的 Requirement），
   **不发明约束语言的语法**。§16 第 17 条。
+  **按本设计 §11.2 的这个读法**，一个匹配不到任何 Requirement 的键是**悬空引用**，
+  它的处置是 §11.3 的 `Err(UnknownConstraintKey { key })`（拦下，不是放行）。
+
+  > **订正（2026-10-06，评审查出）**：初稿把这一处的后果写成「按**今天的**读法，一个拼错的约束键
+  > 会静默不匹配（fail-open）」。**「今天的读法」不存在**——全仓 `constraints` 只有两处用法
+  > （`crates/continuum-graph/src/persist.rs:103` 的序列化与 `:253` 的反序列化），
+  > **零逻辑读者**，故今天没有任何「读法」。那个读法是**本设计 §11.2 定的**。
+  > 并且那个 fail-open **原先只写在遗留项里**（§16 第 17 条），
+  > **裁决类型上看不出来**——现已落进 §11.3 的 `ConstraintError`。原句留在此处。
 - `Node.execution_policy` 的判定按 §225 的 MAY/MUST NOT 两条清单：
   `换模型 / 换工具 / 换节点 / 换算法 / 重新规划 / 改变并行度 / 改变内部执行顺序` 属 MAY（放行）；
   `扩大权限 / 降低隐私约束 / 增加高风险外部副作用` 属 MUST NOT（拦下）。
-  **这两条清单逐项各一条用例**（14 项）。
+  **用例数：7（MAY 逐项放行）＋ 3（这三条禁令逐项拦下）＝ 10 条**；
+  §225 的**第四条** MUST NOT（「修改 REQUIRED」）不是本表的行，它是 §11.3 的 `ViolatesRequired` 那一条。
 
-## 11.3 判定：REQUIRED 是唯一的拦下条件
+  > **订正（2026-10-06，评审查出）**：初稿写「**（14 项）**」。§225
+  > （`docs/spec/05-normative.md:257-285`）实为 **MAY 七条 ＋ MUST NOT 四条**，
+  > 故 7＋3＝10、7＋4＝11，**都不是 14**。原句留在此处。
 
-§6 的图只有一条拦下路径：「**违反 REQUIRED**」。§225 的 MUST NOT 四条里的
-「修改 REQUIRED」是同一件事在 Contract 侧的说法。
+## 11.3 判定：**两条**拦下路径，加一条「判不了」
 
-故判定函数的三值**不是**「通过／违反／不确定」，而是：
+§6 的图给的是一条拦下路径：「**违反 REQUIRED**」。而 §225
+（`docs/spec/05-normative.md:257-285`）另给一组**不依赖任何 Requirement 的 `class`** 就能判的禁令。
+
+> **订正（2026-10-06，评审查出）**：本节初稿标题写「**REQUIRED 是唯一的拦下条件**」，
+> **与同节的 `ViolatesProhibition` 那一臂自相矛盾**——那条禁令不依赖任何 Requirement 的 class
+> 就能拦下。初稿又把 §225 的 MUST NOT 说成「三条」，**实为四条**
+> （修改 REQUIRED／扩大权限／降低隐私约束／擅自增加高风险外部副作用）；
+> 其中「修改 REQUIRED」即 `ViolatesRequired` 那一臂，故禁令臂是其余**三条**。
+> 原本「三条 MUST NOT」这一作用域比事实窄。**原句与错因留在此处。**
+
+**§225 的四条 MUST NOT 与两臂的对应**（逐条，不许漏）：
+
+| §225 的 MUST NOT | 落在哪一臂 |
+|---|---|
+| 修改 REQUIRED | `ViolatesRequired { requirement }` |
+| 扩大权限 | `ViolatesProhibition { Authority }` |
+| 降低隐私约束 | `ViolatesProhibition { Privacy }` |
+| 擅自增加高风险外部副作用 | `ViolatesProhibition { Effect }` |
+
+判定函数**不是**「通过／违反／不确定」——「不确定」在 §6 里没有位置：
 
 ```rust
 pub enum ConstraintVerdict {
@@ -973,11 +1103,35 @@ pub enum ConstraintVerdict {
 }
 ```
 
-`ViolatesProhibition` 的三个取值恰好是 §225 的三条 MUST NOT（权限 / 隐私 / 副作用）。
+**「判不了」走 `Err`，不走第三个裁决值**（评审查出，本节新增）：
+
+```rust
+pub enum ConstraintError {
+    /// `Node.constraints` 里的一个串**匹配不到当前 Contract 的任何 Requirement**（§11.2 的读法）。
+    UnknownConstraintKey { key: String },
+}
+pub fn validate(...) -> Result<ConstraintVerdict, ConstraintError>
+```
+
+判据两条：
+
+1. **一个悬空的约束键不是「满足」**：它意味着**写它的那一方与当前 Contract 对不上**
+   （计划是在旧 Contract 下写的、或键拼错了），`Satisfied` 会让它以「已判过、通过」的形式流下去
+   ——**这正是 fail-open**。**故它必须被拦下**，而「拦下」在 `Result` 上的形态是 `Err`。
+2. **它也不该变成一个 §6 的裁决值**：§6 只给「满足 Contract／违反 REQUIRED」两种结果，
+   往 `ConstraintVerdict` 里加第三支等于把「本层判不了」说成一个 §6 的结论。
+   `Result` 的 `Err` **不可被忽略地当成通过**——调用方必须显式处置它。
+
+**照片**：一条「`constraints` 里放一个 Contract 里不存在的键 → `Err(UnknownConstraintKey { key })`」
+（断言是哪一枚、`key` 是哪一个）；另一条**反例**：`constraints` 为空时**不是** `Err`（空集合法，
+`Node::new` 就置空，`crates/continuum-graph/src/node.rs:31`）——**两侧都钉**，
+只钉悬空那侧会让「空约束表」也变成错误。
+
 **`PREFERRED` / `FLEXIBLE` / `UNSPECIFIED` 的违反不拦下**——§224 的四类含义
 （`docs/总纲 §2.3`）明写 PREFERRED「有充分理由时可调整」、FLEXIBLE「明确允许 Runtime 自动调整」。
 照片：三条 class 各一条「违反但不拦下」（`Ok(Satisfied)` 或带记录的放行），
-`class` 为 `REQUIRED` 时**四条**各拦一次（一条 REQUIRED 违反 + 三条 MUST NOT）。
+`class` 为 `REQUIRED` 时一条 `ViolatesRequired`，三条禁令各一条 `ViolatesProhibition`。
+**§11.2 的用例数与本节分工**：§11.2 的 10 条管 `execution_policy`，本节的 5 条管裁决。
 
 ## 11.4 违反之后的挂起与 Decision
 
@@ -1004,9 +1158,19 @@ Intent 路径）的下一步**，这也是为什么三者在同一个 crate 里�
 
 # 12. Budget、探索预算与 Budget Validator（§333 §334 §110，ENG-005）
 
-**本节是本层对 ENG-005 的兑现**。ENG-005 §五 的表把四件事判给本层：
-`Budget` 类型与分配关系（含预扣/结算）、Budget Validator、`Decision{blocking}` 的触发与恢复、
-以及探索预算的记账。§五 同时把「维护性预算根」判给第 7 层。
+**本节是本层对 ENG-005 的兑现**。ENG-005 §五判给本层的是**两行**：
+
+- `docs/superpowers/specs/2026-10-05-eng-005-budget-accounting.md:112`——
+  `Budget` 类型与分配关系（含预扣／结算）；
+- 同文件 `:113`——Budget Validator、`Decision{blocking}` 的触发与恢复。
+
+同表 `:111` 的「预算视图」判给**当下**（子项目 D），`:114` 的「维护性预算根」判给**第 7 层**。
+**探索预算的记账不在 §五**——它的依据是 §334（本设计 §12.5）。
+
+> **订正（2026-10-06，评审查出）**：初稿写「§五 的表把**四件事**判给本层……以及探索预算的记账」。
+> **两处错**：(i) §五 与探索预算有关的判给项不在那里（依据是 §334）；
+> (ii) 「四件事」这个数是把 §五的两行与它自己的列举混在了一起。
+> **原句留在此处。**
 
 ## 12.1 预算树（ENG-005 §三.1 的「单一预算树」）
 
@@ -1064,7 +1228,8 @@ I3: settled(n, d) + reserved(n, d) ≤ allocation(n, d)
 **I2 是 ENG-005「兄弟节点的活跃预留之和 ≤ 父的剩余」的形态**。原文说的是「活跃预留之和」，
 本设计判的是**兄弟的分配额之和 ≤ 父的可用额**——即**更强的一条**（分配额 ≥ 该子树的任何预留之和，
 由 I3 保证）。**这是本设计与 ENG-005 原句的一处措辞差别，据实记在此**：
-原句在「分配是转移还是上限」上可有两读，本设计取**「分配是上限、不转移」**
+**原句未述「分配是上限还是转移」**（全文没有「上限」「转移」二词，是**未述**，不是「一处两读」），
+本设计取**「分配是上限、不转移」**
 （否则 I2 恒真、那条约束不成立，前一句「否则树不成其为树，额度会被嵌套凭空放大」
 要防的形态也就防不住）。**收件人：协调者**（若判「分配即转移」，I2 换成
 `Σ_{执行中的子节点} reserved(child, d) ≤ allocation(n, d) − settled(n, d)`，其余不变）。
@@ -1240,14 +1405,27 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 | `RecoveryHook`（`crates/continuum-persist/src/recovery.rs:39`）与 `RecoveryPhase`（同文件 `:12-20`） | **本层注册一个钩子**：起库时把悬空的 `reserve` 按预扣结算（§12.3 第 2 处） | 不改；注册点在 `crates/continuum-runtime/src/recover_cmd.rs:38-41`（`RecoveryRegistry::new()` ＋ 两次 `register`），**不是 `main.rs`** |
 
 **本层的钩子挂在 `RecoveryPhase::MarkLostExecutions` 这一态，不新增 phase。**
-判据两条：
+四步判据（**三个备选逐条排除，不是只挑一个**）：
 
 1. **`RecoveryPhase` 的态集不得扩充**：`crates/continuum-persist/src/recovery.rs:24` 的注释写着
-   「**顺序即 §319 的执行顺序，不得改动**」，五态是 §319 的转录。
+   「**顺序即 §319 的执行顺序，不得改动**」，五态是 §319（`docs/spec/05-normative.md:2242-2258`）的转录。
    本层**没有** §319 的判据去加第六态。
-2. **`MarkLostExecutions` 是「判定一次执行已丢失」的那一步**，而 §12.3 的规则正是
-   「**无读数即按预扣结算**」——「判丢失」这个动作与「结算为预扣」这个后果**同一个触发点**。
-   挂到 `ResumeEligibleTasks` 就晚了（那时额度已被后续任务读走）。
+2. **不是 `ReconcileRunningNodes`**：该阶段已有的钩子是 `MarkRunningNodesLost`
+   （`crates/continuum-runtime/src/recovery.rs:27-40`，`fn phase` 返回 `ReconcileRunningNodes`），
+   它**正是产出「哪些运行已 LOST」这个事实的那一步**；本层的结算要**消费**那个事实。
+   两者挂在**同一阶段**会让正确性依赖**阶段内的注册顺序**，而那不是一份被文档化的契约。
+   挂到**下一阶段**（`MarkLostExecutions`）就把这个依赖消掉：那时 LOST 已经落了库。
+3. **不是 `ReconcileIncompleteEffects`**（评审判建议挂此态，**本设计不采纳，理由如下**）：
+   该阶段的钩子 `MarkExecutingAsUnknown`（`crates/continuum-effect/src/recovery.rs:47-49`）
+   处理的是**效应**——把停在 `EXECUTING` 的外部效应标为 `UNKNOWN`（同文件 `:1-9`）。
+   而悬空的**预算预留**不是一次效应：§12.3 的触发是「**这次执行没有读数**」，
+   与「外部做没做成不知道」是两件事。把预算结算挂进效应阶段，会让一处「效应语义」的改动
+   波及预算记账（反之亦然）。
+4. **不是 `ResumeEligibleTasks`**：那时额度已被后续任务读走，结算太晚。
+
+**附一条实测（顺带说明第 4 条不成立时的余地）**：今天注册的钩子只有两个
+（`recover_cmd.rs:38-40`），分别落在 `ReconcileRunningNodes` 与 `ReconcileIncompleteEffects`；
+**`MarkLostExecutions` 这一态今天没有钩子**——本层挂上去是给 §319 点名而无人实现的一态补上实现。
 
 > **订正（2026-10-06，评审查出）**：本行与随后的段落初稿有三处事实错：
 > (i) 说 `RecoveryHook` 定义在 `continuum-runtime` 的同名文件——**它在 `continuum-persist`**；
@@ -1257,7 +1435,9 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 > (iii) 说「加一个 `phase`（照 `RecoveryPhase` 的既有取值）」——**自相矛盾**：
 > 既有取值是五态封闭集，「加一个」就不是「照既有取值」；
 > 而 `:24` 的「不得改动」明写它不能扩。
-> **原句与三处错因留在此处。**
+> (iv) 初稿把「定义」「注册」两句话的出处都指到了 `crates/continuum-runtime/src/recovery.rs:39`——
+> 那一行是 `impl RecoveryHook for MarkRunningNodesLost` 的**末行**，不是 trait 的定义处。
+> **原句与四处错因留在此处。**
 
 **这条由本层的实现 task 做，不推给别处**（改的是 `recover_cmd.rs` 的注册块，
 不是 `main.rs`；**五态一个不动**）。
@@ -1266,22 +1446,32 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 
 | 处 | 现状（实读） | 本设计的请求 | 为什么现在提 |
 |---|---|---|---|
-| `adfir_graph` 缺 `contract_version` | `crates/continuum-graph/src/persist.rs:17-23` 的 `adfir_graph` 只有 `contract_id TEXT NOT NULL`（`:20`）；`AdfirGraph.contract_id: ContractIdRef`（`crates/continuum-graph/src/graph.rs:49`）也只带 id | **新增一个迁移 21**：`ALTER TABLE adfir_graph ADD COLUMN contract_version INTEGER NOT NULL DEFAULT 1`。三条落地要求见下 | §226 的 MUST 落在执行层，而这条信息**今天在图上不可表达**。图上补一列是一次迁移的成本；等执行器落地后再补，就要同时改执行器、恢复路径与既有行 |
+| `adfir_graph` 缺 `contract_version` | `crates/continuum-graph/src/persist.rs:17-23` 的 `adfir_graph` 只有 `contract_id TEXT NOT NULL`（`:20`）；`AdfirGraph.contract_id: ContractIdRef`（`crates/continuum-graph/src/graph.rs:49`）也只带 id | **新增一个迁移 21**：`ALTER TABLE adfir_graph ADD COLUMN contract_version INTEGER NOT NULL DEFAULT 0`。三条落地要求见下 | §226 的 MUST 落在执行层，而这条信息**今天在图上不可表达**。图上补一列是一次迁移的成本；等执行器落地后再补，就要同时改执行器、恢复路径与既有行 |
+
+| `ContractIdRef` 与 `ContractId` 是同概念两类型 | `crates/continuum-graph/src/ids.rs:41` 的 `ContractIdRef` 是一个 `String` newtype | **裁定唯一的 `ContractId`**：本层定义真类型，`ContractIdRef` 改为复用它（那需要登记 `语义层 → 执行层` 这条**合法**方向的边，§1.2.0 的约定：执行层依赖本层），或明写 `ContractIdRef` 是**不透明字符串引用**、其权威在本层 | 本仓对「同一个概念两个类型」一贯判为 Critical（`ToolId` / `ModelId` 各有前例）。**生产点是三处**（实读）：`AdfirGraph::new`（`crates/continuum-graph/src/graph.rs:53`）、**`load_graph` 的读回路径**（`crates/continuum-graph/src/persist.rs:233`），以及各测试 |
 
 **迁移 21 的三条落地要求**（评审查出，逐条都是会直接报错或静默失效的坑）：
 
 1. **必须带 `DEFAULT`**。SQLite 在**非空表**上执行 `ALTER TABLE … ADD COLUMN … NOT NULL`
    **不带默认值时直接报错**（"Cannot add a NOT NULL column with default value NULL"）。
    `adfir_graph` 在生产库里非空，故 `NOT NULL` 与 `DEFAULT` 必须同时给。
+   （替代路线：先加**可空**列、回填后再约束——SQLite 不支持后加 `NOT NULL` 约束以外的改列，
+   故这条替代要重建表，成本高得多。**取前者**。）
 2. **不得改迁移 20 的 SQL**。`migrate()` 按 `schema_migrations` 里已记录的 `version` 跳过
    （`crates/continuum-persist/src/db.rs:96-113`），故**改 20 的 SQL 对已建库完全无效**——
    那是一处「改了但没生效」的静默失效。**加列只能走新号 21**。
-3. **`DEFAULT` 的取值是一个语义声明，不是占位**：`DEFAULT 1` 表示「迁移之前的行按 Contract v1 读」。
-   这个值**没有规范依据**（§226 未规定既有图该按哪一版读），故它**必须与一列同批写进订正注记**，
-   且**在执行层落地时要被重新判定**——若那时判定「既有图无法确定基准版本，应当作不可复用」，
-   则改为 `DEFAULT 0` 并在读取侧把 0 判为「未绑定版本」。
-   **这一条记在 §16 第 24 条，收件人：执行层 ＋ 协调者**（不要让它悄悄变成一个看似有意义的 1）。
-| `ContractIdRef` 与 `ContractId` 是同概念两类型 | `crates/continuum-graph/src/ids.rs:41` 的 `ContractIdRef` 是一个 `String` newtype | **裁定唯一的 `ContractId`**：本层定义真类型，`ContractIdRef` 改为复用它（那需要登记 `语义层 → 执行层` 这条**合法**方向的边，§1.2.0 的约定：执行层依赖本层），或明写 `ContractIdRef` 是**不透明字符串引用**、其权威在本层 | 本仓对「同一个概念两个类型」一贯判为 Critical（`ToolId` / `ModelId` 各有前例）。**早裁便宜**：今天 `ContractIdRef` 的生产方只有一个（测试与 `AdfirGraph::new`） |
+3. **`DEFAULT 0` 表示「图建立时 Contract 版本未知」**，且**读取侧必须把 0 判为「未绑定版本」**，
+   **不得当成真实的 v0**（`load_graph` 读回时 `0` 要能与任何真版本区分开）。取 `0` 而不是 `1`
+   的理由：`1` 会被读成一个**看似有意义的**真版本（迁移之前的行并没有按 v1 建过任何东西），
+   而 `0` 在 `TaskContract.version` 的取值域里不是一个合法版本，故可作哨兵。
+   这个值**没有规范依据**（§226 未规定既有图该按哪一版读），故它**必须与那一列同批写进订正注记**。
+   **这一条记在 §16 第 24 条，收件人：执行层 ＋ 协调者**。
+
+**「早裁便宜」这句话在第二条上要收窄**（评审查出）：`ContractIdRef` 的生产点里有
+**`load_graph` 的读回路径**（`crates/continuum-graph/src/persist.rs:233`），
+故「今天没有既有库受影响」不成立——**已有库里的行会被读回**。
+这不改变「现在裁比以后裁便宜」的结论（今天只有一个读回点，将来执行器落地后还会多几处），
+但**「生产方只有一个（测试）」那句已经删掉**，别再拿它当论据。
 
 **不改的**：`Node.constraints` / `Node.execution_policy` 的类型不动（§11.2 按原样读）；
 `propagate_invalidation` 的签名不动（§8.2 由执行层调）。
@@ -1299,10 +1489,19 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 （`crates/continuum-policy/src/context.rs:25-31`）——一个 `--approve` 的是否给出标志。
 
 **两者不是同一件事**：一个是「当前 Task Contract」，一个是「本次显式批准」。
-相抵的后果是可观察的：按 §8.2 的原文，一条 `Deny` **用户持久策略**（第 3 级）
-在运行期应当被第 2 级的**当前 Contract** 越过；而今天的第 2 级只认 `--approve`，
-故「当前 Contract 允许、用户持久策略 Deny、没有 `--approve`」的情形**会被拒**——
-与 §8.2 的图不一致。
+占位对（`context.rs:9-10` 的注释自述「它占第 2 级 `ExplicitCurrent`，第 1 级之外的规则都可被它越过」），
+**内容不是一个概念**。
+
+**相抵的后果「落成后可见」，今天拍不出来**：按 §8.2 的原文，一条 `Deny` **用户持久策略**（第 3 级）
+在运行期应当被第 2 级的**当前 Contract** 越过。而今天「当前 Contract 允许」这个事实
+**没有任何承载方**——`PolicyContext` 里没有它的位置，本层也还没有契约可传，
+故「当前 Contract 允许 ∧ 用户持久策略 Deny ∧ 无 `--approve`」这一情形**今天就不可构造**，
+「会被拒」是一句**反事实推演**。
+
+> **订正（2026-10-06，评审查出）**：本段的初稿把上面那句写成「相抵的后果是**可观察的**……**会被拒**」。
+> 本层未建、`PolicyContext` 里也没有该事实的位置，故**它今天没有照片**；
+> 按本仓纪律，写不出照片的要把「为什么没有」写出来，而不是把它说成可观察的。
+> 原句留在此处。**该情形的照片要等两件事同时到位**：本层落地 ＋ P2 给第 2 级一个承载位置。
 
 **本设计不擅自改 P2 的类型**（那是边界层的面）。**本层承诺的是**：
 本层的 `TaskContract` 是那个「当前 Task Contract」的**唯一来源**，
@@ -1315,10 +1514,17 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 处 | 本层的处置 |
 |---|---|
 | D 的 `BudgetView` | §12.6：本层产出 `Remaining`，投影恒等；不合一 |
-| D §11 第 12 条：`ExecutionProfile.cost_budget` 的类型收紧 | **本层交付了那个类型**：`cost_budget` 收成 **`Allocation`**（上限，不是余量）——D §6.3 的角色判据与本设计一致。**收紧的动作归执行层**（那列在 `crates/continuum-graph/src/persist.rs:60`），不是本层；那一步需要执行层依赖本层（`语义层 → 执行层`，§1.2.0 的约定），是 §9.1 已声明的方向。**收件人：执行层（接线时）＋ 协调者** |
+| D §11 第 12 条：`ExecutionProfile.cost_budget` 的类型收紧 | **本层交付了那个类型**：`cost_budget` 收成 **`Allocation`**（上限，不是余量）——D §6.3 的角色判据（`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md:986-990`）与本设计一致。**收紧的动作归执行层**（那列在 `crates/continuum-graph/src/persist.rs:60`），不是本层；那一步需要执行层依赖本层（`语义层 → 执行层`，§1.2.0 的约定），是 §9.1 已声明的方向。**这是对 ENG-005 §五的一处改判**（见下）。**收件人：执行层（接线时）＋ 协调者** |
+
+> **这是一处改判，须写明（2026-10-06，评审查出）**：ENG-005 §五（`docs/superpowers/specs/2026-10-05-eng-005-budget-accounting.md:111`）
+> 把「`execution_profile.cost_budget` 的类型收紧」判给「**D 落地时**」。
+> **本设计把它改判给执行层的接线 task**，判据两条：D 的设计 §11 第 12 条**自陈未做**
+> （并写明「解除条件是语义层落地」），而那一列属**执行层**的表（`crates/continuum-graph`，P1）。
+> **改判要写在这里，否则 ENG-005 §五 与本文两处对不上**——这正是本项目反复栽的「两处各说一套」。
+> **收件人：协调者**（若判「仍由 D 做」，则执行层不必接这一步，而 `cost_budget` 的列在 D 手里改不动）。
 | G §14 第 5 条：`usage()` 的语义（累计？会话？） | **本层作为对账方给出答案：不需要那个定义。** 预扣—结算要的是**逐次**读数（一次 `invoke` / 一次 `stream` 的增量），累计是**账本**的职责，不是 `usage()` 的。故 §315 的 `usage()` 按「单次」实现即可，**本层不消费它**（本层消费的是调用方交来的 `Dimensions`）。**这一条把 C §12 第 3 条与 G §14 第 5 条从「定不了」降为「不必定」** |
 | G §14 第 8 条：流式无用量读数 | §12.3：按预扣结算。**本层给出的是保守处置，不是要求 G 补读数**——补读数要先有 §315 的承载位置（G §14 第 4 条同一条缝） |
-| C §6（`docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md:487-489`）：「预算视图来自语义层，不是 provider 的 `usage()`」 | **确认，并按 §12.6 落实**。附一条实读：`Usage` **只覆盖 `token` 一维**且拆成输入/输出，故「用 `usage()` 当成本输入」在**形状上也不可能**（五个量纲只对上一维） |
+| C §6（`docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md:487-489`）：「预算视图来自语义层，不是 provider 的 `usage()`」 | **确认，并按 §12.6 落实**。附一条实读：`Usage { input_tokens, output_tokens }`（`crates/continuum-core/src/model.rs:51-54`）**只覆盖 `token` 一维**且拆成输入/输出，故它**不可能作唯一的成本输入**（五个量纲只对上一维，且那一维的形状还要合成）——**但 `token` 那一维仍可由它喂**，本设计不否认这一点 |
 
 ## 13.5 引擎室之外：一条接口面的请求
 
@@ -1343,22 +1549,22 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | Specification 的 `unknowns`（§227） | `Specification` crate 外不可构造（trybuild）；`Unknowns` 两变体各一条；**没有 `unknowns` 的 `SpecDraft` 不能 finalize**（签名 + 一条 trybuild） |
 | Requirement 四 class（§224） | 四值各一条；`verification_requirement` 的方法集逐条（无判定方法） |
 | Contract 不可原地修改（§226） | 二次写同一 `(id, version)` 撞主键、原行不变（裸 `INSERT`） |
-| ContractDiff 四类 + 第五类（§8.1） | 四类各一条；`class` 升/降各一条；**`class` 相同而 `expression` 变 → `ExpressionChanged`**（断言不是 `strengthened`/`weakened`） |
+| ContractDiff 四类 + `unjudged`（§8.1） | `DiffClass` 四枚各一条；`class` 升/降各一条；**`class` 相同而 `expression` 变 → 进 `unjudged`，且断言它不出现在 `entries` 里** |
 | Plan 审查状态机（§229 §338） | 合法对逐条；`STRATEGIC` 未批不得执行 + `EXECUTION` 可（**两侧**）；「修订 = 新版本 + 旧版本 `SUPERSEDED`」一条 |
 | `ReviewFinding` 四 severity（§339） | 四值各一条 |
 | §340 的三条事实可观察 | 一次「同模型同上下文」的审查读回 `separate_context = false` 且两个 model ref 相同 |
-| Plan Change 十一例（§230） | 逐例一条，两条 class 各覆盖 |
+| Plan Change **十例**（§230，五 MINOR ＋ 五 MATERIAL） | 逐例一条，两条 class 各覆盖 |
 | `UserReviewView`（§341） | 字段清单**逐项八条**（多一项即红、少一项即红；**成本与权限各占一条**，合并即红） |
 | `Decision`（§331） | `options.len() == consequences.len()` 逐条读回；无「只带选项」的构造路径（trybuild）；`Decision` 公开面恰好一个类型（与 `PolicyDecision` 不混） |
 | 恢复链（§332 §107） | 只改指名字段、**其余字段逐项不变**；失败路径断言**四张表无半写行**（不只断言 `Err` 哪一种） |
-| Constraint Validator（§225 §6） | §225 的两条清单**逐项**（7 项 MAY 放行 + 3 项 MUST NOT 拦下）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下 |
+| Constraint Validator（§225 §6） | §225 的 MAY 七条逐项放行 ＋ MUST NOT 三条逐项拦下（第四条见 `ViolatesRequired`）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下；**悬空键 `Err(UnknownConstraintKey)` 一条 ＋ `constraints` 为空不是 `Err` 一条** |
 | 两道门分离（§2.2） | §11.5 的三条（两条 `ALLOWED` 条目 + 方法集断言） |
 | 预算不变量（§12.2） | I1 / I2 / I3 **各一条**违规断言；`reserve` 返回**具体哪一维**（逐维五条）；`settle` 的 `Over` 断言 `dimension` 与 `by` |
 | 无读数按预扣（§12.3） | 三条（流式 / 恢复 / **有读数时不按预扣**） |
 | Budget Validator（§110） | `Within` 一条；`Exceeds` **逐维五条**；判据是 `remaining` 不是 `allocation`（构造一个「按 allocation 判会放行、按 remaining 判超支」的用例） |
 | 探索预算（§334） | 四个默认判据**各两条**（放行/门控，共八条）；策略收紧一条；`has_external_effect` 那一格 `dimension` 为 `None` |
 | 投影到 `BudgetView`（§12.6） | 五维各一条（含 `None → None`）；**`None` 不是 `Some(0)`** |
-| 迁移与表形状 | `migrations.rs` 的集合比对 + `startup.rs` 的计数；三张新表的列清单**逐列** |
+| 迁移与表形状 | `migrations.rs` 的集合比对（**须含 P1 的新号 21**）＋ `startup.rs` 的计数；三张新表的列清单**逐列** |
 | 编码纪律 | `scope` / `status` / `class` / `dimension` 等枚举列小写、多词 `_` 连接；表外取值读回得具体 `Err` |
 
 **本项目既有的六条纪律一并适用**：变异须在**全量 `--no-fail-fast`** 下得出否定结论，
@@ -1376,10 +1582,10 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | §2.4 的判据（`docs/02-工程.md:130-135`） | 落点 |
 |---|---|
 | 含错别字、简称、中英混写、代词的输入被规范化，**或被明确标记为 Unknown / Ambiguous** | §3.2 的 `Canonicalized` 和类型（两支互斥）＋ §14 的四类输入各一条 |
-| **不存在正确候选时系统不强行绑定**（§273） | §4.2 的断言 A / B / C 三条（B 逐候选） |
+| **不存在正确候选时系统不强行绑定**（§273） | §4.2 的断言 A / B / C **＋ D**（B 逐候选；**D 两条照片**：合格者被选中／多合格者得 `Ambiguous`） |
 | 带版本的 Specification，且 `unknowns` 显式保留 | §6.1 的 `Unknowns` 两变体 + `Specification` 无公开构造 + §5.2 的版本规则 |
 | 带版本的 Contract，每条 Requirement 带 `class` 与 `verification_requirement` | §7.1 / §7.3；`class` 四值逐项照片，`verification_requirement` 方法集逐条 |
-| **ContractDiff 能正确判定哪些已有节点受影响** | **本层只做到一半**：四类差异的判定在 §8.1（含第五类诚实标记）；「哪些节点受影响」的判定在执行层，**今天无消费者**（§16 第 13 条）。**这一条在 P4 单独落地时无法完整成立**，据实写明 |
+| **ContractDiff 能正确判定哪些已有节点受影响** | **本层只做到一半**：§226 四类的判定在 §8.1（判不了的另立 `unjudged` 字段，**不进差异类**）；「哪些节点受影响」的判定在执行层，**今天无消费者**（§16 第 13 条）。**这一条在 P4 单独落地时无法完整成立**，据实写明 |
 | 违反 REQUIRED 的候选计划被拦截并生成 Decision | §11.3 / §11.4 / §10.1；拦截与建 Decision 在同一 crate 的两步（不是两个 crate） |
 
 ## 15.2 拍不到的照片（逐条写「为什么没有」）
@@ -1394,7 +1600,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
    能拍的只有机制：四个来源接口、闭集不变量、四态分支。
 4. **§198 的联合解析**：未实现（§3.1），故无照片。
 5. **§227 的「检测冲突/未定义行为」**：检测器未建（§6.1），只有类型。
-6. **表达式之间的强弱比较**（§8.1 的 `ExpressionChanged`）：本层判不了，
+6. **表达式之间的强弱比较**（§8.1 的 `UnjudgedChange`）：本层判不了，
    故「`duration >= 4K` → `>= 2K` 算削弱」这件事**没有照片**，它有的是一条**显式标记**。
 7. **§340 的「独立性是否足够」**：三条事实可观察（有照片），但**判定没有判据**，故无照片。
 8. **真实用量读数**：除 `token` 一维外，其余四维**没有任何产生方**（§12.3，命中处逐条列出），
@@ -1411,13 +1617,23 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 
 **每条具名收件人；凡「缺的是哪一步」都写到步骤，不用「后续」「长期阶段」兜。**
 
-1. **§9.2 的「Intent 存储」与 §2.3 的 `Specification ← Intent 存储（经 Canonicalization）`相抵**
-   （§1.3）。本设计按「类型边」读。**收件人：规范维护者**（两处须改一处）。
-2. **§249 之外的另一处「判定属 P4」只写在代码注释里**：`crates/continuum-graph/src/node.rs:17`
-   的 `/// 结构保存，判定属 P4。` 只覆盖 `execution_policy`，
-   **`constraints`（`:15`）没有对应注记**。§236 两个字段都没有词汇表。
-   本设计按 §225 的清单给 `execution_policy` 的判据、按「约束引用键」给 `constraints` 的读法（§11.2）。
+1. **§9.2 的「Intent 存储」与 §2.3 的 `Specification ← Intent 存储（经 Canonicalization）`**（§1.3）：
+   两处回答的是**不同问题**（源点表 vs 层内依赖边），相抵只在「（经 Canonicalization）」
+   这一个短语的读法上出现；本设计采纳**读法甲（类型边）**，另一种读法及其代价写在 §1.3。
+   **收件人：规范维护者**（两处须择一改，或把那个短语写清）。
+2. **「判定属 P4」只覆盖 §236 的两个字段之一**：`crates/continuum-graph/src/node.rs:17`
+   的 `/// 结构保存，判定属 P4。` 只管 `:18` 的 `execution_policy`，
+   **`constraints`（`:15`）没有对应注记**（`:19` 的 `/// 结构保存，判定属 P5。` 管 `verification_policy`）。
+   §236（`docs/spec/05-normative.md:558-580`）两个字段都只有字段名、无词汇表。
+   本设计按 §225 的清单给 `execution_policy` 的判据（§11.2 的 10 条用例）、
+   按「约束引用键」给 `constraints` 的读法（§11.2、§11.3）。
    **收件人：执行层（补注记）＋ 规范维护者（§236 的词汇表）**。
+
+   > **订正（2026-10-06，评审查出）**：初稿在 §1.2.3 与本节都把这处的后果写成
+   > 「按**今天的**读法……静默不匹配（fail-open）」。**「今天的读法」不存在**——
+   > 全仓 `constraints` 只有序列化（`persist.rs:103`）与反序列化（`:253`）两处，**零逻辑读者**。
+   > 那个读法是**本设计 §11.2 定的**；且该 fail-open 原先**只写在遗留项里**，
+   > **裁决类型上看不出来**——现已落进 §11.3 的 `Err(UnknownConstraintKey { key })`。
 3. **`Mention.kind` 的取值域 §196/§197 未给**（§3.1）。本层取不透明串。
    **收件人：规范维护者**。
 4. **§198 的联合解析没有落点**（§3.1）：§2.1 的组件表里没有承担联合约束传播的组件，
@@ -1445,8 +1661,10 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     两者的桥**没有**。**缺的是「Contract 的 `budget` 怎么变成树上的一次分配」这一步。
     收件人：规范维护者**。
 12. **§226 的 `strengthened` / `weakened` 未给判据**（§8.1）：本设计按 `class` 的四值序判，
-    而 `class` 相同时的 `expression` 变化判不了，故加了第五类 `ExpressionChanged` 作为**诚实标记**
-    （它**不是** §226 的四类之一）。**缺的是「Requirement 表达式的语义比较」这一步。
+    而 `class` 相同时的 `expression` 变化判不了，故改记为**并列字段** `unjudged`（§8.1，
+    它**不是** §226 的四类之一，也不进 `entries`）。**缺的是「Requirement 表达式的语义比较」这一步。
+    **另一处后果一并记此**：本设计用来判 `strengthened`/`weakened` 的 `class` 四值序
+    **是推出来的、不是原文给的**（§8.1 的订正段）；**若此序不成立，则这两类也整个落进 `unjudged`**。
     收件人：规范维护者**。
 13. **ContractDiff 今天没有消费者**（§8.2 §15.1 第 5 条）：§226 的「受影响的 ADFIR 节点 MUST 被重新判定」
     落在执行层，而**执行器未建**。故 §2.4 的第 5 条完成判据在本层单独落地时只能成立一半。
@@ -1458,9 +1676,12 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     **收件人：规范维护者**。
 16. **§331 的 `blocking = false` 无触发条件**（§10.1）：本层只在本层两个触发点写 `true`，
     不发明 `false` 的场景。**收件人：规范维护者**。
-17. **`Node.constraints` 的词汇表没有规范来源**（§11.2）：本层按「约束引用键」读，
-    故一个拼错的键**静默不匹配**（fail-open）。**缺的是「`constraints[]` 的元素是什么」这一步。
-    收件人：规范维护者**。
+17. **`Node.constraints` 的词汇表没有规范来源**（§11.2）：本层按「约束引用键」读
+    （**这是本设计定的读法，不是今天已有的**——全仓零逻辑读者）。一个拼错的键按 §11.3
+    得 `Err(UnknownConstraintKey { key })`（**拦下，不是静默放行**）。
+    **缺的是「`constraints[]` 的元素是什么」这一步。收件人：规范维护者 ＋ 复审者**
+    （「悬空键一律拦下」是本设计的 fail-closed 选择，规范没给判据；若判「未知键按通过处理」，
+    须在 §11.3 正文写明这是有意的 fail-open 并说明代价）。
 18. **维护性预算根（`BudgetOwner::SystemMaintenance`）的创建方是第 7 层**（§12.1）：
     本层提供该 owner 变体与它的入账函数，但**没有任何一方会创建它**
     （ENG-005 §三末行把这一步判给长期循环层，该层未建）。
@@ -1519,8 +1740,20 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     - §三.4（`Trust` 与工具侧 `cost` / `latency` 无收件人）：那是**工具选择**，
       而 §2.1 的组件表里没有「工具选择」这一格（该缺口的判据见 `p3bcdf-followups.md` §七.6）；
       本层不选工具、不读 `ToolProfile`。
-    **四条收件人照原文**（规范维护者／F／B／协调者），**本层一条都不认领**——
-    不为凑数把工具侧的词汇揽进语义层，那正是 §1.2.2 那条边规则要防的形状。
+    **收件人**（见下）：`§三.3`／`§三.4` **照原文**（执行侧工具调用路径 ＋ 规范维护者／后续子项目 ＋ 规范）；
+    **`§三.1` 与 `§三.2` 原文没有收件人**，故这两条是本设计**补的**——
+    `§三.1`：规范维护者（§125 的读/草稿臂归属）＋ 执行侧（工具调用路径）；
+    `§三.2`：同第 26 条的退件理由，规范维护者 ＋ 子项目 B。
+    **本层一条都不认领**——不为凑数把工具侧的词汇揽进语义层，那正是 §1.2.2 那条边规则要防的形状。
+
+    > **订正（2026-10-06，评审查出）**：初稿写「**四条收件人照原文**」。**这是假引用**：
+    > `p3bcdf-followups.md` §三 里**只有**第 3 条（`:68-69`）与第 4 条（`:73`）有收件人，
+    > 第 1 条（`:63`）与第 2 条（`:64-66`）原文**没有收件人**。原句留在此处。
+
+    **`§三.1` 另需一句边界**（评审查出，初稿只给了「本层不持有强制点」一句，太弱）：
+    §11.2 判的是 **Contract 的 Requirement**（计划的约束声明），
+    §三.1 问的是**能力/效应侧的强制点**（§125 的读/草稿类操作该由谁强制）——**两者不同轴**；
+    本层对 `EffectType` 与能力凭据的引用**为零**（§2.2 的边表即证据）。故无交叠。
 28. **`p3bcdf-followups.md` §八 的其余 24 条**：**据实核过，收件人无一条是语义层**
     （分别是协调者、规范维护者、B 的实现的后续轮、`continuum-core`、「无（已闭）」）。
     **§八.19 是唯一提到语义层的一条，已在第 26 条逐条处置；§八.25（§125 的五个操作没有语义相配的
@@ -1537,11 +1770,14 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     **这是命名约定、不是类型守卫**——没有任何编译期机制阻止后来者写 `use continuum_policy::Decision;`
     与 `use continuum_semantics::Decision;` 并列，故它**没有照片**。
     更强的做法（重命名本层的类型）会偏离 §331 的名字。**收件人：复审者**（要不要更强）。
-32. **本设计在 §8.1 给 ContractDiff 加了第五类 `ExpressionChanged`**，
-    而 §226 只给四类（§8.1、§15.2 第 6 条）。**这是本设计最需要被推翻的一处**：
-    若判「不得加第五类」，则 `expression` 变化必须**归入四类之一或忽略**——
-    归入任何一类都是发明判据，忽略则是静默漏判（fail-open）。
-    **三条路本设计都不满意，故把选择权交出。收件人：复审者 ＋ 规范维护者**。
+32. ~~本设计在 §8.1 给 ContractDiff 加了第五类 `ExpressionChanged`~~ —— **已闭（2026-10-06，评审查出）**。
+    初稿加的那一项被写成了 §226 四类的**第五个变体**，于是「它不是第五种差异」这句声明与类型自相矛盾。
+    已改为**并列字段** `unjudged: Vec<UnjudgedChange>`，`DiffClass` 保持**恰好四枚**（§8.1）。
+    **初稿自陈的「三条路都不满意」随之收敛**：三条（改写四类／归并／忽略）**一条都不用走**——
+    记录另立字段，既不动 §226 的枚举，也不漏判。附一条照片要求：
+    「`unjudged` 的条不出现在 `entries` 里」，这条断言把「记录 vs 差异类」的分界钉死。
+    **残留一条收件人：规范维护者**——§226 未给 `strengthened`/`weakened` 的判据，
+    本设计用的 `class` 四值序是推出来的（§8.1 的订正段）；若此序不成立，两类也落进 `unjudged`。
 33. **`AuditKind::UserApprovals` 在本层落地后有两个生产方、两种载荷形状**（§5.4）：
     `continuum-workspace` 的 Integration Gate 写的是操作名（`gate.rs:224` 的 `"apply_patch"` 等），
     本层写的是决策单与被选项。`append_audit` 的 `payload` 是自由 JSON（`tx.rs:79-84`），
