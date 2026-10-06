@@ -1391,11 +1391,19 @@ FailureClass 的映射     落在策略一侧、今天形状未定）；**映射
                       **Task 11 与其后的 router task 把读数接上之后，这两处豁免必须复核并从源码里去掉**；
                       若到那时仍有字段无人读，那是一个**要处置的发现**（删字段或写明为什么留），不是可以继续压着的事。
                       **收件人：Task 11 及之后接上读数的那些 task 的实现者。**
-LifecycleError::Persist  **有产生方、无照片**（Task 6 的实现者报出，评审确认）。**位置**：
-的无照片处置              `crates/continuum-model-registry/src/error.rs` 的
-                      `LifecycleError::Persist(#[from] PersistError)`。
-                      **为什么没有照片**：正常路径不产生它——`Tx` 由调用方传入，而 Task 6 的夹具是
-                      「迁移齐备的临时库」，造一次**真实的写失败**超出该 task 的夹具能力。
+LifecycleError::Persist  **已闭（commit `531c548`）——原稿记的是「有产生方、无照片」**，订正如下，
+的处置（已闭）            **下面那段叙述留作这条决定的前史**（本仓惯例：原话照留、加订正注记）。
+                      **判据与出处**：Task 6 的修正提交 `531c548` 新增了
+                      `a_persist_failure_keeps_the_inner_persist_error`
+                      （`crates/continuum-model-registry/tests/persist.rs:644`）——断言外层
+                      `LifecycleError::Persist` **与**内层 `PersistError::Database` 两层，并点出
+                      `no such table: model_registry`；自证方式是变异 M10「吞掉 `?` 的升格」**只红这一条**、
+                      红位在 `:659`。故那枚变体现有照片，**本条目不再是未决项**。
+                      以下为原稿（照留，只把「本轮未补」那半句订正为已补）：位置是
+                      `crates/continuum-model-registry/src/error.rs` 的
+                      `LifecycleError::Persist(#[from] PersistError)`；原稿记「正常路径不产生它、
+                      造一次**真实的写失败**超出该 task 的夹具能力」——**该判断已被 `531c548` 证伪**：
+                      造法就是下面这三行，Task 6 的修正者照它补上了照片。
                       **若要让它有照片：本仓已有可直接照抄的造法，代价是三行**——
                       `crates/continuum-workspace/src/gate.rs:2514-2536` 的
                       `a_failed_audit_write_reports_persist_and_leaves_the_change_in_the_base`：
@@ -1405,8 +1413,10 @@ LifecycleError::Persist  **有产生方、无照片**（Task 6 的实现者报�
                       本仓对这类 `#[from]` 转发变体的两种处置都有先例（`continuum-graph` 的
                       `ApplyError::Persist` **无**照片、`continuum-workspace` 的 `GateError::Persist` **有**），
                       故这不是「仓内已一致的做法」，而是一个**待定的选择**。
-                      **本轮未补**（Task 6 已按「无照片」交付），记此**待补**。
-                      **收件人：本计划的后续 task（按上法补一条）或长期阶段（若复审判定转发变体无需照片）。**
+                      **本轮已补**（原稿写「本轮未补、记此待补」——**那句已随 `531c548` 作废**，
+                      来历留在上面：它曾是「计划记了一件事、实现侧随后做了却没回来改计划」的那一类，
+                      判据是「凡是『本轮未补』记进遗留的，补上之后必须回来改那一条」——
+                      否则它就成了**已闭记成未闭**，后来者会照它去做一件已经做过的事）。
 Degraded 的降权判据      §250 的八项 MUST 考虑里，可用性**只写死了「过滤 Unavailable」这一档**
                       （设计 §5.3）：`Healthy` 与 `Degraded` 之间**没有判据**——§250 只说「考虑」、
                       §84 没给这一维的算法。本设计不发明，`Degraded` 原样带进 `reason`。
