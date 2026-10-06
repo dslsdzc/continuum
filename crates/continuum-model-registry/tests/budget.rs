@@ -1,66 +1,66 @@
 //! Task 9：§333 的只读预算投影 [`BudgetView`] 的用例。
 //!
-//! 每条断言的「红的条件」见各用例的注释——这些注释不是说明，是变异时的靶子。
+//! # 本文件只钉**类型与签名**，不写运行期用例
 //!
-//! **本文件的用例全部在 crate 之外**：构造走结构体字面量，故「字段是 `pub` 的」这件事
-//! 由编译器守，而不靠本层自觉。
+//! 设计 §10 第 2 条（`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md:1218-1220`）
+//! 明写：语义层未建，预算视图的真实语义在本阶段**不可观察**，**故不为它写运行期用例，只钉类型与签名**。
+//! 根因是**本层的这个类型没有实现体**——它是一个纯数据投影（字段 `pub`、无方法、无判定、无派生），
+//! **从构造到读回之间没有一行本 crate 的代码**。故任何「读回来还是原值吗」的运行期断言都**必然恒真**：
+//! 它验的是 `Option<i64>` 自己的语义，**不是本 crate 的任何东西**，任何不导致编译错误的实现改动都改不动它。
+//! 那些断言已删——**不是「用例没用」，是恒真的断言不构成证据**（删掉的来历即上一句）。
+//!
+//! # 本文件里真正的照片是编译期
+//!
+//! `tests/` 是**独立的 crate**。它能用**结构体字面量**构造出 [`BudgetView`]，
+//! 就证明了「五个字段都是 `pub`」——**这是一条真的编译期照片**（去掉一个 `pub` 即 `E0616`）。
+//! 三条用例全部靠**编译通过 / 编译不过**取证据：
+//!
+//! 1. 字面量里**逐项**写出五个字段名、再用 `let _: Option<i64> = …` 逐项钉类型，
+//!    故字段名、字段类型、以及「字段**恰好是这五个**」都被编译器钉住；
+//! 2. 字段名 / 类型 / 可见性 / 字段个数任改一处 → 本文件**编译不过**。
+//!
+//! **于是本 task 的红的形态是编译错误，不是断言失败**。按本项目纪律「编译不过的变异不算变红」，
+//! **本 task 因此没有一条「变红」的变异**——据实标注，见实现报告 §3。
 
 use continuum_model_registry::BudgetView;
 
-/// §333 的五个量纲**逐项**给值并读回：字段名、字段类型（`Option<i64>`）与取值各钉一次。
+/// §333 的五个量纲**名与类型逐项**钉住。
 ///
-/// **五个字段各有一条照片**（枚举式断言逐项有照片）：五条 `let _: Option<i64> = …`
-/// 各钉一个字段的**类型**，五条 `assert_eq!` 各钉一个字段的**取值**。取值互不相同
-/// （11/22/33/44/55），故「读的时候串了字段」在运行期就会红，不会被「两个字段恰好相等」掩盖。
-///
-/// **红的条件**：任一字段改名或改类型 → 本用例**编译不过**。本类型的字段名与字段类型
-/// 由编译器守（这是纯数据投影的承重形态，见 `the_view_is_a_plain_data_projection` 的注释）；
-/// 运行期能观察的只有「读回时串了字段」这一类错误，它由上面那组互不相同的取值钉住。
+/// 做法：字面量里逐项写字段名（字段名写错即编译不过），再用 `let _: Option<i64> = …` 逐项钉**类型**
+/// （类型改掉即编译不过）。**本用例没有运行期断言**——本类型无实现体，任何「读回是否相等」的断言
+/// 都恒真（文件头已写明来历），故不写。能红的只有编译期：字段改名、改类型、少一个、多一个。
 #[test]
 fn the_view_carries_the_five_dimensions_of_333() {
     let view = BudgetView {
-        money: Some(11),
-        wall_time: Some(22),
-        token: Some(33),
-        gpu_time: Some(44),
-        network_transfer: Some(55),
+        money: None,
+        wall_time: None,
+        token: None,
+        gpu_time: None,
+        network_transfer: None,
     };
 
-    // 类型逐项钉住：把任一字段从 `Option<i64>` 改成别的类型，本行编译不过。
-    let money: Option<i64> = view.money;
-    let wall_time: Option<i64> = view.wall_time;
-    let token: Option<i64> = view.token;
-    let gpu_time: Option<i64> = view.gpu_time;
-    let network_transfer: Option<i64> = view.network_transfer;
-
-    // 取值逐项读回（次序照 §333）。
-    assert_eq!(money, Some(11), "money（§333 第 1 个量纲）");
-    assert_eq!(wall_time, Some(22), "wall_time（§333 第 2 个量纲）");
-    assert_eq!(token, Some(33), "token（§333 第 3 个量纲）");
-    assert_eq!(gpu_time, Some(44), "gpu_time（§333 第 4 个量纲）");
-    assert_eq!(
-        network_transfer,
-        Some(55),
-        "network_transfer（§333 第 5 个量纲）"
-    );
+    // 五个量纲逐项：名写在字面量里，类型钉在这里（次序照 §333）。
+    let _: Option<i64> = view.money;
+    let _: Option<i64> = view.wall_time;
+    let _: Option<i64> = view.token;
+    let _: Option<i64> = view.gpu_time;
+    let _: Option<i64> = view.network_transfer;
 }
 
-/// `None` 与 `Some(0)` 是**两件事**，五个量纲**逐项**各钉两侧。
+/// `None`（该量纲当前**不构成约束**）与 `Some(0)`（**额度为零**）是两件事。
 ///
-/// `None` = 该量纲当前**不构成约束**；`Some(0)` = **额度为零**。二者混同会让
-/// 「这一项不参与筛选」变成「一分钱都不能花」——后果不是少一个筛选项，是候选全被挡。
+/// # 本条判据的守卫**不在本 crate**
 ///
-/// **两侧各有一条断言，且逐项各来一遍**：不构成约束的一侧判 [`Option::is_none`]，
-/// 额度为零的一侧判相等 `Some(0)`。**「不得相等」那一对是这条判据的直接照片**——
-/// 它正是「把 `None` 折成 `0`（或反之）就会红」这句的落点。
+/// 本 crate 只保证**装得下**这个区别，**不保证没人把它抹掉**：折叠会发生在**驱动侧的投影**里
+/// （设计 §6.1：投影由驱动做，不由语义层做），本 crate 里**没有可施加该变异的实现体**。
+/// 真正必须守住「不把 `None` 读成额度为零」的是**投影方与消费方**——计划 `## 遗留` 的同名条
+/// 已把这一点逐条记下，收件人是驱动侧的投影实现与子项目 G。
 ///
-/// **夹具让两者可分辨**：`unconstrained` 五个字段全 `None`，`zeroed` 五个字段全
-/// `Some(0)`，两者在 `Option<i64>` 的 `PartialEq` 下必然不等，故不存在
-/// 「`None` 与 `Some(0)` 在这条断言下同结果」的等价变异体。
+/// # 故本用例只钉编译期
 ///
-/// **红的条件**：任一把 `None` 折成 `Some(0)`（反之亦然）的改动落到本类型可观察的取值上，
-/// 都会让「不得相等」那一对断言里的一条红；只写一侧（例如只判 `is_none`、不判 `Some(0)`）
-/// 则等于只钉住一半，另一半的回归无人看得见。
+/// 钉的是「两种取值都装得下、且五个量纲都装得下」：两个字面量各构造一次，逐项钉 `Option<i64>`。
+/// **这里不写 `assert_ne!(view.money, Some(0))` 之类的断言**——那是恒真的
+/// （`Option` 自己的偏等，中间没有本 crate 的代码），删掉的来历见文件头。
 #[test]
 fn none_is_not_the_same_as_zero() {
     let unconstrained = BudgetView {
@@ -78,128 +78,43 @@ fn none_is_not_the_same_as_zero() {
         network_transfer: Some(0),
     };
 
-    // 一侧：该量纲**不构成约束**。
-    assert!(unconstrained.money.is_none(), "money：None = 当前不构成约束");
-    assert!(
-        unconstrained.wall_time.is_none(),
-        "wall_time：None = 当前不构成约束"
-    );
-    assert!(unconstrained.token.is_none(), "token：None = 当前不构成约束");
-    assert!(
-        unconstrained.gpu_time.is_none(),
-        "gpu_time：None = 当前不构成约束"
-    );
-    assert!(
-        unconstrained.network_transfer.is_none(),
-        "network_transfer：None = 当前不构成约束"
-    );
+    // 「不构成约束」的五项都装得下，类型都是 `Option<i64>`。
+    let _: Option<i64> = unconstrained.money;
+    let _: Option<i64> = unconstrained.wall_time;
+    let _: Option<i64> = unconstrained.token;
+    let _: Option<i64> = unconstrained.gpu_time;
+    let _: Option<i64> = unconstrained.network_transfer;
 
-    // 另一侧：**额度为零**。
-    assert_eq!(zeroed.money, Some(0), "money：Some(0) = 额度为零");
-    assert_eq!(zeroed.wall_time, Some(0), "wall_time：Some(0) = 额度为零");
-    assert_eq!(zeroed.token, Some(0), "token：Some(0) = 额度为零");
-    assert_eq!(zeroed.gpu_time, Some(0), "gpu_time：Some(0) = 额度为零");
-    assert_eq!(
-        zeroed.network_transfer,
-        Some(0),
-        "network_transfer：Some(0) = 额度为零"
-    );
-
-    // 「这是两件事」的直接照片：逐项不得互相折合。
-    assert_ne!(
-        unconstrained.money,
-        Some(0),
-        "money：「不构成约束」不得被折成「额度为零」"
-    );
-    assert_ne!(
-        unconstrained.wall_time,
-        Some(0),
-        "wall_time：「不构成约束」不得被折成「额度为零」"
-    );
-    assert_ne!(
-        unconstrained.token,
-        Some(0),
-        "token：「不构成约束」不得被折成「额度为零」"
-    );
-    assert_ne!(
-        unconstrained.gpu_time,
-        Some(0),
-        "gpu_time：「不构成约束」不得被折成「额度为零」"
-    );
-    assert_ne!(
-        unconstrained.network_transfer,
-        Some(0),
-        "network_transfer：「不构成约束」不得被折成「额度为零」"
-    );
-    assert_ne!(
-        zeroed.money,
-        None,
-        "money：「额度为零」不得被折成「不构成约束」"
-    );
-    assert_ne!(
-        zeroed.wall_time,
-        None,
-        "wall_time：「额度为零」不得被折成「不构成约束」"
-    );
-    assert_ne!(
-        zeroed.token,
-        None,
-        "token：「额度为零」不得被折成「不构成约束」"
-    );
-    assert_ne!(
-        zeroed.gpu_time,
-        None,
-        "gpu_time：「额度为零」不得被折成「不构成约束」"
-    );
-    assert_ne!(
-        zeroed.network_transfer,
-        None,
-        "network_transfer：「额度为零」不得被折成「不构成约束」"
-    );
+    // 「额度为零」的五项也都装得下，类型同样是 `Option<i64>`。
+    let _: Option<i64> = zeroed.money;
+    let _: Option<i64> = zeroed.wall_time;
+    let _: Option<i64> = zeroed.token;
+    let _: Option<i64> = zeroed.gpu_time;
+    let _: Option<i64> = zeroed.network_transfer;
 }
 
-/// 这是一个**纯数据投影**：字段 `pub`、驱动直接构造、**不经 trait、不经校验**。
+/// 这是一个**纯数据投影**：五个字段 `pub`、由驱动直接构造、**不经任何 trait**。
 ///
-/// 本用例在 crate 之外用**结构体字面量**构造它，这一条同时钉住三件事：
+/// **唯一的照片是编译期**：本用例在 crate 之外用**结构体字面量**列出**全部五个字段**。能这么写就证明：
 ///
-/// 1. 五个字段都是 `pub`——有一个私有，字面量就构造不出来；
-/// 2. **没有构造闸门**——没有 `try_new`、没有校验（有闸门就只能经闸门构造）；
-/// 3. **没有「实现者」这一说**——本层不为它定义 trait，故没有东西要「实现」它
-///    （**不定义 trait 是刻意的**：没有实现者的 trait 是**假接口**，设计 §6.1）。
-///    第 3 条**写不出直接断言**（不存在的名字写不进用例），能给出的照片是
-///    **这个类型照常可用**：构造、读字段、按值/按引用传递，全程不需要任何 trait 在作用域里。
+/// 1. 五个字段**都是 `pub`**（去掉一个 `pub` 即 `E0616`）；
+/// 2. 字段集合**恰好是这五个**——字面量**不能少写**一个（`E0063`），也没有第六个字段可写；
+/// 3. **构造不需要任何 trait 在作用域里**（本文件通篇没有一个 `impl` / 一个 trait 名）。
 ///
-/// **「不经校验」不是一句空话**：取值域规范未定义（§333 只给字段名），本层不解释、不换算、
-/// 不记账，故负值与 `i64::MAX` 都原样穿过——下方断言读回的正是原值。
+/// **订正（错误说法的来历留在原地）**：本用例先前写「（有闸门就只能经闸门构造）」——**那句是错的**。
+/// 一个显式闸门（如 `try_new`）**不拦**结构体字面量；字面量构造不过去，唯一的原因是**字段私有**。
+/// 故本用例的 (1)(2) 是字面量能证出来的，而「本层不另设构造便利函数」**证不出来**，先前那句已删，
+/// 不以它作为本条判据的一部分。
 ///
-/// **红的条件**：任一把字段收成私有、或把构造挪到某个 `try_new` / 校验函数之后，
-/// 本用例**编译不过**。本类型的承重形态是编译期，运行期可观察的只有「值原样读回」。
+/// **不经校验**：字面量里给什么值就是什么值，本层不解释、不换算、不记账（§333 未给取值域与单位）。
+/// 这同样是**编译期事实**（`pub` 字段的读写之间没有本 crate 的代码），故**不用运行期断言去证**。
 #[test]
 fn the_view_is_a_plain_data_projection() {
-    // 「驱动直接构造」：无 trait、无校验、无中间函数。负值与极大值都不被拒、不被夹紧，
-    // 因为本层不解释取值域。
-    let view = BudgetView {
-        money: Some(-1),
-        wall_time: None,
-        token: Some(i64::MAX),
-        gpu_time: Some(0),
-        network_transfer: None,
+    let _ = BudgetView {
+        money: Some(11),
+        wall_time: Some(22),
+        token: Some(33),
+        gpu_time: Some(44),
+        network_transfer: Some(55),
     };
-
-    // 值原样穿过：证明「不经校验」不是一句空话。
-    assert_eq!(view.money, Some(-1), "未经校验：负值原样读回");
-    assert_eq!(view.token, Some(i64::MAX), "未经校验：i64::MAX 原样读回");
-
-    // 使用这个类型不需要任何 trait：按值与按引用都只是复制 / 借用。
-    fn takes_by_value(view: BudgetView) -> BudgetView {
-        view
-    }
-    fn takes_by_ref(view: &BudgetView) -> Option<i64> {
-        view.gpu_time
-    }
-    assert_eq!(
-        takes_by_ref(&takes_by_value(view)),
-        Some(0),
-        "传参与读字段都不经任何 trait"
-    );
 }
