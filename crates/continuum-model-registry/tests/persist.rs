@@ -7,8 +7,8 @@
 //! 措辞大于实际覆盖面）。
 //!
 //! Task 6 起本文件另钉 `model_registry` 的**行级读写**：`register_model` / `load_lifecycle` /
-//! `transition_in_tx`（设计 §3.2）。**`model_profile` / `model_skill_score` 两表的行级读写
-//! 不在这里**——它们属后续 task，本文件对那两张表只钉结构。
+//! `transition_in_tx`（设计 §3.2）；Task 7 起另钉 `model_profile` 的**行级读写**：
+//! `save_profile` / `load_profile`（设计 §4.3）。`model_skill_score` 一表仍只钉结构。
 //!
 //! # 编码的格式在这三条链上被钉死（不是靠单条用例）
 //!
