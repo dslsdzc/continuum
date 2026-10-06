@@ -1454,7 +1454,8 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 工具侧：门禁内的正常路径 | Task 4 `a_registered_tool_is_invoked_and_its_result_returned`；**新请求类型的两条性质也由它与其兄弟用例观测**（Task 4 的 `the_adapter_is_handed_the_authorization_that_was_passed_in`） |
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | Task 7 两条（**钉夹具，不钉真实适配器**） |
 | 两个登记点不一致，向一 | Task 5 `…passes_authorize_then_fails_to_route` |
-| 两个登记点不一致，向二 | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` |
+| 两个登记点不一致，向二 —— 前一半：`authorize` 报哪一种 `Err` | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`——断言 `Err(CapabilityError::UnknownTool { id })`（**设计该行的前半**） |
+| 两个登记点不一致，向二 —— 后一半：**「在 `invoke_tool` 之前」** | **结构事实（读类型签名）**：`invoke_tool` 只收 `&AuthorizedTool`，而 `AuthorizedTool` 的唯一铸造通道是 `authorize`（P3A 的性质，其照片在 capability 侧）——**没有授权就构造不出调用**，故**没有可写的运行用例**。**不标为有照片**（与 `cancel` 行同形）。Task 5 曾用 `recorder.touches() == 0` 拍它，而**那条断言是恒真的**（计数由本用例自身的控制流决定），已按守卫判据删除，**来历见 `crates/continuum-provider/tests/two_registries.rs` 文件头那段（按内容找，行号会漂）** |
 | 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，**换写法的逃逸（例如那几种）**写在文件头——**不是封闭枚举** |
 | 模型侧未登记 id | Task 1 `an_unregistered_model_id_is_reported_as_not_found` |
 | 工具侧未登记 id | Task 2 `an_unregistered_tool_id_is_reported_as_unregistered` |
@@ -1464,6 +1465,14 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 中立性（`ALLOWED` 逐对精确） | 既有 `every_crate_depends_only_on_its_allowed_set` |
 | `cancel` 对非流式不可达 | **结构事实**，照片是类型签名（设计 §5.3、§9），**不写运行用例** |
 | `ToolInvocation` 的删除 | Task 3 Step 2 的 `cargo build --workspace --all-targets` 失败 + Step 4 全量绿 |
+
+> **为什么其它同形处不必拆（2026-10-07，本计划终审逐行复查全表后的结论：「只有上面拆开的那一行是表比事实宽」）。**
+> **第 11 行（工具侧未登记 id）**设计原文带「（不是 `Provider(..)`）」——那条断言在 `189f6c5` 被删，
+> 但它与保留的 `matches!(Unregistered { .. })` **是互斥变体、被严格蕴含**：任何违反它的变异体同样
+> 让保留的那条红 ⇒ **不是缺口，无需拆**。
+> **与上面那一行的区别是**：那一行那半说的是「**一次没发生的调用的顺序**」，**不被 authorize 那条蕴含**。
+> **判据（本仓「蕴含型 vs 恒真型」那条判据用在「表」上的形态）**：
+> **「被保留的断言严格蕴含」的删掉的断言不是缺口；「说了另一件事」的删掉的断言是缺口。**
 
 - [ ] **Step 3: 复核「无生产调用方」这一栏（据实记，不粉饰）**
 
