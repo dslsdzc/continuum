@@ -412,8 +412,22 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
 
 - `a_registered_tool_is_described_by_id`：登记 `echo → FakeTool`，`describe_tool("echo")` 给出的
   `ToolDescriptor.id` 与 `list_tools()` 里那条一致。
-- `an_unregistered_tool_id_is_reported_as_unregistered`：`describe_tool("nope")` →
-  `matches!(_, Err(ToolCallError::Unregistered { .. }))`——**不是** `ToolCallError::Provider`（纪律 3）。
+- `an_unregistered_tool_id_is_reported_as_unregistered`：**夹具布置写死——沿用上一条已登记的
+  `echo → FakeTool`，只把查询的 id 换成 `nope`**（**注册表非空**，这一点是判据的一部分，
+  理由见下方的订正注记）→ `matches!(_, Err(ToolCallError::Unregistered { .. }))`——
+  **不是** `ToolCallError::Provider`（纪律 3）。**本用例的承重断言是「未命中返的是哪一种 `Err`」**
+  （`Unregistered` 与 `Provider` 分别描述「路由 / 配置缺陷」与「provider 调用失败」，设计 §5.2）。
+
+  > **订正注记（2026-10-06，协调者裁定）**：本节原只写「`describe_tool("nope")` → …」，
+  > **没写注册表里当时有什么**。若实现者按字面「什么都不登记」，注册表为空，
+  > 于是「先扫各适配器的 `list_tools()` 再判未命中」这个变异体**在这里退化**（两版都扫零个适配器、
+  > 都给 `Unregistered`），**永远绿**——与 Task 4 那条同一条成因。
+  > **故把布置写死**：先登记 `echo → FakeTool`，再查 `nope`。
+  > **落地核对**：Task 2 **早已实现并过审**，其 `crates/continuum-provider/tests/registry_tools.rs` 里
+  > 该用例**正是这么布置的**（先 `register_tool(vec![tool("echo")], Arc::new(FakeTool))`，再
+  > `describe_tool(&tool("nope"))`），与本注记一致——**故这是把计划的布置补齐，不是要改测试字节**。
+  > **判据同前一条**：凡「某条用例不构造 X」的指令，先问「不构造它之后，我要钉的那个变异体
+  > 还区分得出来吗」。
 - `list_tools_is_the_union_of_every_registered_adapter`：登记两个各出一个工具的适配器 →
   `list_tools()` 长度 2，**顺序 = 登记顺序**，且**逐个**断言各自的 `id`（枚举式断言逐项有照片）。
 - `list_tools_keeps_the_first_entry_when_two_adapters_declare_the_same_id`：两个适配器都声明 `echo`
@@ -774,6 +788,20 @@ git commit -m "feat(provider): invoke_tool——工具侧唯一受门禁的调�
   `save_tool` 登记了、注册表**没**登记 → `authorize` **返回 `Ok`**（拿到 `AuthorizedTool`），
   随后 `invoke_tool` 返回 `Err(ToolCallError::Unregistered { .. })`。
   **两半都要断言**：只断后一半会让「authorize 也能挡住它」这条假说法活下来。
+
+  > **分工写死（2026-10-06，协调者裁定）：本用例是一条第「序列 + 结果」的用例，不承担路由机制的变异守卫。**
+  >- **它钉的是**：`authorize` **通过**（返回 `Ok`）**而**路由**未命中**这条**序列**，以及「未命中报的是
+  >  `Unregistered` 这一种 `Err`」这个**结果**。
+  >- **它真正能红的变异体**（两条，都是本 task Step 3 的档）：**(i)** 把 `invoke_tool` 的未命中臂改成
+  >  别的结果（如静默返 `Ok(ToolResult { is_error: true, .. })`，或返 `Provider(..)`）——前一半的
+  >  `Ok` 断言与后一半的变体断言各会红；**(ii)** 让 `authorize` 那半失败（如把 `tool` 表的行撤掉）
+  >  ——第一半的 `Ok` 断言会红。
+  >- **有一条变异体在它上面红不了，据实写明**：**路由机制**那个变异体（「先逐个问遍所有适配器、
+  >  再判未命中」）——本用例的注册表里**一个适配器都没有**，两版问的都是零个，**它在这里退化成
+  >  等价变异体**。**那条机制的照片在 Task 4 的 `an_unregistered_tool_is_not_called_at_all` 上**
+  >  （该用例登记一个服务于**另一个 id** 的 `RecordingTool`，并断言 `recorder.touches() == 0`）。
+  >- **故本用例不另配 `RecordingTool`**：同一件事的**第二个落点**正是本仓反对的形状——路由机制的
+  >  证据只有 Task 4 那一份，此处**只**承担序列与结果。**点名到用例名，不引行号。**
 - `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`（**第二向**）：
   注册表**登记了**适配器、`tool` 表**没** `save_tool` → `authorize` 返回
   `Err(CapabilityError::UnknownTool { .. })`，**在 `invoke_tool` 之前**。
