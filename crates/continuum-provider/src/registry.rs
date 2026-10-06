@@ -66,7 +66,8 @@ pub enum ToolCallError {
 /// **暴露面两侧不对称，理由是强制点 (1) 只覆盖工具**（设计 §3.1）：模型侧 `model_for` 直接
 /// 交出裸 `Arc<dyn ModelProvider>`；工具侧只开只读入口（`list_tools` / `describe_tool`）与
 /// 唯一的调用入口 `invoke_tool`（后者在 Task 4），**不交出适配器**——**没有 `tool_for`、
-/// 也没有 `tool_providers()`**。后两者的缺席由 Task 6 的编译失败样例钉住，**本处不称「已钉住」**。
+/// 也没有 `tool_providers()`**。后两者缺席的证据归 Task 6 的编译失败样例，**本处不对此作任何主张**
+/// ——本处没有能证明「这两个名字编不过」的用例。
 ///
 /// **本注册表没有「枚举有哪些模型」的入口，这是有意的**（设计 §3.1 的裁决，2026-10-06）：
 /// ① 它零消费方；② 枚举出来的 `Arc<dyn ModelProvider>` **不带 id**，而模型调用路径是**按 id 解析**
@@ -125,6 +126,15 @@ impl ProviderRegistry {
     ///
     /// **注意那是适配器登记，不是往 `tool` 表登记**——后者是 `continuum_capability::save_tool`，
     /// 属治理（要哪些能力、什么 effect_class）；本处只管路由（谁去跑）。设计 §3.3 代价三。
+    ///
+    /// **`ids` 为空时的语义**（设计未规定，本计划取此；与 `register_model` 的取法同形，
+    /// 那里空列表同样是「登记表不动」）：两个循环都不做，`tools` 表里不留下任何一条路由，
+    /// 但适配器**仍进 `tool_adapters`**——于是它在 `list_tools()` 的并集里照常出现（收进的是
+    /// 它自己 `list_tools()` 声明的那些 id），而那些 id 没有任何路由指向它，
+    /// 故 `describe_tool` 对它们报 [`ToolCallError::Unregistered`]。
+    /// **本行为没有用例**：触发它需要一次零 id 的登记，而本仓现有调用点全是本模块的测试，
+    /// 每一个都显式给出非空 id 列表；写在这里是为了让「空列表不是漏判」这件事有处可查，
+    /// 不是为了主张它已被验过。
     pub fn register_tool(
         &mut self,
         ids: Vec<ToolId>,

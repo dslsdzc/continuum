@@ -196,8 +196,12 @@ async fn registering_the_same_tool_id_twice_is_rejected_as_duplicate() {
         .register_tool(vec![tool("echo")], one("echo", "先登记的那个的描述"))
         .expect("首次登记应成功");
 
+    // 第二个适配器**登记**在 `echo`（故这一调真的撞上 `Duplicate`），但它**自己声明的是 `delta`**。
+    // 这个错开是刻意的：若两个适配器都声明 `echo`，并集语义会把多出来的那一条吞掉，
+    // 「被拒的登记没往适配器列表里塞东西」就无从观察——`list_tools()` 照样只有一条 `echo`。
+    // 声明 `delta` 之后，那条被塞进去的适配器会在并集里现形（见下方两条 `!any` 断言）。
     let err = registry
-        .register_tool(vec![tool("echo")], one("echo", "后登记的那个的描述"))
+        .register_tool(vec![tool("echo")], one("delta", "后登记的那个的描述"))
         .expect_err("同一个 id 登记第二次必须被拒");
     assert!(
         matches!(err, RegistryError::Duplicate { .. }),
@@ -216,6 +220,16 @@ async fn registering_the_same_tool_id_twice_is_rejected_as_duplicate() {
     let listed = registry.list_tools().await.expect("注册表应能列出工具");
     assert_eq!(listed.len(), 1, "被拒的登记不该多出一条工具");
     assert_eq!(listed[0].description, "先登记的那个的描述");
+    // 「适配器列表侧没被污染」在上一行之后仍需自己一条照片：`len() == 1` 只说明**总条数**，
+    // 而这里要断的是**被拒的那个适配器的声明没进来**——它的 id 与描述都不许出现。
+    assert!(
+        !listed.iter().any(|d| d.id == tool("delta")),
+        "被拒的适配器声明的是 delta，它若进了列表就会在此现形，实际 {listed:?}"
+    );
+    assert!(
+        !listed.iter().any(|d| d.description == "后登记的那个的描述"),
+        "被拒的适配器的描述不该出现在并集里，实际 {listed:?}"
+    );
 }
 
 #[tokio::test]
@@ -225,6 +239,8 @@ async fn registering_a_group_of_tool_ids_is_all_or_nothing() {
         .register_tool(vec![tool("b")], one("b", "已占用的那个"))
         .expect("首次登记应成功");
 
+    // 这一组要拒的是**登记表**里的 `b`；适配器自己声明的是 `a`，而 `a` 不在表里——
+    // 于是「整组被拒之后适配器列表有没有被塞进一条」在 `list_tools()` 上是可观察的。
     let err = registry
         .register_tool(
             vec![tool("a"), tool("b")],
@@ -249,6 +265,14 @@ async fn registering_a_group_of_tool_ids_is_all_or_nothing() {
         .await
         .expect("b 仍是先登记的那个");
     assert_eq!(kept.description, "已占用的那个", "b 不该被这次被拒的登记改写");
+    // 适配器列表侧同样不许被污染：被拒的适配器声明 `a`，它若被塞进列表，并集里就会多出 `a`。
+    let listed = registry.list_tools().await.expect("注册表应能列出工具");
+    assert_eq!(listed.len(), 1, "整组被拒不该往适配器列表里塞适配器");
+    assert_eq!(listed[0].id, tool("b"), "列表里只该有先登记的那个适配器");
+    assert!(
+        !listed.iter().any(|d| d.id == tool("a")),
+        "被拒的适配器声明的 a 不该出现在并集里，实际 {listed:?}"
+    );
 }
 
 #[tokio::test]
