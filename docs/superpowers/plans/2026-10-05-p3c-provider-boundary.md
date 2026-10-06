@@ -1283,11 +1283,18 @@ git commit -m "test(provider): is_error 与 Err 的分流（夹具约定）"
 **留一种不归一就是没关严**」）：匹配前**把连续空白（空格 / `\t` / `\n`）折成一个空格**再比对。
 上面那三种写法因此与一个字面拼法**是同一个拼法**，**不再是逃逸面**。
 
-**归一化之后仍逃逸的三种**（它们不是同一个拼法，而是换了写法；设计 §4.1 末段）：
+**归一化之后仍逃逸的：例如以下三种**（它们不是同一个拼法，而是换了写法；设计 §4.1 末段）：
 全限定 trait 路径（`impl crate::model::ModelProvider for DeepSeek`）、`use … as` 别名后实现、
-把实现 `include!` 进来。故归一化后的守卫仍是**一个下界，不是封闭判定**；这三种写法**没有照片**，
+把实现 `include!` 进来。故归一化后的守卫仍是**一个下界，不是封闭判定**；这几种写法**没有照片**，
 落在评审。上界要解析 trait 路径（需要 `syn` 之类的新 dev 依赖），**本阶段不做**（设计 §12 第 21 条）。
-**文件头要把上面这两段一并写明**：归一化关掉了什么、还剩哪三种。
+
+> **这份清单不是穷尽的，别把它当封闭枚举读（2026-10-07，Task 8 评审）。** 原话写的是「仍逃逸的**三种**」
+> ——**按枚举读就偏穷尽**，而它不是：`impl<T> ModelProvider for Foo<T>`、`impl/*c*/ModelProvider for`
+> 这一类同样逃逸。**往清单里加第四项是输的游戏**（每加一项都还有别的写法）；该做的是**把清单标成
+> 非穷尽的说法**。**设计侧 §4.1 那张清单同理**（**已另派设计作者改，本计划不代改**）——
+> 本计划引它时，**一律按「例如」读，不按「就是这三种」读**。
+
+**文件头要把上面这两段一并写明**：归一化关掉了什么、**还有哪些（例如那几种）仍逃逸**。
 
 - [ ] **Step 2: 运行，确认通过（这是本 task 的正常态）**
 
@@ -1301,6 +1308,74 @@ timeout 300 cargo test -p continuum-provider --test neutrality
 **故意用两个空格**：这样这一次红同时是**空白归一化生效**的照片（若归一化漏了，它会假绿）。
 **这次红要留日志路径**（纪律 1：每次变异用独立日志路径）——它是这条守卫唯一的物证。
 若这一步**不红**，先查归一化，**不要**去改字面拼法。
+
+  > **上面那个 `…` 得展开成明文，且要给出可编译的填充体（2026-10-07，Task 8 评审）。**
+  > `ModelProvider` 有**七个必需方法**（`crates/continuum-provider/src/model.rs` 的
+  > `list_models` / `describe_model` / `invoke` / `stream` / `cancel` / `usage` / `health`），
+  > 故**照 `impl ModelProvider for Probe { … }` 字面抄是编不过的**——**而这条变异必须编得过**
+  > （见下面的通则）。**只写「补齐七个方法」还不够**：不写方法体，下一个读者仍可能写出编不过的 impl。
+  > **本步要临时落进 `src/` 的那份探针，全文如下**（`struct Probe;` ＋ 七个必需方法，**方法体一律
+  > `unimplemented!()`**——`async fn` 照样编得过）。
+  >
+  > **两处落法要说准（否则「编得过」是句空话）**：探针**必须真的进编译**——追加到 `src/lib.rs` 末尾，
+  > **或**新建 `src/probe.rs` 并在 `lib.rs` 里**临时**加一行 `mod probe;`。
+  > **只加文件、不声明模块，rustc 根本不读它**——那时「编得过」无从谈起，而**文本守卫照样会红**。
+  > 另：`Probe` 与它的实现无人使用，会出 `dead_code` 警告——**这里只要求 0 error**，警告不管。
+  > **`ModelProvider` 走 `crate::`**：探针在 `src/` 内，**不能用 `continuum_provider::` 自称本 crate**。
+  >
+  > ```rust
+  > use async_trait::async_trait;
+  > use continuum_core::model::{
+  >     CallId, InvokeRequest, InvokeResponse, ModelDescriptor, ModelId, ModelStream, ProviderHealth,
+  >     Usage,
+  > };
+  > use continuum_core::ProviderError;
+  >
+  > use crate::model::ModelProvider;
+  >
+  > struct Probe;
+  >
+  > #[async_trait]
+  > impl  ModelProvider for Probe {
+  >     async fn list_models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn describe_model(&self, id: &ModelId) -> Result<ModelDescriptor, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn invoke(&self, request: InvokeRequest) -> Result<InvokeResponse, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn stream(&self, request: InvokeRequest) -> Result<ModelStream, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn cancel(&self, call: &CallId) -> Result<(), ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn usage(&self) -> Result<Usage, ProviderError> {
+  >         unimplemented!()
+  >     }
+  >     async fn health(&self) -> ProviderHealth {
+  >         unimplemented!()
+  >     }
+  > }
+  > ```
+  >
+  > **`impl` 与 `ModelProvider` 之间是两个空格**（探针的要点就在这）。**用完即删，不提交。**
+  
+> **本块未经实跑**（本计划的作者不碰 `crates/`，故没把它加进去编一遍）——**故 Step 2 的第一件事
+> 就是把它落进 `src/` 并确认 `cargo build -p continuum-provider --all-targets` 报 0 error**，
+> 再跑那条用例。**没编过就不要往下走**：变异体编不过时这条守卫的红证明不了任何东西。
+> 导入清单已按本仓既有写法核过，但**仍是示意，实现时以源码为准**（未经证实的手写导入清单是重灾区）。
+  > **这一段是本计划里唯一「必须照抄进文件、且必须编得过」的代码块**——它与前面那些
+  > 「Step 3: 实现」的**签名示意**块不是一回事（那些照抄本就编不过，见「关于本计划的代码块」）。
+  >
+  > **通则（2026-10-07 立，一次性关掉同类坑的那一侧）**：**变异体必须编得过；本步的红必须是
+  > 「断言红」，不得是「编译失败型红」**——**编译失败型红区分不出「守卫有效」与「守卫恒绿」**
+  > （两者在这条 guard 上都表现为「用例没红」或「压根没跑」）。**这条是「两种红，判据相反」
+  > 那一段（见「三条纪律」之后）在「守卫类 task」上的具体落点**：那边区分的是 TDD 红与变异红，
+  > 这边说的是**这个 task 的红只能是后者意义上的红**——因为 Task 8 **有中间态可造**
+  > （探针就是中间态），故它**不该**以编译失败为红。
 
 - [ ] **Step 3: 运行全部测试并提交**
 
