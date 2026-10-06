@@ -461,6 +461,20 @@ git commit -m "feat(model-registry): §247 的 ModelProfile 与两处不可表�
 
 - [ ] **Step 1: 写用例**
 
+**落点订正注记（2026-10-06，原话照留）**：本 Step 下面的**闸门**用例**不在 `tests/lifecycle.rs` 里**，
+而在 **`src/lifecycle.rs` 的 `#[cfg(test)]` 单元测试模块**里——**三条**，逐条按**用例名**列出
+（行号只是 2026-10-06 的读数，会漂）：
+`only_the_six_routable_states_pass_the_gate`（当时 `src/lifecycle.rs:331`）、
+`a_stale_model_is_not_routable_while_an_active_one_is`（`:391`）、
+`a_degraded_model_still_passes_the_gate`（`:414`；**这一条在下面另有就地注记**）。
+**理由与 Task 3 同**：闸门要一枚 `ModelProfile`，而 `tests/` 是**独立 crate**、**造不出画像**
+（设计 §2.1 的直接后果）。故本 task 的 Files 里 `tests/lifecycle.rs` 与 `src/lifecycle.rs` 都列出，
+**但两类用例分居两处**——这不是漏实现。
+**判据写进原地**：**「搜不到」不等于「不存在」——先确认搜索范围覆盖了这类东西可能待的所有地方。**
+本仓的用例有**三个落点**：`tests/` 集成测试、**`src/` 的 `#[cfg(test)]` 单元测试**、`tests/compile_fail/*`；
+**一个窄了范围的搜索，给出的否定结论看起来与真的一样**（本轮实测：只搜 `crates/*/tests/` 会得出
+「三条闸门用例漏实现」这个假结论）。
+
 - `the_ten_lifecycle_states_are_recorded_verbatim`：十态逐项（§249 照录），并逐项钉 `as_str` 的
   小写 `_` 连接字面量 + `parse` 往返。红的条件：多词或大写即红（手册写字面量，钉格式）。
 - `only_the_six_routable_states_pass_the_gate`：**十态逐项喂进 `RoutableModel::try_new`**，六态 `Ok`、
@@ -1449,12 +1463,29 @@ git commit -m "feat(model-registry): 具名基线策略"
   **为什么穷尽 `match` 是更强的替代**：它让「枚举长出新成员」这件事**在编译期就让生产函数编译不过**
   （评审复核：`src/escalation.rs:116` 的 `next_step` 那个 `match` 无 `..`），
   而逐档断言字面量只能钉住**今天已经写下的那五档**——新成员不加断言照样绿。
+  **订正注记（2026-10-06，原话照留；本轮修复中发生的一处移交）**：本条原写「**逐档运行期断言**」，
+  修复后**运行期那一半已移交**——它现由 **`next_step_walks_the_ladder_in_order`（`tests/escalation.rs`）**承担；
+  本条自己的锚点改成了**测试侧的编译期锚点**（`name` 的无 `..` 穷尽 `match` ＋ 五处具名调用）。
+  **两组断言覆盖的是不同的改法，故测试侧是独立锚点，不是 src 那个 `match` 的重复**：
+
+  > **`src/escalation.rs` 的 `next_step` match 挡「加变体**未兜底**」；
+  > 测试侧 `name` 的无 `..` match 挡「加变体**并用 `_` 兜底**」**——两个 match **覆盖不同的改法**。
+
+  复核者给出的变异体 **M** 说明为什么缺一不可：**加第六枚变体 ＋ 给 `next_step` 的 match 末尾加
+  `_ => None`** ⇒ **src 编译过、行为逐字不变、无 warning**，**唯一红点就是测试侧那个 `E0004`**。
+  而 **M 是真实会发生的编辑形状**（「加一档顺手用 `_` 兜底」）——只守 src 那个 match，M 全绿。
 - `the_ladder_is_ordered_as_251_states`：顺序断言（不是集合断言）——`Tier1 → Tier2 → Tier2High → CrossFamily → Specialized`。
 - `next_step_walks_the_ladder_in_order`：逐档一条，给出下一档；末档 → `None`。**逐项有照片**，不抽代表。
 - `tier_one_low_is_not_a_step`（trybuild）：`EscalationStep::Tier1Low` **写不出来**。
   这是 §11 第 21 条的落点：§86 的降级例写「Tier 1 Low」，而 §251 的阶梯五档里没有它——
   「Low」是 §18 的**推理强度**取值，不是 §17 的 Tier。本设计不为它加第六个成员
   （加一个不在阶梯里的成员会让「照录 §251」这句话变假）。
+  **订正注记（2026-10-06，原话照留）**：本条**列在 escalation 的用例清单里，但实际落点不在
+  `tests/escalation.rs`**——样例住在 `tests/compile_fail/tier_one_low_is_not_a_step.{rs,stderr}`，
+  由 **`tests/type_level.rs` 的 `t.compile_fail("tests/compile_fail/*.rs")` 通配收走**，
+  即它挂在 **`type_level_guarantees_hold`** 那条驱动用例下（该驱动是 Task 3 建的）。
+  **故本 task 不必改 `tests/type_level.rs`**（通配自动收），**也不要在 `tests/escalation.rs` 里再写一遍**——
+  同一个不可表达性两份样例，就是「同一件事两个落点」。**列在哪个清单里，不等于它落在哪个文件里**。
 
 - [ ] **Step 2: 运行，确认失败**
 
