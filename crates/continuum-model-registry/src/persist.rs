@@ -7,12 +7,16 @@
 //!
 //! # 三处判据
 //!
+//! 前两条是**表结构对后续读写函数的约束**，其照片在那些函数自己的 task 里（本 task 的
+//! 三条用例只钉表结构，故这两条此处**没有照片**，别读成已被覆盖）。
+//!
 //! 1. **`model_skill_score` 挂 `model_profile` 而不挂 `model_registry`**（设计 §3.1 第 1 条）：
-//!    观测是画像的一部分，没有画像就没有观测。故 `load_skill_vector` 不可能是「对未画像的
-//!    模型返回空向量」，只能是「返回该画像的向量」。
+//!    观测是画像的一部分，没有画像就没有观测。落在 `load_skill_vector`（后续 task）上，
+//!    即它不可能是「对未画像的模型返回空向量」，只能是「返回该画像的向量」。
 //! 2. **主键 `(model_id, dimension, score_version)` 是「同一维度的同一版本只有一次观测」的
-//!    落点**（设计 §3.1 第 2 条）。`model_skill_score` 与 `model_registry` 的写入都是**裸
-//!    `INSERT`**，不 `OR REPLACE`——否则「补记一次观测」会静默覆盖历史，而 §24 要的正是历史。
+//!    落点**（设计 §3.1 第 2 条）。落在写入函数（后续 task）上，即 `model_skill_score` 与
+//!    `model_registry` 的写入一律**裸 `INSERT`**、不 `OR REPLACE`——否则「补记一次观测」
+//!    会静默覆盖历史，而 §24 要的正是历史。
 //! 3. **三个列表列取 JSON 数组容器**（`modalities` / `tools` / `failure_modes`），与 P3A 的
 //!    `tool.required_capabilities` 同形；**不建子表**是因为它们**没有逐元素属性**——与
 //!    `model_skill_score` 的分界是判据（版本、样本数、时间窗），不是「谁更长」。
