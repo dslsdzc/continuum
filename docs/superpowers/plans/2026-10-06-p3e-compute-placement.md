@@ -74,10 +74,20 @@
    今天这一条**只有逐字推演的论证、没有照片**（设计无实现体）——**不跑则 `PlacementRules` 的取值
    可以完全不被读而整套用例全绿**。**实测结果写进交付报告**（哪条断言红、日志路径、变异前后 `sha256`）。
 2. **`ALLOWED` 条目与 workspace `members` 必须同批加**（裁定义务 2）。
-   `crates/continuum-runtime/tests/dependency_direction.rs` 有**双向**断言：
-   「`workspace` 成员 ↔ `ALLOWED`」两条各管一个方向（`:249-262`），
-   且逐对断言是 `assert_eq!(appeared, allowed.contains(&other))`（`:276-281`）——
-   **`ALLOWED` 列了而 `Cargo.toml` 没声明的边同样是红**。故 Task 1 的三处
+   `crates/continuum-runtime/tests/dependency_direction.rs` 的
+   `every_crate_depends_only_on_its_allowed_set` 里有**双向**断言：
+   「`workspace` 成员 ↔ `ALLOWED`」两条各管一个方向，
+   且逐对断言是 `assert_eq!(appeared, allowed.contains(&other))`——
+   **`ALLOWED` 列了而 `Cargo.toml` 没声明的边同样是红**。
+   > **行号只是当时读数，会漂**（2026-10-07 收）：本条原写「`:249-262`」与「`:276-281`」，
+   > 那是 **2026-10-06 定稿时**的读数；**2026-10-07 在 p3e 的 worktree 上实读**（HEAD 含 E 的 Task 1）
+   > 三个锚点分别是 **`:267-272`（「未列入 `ALLOWED`」那条断言，信息在 `:270`）**、
+   > **`:273-278`（「表已过期」那条，信息在 `:276`）**、**`:291-296`（逐对双向的 `assert_eq!`）**。
+   > **判据（本条是全仓反复处理的那一类）**：**引用一律按名字／内容（函数名、断言原文），
+   > 行号只作当时读数并标注日期**——凡引行号，写的时候就要预着它会漂。
+   > **本计划其余引 `dependency_direction.rs` 行号的地方（Task 1 的两处、Task 7 一处、
+   > 「关于本计划的代码块」一处）同批按此订正。**
+   故 Task 1 的三处
    （`crates/continuum-node/Cargo.toml` 的 `continuum-artifact` 声明／`Cargo.toml` 的 `members` 行／
    `ALLOWED` 条目）**必须落在同一个 commit 里**，且**两侧都要各拍一次红**（Task 1 Step 1、Step 2）。
 3. **`continuum-model-registry/src/router.rs` 的行号一律「以当时工作树为准」，不写死**（裁定义务 3）。
@@ -176,6 +186,12 @@
     **新增依赖会让 `Cargo.lock` 变化，须一并按显式路径提交锁文件**。
     本计划有**三次**清单改动、**三次**都要提交 `Cargo.lock`：`Cargo.toml`（workspace，Task 1）、
     `crates/continuum-node/Cargo.toml` 的 `trybuild`（Task 2）、同一个文件的 `serde_json`（Task 5）。
+    **`Cargo.lock` 也是「临时改动」的受害者，这一点要写进还原护栏**（2026-10-07，E 的 Task 1 报出）：
+    **凡临时改动会牵动 cargo 解析结果的地方**——workspace `members`、任何 `Cargo.toml` 的依赖声明
+    ——**`trap` 要连 `Cargo.lock` 一起还原**。判据：把 `members` 行临时拿掉，cargo 会重解析并把
+    `continuum-node` 的条目从锁文件里抹掉，而纪律 16 的模板只 `cp` 回那**一个源码文件**；
+    **只还原源码时，「还原后逐字节相同」这句只对部分文件成立**。
+    核对的判据是 `sha256sum Cargo.lock` 在动手前后一致（Task 1 Step 2 的注记里给了同一条）。
     **不修改用户目录的权限位**；不在仓库中写入任何凭据。
 20. **范围与设计一致，不多做不少做。** 明确不做的，逐条列出免得被读成漏项：
     不建 `get(&ComputeNodeId)` / `deregister` / `len` / `is_empty`（零消费方）；
@@ -221,7 +237,9 @@
   `Value` 只是 `artifact.rs:5` 的一条 `use`）——**故写这十个字段的夹具必须自己依赖 `serde_json`**，
   见下条的清单要点与 Task 5 的 Step 1。
 - `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 是
-  `&[(&str, &[&str])]`，**逐对双向断言**（`:276-281`）——**声明的边与表必须精确相等**。
+  `&[(&str, &[&str])]`，**逐对双向断言**（`assert_eq!(appeared, allowed.contains(&other))`；
+  **行号是当时读数**：定稿时 `:276-281`，**2026-10-07 实读 `:291-296`**）
+  ——**声明的边与表必须精确相等**。
 
 **新增 crate 的清单要点**（`crates/continuum-node/Cargo.toml`）：
 `version` / `edition` / `rust-version` 三项用 `workspace = true`（照 `crates/continuum-artifact/Cargo.toml`）；
@@ -282,7 +300,8 @@ crates/continuum-node/                 ← 新建 crate（§7.1）
 - Produces: workspace 成员 `continuum-node`；`ALLOWED` 里的 `("continuum-node", &["continuum-artifact"])`
 
 **为什么 `continuum-artifact` 在**本 task**就登记**（而不是等它的第一个使用点）：`ALLOWED` 的断言是
-**逐对双向**的（`assert_eq!(appeared, allowed.contains(&other))`，`:276-281`），
+**逐对双向**的（`assert_eq!(appeared, allowed.contains(&other))`；**行号是当时读数**：
+定稿时 `:276-281`，2026-10-07 实读 `:291-296`），
 故「表里列了、`Cargo.toml` 没声明」与「声明了、表里没列」**同样是红**。
 三者（crate 的 `Cargo.toml`／workspace 的 `members`／`ALLOWED`）分在三个提交里，
 中间态必然红。**「边由用它的那个 task 登记」这条规矩在这里的落点是「谁引入这个 crate，
@@ -302,15 +321,33 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 ```
 
 预期：`every_crate_depends_only_on_its_allowed_set` 红，信息为
-「workspace 成员 continuum-node 未列入 ALLOWED，它的依赖方向不会被检查」（该断言的原文，`:253-256`）。
+「workspace 成员 continuum-node 未列入 ALLOWED，它的依赖方向不会被检查」。
+**该断言的定位按内容**（函数名 ＋ 上面那句原文）；**行号只是当时读数**：定稿时写 `:253-256`，
+**2026-10-07 实读为 `:267-272`**（`assert!` 在 `:268-271`，**信息在 `:270`**）。
 **这就是这一侧的照片；先记下它，再进 Step 2。**
 
 - [ ] **Step 2: 拍另一侧的红（`ALLOWED` 列了、`members` 里没有）**
 
 把 `members` 里刚加的那一行**临时去掉**，改成在 `ALLOWED` 里加条目，再跑同一条命令。
-预期：红，信息为「ALLOWED 列出的 continuum-node 不是 workspace 成员：表已过期」（`:259-262`）。
+预期：红，信息为「ALLOWED 列出的 continuum-node 不是 workspace 成员：表已过期」。
+**定位同样按内容**；**行号只是当时读数**：定稿时 `:259-262`，**2026-10-07 实读为 `:273-278`**
+（**信息在 `:276`**）。
 **这一侧不是可有可无的对称**：两条断言各管一个方向，只钉一侧时另一侧的静默漏检不会被发现
 （本项目「守卫须两侧都钉」的同一条）。**记下两次红的原文，然后还原到「两边都有」。**
+
+> **一处实现者实测的副作用，必须知道（2026-10-07，E 的 Task 1 报出）**：
+> **把 `members` 行临时去掉时，cargo 会重新解析 workspace，并把已写进 `Cargo.lock` 的
+> `continuum-node` 条目一并抹掉**——而这个文件**不在 `trap` 的还原范围里**
+> （纪律 16 的模板只 `cp` 回被变异的那**一个源码文件**）。
+> **后果**：还原 `Cargo.toml` 之后，`Cargo.lock` 可能仍是「少了 `continuum-node`」的状态，
+> 于是「还原后与变异前逐字节相同」这句话**只对部分文件成立**——**这一步的诚实做法是把
+> `Cargo.lock` 也一起还原，并核对它与动手前相同**（它本来就在 Step 5 的提交路径里，不是新增文件）。
+> **判据（一般化，写进 Global Constraints 第 19 条）**：**凡临时改动会牵动 cargo 解析结果的地方**
+> （workspace `members`、任何 `Cargo.toml` 的依赖声明），**`trap` 要连 `Cargo.lock` 一起还原**。
+> **一处事实要说清、免得被读成否定**：本计划 Step 4 那句「新增一个**空** crate 也会让
+> `Cargo.lock` 变化」**是真的**——它的为真恰恰体现在这里（`members` 在位时，**一条普通的
+> `cargo test` 就会把那一行写回去**，实现者已用定点实验确认）。**这一条是对那句话的补强，
+> 不是否定它。**
 
 - [ ] **Step 3: 加 `ALLOWED` 条目（逐字照设计 §7.3）**
 
@@ -338,6 +375,10 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 
 预期：两条用例全绿、0 warning。**顺便实测记下**：新增一个**空** crate 也会让 `Cargo.lock` 变化
 （多一个 `[[package]]`），Step 5 要提交它。
+**这句话的因果，2026-10-07 由 E 的 Task 1 补齐**：变的不只是「多一行」——**`members` 的增删会让
+cargo 重解析并重写这个文件**，故**把 `members` 行临时拿掉时，`Cargo.lock` 里那一条会被抹掉**；
+`trap` 若不还原它，「还原后逐字节相同」就只对部分文件成立（详见 Step 2 的注记与
+Global Constraints 第 19 条）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
@@ -1415,7 +1456,8 @@ OPEN-007 的赋值与传播；§290 的 Job Capsule 真的把数据限制住了�
 3. **「`ALLOWED` 的条目与 `Cargo.toml` 的声明逐对相等」这一条**，本计划只靠 Task 1 的两侧红
    ＋ Task 7 Step 2 的 `git diff` 复核；**本 crate 没有一条用例能钉住「将来有人给
    `crates/continuum-node/Cargo.toml` 加一条边却不改 `ALLOWED`」**——那条边一旦加上，
-   `every_crate_depends_only_on_its_allowed_set` 会红（`:276-281` 的双向断言），
+   `every_crate_depends_only_on_its_allowed_set` 会红（逐对双向断言；**行号只是当时读数**：
+   定稿时 `:276-281`，2026-10-07 实读 `:291-296`），
    **故它其实是有照片的**，此处记明它的落点在 `continuum-runtime` 的测试里，不在本 crate。
    **收件人：无。**
 
