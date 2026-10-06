@@ -444,10 +444,17 @@ fn an_unknown_lifecycle_state_in_the_column_is_rejected() {
 
 /// 列里是**非文本**值时的照片：`load_lifecycle` 报 `ColumnType { index: 0, actual: "blob" }`。
 ///
-/// 为什么要这一条：`lifecycle_state` 是 `TEXT NOT NULL`，SQLite 的 TEXT 亲和性会把整数
-/// 转成文本（`Value::Int(3)` 读回来是 `"3"`，走的是表外取值那条路），故 `ColumnType`
-/// 这条臂在只有文本与整数的世界里**没有产生方**——那是一条死臂。BLOB 不受亲和性转换，
-/// 是本库里唯一能喂出非文本值的形状；本条给它一张照片（本项目对死臂的处置是删或写明来历）。
+/// 为什么要这一条：`lifecycle_state` 是 `TEXT NOT NULL`，`ColumnType` 这条臂在
+/// 前三种取值形状下**都没有产生方**——那会是一条死臂。四种形状逐项枚举如下，
+/// 故「非文本值只能是 BLOB」不是印象而是穷举后的结论：
+///
+/// 1. **整数 / 实数**：被 TEXT 列的亲和性**转换**成文本（`Value::Int(3)` 读回来是
+///    `"3"`），走的是表外取值那条路（`PersistError::Database`），到不了 `ColumnType`；
+/// 2. **`NULL`**：被 `NOT NULL` 挡在写入侧，列里不可能有它；
+/// 3. **文本**：本臂的正例，不解释；
+/// 4. **BLOB**：**不受亲和性转换**，是本库里唯一能喂出非文本值的形状。
+///
+/// 本条给第 4 种一张照片（本项目对死臂的处置是删或写明来历）。
 #[test]
 fn a_non_text_lifecycle_state_column_is_rejected() {
     let (_dir, db) = db();
@@ -613,6 +620,56 @@ fn an_illegal_transition_leaves_the_row_unchanged() {
     );
 
     tx.commit().unwrap();
+}
+
+/// 落库失败经 `?` 升格成 [`LifecycleError::Persist`]，且**内层变体原样带出**。
+///
+/// # 为什么要自己开一个库
+///
+/// 正常读写不产生 `Persist`，而计划「三条纪律」第 3 条要求 `LifecycleError` **逐变体**至少
+/// 一条用例——本 task 正是这枚变体的产生方，故这条照片的本分在这里。
+/// 造法借自 `crates/continuum-workspace/src/gate.rs` 的
+/// `a_failed_audit_write_reports_persist_and_leaves_the_change_in_the_base`：
+/// **建一个不开迁移的库**，`model_registry` 表因此不存在，读写必然失败
+/// （真实数据库错误，不是伪造一个失败的 `Tx`）。本文件的夹具 `db()` 必然 `migrate()`，
+/// 故本条自建库而**不** `migrate()`。
+///
+/// ## 断言到内层变体
+///
+/// 不是「返回了某个 `Err`」：外层须是 `Persist`，内层须是 `PersistError::Database`
+/// 且信息里点了缺失的表名。红的条件：把 `#[from]` 的转出吞掉（例如
+/// `load_lifecycle(tx, id).unwrap_or(None)`，于是外层变成 `UnknownModel`）、
+/// 或把内层换成另一枚，都在此变红。
+#[test]
+fn a_persist_failure_keeps_the_inner_persist_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("unmigrated.db");
+    // 故意不 migrate()：三张表一张都不存在。
+    let db = Db::open_with(&path, builtin_migrations()).unwrap();
+    let tx = db.begin().unwrap();
+
+    match transition_in_tx(&tx, &id("model-a"), LifecycleState::Unprofiled) {
+        Err(LifecycleError::Persist(PersistError::Database(m))) => assert!(
+            m.contains("no such table: model_registry"),
+            "内层应是「目标表不存在」的 Database 错误，实际 {m}"
+        ),
+        Err(LifecycleError::Persist(other)) => {
+            panic!("内层应为 PersistError::Database，实际 {other:?}")
+        }
+        other => panic!("落库失败应升格成 LifecycleError::Persist，实际 {other:?}"),
+    }
+
+    // 读写面的失败不止迁移一处：`register_model` 也是同一枚 `Persist`。
+    match register_model(&tx, &id("model-a")) {
+        Err(PersistError::Database(m)) => assert!(
+            m.contains("no such table: model_registry"),
+            "内层应是「目标表不存在」的 Database 错误，实际 {m}"
+        ),
+        other => panic!("登记失败应报 PersistError::Database，实际 {other:?}"),
+    }
+
+    // 不 commit：库里没有迁移，也没有要提交的写入；`Tx` 丢弃时自行 ROLLBACK。
+    drop(tx);
 }
 
 /// 登记项的行数（`registering_the_same_id_twice…` 与 `a_transition_on_an_unknown_model…`
