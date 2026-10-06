@@ -36,10 +36,13 @@
 //! 以及 [`RoutingError`] 的三枚新变体。
 //! Task 12 补**具名基线策略** [`BaselineRankingPolicy`]——一个只读已定义输入、用缺省全序的
 //! 可替换实现（设计 §5.3 的「第二步」）。
-//! 阶梯在后续 task，各自落在自己的模块里。
+//! Task 13 补 §251 的**升级阶梯的数据形状**——五档 [`EscalationStep`] 与「下一档」这个
+//! 纯函数 [`next_step`]（`escalation`）；**触发不在本层**（设计 §7.1）。
+//! 阶梯的消费者（升级触发）在后续子项目，各自落在自己的模块里。
 
 pub mod budget;
 pub mod error;
+pub mod escalation;
 pub mod lifecycle;
 pub mod persist;
 pub mod profile;
@@ -47,6 +50,7 @@ pub mod router;
 
 pub use budget::BudgetView;
 pub use error::{LifecycleError, ProfileError, RequirementError, RoutingError};
+pub use escalation::{EscalationStep, next_step};
 pub use lifecycle::{transition, LifecycleState, RoutableModel, RoutableState};
 pub use persist::{
     load_lifecycle, load_profile, load_skill_series, load_skill_vector, p3d_model_migrations,
