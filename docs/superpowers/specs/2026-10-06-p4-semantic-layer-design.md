@@ -370,14 +370,147 @@ pub enum Canonicalized {
 | `Unknown` | 「当前没有可靠解析」 | 满足全部显式约束的候选**为零** |
 
 **§206 的 `abstain` 是这四个态的公共性质**：四态里没有「必须给一个答案」这一支，
-故四个态都是**返回值**，不是错误。四态一律 `Ok`。
+故四个态都是**返回值**，不是错误。
 
+**四态的类型与字段清单**（2026-10-06 补，计划作者查出本节原先只说「字段清单逐项断言」
+却从未给出字段——**那个要求因此不可断言**）：
+
+```rust
+pub enum ResolutionResult {
+    Resolved(Resolved),
+    ConfirmRequired(ConfirmRequired),
+    Ambiguous(Ambiguous),
+    Unknown(Unknown),
+}
+
+/// 解出了**恰好一个**合格候选。
+pub struct Resolved {
+    entity: EntityId,
+    /// 该候选满足的那一组显式约束 —— **照录判定时用的那一组**，不是重新推的（§4.2 的断言 D 靠它可查）。
+    satisfied: Vec<ExplicitConstraint>,
+    /// 判定用的候选集规模，供调用方核对「唯一合格」这件事（§4.2 的断言 A/D）。
+    candidate_count: usize,
+}
+
+/// 有一个占优候选，但不足以安全执行（§206）。
+pub struct ConfirmRequired {
+    first: EntityId,
+    /// 与 `first` 一同满足全部显式约束的候选**全体**（含 `first`），**多于一**。
+    surviving: Vec<Candidate>,
+    /// 判定用的候选集规模。
+    candidate_count: usize,
+}
+
+/// 多个候选仍然成立（§206）。
+pub struct Ambiguous {
+    /// 满足全部显式约束的候选**全体**，**至少两个**。
+    surviving: Vec<Candidate>,
+    candidate_count: usize,
+}
+
+/// 当前没有可靠解析（§206）。
+pub struct Unknown {
+    reason: UnknownReason,
+    candidate_count: usize,
+}
+
+/// 「为什么是 `Unknown`」。**两枚都必须是可区分的**——
+/// §4.2 的断言 B 与断言 C 各钉一枚，混成一枚会让「全不合格」与「本来就没有」不可分。
+pub enum UnknownReason {
+    /// 候选集为空（§4.2 的断言 C）。
+    NoCandidate,
+    /// 候选集非空，但全部违反某条显式约束（§4.2 的断言 B）。
+    AllCandidatesRejected,
+}
+```
+
+**`ResolutionResult` 的每一支都带 `candidate_count`**：断言 A（`e` ∈ 候选集）与断言 D（唯一合格）
+都要拿「集合里有几个」去核，而**判定用的那个集合在结果返回后就没了**——
+不带这个数，两条断言就只能各自再构造一次候选集，那种做法会让用例**用自己的构造去核自己的结果**
+（本仓「表驱动用例覆盖错路径」的同一形状）。带一个数而不是整个集合，是为了不把
+「判定输入」混进「判定输出」（`surviving` 那几个是**输出**：合格的那一部分）。
+
+**返回类型不是 `Result`，故没有 `Err` 支**：§206 的 `abstain` 已经把「没有可靠解析」
+收进 `Unknown` 这一支，而**本层没有第二种失败**
+——输入是值（候选集、`ResolutionRisk` 都由调用方给），解析不做 I/O、不落库。
+故 `resolve` **返回 `ResolutionResult`，无 `Err` 支**
+（2026-10-06 写死；计划作者取同一结论，理由一致）。
+
+> **订正（2026-10-06，计划作者查出）**：本节初稿写「**四态一律 `Ok`**」，
+> 而全节**没有任何 `Err` 支**——那句话隐含「返回类型是 `Result`」，与实际的
+> 「四态本身即返回类型」相抵。已改为上面那句「返回 `ResolutionResult`，无 `Err` 支」。
+> 原句留在此处。
 **四态之间的两条边界没有判据，记在 §16**：
 (a) `ConfirmRequired` 与 `Ambiguous` 的界是「第一候选明显」中的「明显」——
 §206 未给阈值，§271–§278 也未给；
 (b) `Unknown` 与「扩大检索」的界是 §201 的「0 candidate → NIL / **Expand Retrieval**」
 （`docs/spec/04-method.md:691-692`）——**重试检索的条件未给**，本设计不做二次检索。
 两条都**收件人：规范维护者**。
+
+## 4.1.1 「显式约束」是什么：类型与「满足」的判据（**本设计自定**）
+
+§4.2 的四条断言、§14 的用例、§4.6 的 `ExplicitBinding` **全部建立在「显式约束」这个类型与
+「满足」这个判据上**，而本节先前**没有给出它们**——那会让上面那些断言**无法落地**
+（2026-10-06，计划作者查出；这是 Task 5 的开工前置）。
+
+**规范给到哪一步，先说清**：
+
+| 规范给的 | 出处 |
+|---|---|
+| 「约束解析」的**流程名**：`Candidate Set → Explicit Constraints → … → Constraint Propagation` | §201（`docs/spec/04-method.md:662-704`） |
+| 一个**值域**：`ResolutionScope` 的九个作用域 | §274（`docs/spec/05-normative.md:1408-1427`）／§199 |
+| 一个**形状**：`ExplicitBinding { mention, entity, scope, source = USER }` | §277（同文件 `:1464-1484`） |
+| 一句**性质**：「显式 scope 优先级最高」 | §274 |
+
+**规范没给的**：约束的**类型**、**可以用哪几种**、以及**「满足」怎么判**。
+故下面这两件是**本设计的决定**（不是转录），理由逐条给出。
+
+```rust
+/// 一条显式约束。**取值域是闭集，三枚**——每一枚都能追到规范里已有的一个概念，
+/// **不引入开放谓词语言**（那会变成一套本层发明的语法）。
+pub enum ExplicitConstraint {
+    /// 候选必须落在该作用域内。出处：§274 的九值 ＋「显式 scope 优先级最高」。
+    Scope(ResolutionScope),
+    /// 候选的实体种类必须是这一种。出处：§198 的三类候选（`ToolCandidate` /
+    /// `SkillCandidate` / `Relation`）。
+    EntityKind(EntityKind),
+    /// mention 必须绑到该实体。出处：§277 的 `ExplicitBinding`。
+    BoundTo(EntityId),
+}
+
+/// 候选的**判定事实**，由调用方与候选一并给出。
+///
+/// **本层查不到它们**：注册表不在本层（§1.2.3），故 scope 与 kind 只能随值进来。
+/// **§272 的 `Candidate` 三字段不动**（`entity_id` / `evidence[]` / `retrieval_score?`）
+/// ——往那里加字段会改掉张照录的形状。
+pub struct CandidateFacts {
+    pub scope: ResolutionScope,
+    pub kind: EntityKind,
+}
+
+/// 判据：**合取**。候选 `c` 满足约束集 `K` ⟺ `K` 中**每一条**都由 `c` 与 `f` 满足。
+pub fn satisfies(c: &Candidate, f: &CandidateFacts, k: &ExplicitConstraint) -> bool {
+    match k {
+        ExplicitConstraint::Scope(s)      => f.scope == *s,
+        ExplicitConstraint::EntityKind(t) => f.kind == *t,
+        ExplicitConstraint::BoundTo(e)    => c.entity_id() == e,
+    }
+}
+
+/// 「合格」＝候选集里满足全部约束的那些。
+pub fn qualifying(cs: &[(Candidate, CandidateFacts)], k: &[ExplicitConstraint]) -> Vec<Candidate>
+```
+
+**「合取」这一条是本设计的决定**（§201 只给了流程的名字）：把每一条约束都当作**必要条件**
+是唯一不引入优先级的读法；若将来要加权或分级，那是**新增判据**，须有规范出处。
+**这一条正好是 §4.2 断言 B 与 D 的定义基础**（「全部违反」＝合取下的空集，「唯一合格」＝合取下恰一个）。
+
+**`EntityKind` 的取值域照 §198 的三类**（`ToolCandidate` / `SkillCandidate` / `Relation`）——
+**只是那三类，不扩**；§197 的七种**检索手段**不是种类（它们是 `CandidateSource`，§4.3）。
+
+> **为何不把这些做成 trait／闭包**：一个「任意谓词」的开放接口会让**四条断言全部失去判据**
+> （「满足」变成调用方定义的，本层就无从断言 B/D）。闭集是让断言可写的前提。
+> **若复审判定需要开放谓词，则四条断言要一并重写**——这不是一处局部改动。
 
 ## 4.2 「不存在正确候选时不强行绑定」写成可断言的东西
 
@@ -421,9 +554,18 @@ pub enum Canonicalized {
    断言结果 `Resolved(c₁)`——**正例**，钉住「合格的那一个能被选出来」，
    同时钉住 A 不足以替代 D（`c₂` 也在集合里，若绑定到它，A 仍成立）。
 2. **多个合格候选 ⟹ 不是 `Resolved`**：
-   夹具：**同一条非空约束 `K`**；候选集 `{c₁ 满足 K, c₂ 满足 K, c₃ 违反 K}`。
-   断言结果是 `Ambiguous` 而**不是** `Resolved(c₁)`——**这是 D 的负例**，
-   也是本节初稿最直接的缺口。**`c₃` 是对照组，不能省。**
+   夹具：**同一条非空约束 `K`**（`K` 非空由 §4.1.1 的 `ExplicitConstraint` 闭集保证可构造）；
+   候选集 `{c₁ 满足 K, c₂ 满足 K, c₃ 违反 K}`。
+   断言两条，**`c₃` 靠第二条承重**：
+
+   - 结果是 `Ambiguous` 而**不是** `Resolved(c₁)`；
+   - **`Ambiguous.surviving` 恰是 `{c₁, c₂}`，且不含 `c₃`**（逐项：长度为 2、两枚都在、`c₃` 不在）。
+
+   **第二条是要紧的那一条**（2026-10-06，计划作者查出后加强）：
+   若「合格」被实现成**恒真**，则 `c₃` 也会合格、`surviving` 会变成三枚——
+   但只断言「结果是 `Ambiguous`」的话**它仍然绿**。
+   **故「`c₃` 是对照组」这句话要靠 `surviving` 的逐项断言去兑现，否则 `c₃` 不承重、等于没设**。
+   这也是为什么 `Ambiguous` 必须带 `surviving`（§4.1 的字段清单）——不带就写不出这条断言。
 
 > **订正（2026-10-06，修后复核查出）**：本条初稿把照片 2 的夹具写成
 > 「构造 `{c₁ 合格, c₂ 合格}`（两者满足**同一组显式约束**）」，而**「同一组约束」没有要求它非空**。
@@ -521,6 +663,24 @@ pub struct ResolutionRisk {
 并把「最高优先级」落在**约束解析的取值顺序**上：`ExplicitBinding` 在
 `CandidateSet` 过滤之前**先把候选集缩到 `entity` 这一个**（不是给它加权）。
 这一条可断言：给一个与 `ExplicitBinding` 冲突的高分候选，断言结果仍是 `Resolved(binding.entity)`。
+
+**`entity` 不在候选集里时给哪一态**（2026-10-06 补，计划作者查出本节原先没写）：
+**不新增分支，走同一条路径**——把该实体**作为一条候选加入候选集**
+（`evidence` 标 `user_explicit`），再照常过滤。理由三条：
+
+1. **§277 的语义是「用户**选择候选**」**，而 binding 给的是**用户直接指定的实体**，
+   其权威高于检索（「SHOULD 在当前 scope 拥有最高优先级」）。
+   **若因为注册表没检索到就把它拒在集合外，等于让检索结果否决用户**——那是 §277 的反面。
+2. **断言 A 因此不受影响**：`Resolved(e)` 的 `e` 仍**是候选集里的成员**
+   （它就是被加入的那一条），A 的闭集性质保持。
+3. **与它冲突的约束仍照常判**：若该实体同时违反某条显式约束（例如 `Scope` 不符），
+   它与别的候选同罪，按 §4.2 的断言 B 走（全不合格 ⇒ `Unknown { AllCandidatesRejected }`）。
+   **binding 不是「绕过约束」的口子**——它只是提高**检索**这一侧，不豁免 `ExplicitConstraint`。
+
+**照片两条**：(a) `entity` 不在检索给的候选集里 → 结果 `Resolved(that entity)`，
+且 `Resolved.candidate_count` 比检索集**多 1**（证明它确实被加入了）；
+(b) **反例**：`entity` 不在集里**且**违反一条 `Scope` 约束 → `Unknown { AllCandidatesRejected }`
+（证明 binding 不豁免约束）——**两侧都钉**。
 
 **§278**：`TURN / SESSION / PROJECT / USER_PERSISTENT` 四个作用域，
 「系统 **MUST NOT 默认把 Session Alias 永久化**」。落点：
@@ -1243,12 +1403,18 @@ pub enum BudgetOwner {
 
 /// §333 的五个量纲。**单位与取值域规范未给**（§16 第 19 条）——
 /// 本层不解释、不换算、不做跨量纲比较。
+///
+/// **字段是 `pub` 的**，与 D 的 `BudgetView` 同一处置
+/// （`crates/continuum-model-registry/src/budget.rs:36-37` 的判据）：
+/// 本类型**没有需要靠私有性守的不变量**（五个 `Option<i64>`、无取值域、无跨维关系），
+/// 故 `pub` 不削弱任何保证。**三个角色的保证不在本类型上，在下面三个 newtype 上**
+/// ——它们各自私有、无公开构造函数，故「把余量填进上限的位置」仍不可写（见下）。
 pub struct Dimensions {
-    money: Option<i64>,
-    wall_time: Option<i64>,
-    token: Option<i64>,
-    gpu_time: Option<i64>,
-    network_transfer: Option<i64>,
+    pub money: Option<i64>,
+    pub wall_time: Option<i64>,
+    pub token: Option<i64>,
+    pub gpu_time: Option<i64>,
+    pub network_transfer: Option<i64>,
 }
 ```
 
@@ -1264,6 +1430,28 @@ pub struct Dimensions {
 差别在**操作**（`Allocation` 只被写、`Reservation` 被 reserve/settle、`Remaining` 只被读）。
 **类型不共用**（三个 newtype 各包一个 `Dimensions`），故「把余量填进上限的位置」在**类型上不可写**——
 这一条正好回答了 D §11 第 12 条对 `ExecutionProfile.cost_budget` 的角色之问（§13.2）。
+
+**`pub` 字段会不会削弱那个 newtype 的保证？——判过，不会，理由两条**（2026-10-06，计划作者查出后补）：
+
+1. **被 `pub` 的是 `Dimensions`，不是三个角色**。三个 newtype（`Allocation` / `Reservation` /
+   `Remaining`）**各自私有、无公开构造函数**（只能经分配／`reserve`／`remaining()` 得到），
+   故「把一个 `Dimensions` 当 `Allocation` 用」**依然写不出来**。
+   `pub` 只允许调用方**自己拼一个 `Dimensions`**，而 `Dimensions` 不是角色，没有可伪造的语义。
+2. **`Dimensions` 没有不变量可守**：§333 未给单位、未给取值域、未给量纲间的任何关系
+   （§16 第 19 条），故「私有」在它身上**守不住任何东西**——本仓对「公开字段＝无闸门」
+   的判据是「**有闸门要守时才有闸门**」（D 的 `BudgetView` 同判）。
+
+**故 §12.6.1 的解构是两步**（这一条在这里写死，免得两处不能同真）：
+
+```rust
+let Remaining(dims) = r;                       // newtype：无公开构造函数，此处由 remaining() 得来
+let Dimensions { money, wall_time, token, gpu_time, network_transfer } = dims;  // pub 字段
+```
+
+> **订正（2026-10-06，计划作者查出）**：本节先前只写「三个 newtype 各包一个 `Dimensions`」，
+> 而 §12.6.1 写的是**一步按名解构** `let Remaining { money, … }`——
+> **两步解构与一步解构不能同真**（前者要求 `Remaining` 是元组 newtype，后者要求它自己有五个字段）。
+> 已二选一写死为**两步解构**，并补了上面那条 `pub` 之判。原句留在此处。
 
 ## 12.2 预扣—结算与父子分配（ENG-005 §三.1）
 
@@ -1349,6 +1537,24 @@ pub enum BudgetVerdict {
 pub fn check(estimate: &Dimensions, owner: BudgetOwner, ...) -> Result<BudgetVerdict, BudgetError>
 ```
 
+**`Err` 的判据（2026-10-06 补，计划作者查出本节原先没给）**：`BudgetError` 只收**一种**——
+
+```rust
+pub enum BudgetError {
+    /// 树上没有该 owner 的分配记录（`budget_node` 里查不到它）。
+    UnknownOwner { owner: BudgetOwner },
+}
+```
+
+三条写清楚：
+
+1. **超支不是 `Err`**，是 `BudgetVerdict::Exceeds`——§110 的流程要把「预计超支」当**一个可处置的结论**
+   往下走（找替代方案 → 找不到则 Decision），做成 `Err` 会让调用方把它当失败而中止。
+2. **量纲的单位／取值域不是 `Err`**：§333 未给单位（§16 第 19 条），本层不解释，
+   故「值看起来不合理」在本层**没有判据**，不做校验。
+3. **`UnknownOwner` 是 fail-closed 的**：查不到分配记录时**不给 `Within`**
+   （给 `Within` 等于对一棵不存在的子树放行）。这条与 §12.2 的 I1 同侧。
+
 **「先寻找合法低成本方案」不在本层**：那是一次**重新规划**（换模型/换节点/分块/延长时限），
 是执行层 Planner 的动作（§2.1 的组件表里本层没有 Planner）。
 故分工是：`check` 返回 `Exceeds` → **调用方去找替代方案** → 找不到时调本层的
@@ -1433,13 +1639,19 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 ## 12.6.1 裁定：**取形状乙**（2026-10-06，协调者）
 
 **裁定：两个类型 ＋ 一道恒等转换，零跨层边。**
-**`Remaining` 在 `continuum-semantics`**（记账方定义并产出），`BudgetView` 留在
+**`Remaining` 在 `continuum-budget`**（记账方定义并产出；**crate 归属见下**），`BudgetView` 留在
 `continuum-model-registry`（资源层的排序输入面），**转换由驱动做**。
 **D 与本层都不动**；§2.2 那条条件性跨层边 `model-registry ← semantics` **不登记**。
 
 **裁定全文的出处**：`docs/superpowers/2026-10-06-p4-decisions.md`
 （含日期／背景／甲乙两形状与代价／裁定与三条判据／两条断言／双向翻转条件）。
 **本节是转述，以那个文件为准。**
+
+> **订正（2026-10-06，计划作者查出）**：本节初稿写「**`Remaining` 在 `continuum-semantics`**」，
+> **与 §2.1（`:204`）、§2.2 的边表、§12.1 的迁移表（`:308`）三处相抵**——
+> 那三处都把它归 **`continuum-budget`**（记账对象住在预算层）。**正解是 `continuum-budget`**，
+> 已改。**错因**：裁定文件 `p4-decisions.md` 的初版也抄了这一句（协调者已订正，`0e2e73b`），
+> 本设计跟着抄了它——**这是「以另一份文档为源而不回核本层自己的划分」**。原句留在此处。
 
 > **补记（2026-10-06）**：本节初稿写「**本节当前没有仓库里的原始记录，这是一处已知缺口**」，
 > 并把「落成那个文件」列给协调者。**那一句曾经成立**——裁定最初只经消息下达，
@@ -1757,8 +1969,10 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 验什么 | 怎么验 |
 |---|---|
 | 规范化的两条互补结果（§2.4 第 1 条） | `Canonicalized` 的两个变体各一条；含错别字／简称／中英混写／代词四类输入**各一条**；有未解 mention 时断言得 `NeedsResolution`（不是 `Canonical`） |
-| 四态**逐项**（§271 §206） | 四态各至少一条；每条断言是**哪一枚**（不是 `is_ok`） |
-| 不强行绑定（§273 §200 §206） | §4.2 的断言 A / B / C / D：A 一条（`Resolved` 的 id ∈ 候选集）；B **逐候选 N 条**；C 一条；**D 两条照片**（合格者被选中／多合格者得 `Ambiguous`）。**A、B、D 是 fail-open 侧，必须有** |
+| 四态**逐项**（§271 §206） | 四态各至少一条；每条断言是**哪一枚**（不是 `is_ok`）；`ResolutionResult` 的四个变体**字段清单逐项**（加/少/改名即红）；`UnknownReason` 两枚**各一条**（`NoCandidate` / `AllCandidatesRejected`——混成一枚即红） |
+| 显式约束与「满足」（§4.1.1，**本设计自定**） | `ExplicitConstraint` 三枚**各一条** `satisfies` 用例（含各一条反面）；**合取**一条（`K` 有两枚、候选只满足其一时**不合格**）；`CandidateFacts` 的 `scope` / `kind` 各一条；**`Candidate` 三字段不动**（字段清单逐项，加字段即红） |
+| 不强行绑定（§273 §200 §206） | §4.2 的断言 A / B / C / D：A 一条（`Resolved` 的 id ∈ 候选集，用 `candidate_count` 核）；B **逐候选 N 条**（每候选一条 `Err` 形态的 `Unknown{AllCandidatesRejected}`）；C 一条（`Unknown{NoCandidate}`）；**D 两条照片**（(1) 合格者被选中；(2) 多合格者 ⇒ `Ambiguous` **且 `surviving` 恰是 `{c₁,c₂}`、不含 `c₃`**——**第二条才让 `c₃` 承重**）。**A、B、D 是 fail-open 侧，必须有** |
+| `ExplicitBinding` 指向候选集外（§4.6） | 两条：**(a)** 实体不在检索集里 ⇒ `Resolved(它)` 且 `candidate_count` 比检索集**多 1**；**(b)** 反例——不在集里**且**违反一条 `Scope` 约束 ⇒ `Unknown{AllCandidatesRejected}`（证明 binding 不豁免约束） |
 | 单侧守卫的反面 | 「候选集非空且唯一合格 → `Resolved`」也有一条（只钉拒绑那侧会让解析器永远返回 `Unknown` 照样绿） |
 | `retrieval_score` 与 `ResolutionConfidence`（§272 §275） | `ResolutionResult` 字段清单逐项（加分数即红）；`ResolutionConfidence` 无可转 f64 的读者（trybuild）；两者不在同一类型的字段里 |
 | `ResolutionRisk` 是必填（§276） | 签名层面（无 `Option`、无 `Default`）；**运行期无照片**（§15 第 2 条） |
