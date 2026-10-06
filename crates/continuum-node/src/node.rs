@@ -48,6 +48,13 @@ pub enum NodeClass {
 /// （`docs/spec/02-positioning.md:1054-1072`）只说 Scheduler 按「Artifact privacy
 /// **× Node trust class**」决定是否允许传输，**也没有给这个 class 的取值域**。
 /// 规范里能读出的最小区分只有下面两处，两个值各照一处取。
+///
+/// **若规范后来给出更细的信任分级，`NodeTrust` 要重取，且放行方向会变**（设计 §3.3 限度 1、
+/// §10 第 3 条）：今天这两个值只在「能不能放 `LocalOnly` 的制品」这一处被读，闸门对它的用法是
+/// **逐值归类**（§5.4 通道 (a)）——故**加值时必须把新值重新逐值归类**，
+/// 不能假定它默认落在放行侧或拒绝侧。这条约定的另一头是：**信任的产生方不存在**
+/// （按 §292 是 Authority Host，不在 E 的范围），本层**照抄调用方给的标签**，
+/// 不做推断、也不校验它与 `class` 的关系（§3.3 限度 2）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NodeTrust {
     /// 来源：§293 的终态（`docs/spec/05-normative.md:1777`，Device Join 流程走完之后的
@@ -134,18 +141,25 @@ impl ComputeNode {
         self.trust
     }
 
-    /// 消费方：**调用方自己实现的策略**（`PlacementPolicy` 的实现体）——**E 内部零读取**
-    /// （设计 §3.5 末段）。
+    /// 消费方：**调用方自己实现的策略**（`PlacementPolicy` 的实现体）——**本 task 落地时
+    /// E 内部零读取**（设计 §3.5 末段）。
+    ///
+    /// **这一句带时间与位置的限定，Task 5／6 的策略实现落地时要重取它**：今天本 crate 里
+    /// 除本文件外**没有第二个模块**，故这句话的观察对象只有 `tests/node.rs` 的三条访问器断言。
+    /// **不补用例**（已裁）：没有观察对象，写一条「本 crate 内不读它」的正则守卫是对**缺席**设守卫，
+    /// 还得自己自证两侧，成本与收益不成比例。
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
     }
 
-    /// 消费方：调用方自己实现的策略——**E 内部零读取**（同 `capabilities`）。
+    /// 消费方：调用方自己实现的策略——**本 task 落地时 E 内部零读取**
+    /// （同 `capabilities`，含那里关于时间限定与「不补用例」的说明）。
     pub fn resources(&self) -> &[String] {
         &self.resources
     }
 
-    /// 消费方：调用方自己实现的策略——**E 内部零读取**（同 `capabilities`）。
+    /// 消费方：调用方自己实现的策略——**本 task 落地时 E 内部零读取**
+    /// （同 `capabilities`，含那里关于时间限定与「不补用例」的说明）。
     pub fn availability(&self) -> &[String] {
         &self.availability
     }

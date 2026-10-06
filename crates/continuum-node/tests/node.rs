@@ -80,9 +80,35 @@ fn the_six_accessors_return_what_new_was_given() {
 /// **消费方是 Task 6 的兜底档**（设计 §5.9：`a.id().cmp(b.id())` 是排序的最后一道），
 /// 故这条不是提前铺开的 API。
 ///
-/// **红的条件（档位：取反）**：把 `Ord` 改成按**长度**比、或改成反转
-/// （如 `other.0.cmp(&self.0)` 手写 `impl Ord`）→ 第一条断言红。
-/// 第二条（`new("a") == new("a")`）钉的是 `Eq` 那一半，与 `Ord` 是两个 trait。
+/// **红的条件（档位：取反）——四条派生里两条有照片、两条没有，这里不假装有。**
+/// 下面**按断言的内容**指认是哪一条，**不写行号**：本段自身的长短一变，行号就漂，
+/// 而**本轮修复的初稿**里它已经漂过一次（那一稿写 `:88`／`:89`，补完本段后那两条断言落到了别处）。
+///
+/// - **第一条（`a < b`）** 的照片钉的是 **`PartialOrd`**：去掉 `derive(PartialOrd, Ord)` 派生、
+///   并手写 `impl PartialOrd`（`Some(other.0.cmp(&self.0))`）→ 它红。
+///   **Rust 的 `<` 走 `PartialOrd::lt`（即 `partial_cmp`），不经过 `Ord::cmp`。**
+/// - **第二条（`new("a") == new("a")`）** 的照片钉的是 **`PartialEq`**：`assert_eq!` 只要求
+///   `PartialEq` ＋ `Debug`。去掉 `derive(PartialEq, Eq)`、手写 `impl PartialEq` 恒返 `false`
+///   → 它红（同一次跑还会带红 `the_six_accessors_return_what_new_was_given` 里 `id` 那一条
+///   `assert_eq!`，因为那里也走 `==`）。
+/// - **`Ord` 今天没有照片**：只反写 `Ord`、或只把它改成按**长度**比，而**保留
+///   `derive(PartialOrd)`**，两种都**编得过、`4 passed; 0 failed`**——**等价变异体**。
+///   它的唯一消费方是 Task 6 的兜底档（见上），本 crate 内**零调用**，故今天举不出能落在它身上的变异体。
+/// - **`Eq` 今天没有照片，运行期也不可能有**：它是**无方法的标记 trait**，`assert_eq!` 不读它，
+///   故任何运行期断言对它**恒真**。今天它的要求由**编译器**顺带看住——`Ord: Eq` 是 supertrait，
+///   **只要 `Ord` 还派生着**，去掉 `Eq` 派生就会以
+///   `error[E0277]: the trait bound ComputeNodeId: Eq is not satisfied` 编不过。
+///   **但那是一条编译期事实，不是本文件里的一条用例**，也不是上面任何一条断言的照片。
+///
+/// **上面这五枚变异体的实测日志与 sha256** 见 `.superpowers/sdd-p3e-impl/task-2-report.md`
+/// 的「修复轮 1」一节——**本段不写 sha**：它是对**整份文件**取的，
+/// 任何一次无关改动都会让它静默失真（本轮修 `src/node.rs` 的两处注释时就发生过）。
+///
+/// **来历（本段上一版的原话照留）**：上一版写「把 `Ord` 改成按**长度**比、或改成反转
+/// （如 `other.0.cmp(&self.0)` 手写 `impl Ord`）→ 第一条断言红」，以及
+/// 「第二条（`new("a") == new("a")`）钉的是 `Eq` 那一半」。**两句都假**，且假在同一个形状上：
+/// **改了一个同族里用例根本不经过的 trait 方法（`Ord` 对 `PartialOrd`），
+/// 或给一条只读 `PartialEq` 的断言安上了 `Eq` 的名头。**
 #[test]
 fn the_id_is_the_registry_key_and_is_ordered() {
     assert!(ComputeNodeId::new("a") < ComputeNodeId::new("b"));
