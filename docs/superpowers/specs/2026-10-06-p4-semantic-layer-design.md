@@ -469,13 +469,26 @@ pub enum UnknownReason {
 /// 一条显式约束。**取值域是闭集，三枚**——每一枚都能追到规范里已有的一个概念，
 /// **不引入开放谓词语言**（那会变成一套本层发明的语法）。
 pub enum ExplicitConstraint {
-    /// 候选必须落在该作用域内。出处：§274 的九值 ＋「显式 scope 优先级最高」。
+    /// 候选必须落在该作用域内。出处：**§274 的九值**（**只取九值，那句「显式 scope
+    /// 优先级最高」不归这一枚**——见下）。
     Scope(ResolutionScope),
-    /// 候选的实体种类必须是这一种。出处：§198 的三类候选（`ToolCandidate` /
-    /// `SkillCandidate` / `Relation`）。
+    /// 候选的实体种类必须是这一种。出处：`EntityKind`（见下）。
     EntityKind(EntityKind),
     /// mention 必须绑到该实体。出处：§277 的 `ExplicitBinding`。
     BoundTo(EntityId),
+}
+
+/// 候选的实体种类。**闭集四枚**——**不是 §198 的三枚**（见下）。
+pub enum EntityKind {
+    /// §198 的 `ToolCandidate`。
+    Tool,
+    /// §198 的 `SkillCandidate`。
+    Skill,
+    /// §198 的 `Relation`。
+    Relation,
+    /// **连接器服务名**（`GitHub` / `Email` / …，§124／§125 的六项服务）。
+    /// **这一枚是补的，出处不在 §198**，理由见下。
+    ConnectorService,
 }
 
 /// 候选的**判定事实**，由调用方与候选一并给出。
@@ -489,6 +502,8 @@ pub struct CandidateFacts {
 }
 
 /// 判据：**合取**。候选 `c` 满足约束集 `K` ⟺ `K` 中**每一条**都由 `c` 与 `f` 满足。
+///
+/// **`Scope` 这一枚是等值过滤，不是层级**——见下。
 pub fn satisfies(c: &Candidate, f: &CandidateFacts, k: &ExplicitConstraint) -> bool {
     match k {
         ExplicitConstraint::Scope(s)      => f.scope == *s,
@@ -505,8 +520,61 @@ pub fn qualifying(cs: &[(Candidate, CandidateFacts)], k: &[ExplicitConstraint]) 
 是唯一不引入优先级的读法；若将来要加权或分级，那是**新增判据**，须有规范出处。
 **这一条正好是 §4.2 断言 B 与 D 的定义基础**（「全部违反」＝合取下的空集，「唯一合格」＝合取下恰一个）。
 
-**`EntityKind` 的取值域照 §198 的三类**（`ToolCandidate` / `SkillCandidate` / `Relation`）——
-**只是那三类，不扩**；§197 的七种**检索手段**不是种类（它们是 `CandidateSource`，§4.3）。
+**`Scope(s)` 只做等值过滤，不做层级——这是二选一里选定的那一侧**（2026-10-06，评审查出后定）：
+
+- **选定**：`f.scope == *s` 是**等值判据**，**§274 的层级不由这一枚承担**，
+  而由 §4.6 的 alias 解析承担（alias 的四作用域各管一段寿命，见下）。
+- **为什么不做层级**：`==` 是等值，而 §274 的九个值是一条**优先级层级**；
+  要做层级就必须先有**「哪一枚比哪一枚更广」的序**，而**规范没有给这个序**
+  （§274 只给了九个名字与一句「显式 scope 优先级最高」）。**本层不发明这个序。**
+- **为什么那句「优先级最高」不归这一枚**：它是一条**决胜规则**
+  （多个 binding 落在不同 scope 时取哪一个），**不是准入规则**（哪些候选合格）。
+  把决胜规则当准入规则会把「`project` 层可见的候选」在 `explicit` 约束下判成不合格——
+  **而规范没这么说**。故出处收窄为「§274 的九值」。
+
+> **订正（2026-10-06，评审查出）**：本节初稿把 `Scope` 的出处写成「§274 的九值 ＋
+> 『显式 scope 优先级最高』」，**那一句本层用不上**（见上）；且**没写它做的是等值还是层级**——
+> 那是一个会被读成两种意思的空档。现已写死为**等值**，并写明层级由谁承担、序从哪来。
+> 原句留在此处。
+
+**缺的是「九个 scope 之间的包含关系」这一步**（若将来要用层级过滤）。
+**收件人：规范维护者。**
+
+**`EntityKind` 是四枚，不是 §198 的三枚**（2026-10-06，评审查出后补）：
+
+- **为什么必须补第四枚**：§16 第 26 条本设计**认领了「服务名作为 mention 的解析目标」那一半**，
+  并写明「与其它实体**同形**处理」。而 `GitHub` / `Email` 这些服务名**不是 `Tool` / `Skill` /
+  `Relation` 中任何一个**——若只有三枚，调用方只能**硬塞**一枚进去，
+  于是**静默错型、且没有任何断言会红**（正是本仓最忌的形状）。
+- **为什么用第四枚而不是「三枚 ＋ `Opaque`」**：`Opaque` 会让这个类型**不再是闭集**，
+  而 §14 的「三枚 `satisfies` 各一条」与 §11.3 式的逐枚断言**全建立在闭集上**。
+  **闭集是让断言可写的前提**（本节的总结句），故宁可为服务名立一枚真种类。
+- **第四枚的出处**：§124（`docs/spec/02-positioning.md:1803-1826`）的六项服务与
+  §125 的「按操作细分」；§124 明写「Connector 不等于 Agent，它只是 Capability Provider」，
+  故服务名是一个**有自身身份**的解析目标，不是工具或技能的别名。
+- **§198 的引用只取词汇、不取算法**（评审查出）：§198 正是 §16 第 4 条判「没有落点、未实现」
+  的那一节（联合解析算法本设计不建）。**此处只借它的三个候选名当词汇**，
+  **不借它的联合约束传播**——两处不矛盾，但这一句要写明，否则读起来像相抵。
+
+**照片**：一条——`GitHub` 这类 mention 解出的候选，其 `CandidateFacts.kind`
+**恰是 `ConnectorService`**；**反面**一条——它不是 `Tool` 也不是 `Skill`（逐枚断言，不是「不等于某个别的值」）。
+
+**两套 scope 词汇的关系**（评审查出：§274 九值与 §278 四值在同一个 crate 里并存而本节没给映射）：
+
+| §278 的 alias 作用域 | 对应 §274 的哪一枚 | 说明 |
+|---|---|---|
+| `TURN` | `conversation` | **最弱的一对**：§274 **没有「轮次」这一值**，取语义最近的 |
+| `SESSION` | `session` | 同名 |
+| `PROJECT` | `project` | 同名 |
+| `USER_PERSISTENT` | `user` | §278 的「持久」对应 §274 的 user 层 |
+
+**本层的约定**：**`ExplicitConstraint::Scope` 用 §274 的九值**（它是解析的作用域），
+**`alias` 表用 §278 的四值落库**（它是别名的寿命），上表是两者的映射。
+**这张表是本设计的决定**——**规范没有给出九值与四值的关系**
+（两节各自成文、互不引用）。故：**一条以 alias scope 表述的约束必须先经上表换成 §274 的值**，
+换不出来的（`workspace` / `tool` / `plugin` / `global` / `explicit` 五枚）**在 alias 层没有对应**，
+故**不能**用 alias 表述——这一条是可断言的（映射函数的定义域**恰好**是那四枚）。
+**缺的是「§274 与 §278 两套词汇的关系」这一步。收件人：规范维护者。**
 
 > **为何不把这些做成 trait／闭包**：一个「任意谓词」的开放接口会让**四条断言全部失去判据**
 > （「满足」变成调用方定义的，本层就无从断言 B/D）。闭集是让断言可写的前提。
@@ -522,9 +590,32 @@ pub fn qualifying(cs: &[(Candidate, CandidateFacts)], k: &[ExplicitConstraint]) 
 
 本设计把它折成**四条断言**：三条管「什么时候**可以**返回 `Resolved`」，一条管「什么时候**不可以**」。
 
-**（断言 A，闭集）`Resolved(e)` 蕴含 `e` 是输入候选集里的成员。**
+**（断言 A，闭集）`Resolved(e)` 蕴含 `e ∈ 检索集 ∪ {由 `ExplicitBinding` 注入的那一枚}`。**
 不是「e 与某个候选相似」，而是**同一个 `EntityId` 值**。
 它排除的失败形态：解析器自造一个实体、或把检索分数最高的候选的名字拼出来。
+
+**「输入候选集」是哪个集，必须写清——本节初稿在这一处循环**（2026-10-06，评审查出）：
+
+> **订正**：A 的初稿写「`e` 是**输入候选集**里的成员」，而「输入候选集」两读都通：
+> **读成「检索器交出的那一集」**，则 §4.6 的 binding 注入**破了 A**；
+> **读成「解析器实际工作的那一集」**，则**注入后 A 恒真**——A 退化成几乎无内容的断言，
+> **解析器可以自造任何实体而 A 永不响**，而 A 本来就是防「解析器自造实体」的。
+> **证据就在本节自己的照片里**：`Resolved.candidate_count` 比**检索集**多 1
+> （§4.6 的照片 (a)）⇒ **「检索集」与「工作集」是两个集合，而 A 拿的必须是前者。**
+> 原句留在此处。
+
+**故 A 重述为上面那一句**，并把「工作集」显式定义出来：
+
+```rust
+// 工作集 = 检索集 ＋ binding 注入（§4.6）。A 约束的是这个式子里的两个来源，不是工作集本身。
+let working = retrieved.clone();
+if let Some(b) = binding { working.push(injected_candidate(b)); }   // 唯一允许的注入点
+```
+
+**与之配套的守卫（照片一条）**：**注入只能来自 `ExplicitBinding`**——
+构造一个「解析器自造了一个既不在检索集、也没有 binding 背书的实体」的情形，
+**断言 A 变红**（`Resolved` 的 `candidate_count` 会大于工作集应有的大小，或该实体不在两个来源的并里）。
+**没有这条照片，A 就只是「工作集成员的成员」这个同义反复。**
 
 **（断言 B，拒绑）候选集非空 ∧ 全部候选都违反某个显式约束 ⟹ 结果不是 `Resolved`。**
 这一条是 §273 的正面形态。它的难点是「全部候选`都得判到`」——
@@ -665,14 +756,19 @@ pub struct ResolutionRisk {
 这一条可断言：给一个与 `ExplicitBinding` 冲突的高分候选，断言结果仍是 `Resolved(binding.entity)`。
 
 **`entity` 不在候选集里时给哪一态**（2026-10-06 补，计划作者查出本节原先没写）：
-**不新增分支，走同一条路径**——把该实体**作为一条候选加入候选集**
+**不新增分支，走同一条路径**——把该实体**作为一条候选注入工作集**
 （`evidence` 标 `user_explicit`），再照常过滤。理由三条：
 
-1. **§277 的语义是「用户**选择候选**」**，而 binding 给的是**用户直接指定的实体**，
-   其权威高于检索（「SHOULD 在当前 scope 拥有最高优先级」）。
-   **若因为注册表没检索到就把它拒在集合外，等于让检索结果否决用户**——那是 §277 的反面。
-2. **断言 A 因此不受影响**：`Resolved(e)` 的 `e` 仍**是候选集里的成员**
-   （它就是被加入的那一条），A 的闭集性质保持。
+1. **这是对 §277 的一次扩张，不是同一件事——名分要说对**（2026-10-06，评审查出）：
+   §277 的字面前提是「用户**选择候选**」（候选已由检索给出），
+   而这里处理的是「用户**直接点名**一个检索没给出的实体」。
+   **扩张的理由成立**（用户的权威高于检索——「SHOULD 在当前 scope 拥有最高优先级」；
+   若因为注册表没检索到就把它拒在集合外，等于让检索结果否决用户），
+   **但本文必须把它写成扩张**：**§277 只覆盖「选择已有候选」那一半**，
+   「点名收集合外的实体」是**本设计补的**。**收件人：规范维护者**（§277 要不要覆盖这一半）。
+2. **断言 A 因此写成「检索集 ∪ 注入的那一枚」**（§4.2 重述后的 A），**而不是「工作集」**——
+   **注入是 A 里显式列出的第二个来源**，故 A 不因注入而失效，
+   也**不因注入而恒真**（恒真的那个版本拿的是工作集，见 §4.2 的订正）。
 3. **与它冲突的约束仍照常判**：若该实体同时违反某条显式约束（例如 `Scope` 不符），
    它与别的候选同罪，按 §4.2 的断言 B 走（全不合格 ⇒ `Unknown { AllCandidatesRejected }`）。
    **binding 不是「绕过约束」的口子**——它只是提高**检索**这一侧，不豁免 `ExplicitConstraint`。
@@ -1441,6 +1537,12 @@ pub struct Dimensions {
    （§16 第 19 条），故「私有」在它身上**守不住任何东西**——本仓对「公开字段＝无闸门」
    的判据是「**有闸门要守时才有闸门**」（D 的 `BudgetView` 同判）。
 
+**计划的收口要求（写在设计侧，供 `plan-p4` 取用）**：上面「三个角色各自私有、无公开构造函数」
+目前只是**设计写死的承诺**——P4 三个 crate 尚未落地，代码层面现在只能核「设计承诺了」。
+**故实现计划里须有一条**：**三个角色的构造函数集合逐个断言**
+（`Allocation` / `Reservation` / `Remaining` 各一条，断言「除设计指定的那个入口外无第二个公开构造路径」，
+形态照 P3A 对 `AuthorizedTool` 的 trybuild 样例）。**收件人：`plan-p4`。**
+
 **故 §12.6.1 的解构是两步**（这一条在这里写死，免得两处不能同真）：
 
 ```rust
@@ -1477,8 +1579,32 @@ I3: settled(n, d) + reserved(n, d) ≤ allocation(n, d)
 要防的形态也就防不住）。**收件人：协调者**（若判「分配即转移」，I2 换成
 `Σ_{执行中的子节点} reserved(child, d) ≤ allocation(n, d) − settled(n, d)`，其余不变）。
 
-**结算**：`settle(reservation, actual: Dimensions) -> SettleOutcome`，
+**结算**：`settle(reservation, actual: Dimensions) -> Result<SettleOutcome, BudgetError>`，
 `SettleOutcome ∈ { Within { refunded: Dimensions }, Over { dimension, by: i64 } }`。
+
+**`actual` 的符号：拒收，不截断**（2026-10-06，评审查出后补）。补 `BudgetError` 第二枚：
+
+```rust
+pub enum BudgetError {
+    UnknownOwner { owner: BudgetOwner },
+    /// `actual` 的某一维为负。
+    NegativeActual { dimension: DimensionKind, value: i64 },
+}
+```
+
+判据两条：
+
+1. **负数是 fail-open 的入口**：`settled` 会因此变小、`available` 反而变大，
+   而 **I1 只约束 `available`、不约束 `actual` 的符号**——一个负的 `actual`
+   能把已经花掉的额度「还回来」，且**没有任何断言会拦它**（评审查出的正是这一格）。
+2. **拒收而不是按 0 截断**：截断是**静默**的——它把产生方（调用方／执行侧）的一个 bug
+   吞掉，账面上看不出发生过什么。拒收把这个 bug **当场暴露**，与本层
+   `UnknownOwner` 的 fail-closed 同侧。
+
+**照片两条**：(a) 某一维为负的 `actual` ⇒ `Err(NegativeActual { dimension, value })`，
+**并断言账本未变**（`reserve` 仍活跃、`settled` 未动——失败路径不但断言哪一种 `Err`，
+还要断言**没有半写的副作用**）；(b) **反例**：`actual` 各维为 0 ⇒ `Ok(Within { .. })` 且额度全额退回
+（只钉拒绝那侧会让「`0` 也被拒」漂过去）。
 `Over` 不写第二行账——**运行期实际超支的裁决不在本层**：ENG-005 §三.2 把它判给
 `FailureClass::Constraint` ＋ 该节点的 `EscalationPolicy::Decision`，那两项都是执行层的词汇
 （`crates/continuum-graph/src/failure.rs:8`、`:32`）。
@@ -1971,6 +2097,9 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 规范化的两条互补结果（§2.4 第 1 条） | `Canonicalized` 的两个变体各一条；含错别字／简称／中英混写／代词四类输入**各一条**；有未解 mention 时断言得 `NeedsResolution`（不是 `Canonical`） |
 | 四态**逐项**（§271 §206） | 四态各至少一条；每条断言是**哪一枚**（不是 `is_ok`）；`ResolutionResult` 的四个变体**字段清单逐项**（加/少/改名即红）；`UnknownReason` 两枚**各一条**（`NoCandidate` / `AllCandidatesRejected`——混成一枚即红） |
 | 显式约束与「满足」（§4.1.1，**本设计自定**） | `ExplicitConstraint` 三枚**各一条** `satisfies` 用例（含各一条反面）；**合取**一条（`K` 有两枚、候选只满足其一时**不合格**）；`CandidateFacts` 的 `scope` / `kind` 各一条；**`Candidate` 三字段不动**（字段清单逐项，加字段即红） |
+| `EntityKind` 四枚（§4.1.1） | 四枚各一条；服务名一条：mention 为 `GitHub` 类 ⇒ `kind` **恰是 `ConnectorService`**，**反面**断言它不是 `Tool`、也不是 `Skill`（逐枚）；`Scope` 的映射函数**定义域恰是 §278 的四枚**（`TURN`/`SESSION`/`PROJECT`/`USER_PERSISTENT`），五枚换不出来的各一条 `Err`/`None` |
+| `Scope` 是等值不是层级（§4.1.1） | 一条：`project` 层可见的候选在 `Scope(explicit)` 下**不合格**（等值判据的直接后果，写出来是为了「层级」不会被顺手实现进去） |
+| 断言 A 的注入守卫（§4.2） | 一条：解析器自造一个**既不在检索集、也无 `ExplicitBinding` 背书**的实体 ⇒ **A 变红**（该实体不在「检索集 ∪ 注入的那一枚」里）。**没有这条，A 只是同义反复** |
 | 不强行绑定（§273 §200 §206） | §4.2 的断言 A / B / C / D：A 一条（`Resolved` 的 id ∈ 候选集，用 `candidate_count` 核）；B **逐候选 N 条**（每候选一条 `Err` 形态的 `Unknown{AllCandidatesRejected}`）；C 一条（`Unknown{NoCandidate}`）；**D 两条照片**（(1) 合格者被选中；(2) 多合格者 ⇒ `Ambiguous` **且 `surviving` 恰是 `{c₁,c₂}`、不含 `c₃`**——**第二条才让 `c₃` 承重**）。**A、B、D 是 fail-open 侧，必须有** |
 | `ExplicitBinding` 指向候选集外（§4.6） | 两条：**(a)** 实体不在检索集里 ⇒ `Resolved(它)` 且 `candidate_count` 比检索集**多 1**；**(b)** 反例——不在集里**且**违反一条 `Scope` 约束 ⇒ `Unknown{AllCandidatesRejected}`（证明 binding 不豁免约束） |
 | 单侧守卫的反面 | 「候选集非空且唯一合格 → `Resolved`」也有一条（只钉拒绑那侧会让解析器永远返回 `Unknown` 照样绿） |
@@ -1992,7 +2121,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 恢复链（§332 §107） | 只改指名字段、**其余字段逐项不变**；失败路径断言**四张表无半写行**（不只断言 `Err` 哪一种） |
 | Constraint Validator（§225 §6） | §225 的 MAY 七条逐项放行 ＋ MUST NOT 三条逐项拦下（第四条见 `ViolatesRequired`）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下；**三侧**：悬空键 `Err(UnknownConstraintKey)` 一条 ＋ `constraints` 为空不是 `Err` 一条 ＋ **命中 `PREFERRED` 键不是 `Err`、也不拦下一条**（第三条钉住「判据与 `class` 无关」） |
 | 两道门分离（§2.2） | §11.5 的三条（两条 `ALLOWED` 条目 + 方法集断言） |
-| 预算不变量（§12.2） | I1 / I2 / I3 **各一条**违规断言；`reserve` 返回**具体哪一维**（逐维五条）；`settle` 的 `Over` 断言 `dimension` 与 `by` |
+| 预算不变量（§12.2） | I1 / I2 / I3 **各一条**违规断言；`reserve` 返回**具体哪一维**（逐维五条）；`settle` 的 `Over` 断言 `dimension` 与 `by`；**`actual` 负值**：一条 `Err(NegativeActual{dimension,value})` **并断言账本未变**（无半写副作用）＋ **反例**一条（各维为 0 ⇒ `Ok(Within)` 且全额退回） |
 | 无读数按预扣（§12.3） | 三条（流式 / 恢复 / **有读数时不按预扣**） |
 | Budget Validator（§110） | `Within` 一条；`Exceeds` **逐维五条**；判据是 `remaining` 不是 `allocation`（构造一个「按 allocation 判会放行、按 remaining 判超支」的用例） |
 | 探索预算（§334） | 四个默认判据**各两条**（放行/门控，共八条）；策略收紧一条；`has_external_effect` 那一格 `dimension` 为 `None` |
