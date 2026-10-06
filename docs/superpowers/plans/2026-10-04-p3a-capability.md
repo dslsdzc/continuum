@@ -110,7 +110,9 @@ Cargo.toml（workspace）                        members
 - [ ] **Step 1: 建 crate 骨架并登记**
 
 `Cargo.toml` 的依赖：**只声明本 task 用得到的**——`continuum-effect`（要用 `EffectType`）与
-`thiserror`（`error.rs` 的 `CapabilityError` 上有 `Error` 派生，去掉即 `E0433`）。
+`thiserror`（`error.rs` 的 `CapabilityError` 上有 `Error` 派生，去掉即一个「解析不到该 crate」的
+编译错误——**原写 `E0433`，未见实跑记录，2026-10-06 改为不写码的说法**：同一处缺依赖在不同写法下
+会给不同的码，**以实跑读回的报错为准**）。
 `continuum-core` / `continuum-persist` / `continuum-events` / `serde` / `serde_json` 与 dev-dep
 `tempfile` / `trybuild` **由需要它们的 task 增量加**（`ALLOWED` 对叶子 crate 记的是**实际依赖**，
 一次声明齐会让条目在中间若干 task 里说谎；判据同「迁移由用它的 task 注册」）。

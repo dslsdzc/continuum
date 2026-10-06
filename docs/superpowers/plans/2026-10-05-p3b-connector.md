@@ -654,10 +654,10 @@ git commit -m "feat(connector): 非效应臂与入口第 3 步"
   **这条样例钉住的是哪一件事，要说准**（设计 §5.1）：它只钉「`Effect` 变体的字段类型是 `AuthorizedEffect`」，
   **钉不住**「效应型操作不得用裸能力驱动」——后者是**运行期**核对（Task 5 第 3 步），
   它的照片是 `EffectAuthorizationRequired` 那一条。**不要把两者混为一谈。**
-- `op_binding_has_no_effect_field.rs`：**先 `OpBinding::new(op, kind)` 造出一条绑定，再对它写 `binding.effect = …`** —— **不编译**（`E0609`：`no field \`effect\` on type \`OpBinding\``）。
+- `op_binding_has_no_effect_field.rs`：**先 `OpBinding::new(op, kind)` 造出一条绑定，再对它写 `binding.effect = …`** —— **不编译**（**报「没有 \`effect\` 这个字段」那一类错**——**原写 `E0609`，未见实跑记录，2026-10-06 改为不写码的说法**：以实跑读回的 `.stderr` 为准）。
   这条钉的是「效应是推出来的、不是声明的」（设计 §3.2 第 4 条、§9）。
 
-  **样例的形状是刻意的，判别力不如表面看上去那么强，要写准**：`OpBinding` 的字段是**私有**的，故**任何**外部结构体字面量（`OpBinding { op, kind }`）都编译不过，而 rustc 报的很可能是**隐私错误**（`E0603`，或「cannot construct with struct literal syntax due to private fields」）而不是「没有 `effect` 字段」——那样这条样例就分不出「效应是推出来的」与「外部构造不出 `OpBinding`」，**声称钉住的东西其实没钉住**。故本样例走**字段赋值**那条路（它只碰字段名，不碰可见性），并且 **`.stderr` 必须是 `E0609` / `no field \`effect\``**；**若生成出来的 `.stderr` 是隐私错误，这条样例按现形状不算数**，须换一条不落在可见性上的写法（例如断言 `OpBinding` 的公开构造入口只收两个入参：`OpBinding::new(op, kind, effect)` 报「参数个数不符」）。
+  **样例的形状是刻意的，判别力不如表面看上去那么强，要写准**：`OpBinding` 的字段是**私有**的，故**任何**外部结构体字面量（`OpBinding { op, kind }`）都编译不过，而 rustc 报的很可能是**隐私错误**（**原写 `E0603`，未见实跑记录，2026-10-06 改为不写码的说法**：「cannot construct with struct literal syntax due to private fields」那一类）而不是「没有 `effect` 字段」——那样这条样例就分不出「效应是推出来的」与「外部构造不出 `OpBinding`」，**声称钉住的东西其实没钉住**。故本样例走**字段赋值**那条路（它只碰字段名，不碰可见性），并且 **`.stderr` 必须是「`no field \`effect\``」那一条**（**原写 `E0609`，未见实跑记录，2026-10-06 改为不写码的说法**——钉子仍是「报的是哪一条」，只是不预先断言码）；**若生成出来的 `.stderr` 是隐私错误，这条样例按现形状不算数**，须换一条不落在可见性上的写法（例如断言 `OpBinding` 的公开构造入口只收两个入参：`OpBinding::new(op, kind, effect)` 报「参数个数不符」）。
 
 `tests/type_level.rs` 用 `trybuild::TestCases::new().compile_fail("tests/compile_fail/*.rs")` 驱动（与 `continuum-capability` / `continuum-secrets` 的 `tests/type_level.rs` 同形——**照那两处写，不要另发明一种驱动方式**）。
 
@@ -668,7 +668,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-connector --test type_lev
 ```
 
 首次运行会生成/比对 `.stderr`：**生成出来的那份要人读一遍**（`TRYBUILD=overwrite` 只生成，不校对），
-确认它报的是**上面逐条指定的那一个**（第一份＝类型不符，第二份＝`E0609` 没有 `effect` 字段），
+确认它报的是**上面逐条指定的那一个**（第一份＝类型不符，第二份＝「没有 `effect` 字段」——**原写 `E0609`，未见实跑记录，2026-10-06 改为不写码的说法**），
 而**不是**本 crate 里别的拼写错误或隐私错误。
 
 - [ ] **Step 3: 变异与全量验证**
@@ -968,7 +968,8 @@ git commit -m "docs: P3 子项目 B 的收尾与复核"
     OpBinding 上没有 EffectType 字段可填（编译期），而「连接器声明了 EffectType」这件事在类型上
     根本不存在——故不存在可照的反面。据实标明。
     （**该样例的判别力有限、形状是刻意的**：字段私有会让**任何**外部字面量都编译不过，
-    故样例走字段赋值那条路，判据是 `.stderr` 报 `E0609` 而非隐私错误，见 Task 6 Step 1。）
+    故样例走字段赋值那条路，判据是 `.stderr` 报「没有 `effect` 字段」而非隐私错误
+    （**原写 `E0609`，未见实跑记录，2026-10-06 改为不写码的说法**），见 Task 6 Step 1。）
     收件人：无。
 
 14. **已闭（裁决 B2；本条由 plan-b 查出）**：入口的 now 曾是入参而设计 §5.1 的签名里没有它

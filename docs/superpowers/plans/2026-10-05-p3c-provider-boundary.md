@@ -298,8 +298,12 @@ timeout 300 cargo test -p continuum-provider --test registry_models
 预期：**`E0432`**（`unresolved imports`：`continuum_provider::ProviderRegistry` 不存在）
 ——**这个码取自实跑**（`.superpowers/sdd-p3c-impl/task-1-report.md` 第 2 节，日志 `.tmp/step2-red.log`）。
 **订正（2026-10-06）**：本节原写 `E0433`，是照「类型不存在」推测的；实跑的写法是
-`use continuum_provider::{ProviderRegistry, ..};`，那是 **`E0432`（unresolved imports）**，
-全限定路径才会给 `E0433`。**凡计划里写错误码的地方一律以实跑为准**（本计划其余处的码同此例）。
+`use continuum_provider::{ProviderRegistry, ..};`，那是 **`E0432`（unresolved imports）**。
+**「全限定路径才会给 `E0433`」那半句原样留在这里，但它是未实测的对照说法**（写它的时候没跑过）
+——**已改为不写码的说法**：**同一处「类型不存在」在不同的写法下会给不同的码，故以实跑读回的
+`.stderr` 为准**。**凡计划里写错误码的地方一律以实跑为准**（本计划其余处的码同此例）。
+**判据留档**：**「未见实跑记录」的报错码，比写错的码只差一步**——两者都是**凭印象写下的、
+看起来像事实的东西**；处置统一：**要么实跑、要么不写码**。
 
 - [ ] **Step 4: 实现**
 
@@ -1014,6 +1018,8 @@ git commit -m "test(provider): 两个登记点不一致的两向照片"
    > **代码块里那行注释随之改为 `// 预期 E0624`**，`.stderr` 钉的也是 `E0624`。
    > **那条判据的实质不变**：本样例钉的是「**私有**」（有授权也够不着构造入口），
    > **不是**「元数不合（`E0061`）」或「类型不合（`E0308`）」——这一点原话成立，未动。
+   > **补一句（2026-10-06）**：**`E0061` 那一式未实测，故它在本处只作否定式对照、不作判据**
+   > （`E0308` 另说：样例 3 的 `.stderr` 实跑就是它）。后来者别把「不是 `E0061`」当结论引用。
    > **独立复核（本计划作者自己跑的 rustc 探针，`--edition 2024`）**：
    > `mod m { fn f() {} } fn main() { m::f(); }` → **`E0603`**；
    > `mod m { pub struct S; impl S { fn g() {} } } fn main() { m::S::g(); }` → **`E0624`**。
