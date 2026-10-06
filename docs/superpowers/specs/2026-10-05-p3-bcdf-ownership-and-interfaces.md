@@ -53,12 +53,22 @@ list_models / describe_model / invoke / stream / cancel / usage / health
 list_tools / describe_tool / invoke / cancel
 ```
 
-类型在 `crates/continuum-core/src/tool.rs`：`ToolId`、`ToolDescriptor`、`ToolInvocation`、`ToolResult`。
+类型在 `crates/continuum-core/src/tool.rs`：`ToolId`、`ToolDescriptor`、`ToolResult`。
+**`invoke` 的请求类型不在那里**——它是 `continuum-provider` 的 `AuthorizedToolInvocation`（见下方订正）。
 
 **订正（2026-10-05，裁决 §五）**：`ToolInvocation` **删除**——`invoke` 的请求侧被 C 设计 §7.5 的新请求类型
 （`AuthorizedToolInvocation`）取代，旧类型不再有生产调用方，留着就是**同一个概念两个类型**。
-删在 §7.5 那次改动里同批做，**连测试夹具 `crates/continuum-provider/tests/fake_provider.rs` 一起**。
+删在 §7.5 那次改动里同批做，**连测试夹具一起**。
 `ToolId` / `ToolDescriptor` / `ToolResult` 三个**不动**。
+（上面那句「连测试夹具 `crates/continuum-provider/tests/fake_provider.rs` 一起」是 2026-10-05 的原话，
+**该路径到落地时已经不对了**：Task 1 / Task 2 把 `FakeModel`、`FakeTool` 搬进了
+`tests/common/mod.rs`，Task 2 又新造了 `tests/registry_tools.rs`（内含两个 `impl ToolProvider`）。
+**要改的是三处**：`tests/common/mod.rs` 与 `tests/registry_tools.rs` 的两个 `impl`。原话照留为来历。）
+
+**落地（2026-10-06，P3 子项目 C 的 Task 3，commit `a0a8a07`）**：
+上述删除与请求面换血已完成。`AuthorizedToolInvocation<'a>` 落在 `crates/continuum-provider/src/tool.rs`
+（类型 `pub`、构造入口 `pub(crate)`、字段私有——C 设计 §7.5 的「可见性三件套」）；
+`grep -rnw ToolInvocation crates/` 已**零命中**（`-w` 是词边界，否则会被 `AuthorizedToolInvocation` 子串命中）。
 
 **注意一处既有事实**：`ToolId` **同时**是 §252 的 `Tool.id`——P3 子项目 A 判为同一个类型并**复用它**
 （`crates/continuum-capability/src/lib.rs:40` 有说明）。**再不要造第二个 `ToolId`。**
