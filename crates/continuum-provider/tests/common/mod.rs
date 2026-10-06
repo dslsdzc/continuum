@@ -217,6 +217,11 @@ impl ToolProvider for RecordingTool {
         }])
     }
 
+    /// 声明之外的 id 返 `ProviderError::Unavailable`——**同 `FakeTool`，来由见设计 §5.2**：
+    /// 工具侧没有 `UnknownModel` 那样的「不是我的」取值，故只能把「无此工具」报成一个
+    /// 瞬时类。**这是夹具的便利（照抄既有夹具的形状），不是被推荐的行为样例**——
+    /// 注册表要做的正是别让这种报法污染路由层的判据（`src/registry.rs` 的
+    /// `ToolCallError` 文档把这条记成历史缺陷／反模式）。本文件的用例都不走这一支。
     async fn describe_tool(&self, id: &ToolId) -> Result<ToolDescriptor, ProviderError> {
         self.touches.fetch_add(1, Ordering::SeqCst);
         if id == &self.id {
