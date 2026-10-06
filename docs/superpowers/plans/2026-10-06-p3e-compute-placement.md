@@ -788,17 +788,29 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
   **这一格是必需的**：没有它，一个「把所有制品都当 `LocalOnly` 一律拒掉」的实现
   能通过本表其余每一行——那正是 fail-closed 的反面（闸门静默拒绝一切）。
   **红的条件（档位：收紧）**：让闸门对所有等级都返回 `Err`——或**只把 `spec_floor` 对那四档**
-  也改成 `TrustedPersonalOnly`。**这一条会红**，而**同一条变异体还会红这些，逐条点名**
-  （本行初稿写「这一条与**下一条**」，**那是错的**——见下一条的说明）：
-  `the_gate_cannot_be_widened_by_any_caller_table` 的**四档臂**（它期望那两个 `Ok`）、
-  以及 **Task 6 里凡用 `Public` 制品的那几条**（`the_same_node_set_in_any_order_yields_the_same_node`、
-  `the_id_breaks_ties_when_the_policy_says_equal`、`swapping_the_policy_changes_the_result`
-  ——它们的夹具都是「`Public` 制品 ＋ 全 `AnyNode` 表」）。
-  **不会红的**：`a_caller_supplied_rule_can_tighten_the_gate`（它**本来就期望 `Err`**）、
-  `four_class_trust_combinations_and_only_one_passes`（全走 `LocalOnly`）、
-  `an_empty_artifact_set_filters_nothing` 与 `an_empty_artifact_set_returns_the_tiebreak_winner`
-  （制品集为空 ⇒ 闸门不看 `spec_floor`）、`duplicate_node_ids_are_a_named_error` 与
-  `an_empty_node_set_is_unplaceable`（期望的 `Err` 与该变异体同解）。
+  也改成 `TrustedPersonalOnly`。
+  **这一条会红；同一条变异体还会红下面这**两**处，逐条点名**（本行初稿写「这一条与**下一条**」，
+  那是错的：下一条本来就期望 `Err`。第一轮评审改成了「具名清单」，**但那份清单又多列了 Task 6 的
+  三条**——定点复核查出那三条的节点 `class` / `trust` 在本计划里从未写明，**预测因此悬空**；
+  本行按下面的夹具事实重写）：
+  - `a_public_artifact_may_land_on_a_cloud_node`（**本条自己**）：`nodes = [cloud]`，而云节点是
+    `Temporary / OutsidePersonalTrustDomain` ⇒ 变异后它过不了 `TrustedPersonalOnly` ⇒ `Err` ⇒ 红。
+  - `the_gate_cannot_be_widened_by_any_caller_table` 的 **(a) 臂的四个 `AnyNode` 档**
+    ——那一臂也是 `nodes = [cloud]`（同一情形）；**(b) 臂不红**：它是 `[cloud, desktop]`，
+    变异后 `desktop`（Personal / Trusted）仍在，故那四档仍得到 `Ok`。
+  **不会红的，逐条给出机制**（免得有人去查不存在的问题）：
+  - `a_caller_supplied_rule_can_tighten_the_gate`：它**本来就期望 `Err`**；
+  - `four_class_trust_combinations_and_only_one_passes`：全走 `LocalOnly`，`spec_floor` 没动；
+  - `an_empty_artifact_set_filters_nothing` 与 `an_empty_artifact_set_returns_the_tiebreak_winner`：
+    制品集为空 ⇒ 闸门连一档都不看；
+  - `duplicate_node_ids_are_a_named_error` 与 `an_empty_node_set_is_unplaceable`：期望的 `Err`
+    与该变异体同解；
+  - **Task 6 的三条**（`the_same_node_set_in_any_order_yields_the_same_node` /
+    `the_id_breaks_ties_when_the_policy_says_equal` / `swapping_the_policy_changes_the_result`）：
+    **它们的节点是 `desktop(...)`（`class = Personal`、`trust = TrustedPersonal`）**
+    ——那正是变异后仍然放行的那一类，故三条**全绿**。
+    **这一条与 Task 6 的夹具是钉死的一对**：Task 6 已把那三枚节点的 `class` / `trust` 写死为
+    `desktop(...)`；**若将来有人把那个夹具改成 `cloud(...)`，这份预测要同时改**。
 - `a_caller_supplied_rule_can_tighten_the_gate`（**放行侧的收紧面；裁定义务 1 的落点**）：
   `Secret` ＋ `rules_with(Secret, TrustedPersonalOnly)` ＋ `nodes = [cloud]` → **`Err(NoPlaceableNode)`**。
   **这一条钉的是「调用方的表真的被读」**：一个**完全不读 `policy.rules()`、只算
@@ -1019,9 +1031,30 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 > 升序 + 「`"c"` 标签最多」= **赢家是 `"a"`**，与同一段断言的 `"c"` 相抵。
 > 现取**降序**（标签多者在前），故下面的夹具里**标签最多的那一枚（`"c"`）胜出**。
 
+**本 task 共用的三枚节点，写死如下**（**三条用例用的是同一组，不再各造一组**）：
+
+| id | 工厂 | `class` | `trust` | `capabilities` 的标签数 |
+|---|---|---|---|---|
+| `"a"` | `desktop("a")` | `Personal` | `TrustedPersonal` | **0** |
+| `"b"` | `desktop("b")` | `Personal` | `TrustedPersonal` | **1** |
+| `"c"` | `desktop("c")` | `Personal` | `TrustedPersonal` | **3** |
+
+**两处先说清，免得后来者改错**：
+1. **`class` / `trust` 取 `desktop`（Personal / Trusted）是刻意的、且是承重的**：
+   本 task 要的是「三枚**都过闸门**」的节点，而 §4.4 的闸门只对 `LocalOnly` 收紧；
+   本 task 的制品是 `Public` ＋ `rules_all_any()`，故**四种 `class` × `trust` 组合都能过**
+   （两枚 × 两枚 = 4，与 Task 5 那条逐项用例的口径同）——取 `desktop` 是因为
+   **它与 Task 5 的工厂同名、语义最清楚**。
+   **但它对 Task 5 那条变异体的预测是承重的**：Task 5 的「`spec_floor` 对四档也改成
+   `TrustedPersonalOnly`」那条变异体下，**`desktop` 仍被放行 ⇒ 本 task 三条全绿**；
+   Task 5 的预测里已经写明这一点（并写明「若这里改成 `cloud(...)`，那份预测要同时改」）。
+   **改这一栏之前先读那一条。**
+2. **id 与标签数反向**：`"a"` 的 id 最小而标签最少、`"c"` 的 id 最大而标签最多——
+   于是**降序策略的赢家（`"c"`）与 id 升序的赢家（`"a"`）是两个不同的节点**，
+   这正是下面「确定性」与「兜底档」两条各自可观察的前提。
+
 - `the_same_node_set_in_any_order_yields_the_same_node`（**确定性**）：
-  三枚**都过闸门**的节点（`Public` 的制品 ＋ `rules_all_any()`），id 取 `"a"` / `"b"` / `"c"`，
-  `capabilities` 的标签数分别取 **0 / 1 / 3**（即 `"c"` 最多）。
+  上表那三枚（`Public` 的制品 ＋ `rules_all_any()`），
   用 `ByCapabilityCount` 策略，把同一组节点按**三种不同顺序**放进 `nodes`，各调一次 `place`，
   **断言三次返回的是同一枚**（`"c"`，**策略的序**所指定的那一枚）。
   **红的条件（档位：移除）**：删掉步骤 4 的 `sort_by` 那一行 → 三次返回三枚不同的节点，红。
@@ -1031,6 +1064,7 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
   把方向改成升序（或把夹具的标签数配反）**必须同时改这一处**，否则照写必红
   （同 `swapping_the_policy_changes_the_result` 的「两次不同」也会一并失去意义）。
 - `the_id_breaks_ties_when_the_policy_says_equal`（**兜底档**）：
+  **上表那三枚**（`desktop("a")` / `desktop("b")` / `desktop("c")`），
   `BaselinePlacementPolicy`（`compare` 恒 `Equal`），nodes 按 `"c"` / `"a"` / `"b"` 的顺序给，
   → `Ok(n)` 且 **`n.id() == ComputeNodeId::new("a")`**（id 升序的最小者）。
   **红的条件（档位：移除）**：删掉 `.then_with(|| a.id().cmp(b.id()))` → `sort_by` 是**稳定**排序，
@@ -1038,8 +1072,8 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
   **第二种（档位：取反）**：把兜底档反过来（`b.id().cmp(a.id())`）→ 返回 `"c"`，红。
   **夹具的承重点**：输入的第一个元素**不是** id 最小的那一个（否则两种实现不可区分）。
 - `an_empty_artifact_set_returns_the_tiebreak_winner`（**§9「无制品」那一行的后一半**）：
-  `artifacts = []` ＋ 三枚节点（**按 `"c"` / `"a"` / `"b"` 的顺序给**）＋ `BaselinePlacementPolicy`
-  → 返回 id 最小的那一枚 `"a"`。
+  `artifacts = []` ＋ **上表那三枚**（**按 `"c"` / `"a"` / `"b"` 的顺序给**）
+  ＋ `BaselinePlacementPolicy` → 返回 id 最小的那一枚 `"a"`。
   **与 Task 5 的同名用例的分工写明**：那一条钉「不过滤」（单枚节点，Ordering 无关），
   这一条钉「返回的是兜底档选中的那一枚」（多枚节点）。
   **红的条件（档位：移除）**：删掉 `.then_with(|| a.id().cmp(b.id()))` → 稳定排序保留输入序
@@ -1049,7 +1083,7 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
   据实合并成一条并记在报告里**——不为了凑两处而留两条等价用例
   （照 G 的计划 Task 11 对「三处观测点」的同一处置）。
 - `swapping_the_policy_changes_the_result`（**策略可替换**）：
-  同一组节点（**沿用上一条的夹具**：`"a"` 0 个标签、`"b"` 1 个、`"c"` 3 个）、同一组制品，跑两次：
+  **上表那三枚**（`"a"` 0 个标签、`"b"` 1 个、`"c"` 3 个，`class` / `trust` 同上表）、同一组制品，跑两次：
   一次 `BaselinePlacementPolicy`（全 `Equal`，由兜底档给出 id 最小者 `"a"`），
   一次 `ByCapabilityCount`（**降序**，标签多者在前 → `"c"`）；**断言两次不同**且各是各的那一枚。
   **它钉的是「排序真的读策略」，不钉「哪个策略对」**（设计 §9 那一行的口径逐字如此）。
