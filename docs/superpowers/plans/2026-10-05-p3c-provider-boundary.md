@@ -674,6 +674,22 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
   `matches!(_, Err(ToolCallError::Unregistered { .. }))`，**且不是 `Provider(..)`**。
   **这条只钉路由本身**（本文件的 `db()` 照用，但**不调 `register_tool`**）；「`tool` 表有行、注册表无适配器」那一向
   是**另一个命题**，它在 Task 5，**不在这里重复**。
+
+  > **订正注记（2026-10-06，Task 4 实现者实测 + 协调者裁定采纳偏离）。**
+  > **原文照留**：上面那半句「本文件的 `db()` 照用，但**不调 `register_tool`**」。
+  > **它错在哪**：照它办，**这条守卫就失去了主语**——注册表里一个适配器都没有时，
+  > 「先逐个问遍所有适配器、再判未命中」与「直接查表判未命中」这两版**问的是零个适配器**，
+  > 于是那个本该被抓的**变异体退化成了等价变异体**（纪律 1(b)：举不出「这两版在哪个入参上会给出不同结果」），
+  > **永远绿**——而派单要求它在变异下必须红。
+  > **实现改成**：该用例**登记一个服务于另一个 id 的 `RecordingTool`**（它记录自己有没有被调用），
+  > 断言 `invoke_tool` 仍返回 `Unregistered` **且 `recorder.touches() == 0`**。
+  > 「被测 id 无适配器」这一条**没有被削弱**；被钉住的命题仍是**路由**那一件事，
+  > 对 `tool` 表**仍是零主张**（本用例要避开的「`tool` 表有行、注册表无适配器」那一向仍在 Task 5，不在此重复）。
+  >
+  > **判据（本项目通用，不限于本条）**：**凡「某条用例不构造 X」这类指令，先问一句
+  > 「**不构造它之后，我要钉的那个变异体还区分得出来吗**」**——把 X 拿掉如果让变异体**退化**
+  > （两版在所有入参上给出同一结果），**那条守卫就等于没写**，而它在报告里仍会显示为绿。
+  > 「为了让用例隔离，就不构造某样东西」是这类指令的常见形态，代价往往就落在变异体上。
 - `the_adapter_failure_is_reported_as_provider`：适配器 `invoke` 返 `Err(ProviderError::Transport(..))` →
   `matches!(_, Err(ToolCallError::Provider(_)))`，**且不是 `Unregistered`**。
 - `the_adapter_is_handed_the_authorization_that_was_passed_in`：适配器侧读
