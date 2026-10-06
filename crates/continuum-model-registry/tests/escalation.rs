@@ -28,21 +28,40 @@
 
 use continuum_model_registry::{EscalationStep, next_step};
 
-/// §251 的五档**逐档点名**，且「恰好这五枚」是**编译期**事实。
+/// §251 的五档**逐档点名**——且本用例钉的全是**编译期**事实，**没有一条运行期断言**。
 ///
 /// 设计 `:586-587` 定本类型**没有落库编码**（不进任何列），故这里**没有字面量可钉**。
-/// 能钉的是变体本身，分两层：
+/// 于是能钉的只剩**拼写**，而「拼写」有两种钉法，本用例只取后者：
 ///
-/// 1. **逐档**：下面五次 `assert_eq!` 各点名一枚变体并对 [`name`] 的映射取值。五次**不抽代表**；
-///    每次都能被一个**仍然编得过**的变异体打红——改 [`name`] 里**那一枚自己的臂**即可
-///    （例：`Tier2High => "Tier2"`），故每次都是**守卫**（有具名变异体）而不是恒真断言。
-/// 2. **恰好五枚**：[`name`] 的 `match` **穷尽且无 `..`**。加第六枚变体时它**编译不过**
-///    （E0004 non-exhaustive patterns）——**这才是「恰好五枚」的照片**。
-///    若只写一张五元素清单（例如一个 `[EscalationStep; 5]`），那只是把五枚**抄一遍**，
-///    加第六枚时清单照样编得过、用例照样绿：抄写不是钉。
+/// # 为什么删掉了字符串比较（原稿的五条 `assert_eq!`）
+///
+/// 「`EscalationStep::Tier1` 的拼写是 `"Tier1"`」是一句关于**测试自己**的话：它**没有实现侧的变异体**
+/// ——改 `src/` 里任何一行都不会让它红（唯一能让它红的是改测试自己那几行）。按本项目刚定的守卫判据
+/// （*B 是守卫 ⟺ 存在仍能编译的具名变异体 M，使 M 下 B 之前断言全过、B 失败*），它**不是守卫**。
+///
+/// **留下这样一条断言、只在注释里写「它没有实现侧变异体」，是最坏的一种**：一句关于测试自己的话
+/// 留在原地，后来者会重新把它误标成守卫（**这是假绿的书面背书**）。
+/// 记录拼写用**注释**比用**恒真断言**更诚实——故这里只**点名**，不比较。
+///
+/// # 编译期锚点（本用例真正钉住的东西）
+///
+/// [`name`] 的 `match` **穷尽且无 `..`**，且对五枚变体**逐一具名调用**。这给出两条**编译期**事实：
+///
+/// - **改名**任一枚变体（例：`Tier2High`）→ 本测试文件编译不过（E0599：`match` 的臂与下面的调用
+///   都指向一个不存在的变体）；
+/// - **新增第六枚变体** → [`name`] 的 `match` 编译不过（E0004 non-exhaustive patterns）。
+///
+/// 若只写一张五元素清单（例如一个 `[EscalationStep; 5]`）而不写这个 `match`，那只是把五枚**抄一遍**，
+/// 加第六枚时清单照样编得过、用例照样绿：**抄写不是钉**。
+///
+/// # 逐档的**运行期**照片不在这里
+///
+/// 简报 Step 1 要的「逐档运行期断言」由 [`next_step_walks_the_ladder_in_order`] 承担：它对五档各一条，
+/// **每条都能被 `src/` 侧的具名变异体打红**（变异 (a)(b) 两轮已证）。本用例**不重复承担**这件事
+/// ——同一个性质在两处各写一遍，只会让「红在哪一处」变模糊。
 #[test]
 fn the_ladder_has_exactly_the_five_steps_of_251() {
-    /// 逐枚点名。**无 `..`**：新增变体即 E0004（见测试文档第 2 层）。
+    /// 逐枚点名。**无 `..`**：新增变体即 E0004；改名任一变体即 E0599（见测试文档）。
     fn name(step: EscalationStep) -> &'static str {
         match step {
             EscalationStep::Tier1 => "Tier1",
@@ -53,11 +72,13 @@ fn the_ladder_has_exactly_the_five_steps_of_251() {
         }
     }
 
-    assert_eq!(name(EscalationStep::Tier1), "Tier1");
-    assert_eq!(name(EscalationStep::Tier2), "Tier2");
-    assert_eq!(name(EscalationStep::Tier2High), "Tier2High");
-    assert_eq!(name(EscalationStep::CrossFamily), "CrossFamily");
-    assert_eq!(name(EscalationStep::Specialized), "Specialized");
+    // 五枚逐一具名调用——**编译期锚点**（改名即 E0599），**不比较**返回值（比较是没有实现侧
+    // 变异体的恒真断言，见测试文档）。五次**不抽代表**。
+    let _ = name(EscalationStep::Tier1);
+    let _ = name(EscalationStep::Tier2);
+    let _ = name(EscalationStep::Tier2High);
+    let _ = name(EscalationStep::CrossFamily);
+    let _ = name(EscalationStep::Specialized);
 }
 
 /// §251 的阶梯是**有序**的：`Tier1 → Tier2 → Tier2High → CrossFamily → Specialized`。
