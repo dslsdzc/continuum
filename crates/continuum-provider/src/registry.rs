@@ -41,8 +41,11 @@ pub enum RegistryError {
 /// **为什么需要第二个错误类型**：`invoke_tool` 的失败有两个不同来源——「这个 id 没有适配器」
 /// （路由，配置缺陷）与「适配器调用失败」（可能瞬时）；一个 `Result` 只能带一个错误类型，
 /// 把两者压进 `ProviderError` 就是把「配置错了」报成「provider 挂了」——而那件事在本仓
-/// 已经发生过一次（`crates/continuum-provider/tests/fake_provider.rs` 的 `FakeTool::describe_tool`
+/// 已经发生过一次（`crates/continuum-provider/tests/common/mod.rs` 的 `FakeTool::describe_tool`
 /// 把「无此工具」报成 `Unavailable`，设计 §5.2 记的正是这一处）。
+/// **原引 `crates/continuum-provider/tests/fake_provider.rs` 的 `FakeTool`，2026-10-07 订正**——
+/// `FakeTool` 在 Task 2 已搬进 `tests/common/mod.rs`，`fake_provider.rs` 今天只有 `FakeModel` 一侧
+/// （该文件里既无 `describe_tool` 也无 `Unavailable`），旧路径是**死引用**。
 ///
 /// `list_tools()` 是已登记适配器各自 `list_tools()` 的并集、**不按 id 查**，
 /// 故 [`ToolCallError::Unregistered`] 在它那条路径上不可达（设计 §3.5 的订正段）。

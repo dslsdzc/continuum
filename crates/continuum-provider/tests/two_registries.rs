@@ -7,7 +7,7 @@
 //!
 //! - `a_tool_in_the_table_without_an_adapter_passes_authorize_then_fails_to_route`（第一向）：
 //!   表里有行、注册表里没有适配器 → `authorize` **通过**而路由**未命中**、报 `Unregistered`；
-//! - `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`（第二向）：
+//! - `an_adapter_without_a_row_in_the_table_fails_authorize`（第二向）：
 //!   注册表里有适配器、表里当时没有行 → `authorize` 在**任何调用之前**报 `UnknownTool`。
 //!
 //! **本文件两向都不承担「路由机制」与「注册表被碰过几次」这两条守卫**（协调者裁定
@@ -105,8 +105,14 @@ async fn a_tool_in_the_table_without_an_adapter_passes_authorize_then_fails_to_r
 /// `authorize` 报 `UnknownTool`，且发生在 `invoke_tool` **之前**——没有授权就构造不出
 /// 调用。「注册表在这条路径上没被碰过」这句**在此处没有断言**：计数由本用例自身的控制流
 /// 决定（下面压根不发调用），没有实现变异能移动它，故按守卫判据不写（见文件头）。
+///
+/// **改名（2026-10-07）**：本用例原名
+/// `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`。
+/// **`_before_any_call` 那半自 `072ac71` 起就没有断言**（它的那条断言删了，来历在文件头），
+/// 名字却还宣称它钉着——名字与断言不符。故去掉那半，**只留断言得到的那半**。
+/// 旧名照留在此处为来历：计划（Task 5 段、变异表、Step 2 的表）与 Task 9 的 brief 里引的都是旧名。
 #[test]
-fn an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call() {
+fn an_adapter_without_a_row_in_the_table_fails_authorize() {
     let (_dir, db) = db();
     let mut registry = ProviderRegistry::new();
     // 服务哪个 id 由**登记**给出，不看适配器自己声明什么（`FakeTool` 声明的是 `echo`）——
