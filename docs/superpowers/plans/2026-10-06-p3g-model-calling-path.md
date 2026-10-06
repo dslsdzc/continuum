@@ -926,7 +926,8 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 ///
 /// **第二个参数是那枚值本身，不是它的类型名**（见 Task 7 的自定说明 2）：设计 §3.1 的代码块
 /// 只写了 `candidate: &ExecutionCandidate`，而句柄在 ②③ 之间被丢了——`ModelStream` 也**不带句柄**
-/// （`crates/continuum-core/src/model.rs:89-92`），故发起与中止两侧都必须另收一枚。
+/// （`crates/continuum-core/src/model.rs:93-96` 只有 `call: CallId` 与 `chunks`），
+/// 故发起与中止两侧都必须另收一枚。
 /// **本计划据此在 `call` / `call_stream` / `abort` 的参数表里各加一枚 `&Arc<dyn ModelProvider>`。**
 ///
 /// **不收 `ModelId`**（设计 §2.2）：id 只有一处来源——`candidate.model()`。
@@ -1008,7 +1009,7 @@ git commit -m "feat(runtime): 发起模型调用与截止"
   一个「drop 即取消」的实现在**适配器侧什么也没做**（drop 不产生任何远端动作），
   而它会让**向二**照样绿——**只钉向二等于没钉**。
 - `aborting_a_stream_calls_cancel_with_the_streams_own_call_id`（**向二**）：
-  经 G 的中止入口 `abort(&stream, &adapter)` → 断言
+  经 G 的中止入口 `abort(&adapter, &stream)` → 断言
   (a) 适配器的 `cancel` **被调用了一次**，(b) 收到的 `CallId` **== `stream.call`**。
   **三个断言缺一不可**（「被调用」「恰好一次」「是那一个」）——
   只断「被调用」时，一个 `cancel(&CallId::new(""))` 的实现会绿。
@@ -1052,7 +1053,9 @@ pub async fn call_stream(
 
 /// 中止一条流。**G 的中止入口**——`ModelStream` 自己不带适配器句柄，故它另收一枚。
 /// 语义是**幂等、尽力而为**（C §5.3 定案）：不把「这个 `CallId` 已完成」判成错误。
-pub async fn abort(stream: &ModelStream, adapter: &Arc<dyn ModelProvider>)
+/// **参数序与 `call` / `call_stream` 一致**：句柄在前、被作用的那个值在后
+/// （设计 §3.1 的代码块即是此序；本计划初稿写成 `(stream, adapter)`，**已按设计改齐**，2026-10-06）。
+pub async fn abort(adapter: &Arc<dyn ModelProvider>, stream: &ModelStream)
     -> Result<(), ModelCallError>;
 ```
 
@@ -1296,7 +1299,11 @@ git commit -m "docs(runtime): P3 子项目 G 的收尾与复核"
 
 **设计侧的落点**：`docs/superpowers/specs/2026-10-06-p3g-model-calling-path-design.md` §3.1
 （代码块 + 正文第 3、4、6、7 条 + `Candidate` / `CallPlan` 两枚随行类型的声明 + `Deadline` 口径）。
-**本计划的 task 正文与它现已一致**，无需改动 Task 6–9 的签名。
+**本计划的 task 正文与它现已一致，只差一处签名**：`abort` 的参数序本计划初稿写成
+`(stream, adapter)`、与设计 §3.1 的 `(adapter, stream)` **相反**，**已按设计改齐**
+（Task 9 的签名与用例两处，2026-10-06）。
+**订正**：本行初稿写的是「**无需改动 Task 6–9 的签名**」——**那句为假**：
+**只要参数序不一致，就是签名不一致**（序是签名的一部分）。其余四处形状无需改动 Task 6–9。
 
 ```
 （以下四段是**当时的判据**，作来历照留；设计作者已据此把口径写回设计正文。）
@@ -1332,10 +1339,16 @@ RouteInput 没有生命周期参数         设计 §3.1 写 `RouteInput<'_>`，
 ```
 G 的测试必须裸 SQL 播 D 的画像行    **→ 已回写设计 §11 前置二**：设计明写「**接受这条耦合，不向 D 要
                                   播种入口**」，并写清「接受的是什么」（D 的列名与 JSON 容器编码）、
-                                  「它是有意的耦合 + 护栏」、「射程」（**加列不会红**，只有改掉 G
-                                  依赖的那些列名/编码才红），三条替代为何更坏，收件人是谁。
+                                  「它是有意的耦合 + 护栏」、「射程」（**加「可空或带默认值」的列不会红**，
+                                  只有改掉 G 依赖的那些列名/编码、以及**新增一列必填的列**才会红，
+                                  因为 G 按列名写的 `INSERT` 会缺一个值），
+                                  三条替代为何更坏，收件人是谁。
                                   **本计划的那句「D 的表变一次，G 的夹具会静默失配」要按射程收窄**：
-                                  改列名/编码时它**不静默**（夹具会红）；只有「加列」时不红，而加列无害。
+                                  改列名/编码时它**不静默**（夹具会红）；只有「加可空/带默认值的列」时不红，
+                                  而那种加列无害。
+                                  **（订正，2026-10-06 复核指出）**：本行上一版写的是「加列不会红」/「加列无害」
+                                  ——**射程宽了一格**：新增一列**必填且无默认值**的列时，G 的 `INSERT`
+                                  照样红。决定红不红的是**那一列要不要值**，不是「按不按列名写」。
                                   **收件人：D 的实现者（表结构变更须通知）＋ G 的实现者**（设计 §14 第 18 条）。
 
 ModelCallError 的落点依赖 F          **→ 已回写设计 §10.2 的订正段**：设计把那句「F 已放好了」标为假
