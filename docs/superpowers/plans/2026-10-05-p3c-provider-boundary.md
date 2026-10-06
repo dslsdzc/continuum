@@ -942,6 +942,22 @@ git commit -m "feat(provider): invoke_tool——工具侧唯一受门禁的调�
   `Err(CapabilityError::UnknownTool { .. })`，**在 `invoke_tool` 之前**。
   断言里写明：这条路径上 `ProviderRegistry` 一次都没被碰过。
 
+  > **订正注记（2026-10-07，终审后的改名）。** **原话照留**：上面那一行的用例名
+  > **`an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`**。
+  > **改名后是 `an_adapter_without_a_row_in_the_table_fails_authorize`**（**去掉 `_before_any_call`**）。
+  > **理由**：**那个名字声称的比断言多**——承载「`before_any_call`」那半的断言
+  > （`recorder.touches() == 0` 等）**已在 `072ac71` 被按「恒真」删掉**，而**函数自己的文档
+  > 早就写着那一半没有断言**。**类型 / 断言改了它不会报错**——名字不在编译器管得着的地方。
+  > **旧名留在函数文档里作来历。**
+  >
+  > **判据（本计划通用，写在此处一次）**：**用例名也是一种断言——它声称的东西必须与断言实际覆盖的
+  > 相等。** **当断言被删 / 收窄而名字没跟上时，名字就成了最持久的一句假话**：它出现在计划、报告、
+  > 别人的引用里，而**没有任何工具会因为它不对而报错**（与「绝对措辞须有用例」是同一族，只是
+  > 这一族的载体是**标识符**，改断言时最容易漏）。
+  > **与「两种红，判据相反」那段的互指**：那一段讲的是**步骤顺序不成立时红从哪来**，
+  > 本条讲的是**名字与断言射程不等**——**同属「文档声称的比事实多」那一族**，只是缺口的载体不同
+  > （那边是步骤，这边是标识符）。
+
   > **订正注记（2026-10-06，Task 5 独立评审 + 本计划的产物瑕疵）。** **原话照留**：上面那半句
   > 「**断言里写明：这条路径上 `ProviderRegistry` 一次都没被碰过**」——**正是这一句生出了两条非守卫的断言**。
   > 按它写出来的实现（评审前的版本）在第二向里放了 `RecordingTool` 与
@@ -1166,7 +1182,7 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 > | 4 | `tests/registry_tools.rs` | `an_unregistered_tool_id_is_reported_as_unregistered` 里那处 |
 > | 5 | `tests/registry_tools.rs` | `list_tools_reports_an_adapter_failure_as_provider` 里那处 |
 > | 6 | `tests/registry_tools.rs` | `describe_tool_routes_by_registration_not_by_the_adapters_list_tools` 里那处 |
-> | 7 | `tests/two_registries.rs` | `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` 里那处 |
+> | 7 | `tests/two_registries.rs` | `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` 里那处（**该用例 2026-10-07 已改名为 `…_fails_authorize`——去掉 `_before_any_call`**，理由见 Task 5 Step 1 那条注记） |
 >
 > **正文原先只点了 `fake_provider.rs` 那一处**（在 Step 1 里），其余六处没有任何指令**——
 > 它们是**编译错误逼出来的**（`FakeTool` 不再是单元结构体，`Arc::new(FakeTool)` 一处都过不去）。
@@ -1454,7 +1470,7 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 工具侧：门禁内的正常路径 | Task 4 `a_registered_tool_is_invoked_and_its_result_returned`；**新请求类型的两条性质也由它与其兄弟用例观测**（Task 4 的 `the_adapter_is_handed_the_authorization_that_was_passed_in`） |
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | Task 7 两条（**钉夹具，不钉真实适配器**） |
 | 两个登记点不一致，向一 | Task 5 `…passes_authorize_then_fails_to_route` |
-| 两个登记点不一致，向二 —— 前一半：`authorize` 报哪一种 `Err` | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call`——断言 `Err(CapabilityError::UnknownTool { id })`（**设计该行的前半**） |
+| 两个登记点不一致，向二 —— 前一半：`authorize` 报哪一种 `Err` | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize`（**2026-10-07 由 `…_fails_authorize_before_any_call` 改名**——旧名声称的比断言多，理由见 Task 5 Step 1 那条注记）——断言 `Err(CapabilityError::UnknownTool { id })`（**设计该行的前半**） |
 | 两个登记点不一致，向二 —— 后一半：**「在 `invoke_tool` 之前」** | **结构事实（读类型签名）**：`invoke_tool` 只收 `&AuthorizedTool`，而 `AuthorizedTool` 的唯一铸造通道是 `authorize`（P3A 的性质，其照片在 capability 侧）——**没有授权就构造不出调用**，故**没有可写的运行用例**。**不标为有照片**（与 `cancel` 行同形）。Task 5 曾用 `recorder.touches() == 0` 拍它，而**那条断言是恒真的**（计数由本用例自身的控制流决定），已按守卫判据删除，**来历见 `crates/continuum-provider/tests/two_registries.rs` 文件头那段（按内容找，行号会漂）** |
 | 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，**换写法的逃逸（例如那几种）**写在文件头——**不是封闭枚举** |
 | 模型侧未登记 id | Task 1 `an_unregistered_model_id_is_reported_as_not_found` |
