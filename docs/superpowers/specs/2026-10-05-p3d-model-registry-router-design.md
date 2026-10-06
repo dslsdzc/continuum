@@ -314,7 +314,8 @@ P3A 把 §87 的 `cost` / `latency` / `trust` 留成了**单位结构体**（只
 ### `trust`：**D 不接，退件**（P3A 把三个字段一并判给 D，本设计只接两个）
 
 P3A 设计 §3.1 把 `cost` / `latency` / `trust` **三个一起**写成「服务子项目 D 的候选排序」
-（`crates/continuum-capability/src/tool.rs:171`、`:229`）。本设计**只接 `Cost` / `Latency`**，`trust` 退件，
+（`crates/continuum-capability/src/tool.rs:112-113` 与 `:178-179` 两处文档；`Trust` 本身的定义在 `:229-251`）。
+本设计**只接 `Cost` / `Latency`**，`trust` 退件，
 理由三条，都是本设计自己文档里的判据而不是偏好：
 
 1. **§247 的 `ModelProfile` 没有信任字段。** 十二个字段逐项核过（§2.1 的表）：`id`、`version`、`provider`、
@@ -417,7 +418,7 @@ pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
 
 ## 3.3 迁移编号
 
-已占用（`crates/continuum-runtime/src/main.rs:57-65` 的装配集合）：`1`、`2`（P0 内建）、`10`（artifact）、
+已占用（`crates/continuum-runtime/src/main.rs:83-93` 的 `runtime_migrations()` 装配集合）：`1`、`2`（P0 内建）、`10`（artifact）、
 `20`（graph）、`30`（workspace）、`40`（effect）、`41`（policy）、`50`（P3A capability）——共 8 条。
 「前几位是十位一档」是本仓的既有取法（P3A 计划第 441 行）。
 
@@ -436,7 +437,7 @@ pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
   **故本设计不声称 `80` 在全仓未被占用**——它只声称 `80` 在 `runtime_migrations()` 的集合里未被占用，
   且这一点由 `crates/continuum-runtime/tests/migrations.rs` 的 `migration_versions_are_unique` 逐条断言。
 - B、C 若已取 `80`，实现时重编。此协调点记在 §11 第 14 条（现按裁定收敛为「核对」）。
-- 注册由用它的那个 task 完成，`expected_migrations()`（`crates/continuum-runtime/tests/migrations.rs:30`）
+- 注册由用它的那个 task 完成，`expected_migrations()`（`crates/continuum-runtime/tests/migrations.rs:29`）
   与 `startup.rs` 的计数断言随之更新——**这是两份转录，不是重复**，该文件的注释说明了理由。
 
 ---
