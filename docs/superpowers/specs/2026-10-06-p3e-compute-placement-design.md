@@ -65,9 +65,22 @@
 > 2. 初稿原文写「`ExecutionProfile.compute_node`（§246）｜**本仓零命中**（无该类型、无该字段）
 >    ｜`grep -rn "ExecutionProfile" crates/` 无命中」。**该类型与字段都存在**：
 >    `crates/continuum-graph/src/execution.rs:20`／`:25`，同日定稿的兄弟设计（G 的设计 `:673`）
->    正引着它。**来历（为什么没查出来）**：初稿那次 `grep` 带了 `| head -20`，
->    而同一行模式里还有 `NodeId`——**前 20 条命中全是 `NodeId`，`ExecutionProfile` 的命中被截断了**，
->    于是「被截断」被当成了「零命中」。**「零命中」是一句可实跑的断言，截断过的输出不能作它的证据。**
+>    正引着它。**来历（为什么没查出来）**：初稿那次查的**不是**上面那句单独的
+>    `grep -rn "ExecutionProfile" crates/`，而是**一条把六个模式并起来的 grep、
+>    末尾接了 `| head -20`**（用于一次查多件事）：
+>
+>    ```
+>    grep -rn "compute_node\|ExecutionProfile\|NodeId\|TrustDomain\|trust_domain" --include="*.rs" crates/ | head -20
+>    ```
+>
+>    那一跑的前 20 条命中**全是 `NodeId`**，`ExecutionProfile` 与 `compute_node` 的命中
+>    **被 `head -20` 截断在视野之外**，于是「被截断」被当成了「零命中」。
+>    **「零命中」是一句可实跑的断言，截断过的输出不能作它的证据。**
+>    **订正（2026-10-06，定点复核要求；原话照留）**：本段初稿把那条命令写成
+>    「`grep -rn "ExecutionProfile" crates/`」——**与它自述的来历不相容**：那条命令
+>    **不可能**匹配出 `NodeId` 行，故「前 20 条命中全是 `NodeId`」在它之下不成立。
+>    本仓规矩是「把错误说法的来历留在原地」，而**一个不成立的来历比没有来历更坏**——
+>    后来者会信它，并据此以为「单查一个词也会被截断」。上框内是**当时真跑的那条**。
 >    **后果**：§8 第 1 条的「没有端到端照片」原本以「类型不存在」为理由，理由作废（§8 第 1 条已重述）；
 >    §10 第 14、15 条的前提同时作废（两条已重写）。
 >
@@ -520,9 +533,18 @@ fn strictest(a: TransferRule, b: TransferRule) -> TransferRule {
 
 | 通道 | 机制 | 判据 / 照片 |
 |---|---|---|
-| **(a) 枚举穷尽** | `spec_floor` 对 `PrivacyClass` 的 `match` **穷尽且无通配臂**。加第六档时本函数编译不过，必须逐档归类 | 与 `PrivacyClass::as_str` 同形（`crates/continuum-artifact/src/artifact.rs:112-124` 的注释明写「加档时本函数编译不过，编码不会漏分支」）。**这条不是运行期可拍的**，据实记在 §8 第 5 条。 |
+| **(a) 枚举穷尽** | `spec_floor` 对 `PrivacyClass` 的 `match` **穷尽且无通配臂**。加第六档时本函数编译不过，必须逐档归类 | 与 `PrivacyClass::as_str` 同形：`crates/continuum-artifact/src/artifact.rs:110-111` 的注释明写「加档时本函数编译不过，编码不会漏分支」（函数体在 `:119`）。**这条不是运行期可拍的**，据实记在 §8 第 5 条。 |
 | **(b) 表覆盖** | 调用方给的 `PlacementRules` **必须覆盖五档**，缺档即构造期 `Err`（见下） | 照片：只给四档的 `try_new` 返回 `Err(MissingLevel { level })`；给重复档返回 `Err(DuplicateLevel { level })` |
-| **(c) 字符串解码** | **E 从不经字符串读隐私等级**——进来的就是 `PrivacyClass` 值 | 唯一解码点是 `PrivacyClass::parse`（`artifact.rs:129`），表外串返回 `None`，落库侧把它翻成 `PersistError`（`persist.rs:120-123`）。故「未知等级」到不了 E。列 NOT NULL 使得「没有等级」也不可表达（`persist.rs:15`） |
+| **(c) 字符串解码** | **E 从不经字符串读隐私等级**——进来的就是 `PrivacyClass` 值 | 唯一解码点是 `PrivacyClass::parse`（`artifact.rs:137`），表外串返回 `None`，落库侧把它翻成 `PersistError`（`persist.rs:120-123`）。故「未知等级」到不了 E。列 NOT NULL 使得「没有等级」也不可表达（`persist.rs:15`） |
+
+> **行号订正（2026-10-06，定点复核查出；原话照留）**：本节初稿在这三处引的是
+> `artifact.rs` 的 `:112`／`:129`／`:112-124`。**四个号全错**——它们指向的是**同文件里
+> `ArtifactType` 的那一套**（`as_str` 在 `:47`、`parse` 在 `:68`），而 `PrivacyClass` 的那一套在
+> `:119`／`:137`，注释在 `:110-111`。**来历**：这四个号是**上一轮**从我这里写下的，且被复审的
+> 「清白清单」判为「逐条属实」而**未被重取**——即一次错误的背书让错号躲过了一轮核对；
+> 本轮由定点复核逐条重取后改正。**教训与 §1.2 的订正块同族**：`file:line` 无论写在哪一份文件里
+> （被评审的设计、还是评审报告），**都要自己打开那一行**。**订正不放宽任何断言**：三条通道的
+> 机制与结论一字未动。
 
 > **注**：本行初稿引的是 `persist.rs:14`——**那一行是 `producer_node TEXT,`，是那张表里唯一可空的列**
 > （M1，2026-10-06 评审查出）；`NOT NULL` 在 `:15` 的 `privacy_class TEXT NOT NULL,`。已改。
@@ -738,9 +760,13 @@ pub enum PlacementError {
 判据是 `p3bcdf-followups.md` §四.4 的裁决：「**否定式照片在本仓是被接受的**」——
 F 的 P-19 与 B 的「不写审计」照片都是这一形状。
 
-**D 侧需要的访问器，本设计一个都不缺**（不因删字段而变）：`selected()`／`model()`／`state()`／
-`compatibility()`／`confidence()`／`reason()` 都已存在（`crates/continuum-model-registry/src/router.rs`
-工作树的 `:403`、`:355-376`），且 `RoutingReason` 的四个访问器也在（`:302-318`）。
+**D 侧需要的访问器——本节这一段是前瞻，不是今天的依赖**（2026-10-06，定点复核要求标明）：
+删掉字段之后 **E 对 D 零依赖**（§7.2），故下面这一段的**消费方是「将来若取读法 (b)」那个时点的 E**，
+**不是今天的 E**——今天没有任何一行代码读它们，写在这里是为了说明「若那一天到来，D 侧不缺面，
+缺的只是 E 侧那个字段与一条真会读它的用例」（与 §10 第 8 条的翻转条件同一条）。
+`selected()`／`model()`／`state()`／`compatibility()`／`confidence()`／`reason()` 都已存在
+（`crates/continuum-model-registry/src/router.rs` 工作树的 `:403`、`:355-376`），
+且 `RoutingReason` 的四个访问器也在（`:302-318`）。
 **本设计不请求 D 新增任何面，也不再请求 D 提供任何面**——若复审判定该边必须以 (b) 兑现，
 那要新增的是 D 侧的**回退接口**，届时应由复审重新提出，而不是由本设计预先占位。
 
@@ -845,8 +871,9 @@ continuum-artifact  ──→ continuum-node
 ## 7.3 `ALLOWED` 表与 workspace 成员
 
 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 需要**新增一条**，
-按字母序放在 `continuum-model-registry` 与 `continuum-persist` 之间
-（字母序：`artifact` < `model-registry` < `node` < `persist`）：
+放在 `continuum-model-registry` 之后（**该表整体不是字母序**：`continuum-persist` 在 `:28`，
+排在 `continuum-events` 之后、`continuum-provider` 之前；本条目按「新条目跟在同族的
+`continuum-model-registry`（`:129-136`）之后」放，与已登记各条的相邻关系一致）：
 
 ```rust
     // P3 子项目 E：计算节点与放置。设计 §7.2 的唯一一条边是 artifact（`Artifact` /
@@ -874,10 +901,13 @@ continuum-artifact  ──→ continuum-node
 
 - **§243 的主语是 Scheduler**（`docs/spec/05-normative.md:731`），而 §304
   （`docs/spec/05-normative.md:1973-1985`）把 Resource Scheduler 的四项职责列出来。故放置的隐私裁决归 E。
-  **订正（2026-10-06，评审查出；原话照留）**：本行初稿写「§304 **把 Resource Scheduler 定在第 4 层**」
-  ——**§304 全文没有「第 4 层」这四个字**，它只列四项职责；层号来自 `docs/02-工程.md` 的 §4.2
-  （`:435`「Resource Scheduler 落在第 4 层」）与 §9.1 的层号。这是「引文不说所引之事」，
+  **订正（2026-10-06，评审查出；原话照留；节号于同日定点复核再订正）**：本行初稿写「§304
+  **把 Resource Scheduler 定在第 4 层**」——**§304 全文没有「第 4 层」这四个字**，它只列四项职责；
+  层号来自 `docs/02-工程.md` 的 **§7.2 组件边界**（标题在 `:433`）里那一句
+  `:435`「Resource Scheduler 落在第 4 层」，与 §9.1 的层号。这是「引文不说所引之事」，
   **结论（§243 的主语是 Scheduler、故归 E）不受影响**，改的是出处。
+  **这一处订正自身也曾挂错节号**：初稿这一句写「§4.2（`:435`）」，而行号 `:435` 落在 **§7.2** 之下
+  ——一处以「引文不说所引之事」为内容的订正，自己犯了同一件事。已按实读改正。
 - **策略层的 `PolicyContext` 里没有节点侧的事实**：它的事实集是 `explicit_current` / `privacy_class` /
   `effect_type` / `task_class` / `duration_ms`（`context.rs:31-39`），
   没有 `NodeClass`、没有 `NodeTrust`。故它今天**表达不出**「这一档等级 × 这一类节点」这个二元判定。
@@ -920,7 +950,7 @@ continuum-artifact  ──→ continuum-node
    故拍不到「临时节点只拿到了该拿的」。
 5. **§5.4 通道 (a) 的枚举穷尽**：它是一条**编译期**性质（加档时红），
    没有运行期照片——不能为了拍它去改 `PrivacyClass`。据实记，
-   同形先例是 `PrivacyClass::as_str` 的注释（`artifact.rs:112-124`）。
+   同形先例是 `PrivacyClass::as_str` 的注释（`artifact.rs:110-111`）。
 6. **§342.7「Temporary Node 不得自动进入 Personal Trust Domain」**：Authority 不存在，
    信任标签由调用方给（§3.3 限度 2），故拍不到「它没被自动放进去」。
 7. **§93 的 data movement cost**：locality 无输入（§5.7），故拍不到「搬运成本被算进去了」。
@@ -934,6 +964,7 @@ continuum-artifact  ──→ continuum-node
 | **判据 §4.4**：混合节点集下 `LocalOnly` 只落在 personal 且被信任的节点上 | 给定 `[云节点(temporary, outside), 桌面(personal, trusted)]`，断言 `place` 返回的那个，并逐项断言它的 `class() == Personal` 与 `trust() == TrustedPersonal` |
 | **判据 §4.4 的否定面** | 节点集只有云节点时返回 `Err(NoPlaceableNode)`（**上面一条与这一条是成对的**，单看任一条分不清两种 `Err`） |
 | **放行侧（I1，2026-10-06 评审查出后补）** | `Public` 的制品 ＋ 表里 `Public` 那一档写 `AnyNode` ＋ 节点集**只有云节点** → **`Ok`**，断言返回的正是那枚云节点（顺带断言 `class() != Personal`）。**这一格是必需的**：没有它，一个「把所有制品都当 `LocalOnly` 一律拒掉」的实现能通过本表其余每一行——那正是 fail-closed 的反面（闸门静默拒绝一切）。**上面两行钉「该拒的拒」，这一行钉「该放的放」。** |
+| **调用方收紧（2026-10-06 定点复核补，I1 的走查发现本表缺这一侧）** | `Secret` 的制品 ＋ 表里 **`Secret` 那一档写 `TrustedPersonalOnly`** ＋ 节点集**只有云节点** → 断言 **`Err(NoPlaceableNode)`**。**这一格钉的是「调用方的表真的被读」**：一个**完全不读 `policy.rules()`、只算 `spec_floor(level)`** 的实现，在 `Secret` 上得 `AnyNode`，故会返 `Ok` ⇒ **在这一格自己的断言上变红**。**同时它是 §10 第 2 条那句「那四档的宽严完全取决于调用方」的照片**——没有这一格，那句话既无照片、又在「不读表」的实现下为假。**本表里唯一读 `policy.rules()` 的一格**：其余各格或是 `LocalOnly`（`spec_floor` 已钉死）、或是「五档全 `AnyNode`」（与不读表同解）、或走 `compare`／`try_new`／第一步判重，**在那个变异体下都仍为绿**——故它是那条变异体的唯一红点。**实施期须把该变异体真跑一遍**，红点须落在本行的断言上。 |
 | **闸门不可被策略放宽** | 五档**全写** `AnyNode` 的 `PlacementRules`：`LocalOnly` 的制品仍只落在 `TrustedPersonalOnly` 那一类节点上（**逐档遍历**，不是只测 `LocalOnly` 一档）。**顺带钉住 §5.4 的那句话**：`LocalOnly` 那一格被 `spec_floor` 覆盖，填什么都一样 |
 | **请求面不依赖 Router 输出（C4 裁定要求的反侧照片）** | `tests/placement.rs` 里有一枚样例，**只给 `artifacts` 与 `nodes`** 就把 `PlacementRequest` 建出来并调用 `place` ——**不调 `rank`、不构造任何候选集**：裁定原文要的是「删字段之后它必须**仍然编得过、跑得过**」，「这就是『零读取』这件事的照片」。这是否定式照片（`p3bcdf-followups.md` §四.4 判它在本仓可接受）。**与其余各行不重复**：那些行断言的是给定 `nodes`／`artifacts` 时闸门的行为，这一行断言的是**请求的构造本身**不需要任何候选值 |
 | **注册表不引 artifact（M4 的守卫）** | 源码文本断言：`src/registry.rs` 里不出现 `continuum_artifact` / `Artifact` / `PrivacyClass` 三个名字。**证明力的边界**：匹配的是字面拼法，别名与全限定路径逃逸——是下界不是封闭判定（与 C 设计 §4.1 末段同形）；更硬的一层是 `ALLOWED` 的逐对断言（本 crate 整体） |
@@ -967,6 +998,13 @@ continuum-artifact  ──→ continuum-node
    **本设计不指定谁产生它**。**订正（2026-10-06，评审查出；I3）**：本条初稿只点了 `data_policy`，
    **漏了紧挨着它的 `node_policy`**（`docs/spec/05-normative.md:224-226` 三行相邻）——
    一个节点侧组件对规范里的节点策略槽一字未提。**它与 `PlacementRules` 是不是同一件事，逐条见 §10 第 16 条。**
+   **本条与第 16 条的口径对齐（2026-10-06，定点复核要求）**：**本条是「表的值规范没给」，
+   第 16 条是「这张表与 §224 的 `node_policy` 是不是同一件事」——两条都不选、都不倾向**。
+   并列读时请勿把「候选产生方」一栏读成已经倾向「是同一件事」：那一栏列的是**候选人**，
+   与第 16 条的「两种读法都不选」是同一口径，不是两个口径。
+   **照片**：上面那句「那四档的宽严完全取决于调用方」由 §9 的「**调用方收紧**」一格拍
+   （`Secret` ＋ `TrustedPersonalOnly` ＋ 只有云节点 → `Err(NoPlaceableNode)`）——
+   **2026-10-06 定点复核查出：本节初稿那句话没有照片**，且在一份「不读表」的实现下**为假**。
    **阻塞范围**：阻塞「保证的完整」，不阻塞接口冻结。
 3. **§287 的 `trust` 无取值域**：本设计取二值（§3.3）。若规范给出更细的分级，`NodeTrust` 要重取，
    且**放行方向会变**——`LocalOnly` 的闸门逐值归类，加值时必须重新归（§5.4 通道 (a)）。
@@ -1028,7 +1066,7 @@ continuum-artifact  ──→ continuum-node
     无需动作）**。**阻塞范围**：不阻塞 E，且本条不构成任何待办。
 13. ~~**本设计不落库、不取迁移号**（§4.2）~~ —— **已删（2026-10-06，评审查出）**：
     这一条是**§4.2 已经作出的裁决**，不是一条未决项；把一条已作的裁决再列进遗留，
-    会让后来者以为「要不要落库」还开着。**处置：从本表删去**——**原话以删除线留原地**
+    会让后来者以为「要不要落库」还开着。**处置：判删，原位留删除线记录**
     （照本仓「订正把原话与来历留在原地」的惯例），**编号不重排**，以免与复审报告、
     上一版设计与 `docs/superpowers/2026-10-06-p3e-decisions.md` 引的编号错位。
     **§4.2 的正文一字未动**，那里仍是它的落点。
