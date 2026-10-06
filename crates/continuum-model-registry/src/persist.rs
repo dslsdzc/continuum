@@ -3,9 +3,23 @@
 //! 表定义与行级读写同址（同 P3A 的 `continuum-capability/src/persist.rs`）。
 //! Task 5 落迁移：`p3d_model_migrations()` 建出 §3.1 的三张表。Task 6 落
 //! **`model_registry` 一表的行级读写**：`register_model` / `load_lifecycle` /
-//! `transition_in_tx`（设计 §3.2）。**`model_profile` / `model_skill_score` 两表的行级读写
-//! 仍由后续 task 落进本文件**（`save_profile` / `load_profile` / `save_skill_observation` /
-//! `load_skill_vector` / `load_skill_series`）。
+//! `transition_in_tx`（设计 §3.2）。Task 7 落 **`model_profile` 一表的行级读写**
+//! （[`save_profile`] / [`load_profile`]）与它上面那道「画像早于 verified 被拒」的闸门
+//! （设计 §4.3）。**`model_skill_score` 一表的行级读写仍由后续 task 落进本文件**
+//! （`save_skill_observation` / `load_skill_vector` / `load_skill_series`）。
+//!
+//! # §22 的「初步画像」本层不落，这是决定不是遗漏
+//!
+//! §22 的流水线是「读官方文档 → 搜 model card → 收集 benchmark → 收集公开 failure mode →
+//! **生成初步画像** → 执行 Active Probe → Verifier → 生成正式 Profile」
+//! （`docs/spec/01-concepts.md:1022-1066`）。初步画像**先于** probe，而本层的 `model_profile`
+//! 行只在 `probed → verified` 时产生（[`save_profile`] 的闸门），故**初步画像没有落库的落点**。
+//!
+//! **不落它是决定**：初步画像的全部内容来自公开资料、**样本数为零**；把它作为一个可路由的画像
+//! 存下来，就是给一个从未实测的模型一个与实测画像同形的身份，而那正是 §21「新增模型不能直接
+//! 进入自动 Router」要拦的。**它的效果由 §247 的两个字段承载**——`evidence_count` 与
+//! `confidence`：初步阶段二者分别是「证据条数」与「低置信」，正式画像生成时一并写入
+//! （设计 §4.3）。
 //!
 //! # 三处判据
 //!
@@ -29,11 +43,42 @@
 //! 枚举列的落库编码（`lifecycle_state` 取 [`crate::LifecycleState::as_str`]、`dimension` 取
 //! [`crate::SkillDimension::as_str`]）挂在各自的类型上，**不在本文件另建一份表**（全局约束）。
 
+use continuum_capability::{Cost, Latency};
 use continuum_core::model::ModelId;
+use continuum_core::tool::ToolId;
 use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
 
 use crate::error::LifecycleError;
 use crate::lifecycle::{LifecycleState, transition};
+use crate::profile::{ModelProfile, Ratio, SkillVector};
+
+/// `model_profile` 的列清单（设计 §3.1 的建表 SQL 是权威取值；顺序与建表语句一致）。
+///
+/// 只写一份：按 id 读是唯一的读路径，[`row_to_profile`] 的下标按它数。
+/// **`save_profile` 的 `INSERT` 列名不引用本常量**（那是 SQL 文本的一部分），
+/// 故两处列序只能靠用例钉：`tests/persist.rs` 的
+/// `the_model_profile_columns_are_exactly_the_eleven_columns` 钉**声明序**，
+/// `a_profile_round_trips_field_by_field` 钉**列内容**——读回来的字段值必须等于手写字面量
+/// （它同时钉住了读路径的下标与写路径的列序，两处写串都在那里变红）。
+const PROFILE_COLUMNS: &str = "id, version, provider, model_revision, modalities, tools, \
+                               failure_modes, cost_profile, latency_profile, evidence_count, \
+                               confidence";
+
+/// 画像**已产出**、允许存正式画像的六态（设计 §4.3）。
+///
+/// 三个异常态（`stale` / `degraded` / `quarantined` / `disabled`）在允许集里：它们改的是画像的
+/// **可用性**，不是撤销它——§249 只禁它们进入自动路由，没说不许有画像。**逐项列出**而不是
+/// 写成「`verified` 之后都行」：拒绝集 `{discovered, unprofiled, researched, probed}` 与它
+/// 互不相交且合并即为十态（`tests/persist.rs` 的
+/// `saving_a_profile_before_verified_is_rejected_with_the_state` 对十态逐项断言）。
+const PROFILE_ALLOWED_STATES: [LifecycleState; 6] = [
+    LifecycleState::Verified,
+    LifecycleState::Active,
+    LifecycleState::Stale,
+    LifecycleState::Degraded,
+    LifecycleState::Quarantined,
+    LifecycleState::Disabled,
+];
 
 /// 本 crate 注册的迁移：§3.1 的三张表全在**一条**迁移里。
 ///
@@ -166,4 +211,256 @@ pub fn transition_in_tx(
         &[Value::text(to.as_str()), Value::text(id.as_str())],
     )?;
     Ok(from)
+}
+
+/// 画像的写入点：**先读登记项的当前状态**，不在 [`PROFILE_ALLOWED_STATES`] 内即
+/// [`LifecycleError::ProfileBeforeVerified`]（设计 §4.3）。
+///
+/// # 返回类型是 `LifecycleError` 而不是 `PersistError`
+///
+/// 设计 §3.2 把本函数记成 `-> Result<(), PersistError>`，而 §4.1 / §4.3 要求它返回
+/// `Err(LifecycleError::ProfileBeforeVerified { state })`——**两处相抵，`PersistError` 装不下
+/// 那枚变体**（它是 `LifecycleError` 的成员，`PersistError` 没有对应臂）。取 §4.1 / §4.3 那一侧：
+/// 闸门是本函数存在的理由，签名装不下闸门的错误值即签名错。落库本身的失败经
+/// `#[from]` 升格成 [`LifecycleError::Persist`]，故这一枚没丢信息。**这是计划侧要改的一处**
+/// （已在本 task 报告里报回）。
+///
+/// # 闸门为什么读库而不是收一个状态参数
+///
+/// 收状态参数就等于把「当前状态是什么」交给调用方声称——那是设计 §4.2 判为纸保证的那类做法。
+/// 读与写在同一事务里（`Tx` 由调用方开），故「读到的状态」与「写下的那一行」是同一时刻的库。
+///
+/// # 未登记的模型（`load_lifecycle` 给 `None`）
+///
+/// **不在本函数里报错**，直接落到 `INSERT`：`model_profile.id REFERENCES model_registry(id)`
+/// 会拒绝这一行（`Db::open_with` 开了 `PRAGMA foreign_keys=ON`），失败升格成
+/// [`LifecycleError::Persist`]。照片是 `tests/persist.rs` 的
+/// `a_profile_for_an_unregistered_model_is_rejected`。**不静默创建登记项**——登记是
+/// [`register_model`] 的活（同 [`transition_in_tx`] 对 `UnknownModel` 的处置）。
+///
+/// # 裸 `INSERT`，不是 `OR REPLACE`
+///
+/// 同 [`register_model`]：同 id 的第二次写入由主键拒绝，判据在库层而非调用方自查
+/// （设计 §3.1 第 2 条）。画像**何时**该被改写（重新 profiling）是 §82 的事，本层不替它开口子。
+///
+/// # 三个列表列与两个存在性列
+///
+/// 三个列表列取 JSON 字符串数组（**容器**；`tools` 的元素取 [`ToolId::as_str`]），
+/// 空数组落 `"[]"` 而**不是 `NULL`**——三个列都是 `NOT NULL`，且「空数组」与「没有这一列」
+/// 是两件事。`cost_profile` / `latency_profile` 走 P3A 的存在性编码（设计 §2.5）：
+/// `None` → `NULL`（尚未登记画像），`Some(个体)` → 该个体的 [`Cost::as_str`] / [`Latency::as_str`]。
+///
+/// # 第十二个字段 `skill_vector` **不写在这里**
+///
+/// 画像有十二个字段，而 `model_profile` 只有**十一列**——`skill_vector` 落
+/// `model_skill_score` 那张键控时间序列表（同一维度多个版本，一个列装不下）。
+/// 故本函数**不按十二列写 SQL**，`skill_vector` 由 `save_skill_observation`（后续 task）写。
+pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), LifecycleError> {
+    if let Some(state) = load_lifecycle(tx, profile.id())? {
+        if !PROFILE_ALLOWED_STATES.contains(&state) {
+            return Err(LifecycleError::ProfileBeforeVerified { state });
+        }
+    }
+    // `None`（未登记）走到这里：闸门判不了（没有状态可读），由外键拒绝这次写入。
+
+    tx.execute(
+        "INSERT INTO model_profile
+           (id, version, provider, model_revision, modalities, tools, failure_modes,
+            cost_profile, latency_profile, evidence_count, confidence)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        &[
+            Value::text(profile.id().as_str()),
+            Value::text(profile.version()),
+            Value::text(profile.provider()),
+            Value::text(profile.model_revision()),
+            Value::text(encode_string_list(profile.modalities(), "modalities")?),
+            Value::text(encode_tool_ids(profile.tools())?),
+            Value::text(encode_string_list(profile.failure_modes(), "failure_modes")?),
+            presence(profile.cost_profile().map(|cost| cost.as_str())),
+            presence(profile.latency_profile().map(|latency| latency.as_str())),
+            Value::Int(profile.evidence_count() as i64),
+            Value::text(profile.confidence().as_str()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 按 id 读一份画像。**没有这一行返回 `Ok(None)`**，不是 `Err`（同 [`load_lifecycle`]；
+/// 设计 §2.1 把这条反例定为「画像必须来自库」的照片）。
+///
+/// # 读回来的画像里 `skill_vector` 是**空的**
+///
+/// 不是默认值，也不是本函数漏读一列：`skill_vector` 根本不在 `model_profile` 表里
+/// （见 [`save_profile`] 末节）。它由 `load_skill_vector` 单独装载（后续 task），
+/// 消费方把两份合起来用。**本函数不替它拼**——拼一次就等于有第二个「画像从哪来」的路径，
+/// 而那正是设计 §2.1 要掐掉的东西。故 `try_new` 收到的是
+/// [`SkillVector::from_current`] 的空向量（九维全 `None`，即「尚无观测」——`None` 不是 0）。
+///
+/// # 表外取值一律具体 `Err`
+///
+/// 三个列表列不是 JSON 字符串数组、`cost_profile` / `latency_profile` 不是 `Cost` / `Latency`
+/// 的那一个字面量、`confidence` 不是 `[0,1]` 内的十进制串（[`Ratio::parse`] 给 `None`）、
+/// `evidence_count` 是负数——**逐条转成具体 `Err`，不取默认值**：把表外串猜成某一枚会成为
+/// 第二份表示（同 `LifecycleState::parse` 的理由）。非文本的列值另报
+/// [`PersistError::ColumnType`]。
+pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError> {
+    let rows = tx.query(
+        &format!("SELECT {PROFILE_COLUMNS} FROM model_profile WHERE id = ?1"),
+        &[Value::text(id.as_str())],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    row_to_profile(&row).map(Some)
+}
+
+/// 一行 → 画像。列序与 [`PROFILE_COLUMNS`] 一一对应。
+///
+/// 十二条字段里读十一条列：`skill_vector` 由空向量填（理由见 [`load_profile`]）。
+fn row_to_profile(row: &[Value]) -> Result<ModelProfile, PersistError> {
+    let id = ModelId::new(text_at(row, 0)?);
+    let modalities = decode_string_list(&text_at(row, 4)?, "modalities")?;
+    let tools = decode_tool_ids(&text_at(row, 5)?)?;
+    let failure_modes = decode_string_list(&text_at(row, 6)?, "failure_modes")?;
+
+    let cost_profile = match optional_text_at(row, 7)? {
+        None => None,
+        Some(raw) => Some(decode_literal(&raw, "Cost", Cost::parse)?),
+    };
+    let latency_profile = match optional_text_at(row, 8)? {
+        None => None,
+        Some(raw) => Some(decode_literal(&raw, "Latency", Latency::parse)?),
+    };
+
+    let raw_evidence = int_at(row, 9)?;
+    let evidence_count = u64::try_from(raw_evidence).map_err(|_| {
+        PersistError::Database(format!("evidence_count 是负数：{raw_evidence}"))
+    })?;
+    let confidence = decode_literal(&text_at(row, 10)?, "Ratio", Ratio::parse)?;
+
+    Ok(ModelProfile::try_new(
+        id,
+        text_at(row, 1)?,
+        text_at(row, 2)?,
+        text_at(row, 3)?,
+        modalities,
+        tools,
+        // 第十二个字段不在这张表里（见 `load_profile`）：空向量 = 九维都尚无观测。
+        SkillVector::from_current(Vec::new()),
+        failure_modes,
+        latency_profile,
+        cost_profile,
+        evidence_count,
+        confidence,
+    ))
+}
+
+/// 存在性编码（同 P3A 的 `tool.cost`）：`None` → `NULL`（尚未登记画像），
+/// `Some(字面量)` → 该字面量。 [`Cost::as_str`] / [`Latency::as_str`] 都是**空串**
+/// （取值域为空，设计 §3.1），故这里的空串**不是**「空 / 未知 / 未登记」——「未登记」是 `NULL`。
+fn presence(literal: Option<&str>) -> Value {
+    match literal {
+        Some(s) => Value::text(s),
+        None => Value::Null,
+    }
+}
+
+/// 自由文本列表列的容器编码：JSON 字符串数组。
+///
+/// 选 JSON 数组的理由与三个列的存在理由同在（设计 §3.1 第 3 条）：元素是自由文本，
+/// 定长分隔符在有取值域的那天会撞上取值本身。**只做容器**——元素的编码不在这里。
+fn encode_string_list(items: &[String], column: &str) -> Result<String, PersistError> {
+    serde_json::to_string(items)
+        .map_err(|e| PersistError::Database(format!("{column} 不可序列化为 JSON: {e}")))
+}
+
+/// [`encode_string_list`] 的逆。**容器坏了才报错**：元素是自由文本，没有表外取值可言。
+fn decode_string_list(raw: &str, column: &str) -> Result<Vec<String>, PersistError> {
+    serde_json::from_str(raw).map_err(|e| {
+        PersistError::Database(format!("{column} 不是字符串数组（{raw}）: {e}"))
+    })
+}
+
+/// `tools` 列的容器编码：JSON 字符串数组，元素取 [`ToolId::as_str`]。
+///
+/// 与 [`encode_string_list`] 分开写，是因为元素类型不同（[`ToolId`] 而不是 `String`）——
+/// 合起来要一个「转成串」的闭包，而那样调用点就看不出元素取的是哪个编码函数。
+fn encode_tool_ids(tools: &[ToolId]) -> Result<String, PersistError> {
+    let names: Vec<&str> = tools.iter().map(ToolId::as_str).collect();
+    serde_json::to_string(&names)
+        .map_err(|e| PersistError::Database(format!("tools 不可序列化为 JSON: {e}")))
+}
+
+/// [`encode_tool_ids`] 的逆。[`ToolId::new`] 收自由文本，故没有表外取值这一类失败。
+fn decode_tool_ids(raw: &str) -> Result<Vec<ToolId>, PersistError> {
+    let names: Vec<String> = serde_json::from_str(raw)
+        .map_err(|e| PersistError::Database(format!("tools 不是字符串数组（{raw}）: {e}")))?;
+    Ok(names.into_iter().map(ToolId::new).collect())
+}
+
+/// 按各类型自己那一对 `as_str` / `parse` 解码一个标量列，`parse` 给 `None` 即具体 `Err`。
+///
+/// 三个标量列（`cost_profile` / `latency_profile` / `confidence`）的处置形状相同，
+/// 差异只有类型名与那个 `parse` 函数，故收在一处：**「不取默认值」这条判据只写一遍**。
+fn decode_literal<T>(
+    raw: &str,
+    type_name: &str,
+    parse: impl FnOnce(&str) -> Option<T>,
+) -> Result<T, PersistError> {
+    parse(raw).ok_or_else(|| PersistError::Database(format!("未知 {type_name}: {raw}")))
+}
+
+/// 按下标取列，用 `convert` 把该列的 [`Value`] 收窄到 `T`（同 P3A 的同名函数）。
+///
+/// **`PersistError::ColumnType` 只在本函数里构造一处**：三个具体取列函数只提供各自的
+/// `convert`。收窄不了的两种情形靠 `actual` 区分：列在但类型不符记该值的 [`kind_name`]，
+/// 列缺失（`convert` 根本没被调到）记 `"missing"`。
+fn column_at<T>(
+    row: &[Value],
+    index: usize,
+    convert: impl Fn(&Value) -> Option<T>,
+) -> Result<T, PersistError> {
+    row.get(index)
+        .and_then(convert)
+        .ok_or_else(|| PersistError::ColumnType {
+            index,
+            actual: row.get(index).map_or("missing", kind_name),
+        })
+}
+
+fn as_text(v: &Value) -> Option<String> {
+    match v {
+        Value::Text(s) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn as_int(v: &Value) -> Option<i64> {
+    match v {
+        Value::Int(i) => Some(*i),
+        _ => None,
+    }
+}
+
+/// `NULL` 收窄成 `Some(None)`（「该列是空的」也是一个可观察的结果，不是收窄失败），
+/// 文本收窄成 `Some(Some(text))`，其余 `None`（收窄失败）。
+fn as_optional_text(v: &Value) -> Option<Option<String>> {
+    match v {
+        Value::Null => Some(None),
+        Value::Text(s) => Some(Some(s.clone())),
+        _ => None,
+    }
+}
+
+fn text_at(row: &[Value], index: usize) -> Result<String, PersistError> {
+    column_at(row, index, as_text)
+}
+
+/// `NULL` → `None`，文本 → `Some`，其余报错。
+fn optional_text_at(row: &[Value], index: usize) -> Result<Option<String>, PersistError> {
+    column_at(row, index, as_optional_text)
+}
+
+fn int_at(row: &[Value], index: usize) -> Result<i64, PersistError> {
+    column_at(row, index, as_int)
 }

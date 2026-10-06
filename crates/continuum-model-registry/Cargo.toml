@@ -20,6 +20,10 @@ continuum-capability = { path = "../continuum-capability" }
 # （设计 §3.3）。后续 task 的行级读写经 `Tx` / `Value` / `PersistError`（设计 §3.2、
 # §8.2）。这条边**由用它的那个 task 登记**（就是本 task），不推给别处。
 continuum-persist = { path = "../continuum-persist" }
+# Task 7 起的使用点：`persist.rs` 的 `modalities` / `tools` / `failure_modes` 三个列表列
+# 取 JSON 字符串数组作**容器**（设计 §3.1 第 3 条），与 P3A 的 `tool.required_capabilities`
+# 同形。**只做容器**：元素的编码仍挂在各自类型上（`ToolId::as_str` 等）。
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # Task 3 起的使用点：`tests/type_level.rs` 用编译失败样例钉住「画像 crate 外构造不出来」

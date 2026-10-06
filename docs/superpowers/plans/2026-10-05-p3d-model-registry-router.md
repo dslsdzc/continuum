@@ -788,7 +788,9 @@ cargo test -p continuum-model-registry --test persist
 
 ```rust
 /// 画像的写入点。**读登记项的当前状态**，不在允许集内即 `Err(ProfileBeforeVerified { state })`。
-pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), PersistError>;
+/// **返回 `LifecycleError` 而不是 `PersistError`**：闸门的那枚变体装不进后者（见 `## 遗留`
+/// 的「save_profile 的返回类型」一条）——设计 §3.2 与 §4.1/§4.3 两处相抵，此处取后者的判据。
+pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), LifecycleError>;
 pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError>;
 ```
 
@@ -1383,8 +1385,12 @@ FailureClass 的映射     落在策略一侧、今天形状未定）；**映射
 的 Some                 D 复用的是两个**类型**（落在模型画像上），不读 `ToolProfile`；
                       而 §4.1 里**没有「工具选择」这个组件**。**规范未给判据**。
                       收件人：协调者（在四份之间指派）＋ 规范维护者。
-#[allow(dead_code)]     **本仓首次出现这个豁免，共两处，都在 `crates/continuum-model-registry/src/profile.rs`**：
-的两处豁免             (a) `ModelProfile::try_new` 在非测试构建下无调用方（`load_profile` 要等 Task 7）；
+#[allow(dead_code)]     **已闭（Task 7）**：两处豁免都已从源码里删掉，上面的判据照办——Task 7 的
+的两处豁免             `save_profile` 要用满十二个字段，故五个字段各补了**真访问器**，`try_new`
+（已闭）               也由 `load_profile` 在普通构建下调用；两处都不再需要豁免，**没有留下
+                      「这个字段真的没人读」这类待复核项**。下面为原稿（照留，作这条决定的来历）：
+                      **本仓首次出现这个豁免，共两处，都在 `crates/continuum-model-registry/src/profile.rs`**：
+                      (a) `ModelProfile::try_new` 在非测试构建下无调用方（`load_profile` 要等 Task 7）；
                       (b) `ModelProfile` 的五个字段无访问器（读数方是 Router，在 Task 11 及之后）。
                       **接受的理由**：0 warning 是硬约束，而替代方案「提前铺五个访问器」＝**建了没人用的 API**，
                       那比这条豁免更坏。**但它会永久掩盖「这个字段真的没人读」**——故：
@@ -1429,6 +1435,14 @@ transition_in_tx 的取名  落库版迁移函数在本计划里叫 `transition_
                       改名理由：内存版 `lifecycle::transition` 已在 crate 根导出，两个同名函数
                       在同一个导出面里冲突。**属计划自定，记此申报**；若复审要把两处收敛成一个名字，
                       须同时决定导出面的形状（根上只导内存版、落库版经 `persist::` 调用）。
+save_profile 的返回类型   **设计自相抵**：§3.2 把 `save_profile` 记成 `-> Result<(), PersistError>`，
+                      §4.1 / §4.3 却要求它返回 `Err(LifecycleError::ProfileBeforeVerified { state })`
+                      ——`PersistError` 里没有装得下那枚变体的臂（它是 `LifecycleError` 的成员）。
+                      **Task 7 的落地**：取 §4.1 / §4.3 那一侧，签名是
+                      `Result<(), LifecycleError>`（落库失败经 `#[from]` 升格成 `LifecycleError::Persist`，
+                      故没有丢信息）。本计划的 Task 7 Step 3 代码块会给成 `-> Result<(), PersistError>`，
+                      **那处是照抄设计 §3.2、已按本条订正为 `LifecycleError`**。
+                      **收件人：设计作者（§3.2 的签名要改）＋ 复审者。**
 register_model 的落态     设计 §3.2 的注释写「§21 发现即登记」，§4.3 的表却把「`discovered → unprofiled`」
                       的触发方记为登记方（`register_model`）。本计划按 §3.2 取「登记后落在 `discovered`」，
                       两处的措辞差别记此，**不自行挑一边改设计**。收件人：设计作者 ＋ 复审者。

@@ -59,12 +59,13 @@ pub enum ProfileError {
 ///
 /// # 四枚变体的到位情况
 ///
-/// 设计 §4.1 列了四枚（`Illegal` / `ProfileBeforeVerified` / `UnknownModel` / `Persist`）。
-/// Task 4 落 `Illegal`（内存版 `transition` 的失败值）；Task 6 随落库读写补上
-/// `UnknownModel { id }` 与 `Persist(#[from] PersistError)`（`persist::transition_in_tx` 的两个
-/// 失败来源：没有登记项可改、以及读写出错）。
-/// **`ProfileBeforeVerified` 仍未落地**：它的产生方是 `save_profile`（Task 7）——
-/// **没有产生方的变体不先铺开**，一枚永不出现的变体会让 `match` 的穷尽臂说谎。
+/// 设计 §4.1 列了四枚（`Illegal` / `ProfileBeforeVerified` / `UnknownModel` / `Persist`），
+/// 四枚按产生方先后到场：Task 4 落 `Illegal`（内存版 `transition` 的失败值）；Task 6 随落库
+/// 读写补上 `UnknownModel { id }` 与 `Persist(#[from] PersistError)`
+/// （`persist::transition_in_tx` 的两个失败来源：没有登记项可改、以及读写出错）；
+/// Task 7 随 `save_profile` 补上 `ProfileBeforeVerified { state }`。
+/// **没有产生方的变体不先铺开**——一枚永不出现的变体会让 `match` 的穷尽臂说谎。
+/// 四枚到齐后，`LifecycleError` 的每个变体都至少有一条产生方照片（计划「三条纪律」第 3 条）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum LifecycleError {
     /// 迁移对不在 §4.1 的表里。`from` / `to` 原样带出（形状取自 `continuum-graph` 的同名变体
@@ -76,6 +77,25 @@ pub enum LifecycleError {
         from: LifecycleState,
         to: LifecycleState,
     },
+
+    /// 存画像时，登记项的当前状态**尚未产出正式画像**（设计 §4.1、§4.3）。
+    ///
+    /// `state` 原样带出**读到的那个十态值**（不是收窄后的类型）：调用方要判的是「还差几步」，
+    /// 而允许集与拒绝集互不相交，故带出十态不损失精度。
+    ///
+    /// # 允许集与拒绝集（十态的一个二分，不是抽样）
+    ///
+    /// 允许集 `{verified, active, stale, degraded, quarantined, disabled}`——画像已产出，
+    /// 三个异常态只是改了它的**可用性**，不是撤销它。拒绝集
+    /// `{discovered, unprofiled, researched, probed}`——画像流水线尚未走完。
+    /// 依据是 §22 的顺序「生成初步画像 → 执行 Active Probe → Verifier → **生成正式 Profile**」：
+    /// 正式画像在 Verifier 之后，故 `probed` 及以前都不许有正式画像行。
+    ///
+    /// # 产生方只有 [`crate::persist::save_profile`]
+    ///
+    /// 内存里没有「当前状态」这一维可供判定，故这枚变体的产生方是落库写入点。
+    #[error("登记项处于 {state:?}，画像流水线尚未走完，不能存正式画像（§4.3）")]
+    ProfileBeforeVerified { state: LifecycleState },
 
     /// 登记项不存在，没有状态可迁移。`id` 原样带出。
     ///

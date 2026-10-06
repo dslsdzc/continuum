@@ -150,6 +150,7 @@ dependencies = [
  "continuum-capability",
  "continuum-core",
  "continuum-persist",
+ "serde_json",
  "tempfile",
  "thiserror",
  "trybuild",

@@ -371,21 +371,19 @@ pub fn current_observation(series: &[SkillObservation]) -> Option<&SkillObservat
 /// **§247 的十二个字段里没有它们中的任何一个**，故一处都不加（设计 §2.1、§2.5，
 /// §11 第 7 / 23 条；`trust` 的退件理由见设计的 §2.5 末节）。
 ///
-/// # 五个字段今天没有读取方，故带 `#[allow(dead_code)]`
+/// # 不设 `dead_code` 豁免（曾经有两处，来历留在这里）
 ///
-/// `version` / `provider` / `model_revision` / `latency_profile` / `cost_profile` 这五个字段
-/// 的访问器**按设计 §2.1 「随消费方增补、不预先铺开」**，故它们今天没有读取方，而本 crate 是库、
-/// 字段私有，`dead_code` 会如实报 `fields ... are never read`（实测，见本 task 报告），
-/// 「0 warning」又是硬约束。这是**计划的**状态，不是遗骸——消费方随 `load_profile`（Task 5）
-/// 等后续 task 接上，**那时这一行必须删掉**：留着会让将来真正多余的字段也静默。
+/// Task 3 落地时本类型带两处 `#[allow(dead_code)]`，理由是「五个字段没有访问器、
+/// `try_new` 在非测试构建下没有调用方」（计划 §遗留 的那条，明写「Task 11 及其后接上读数
+/// 之后必须复核并从源码里去掉」）。**Task 7 已把两处都去掉**：
+/// 写入点 `persist::save_profile` 要用满十二个字段，故五个字段各补了**真访问器**
+/// （[`Self::version`] / [`Self::provider`] / [`Self::model_revision`] /
+/// [`Self::latency_profile`] / [`Self::cost_profile`]），`try_new` 也由
+/// `persist::load_profile` 在非测试构建下调用。**剩下的读取方一个不缺**，若将来又出现
+/// `dead_code` 警告，那是要处置的发现（删字段或写明为什么留），不是可以再压豁免的事。
 ///
-/// **不派生任何 trait 来压这个警告。** 派生的 `PartialEq` / `Clone` impl 确实会读这些字段、
-/// 从而让警告消失（实测：`#[derive(Debug)]` 单独不起作用，加 `PartialEq` 才消失），
-/// 但今天**没有任何一处比对或克隆整份画像**——用一个没有消费方的派生去换警告消失，
-/// 就是给「声明了没有消费方的东西」编理由（`AuthorizedTool` 删掉 `Clone` / `PartialEq` / `Eq`
-/// 正是同一条判据，见 `crates/continuum-capability/src/registry.rs:24-33`）。
-/// 故这五个字段的读取方要么是**真访问器**，要么就是这个如实写明的豁免。
-#[allow(dead_code)]
+/// **本类型不派生 `PartialEq` / `Clone`** 这条判据不变：至今没有一处比对或克隆整份画像
+/// （[`crate::persist`] 的往返用例逐字段比对，用的是访问器）。
 pub struct ModelProfile {
     id: ModelId,
     version: String,
@@ -408,16 +406,12 @@ impl ModelProfile {
     /// [`SkillObservation`]），到这一步没有可再失败的判据——故不发明一个永不会出现的 `Err`
     /// （设计 §2.4 末段：构造失败在构造期就被拒）。
     ///
-    /// # 为什么带 `#[allow(dead_code)]`
+    /// # 不加 `dead_code` 豁免
     ///
-    /// 本函数在**非测试**构建里目前没有调用方：唯一的生产路径 `persist::load_profile` 是
-    /// Task 5 的产物。crate 内测试是它的调用方，但那些在 `cfg(test)` 之下，压不住普通构建的
-    /// `dead_code` 警告。三条路的取舍：删掉它，crate 内测试就构造不出画像（字段私有）；
-    /// 改成 `pub`，直接推翻本类型唯一的保证（见类型文档）；留 `allow` 并写明理由——
-    /// 与 P3C 计划第 229 行对同类情形的处置同形（「0 warning」是硬约束）。
-    /// **Task 5 接上 `load_profile` 之后这一行应当删掉**：那时它有真调用方，`allow` 会变成
-    /// 一条掩盖真死代码的豁免。
-    #[allow(dead_code)]
+    /// Task 3 落地时本函数在**非测试**构建里没有调用方（`persist::load_profile` 尚未写），
+    /// 故当时带 `#[allow(dead_code)]` 并写明「`load_profile` 接上之后这一行应当删掉」。
+    /// **Task 7 接上了**：本函数现在是 `persist::load_profile` 的唯一构造调用，属普通构建下的
+    /// 真实调用方，故那一行已删。删掉而不是留着，是因为留着会让将来真正多余的函数也静默。
     pub(crate) fn try_new(
         id: ModelId,
         version: String,
@@ -451,6 +445,22 @@ impl ModelProfile {
     /// §247 的 `id`（§315 的 [`ModelId`]）。
     pub fn id(&self) -> &ModelId {
         &self.id
+    }
+
+    /// §247 的 `version`——**画像的版本**，不是 §24 观测的 `version`（后者在
+    /// [`SkillObservation::version`]）。
+    pub fn version(&self) -> &str {
+        &self.version
+    }
+
+    /// §247 的 `provider`。词表规范未定义，故是自由文本。
+    pub fn provider(&self) -> &str {
+        &self.provider
+    }
+
+    /// §247 的 `model_revision`。
+    pub fn model_revision(&self) -> &str {
+        &self.model_revision
     }
 
     /// §247 的 `skill_vector`（§248 的九维，见 [`SkillVector`]）。
@@ -488,8 +498,19 @@ impl ModelProfile {
         &self.failure_modes
     }
 
-    // 其余五个字段（`version` / `provider` / `model_revision` / `latency_profile` /
-    // `cost_profile`）的访问器按消费方需要增补，**不预先铺开**（设计 §2.1）。
+    /// §247 的 `latency_profile`：`None` = 尚未登记，`Some` = 已登记
+    /// （与 P3A 的 `tool.latency` 列同一存在性编码，设计 §2.5）。
+    ///
+    /// **`Some` 不携带取值**：[`Latency`] 是单位结构体、取值域为空（设计 §3.1 只定容器形状），
+    /// 故 `Some(Latency)` 的信息量就是「这个模型的延迟画像已登记」。
+    pub fn latency_profile(&self) -> Option<Latency> {
+        self.latency_profile
+    }
+
+    /// §247 的 `cost_profile`。语义与 [`Self::latency_profile`] 同（`None` = 尚未登记）。
+    pub fn cost_profile(&self) -> Option<Cost> {
+        self.cost_profile
+    }
 }
 
 // ===== `ModelProfile` 的字段级用例（crate 内） =====

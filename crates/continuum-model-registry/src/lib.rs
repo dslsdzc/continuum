@@ -22,8 +22,10 @@
 //! [`RoutableState`]、闸门 [`RoutableModel`] 与迁移表 [`transition`]；Task 5 补 §3.1 的
 //! 三张表（[`persist::p3d_model_migrations`]）与它在驱动装配处的注册；Task 6 补
 //! `model_registry` 一表的行级读写（[`register_model`] / [`load_lifecycle`] /
-//! [`transition_in_tx`]）。
-//! 另两张表的行级读写、路由、阶梯、预算各自在后续 task 落在自己的模块里。
+//! [`transition_in_tx`]）；Task 7 补 `model_profile` 一表的行级读写
+//! （[`save_profile`] / [`load_profile`]）与那道「画像早于 `verified` 被拒」的闸门
+//! （[`LifecycleError::ProfileBeforeVerified`]）。
+//! 另一张表（`model_skill_score`）的行级读写、路由、阶梯、预算各自在后续 task 落在自己的模块里。
 
 pub mod error;
 pub mod lifecycle;
@@ -32,7 +34,10 @@ pub mod profile;
 
 pub use error::{LifecycleError, ProfileError, RoutingError};
 pub use lifecycle::{transition, LifecycleState, RoutableModel, RoutableState};
-pub use persist::{load_lifecycle, p3d_model_migrations, register_model, transition_in_tx};
+pub use persist::{
+    load_lifecycle, load_profile, p3d_model_migrations, register_model, save_profile,
+    transition_in_tx,
+};
 pub use profile::{
     current_observation, ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore,
     SkillVector,
