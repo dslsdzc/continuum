@@ -121,11 +121,27 @@ pub enum LifecycleError {
 
 /// 路由侧的错误（设计 §5.3）。
 ///
-/// # 只有一枚变体：其余由 Task 10 增补
+/// # 只有一枚变体：其余**不由 Task 10** 增补，由 Task 11 增补
 ///
-/// 本 task 只落 [`RoutingError::NotRoutable`]——它是可路由闸门
+/// Task 4 落 [`RoutingError::NotRoutable`]——它是可路由闸门
 /// （[`crate::lifecycle::RoutableModel::try_new`]）的失败值，产生方在本 task 之内。
-/// 设计 §5.3 的其余变体（需求侧与候选集侧）随各自的产生方在 Task 10 / Task 11 落地。
+///
+/// **订正（2026-10-06，Task 10 完工后）**：本段原写
+/// 「设计 §5.3 的其余变体（需求侧与候选集侧）随各自的产生方在 Task 10 / Task 11 落地」
+/// ——**这句在 Task 10 完工后是假的**：Task 10 **没有**增补 `RoutingError` 的任何变体，
+/// 而**这是刻意的，不是漏项**（设计 §5.4 逐条给了不收的理由）：
+/// `Persist` 不收（`rank` 是纯函数，签名里没有 `Tx`，产不出读库失败）、
+/// `Requirement(#[from] RequirementError)` 不收（`RoutingRequest` 装的是**已构造的**
+/// [`crate::router::TaskSkillRequirement`]，空需求在构造期就被拒，这条路径**到不了 `rank`**）、
+/// `ProfileBeforeVerified` 不收（它是 [`LifecycleError`] 的变体，产生方是 `save_profile`）。
+/// 需求侧的失败值因此是**独立的一枚** [`RequirementError`]。
+/// 设计 §5.3 的其余三枚（`NoEligibleCandidate` / `DuplicateModelCandidate` /
+/// `UnknownAvailability`）**由 Task 11 增补**，随各自的产生方
+/// （该 task 的 Interfaces 一栏列的就是这三枚）。
+///
+/// **这句错在哪，记在这里免得后来者再犯**：它错在**时点**——写它的时候 Task 10 还没开工，
+/// 而读它的人在 Task 10 完工之后。**这类「将来某 task 会补」的句子必须带时点**
+/// （本仓已立过这条）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum RoutingError {
     /// 该状态**不可进入自动路由路径**，`state` 原样带出**传入的那个十态值**。

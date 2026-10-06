@@ -22,7 +22,8 @@
 //!
 //! 它们是**纯数据**：字段 `pub`（或只有一条构造闸门），从构造到读回之间**没有本 crate 的代码**，
 //! 故「读回来还是原值吗」这类运行期断言必然恒真。派生的判据是**有没有当场消费方**：
-//! 本模块的四个类型今天一个消费者都没有（`rank` 在 Task 11），故 `Debug` / `PartialEq` 等
+//! 本模块的**三个**类型（[`TaskSkillRequirement`] / [`FamilyPreference`] / [`RoutingRequest`]）
+//! 今天一个消费者都没有（`rank` 在 Task 11），故 `Debug` / `PartialEq` 等
 //! 一律不加。**要加的那一天，连同一个真用得上的用例一起加。**
 
 use continuum_core::model::{ModelId, ProviderHealth};
@@ -37,8 +38,12 @@ use crate::profile::SkillDimension;
 ///
 /// # 字段私有，空的集合在构造期就被拒
 ///
-/// 唯一的构造入口是 [`TaskSkillRequirement::try_new`]，**空集合返回
-/// [`RequirementError::RequirementEmpty`]**。这不是一条风格约定，是**堵一个 `0/0`**：
+/// **crate 外**唯一的构造入口是 [`TaskSkillRequirement::try_new`]，**空集合返回
+/// [`RequirementError::RequirementEmpty`]**。射程要说准：字段的私有性是**模块级**的，
+/// 故本模块自己的代码仍能直接写字面量——被挡住的是**crate 外**（含 `tests/`，那是独立的 crate），
+/// 而两处照片（`tests/router.rs` 与 `tests/compile_fail/a_requirement_cannot_be_built_*.rs`）
+/// 的观察点也都在 crate 外。
+/// 这不是一条风格约定，是**堵一个 `0/0`**：
 /// `compatibility = matched / required`（§84）在 `required` 为空时是 `0/0`，
 /// 而 `CandidateScore.compatibility: Ratio` **拒 NaN**、`evaluate` **不返回 `Result`**——
 /// 实现者只剩 panic 或编一个值两条路，**两条都能过 §9 原有的全套用例**（设计 §5.1 末段）。
