@@ -224,6 +224,8 @@ continuum-budget     ← continuum-semantics, continuum-persist
 | ~~`model-registry ← semantics`~~ | **不登记**——协调者已于 2026-10-06 裁定取形状乙（§12.6.1）：两类型 ＋ 驱动做恒等转换，零跨层边。此行留作前史，说明「跨层边可以登记，但这一条被裁掉了」 | 无 |
 
 **上表因此没有任何跨层边**：本层落地时**一条跨层边都不登记**。
+**本设计对两条出路都不改动 `Remaining` 的定义**（五个 `Option<i64>`、逐维现算），
+故 §12.1–§12.5 一字不改——**读到本表时不要以为 §2.2 已经选了边**（选边的是 §12.6.1 的裁定）。
 
 > **订正（2026-10-06，评审查出并已裁定）**：初稿的 §13.4 里出现过「允许 `graph → semantics`」这个说法，
 > 而本表里没有对应行，§1.2.2 规则 2 又说「跨层边一条都不登记」——**三处各说一套**。
@@ -1105,13 +1107,16 @@ pub enum ConstraintVerdict {
 
 ```rust
 pub enum ConstraintError {
-    /// `Node.constraints` 里的一个串**匹配不到当前 Contract 的任何 Requirement**（§11.2 的读法）。
+    /// `Node.constraints` 里的一个串**不在当前 Contract 的 Requirement id 集合里**。
+    ///
+    /// **判据与 `class` 无关**——命中的那条 Requirement 是 `REQUIRED` 还是 `PREFERRED`
+    /// 都不改变本变体的触发条件（见下第三条判据）。
     UnknownConstraintKey { key: String },
 }
 pub fn validate(...) -> Result<ConstraintVerdict, ConstraintError>
 ```
 
-判据两条：
+判据三条：
 
 1. **一个悬空的约束键不是「满足」**：它意味着**写它的那一方与当前 Contract 对不上**
    （计划是在旧 Contract 下写的、或键拼错了），`Satisfied` 会让它以「已判过、通过」的形式流下去
@@ -1119,11 +1124,34 @@ pub fn validate(...) -> Result<ConstraintVerdict, ConstraintError>
 2. **它也不该变成一个 §6 的裁决值**：§6 只给「满足 Contract／违反 REQUIRED」两种结果，
    往 `ConstraintVerdict` 里加第三支等于把「本层判不了」说成一个 §6 的结论。
    `Result` 的 `Err` **不可被忽略地当成通过**——调用方必须显式处置它。
+3. **触发条件是「不在 id 集合里」，不是「不指向 REQUIRED」**——这一格是本节的要害：
 
-**照片**：一条「`constraints` 里放一个 Contract 里不存在的键 → `Err(UnknownConstraintKey { key })`」
-（断言是哪一枚、`key` 是哪一个）；另一条**反例**：`constraints` 为空时**不是** `Err`（空集合法，
-`Node::new` 就置空，`crates/continuum-graph/src/node.rs:31`）——**两侧都钉**，
-只钉悬空那侧会让「空约束表」也变成错误。
+   > **订正（2026-10-06，评审查出）**：本节初稿把判据写成「**匹配不到当前 Contract 的任何
+   > Requirement**」，而 §11.2 写的是「每个串当作**一个 REQUIRED 约束的引用键**」——
+   > 两句**不等价**，差的那一格会出事：若节点写了一个**存在、但 `class` 是
+   > `PREFERRED`/`FLEXIBLE`/`UNSPECIFIED`** 的 Requirement id，
+   > 按「不指向 REQUIRED」判就成 `Err`，**于是 §11.3 的「三类违反不拦下」在同一条路径上被绕过**
+   > ——**同一件事两条路给出相反结果**。原句留在此处。
+   >
+   > 故 `Err` 的判据明确定为「**`key` 不在当前 Contract 的 Requirement id 集合里**」，
+   > **与 `class` 无关**。§11.2 那句「当作 REQUIRED 约束的引用键」说的是
+   > 「命中之后**按 REQUIRED 那一路去判**」，**不是**「只认 REQUIRED 的键」——
+   > 命中一条非 REQUIRED 的键时，裁决由该 Requirement 的 `class` 决定
+   > （`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 一律**不拦下**）。
+
+**照片三条，三侧都钉**：
+
+1. `unknown_constraint_key_is_an_error`——`constraints` 里放一个 Contract 里不存在的键，
+   断言 `Err(UnknownConstraintKey { key })`，且 `key` 是**那一个**。
+2. `empty_constraints_is_not_an_error`——`constraints` 为空**不是** `Err`（空集合法，
+   `Node::new` 就置空，`crates/continuum-graph/src/node.rs:31`）。
+3. **`a_key_pointing_at_a_preferred_requirement_is_not_an_error`**（评审查出后补的**第三条**）——
+   键命中一条 `class = PREFERRED` 的 Requirement：断言**不是 `Err`、也不拦下**
+   （该 Requirement 的违反按 §11.3 末段走「不拦下」）。
+   这条照片钉的正是第三条判据：**没有它，「不指向 REQUIRED 就报错」的实现照样全绿**，
+   而那样会绕掉 §11.3。
+
+**三侧合起来才算钉住**：悬空键 `Err`（1）／空表不是 `Err`（2）／**命中非 REQUIRED 键不是 `Err`**（3）。
 
 **`PREFERRED` / `FLEXIBLE` / `UNSPECIFIED` 的违反不拦下**——§224 的四类含义
 （`docs/总纲 §2.3`）明写 PREFERRED「有充分理由时可调整」、FLEXIBLE「明确允许 Runtime 自动调整」。
@@ -1472,9 +1500,19 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
    波及预算记账（反之亦然）。
 4. **不是 `ResumeEligibleTasks`**：那时额度已被后续任务读走，结算太晚。
 
-**附一条实测（顺带说明第 4 条不成立时的余地）**：今天注册的钩子只有两个
-（`recover_cmd.rs:38-40`），分别落在 `ReconcileRunningNodes` 与 `ReconcileIncompleteEffects`；
-**`MarkLostExecutions` 这一态今天没有钩子**——本层挂上去是给 §319 点名而无人实现的一态补上实现。
+**实测（比只引 §319 更硬的一条，评审者补）**：今天注册的钩子只有两个
+（`recover_cmd.rs:38-40`），分别落在 `ReconcileRunningNodes` 与 `ReconcileIncompleteEffects`。
+而 `MarkRunningNodesLost` 的**钩子文档自称覆盖两个阶段**——
+`crates/continuum-runtime/src/recovery.rs:8-9` 写着「§319 的 `reconcile running nodes`
+**与** `mark lost executions`」——**却只注册在 `ReconcileRunningNodes` 上**
+（同文件 `:27-29` 的 `fn phase`）。
+**故 `MarkLostExecutions` 是「§319 点了名、却没有任何钩子注册」的那一态**，
+本层的预算钩子挂上去正是补上它。
+
+**本层的钩子不重复 `MarkRunningNodesLost` 已经做掉的那一半**：
+那一步做的是**把节点状态标成 LOST**（`continuum_graph::mark_running_nodes_lost`，
+同文件 `:33`）；本层做的是**读那个已经成立的事实、把悬空的 `reserve` 按预扣结算**（§12.3）。
+两者**一个写状态、一个记账**，不重不漏——**挂到下一阶段正是为了让后者读得到前者**（第 2 条）。
 
 > **订正（2026-10-06，评审查出）**：本行与随后的段落初稿有三处事实错：
 > (i) 说 `RecoveryHook` 定义在 `continuum-runtime` 的同名文件——**它在 `continuum-persist`**；
@@ -1606,7 +1644,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | `UserReviewView`（§341） | 字段清单**逐项八条**（多一项即红、少一项即红；**成本与权限各占一条**，合并即红） |
 | `Decision`（§331） | `options.len() == consequences.len()` 逐条读回；无「只带选项」的构造路径（trybuild）；`Decision` 公开面恰好一个类型（与 `PolicyDecision` 不混） |
 | 恢复链（§332 §107） | 只改指名字段、**其余字段逐项不变**；失败路径断言**四张表无半写行**（不只断言 `Err` 哪一种） |
-| Constraint Validator（§225 §6） | §225 的 MAY 七条逐项放行 ＋ MUST NOT 三条逐项拦下（第四条见 `ViolatesRequired`）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下；**悬空键 `Err(UnknownConstraintKey)` 一条 ＋ `constraints` 为空不是 `Err` 一条** |
+| Constraint Validator（§225 §6） | §225 的 MAY 七条逐项放行 ＋ MUST NOT 三条逐项拦下（第四条见 `ViolatesRequired`）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下；**三侧**：悬空键 `Err(UnknownConstraintKey)` 一条 ＋ `constraints` 为空不是 `Err` 一条 ＋ **命中 `PREFERRED` 键不是 `Err`、也不拦下一条**（第三条钉住「判据与 `class` 无关」） |
 | 两道门分离（§2.2） | §11.5 的三条（两条 `ALLOWED` 条目 + 方法集断言） |
 | 预算不变量（§12.2） | I1 / I2 / I3 **各一条**违规断言；`reserve` 返回**具体哪一维**（逐维五条）；`settle` 的 `Over` 断言 `dimension` 与 `by` |
 | 无读数按预扣（§12.3） | 三条（流式 / 恢复 / **有读数时不按预扣**） |
