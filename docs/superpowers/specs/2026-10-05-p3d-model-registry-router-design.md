@@ -404,17 +404,41 @@ pub fn load_skill_series(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension)
                          -> Result<Vec<SkillObservation>, PersistError>;   // 按 score_version 升序
 pub fn register_model(tx: &Tx<'_>, id: &ModelId) -> Result<(), PersistError>;  // §21 发现即登记
 pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState>, PersistError>;
-/// 迁移一个模型的登记状态。**返回的是迁移前的旧态（`from`）**，不是 `to`——
-/// 调用方要记「从哪来」，而「到哪去」它就是自己传的 `to`，返回它没有信息量。
-/// 旧态另有一个来源：`load_lifecycle` 在同一事务里读。**若登记项不存在**：
-/// `Err(LifecycleError::UnknownModel { id })`（**不静默创建**——登记是 `register_model` 的活）。
-pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
-                  -> Result<LifecycleState, LifecycleError>;                    // §4.3
+/// 迁移表判定：**纯函数，不持 `Tx`**。非法对 → `Err(LifecycleError::Illegal { from, to })`。
+/// 返回值是**迁移前的旧态（`from`）**，不是 `to`——调用方要记「从哪来」，
+/// 而「到哪去」它就是自己传的 `to`，返回它没有信息量。
+pub fn transition(from: LifecycleState, to: LifecycleState)
+                  -> Result<LifecycleState, LifecycleError>;                    // §4.1 的表
+
+/// 带事务的迁移：读登记项 → 过 `transition` → 写回，**三步同一事务**。
+/// **若登记项不存在**：`Err(LifecycleError::UnknownModel { id })`（**不静默创建**——登记是
+/// `register_model` 的活）。非法对在写之前返回，故**失败不留半写的行**。
+pub fn transition_in_tx(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
+                        -> Result<LifecycleState, LifecycleError>;              // §4.3
+
+/// §2.2 的「当前观测」：一列观测里 `version` 最大的那一次（`None` = 空列）。
+/// `load_skill_vector` 用它把时间序列折成向量。
+pub fn current_observation(series: &[SkillObservation]) -> Option<&SkillObservation>;
 ```
 
-`load_skill_series` 的消费方是 §82 的行为指纹（「如果表现突然变化」，`docs/spec/02-positioning.md:736-764`）
+**为什么迁移拆成两个入口——纯函数那半不持 `Tx`。** 这是本设计按实现改准的一处
+（原 §3.2 只写了一个 `transition(tx, id, to)`，那是**两类事混在一个签名里**）：
+`transition` 只做**表判定**，不碰库，故**任何不写库的调用方也能用它**——例如排序策略或校验路径要在内存里
+问「这对状态合不合法」；`transition_in_tx` 才承担「读—判—写同一事务」。**把它拆开不是为了好看**：
+若只有一个带 `Tx` 的入口，上面那种「只想问表、不打算写库」的调用方就没有可用的东西。**`current_observation`
+同源**——它是 §2.2 那条「当前值取 `version` 最大」的规则，原先只有散文没有名字，实现给了它一个。
+
+**这一类的名字要记住：它是「实现里多了、设计里没有」，与「设计里多了、实现里没有」互为镜像。**
+两种都要扫。**只扫一个方向会让设计逐渐落后于实现，而落后的一方不会报错**——
+设计多了，实现者会报回来（本轮 `EscalationLadder` 即是一例）；
+**设计少了，没有谁会报**：实现照跑、测试照绿，只是设计不再描述真实的东西。
+故凡实现里出现设计没写的公开入口，**要么补进设计，要么把它删掉**，两样都要留判据。
+
+`load_skill_series` 的**预期消费方**是 §82 的行为指纹（「如果表现突然变化」，`docs/spec/02-positioning.md:736-764`）
 ——判「变化」至少要看两次观测，故它现在就必须有；只存当前值会让 §82 的判据无法成立。
-**它的产生方（周期性 probe）本阶段不存在**，这一点写在 §10 的「拍不到的照片」里，不靠一句将来时糊过去。
+**本阶段它的产生方与消费方都缺**（订正：原句只写了产生方那一半）：**产生方**是周期性的 probe，
+**消费方**是上面说的 §82 漂移检测，**两者都尚未建**。§10 第 1 条讲的是产生方；消费方这一半补在此处，
+免得读者以为只缺前者。整条链的运行期无调用者这件事，另有具名落点（§11 第 26 条）。
 
 ### 返回类型的分工：`PersistError` 是「库不干了」，业务拒绝另立类型
 
@@ -1206,9 +1230,9 @@ continuum-model-registry   （资源层：§247–§251 的画像、Registry、R
 crates/continuum-model-registry/
   Cargo.toml
   src/lib.rs          导出面与 crate 文档
-  src/profile.rs      ModelProfile、SkillVector、SkillDimension、SkillObservation、SkillScore、Ratio
-  src/lifecycle.rs    LifecycleState、RoutableState、RoutableModel、迁移表
-  src/persist.rs      三张表的迁移与读写（与表定义同址）
+  src/profile.rs      ModelProfile、SkillVector、SkillDimension、SkillObservation、SkillScore、Ratio、current_observation
+  src/lifecycle.rs    LifecycleState、RoutableState、RoutableModel、迁移表（`transition`，纯函数）
+  src/persist.rs      三张表的迁移与读写（与表定义同址；含带事务的 `transition_in_tx`）
   src/router.rs       RoutingRequest、RankedExecutionCandidates、RankingPolicy、BaselineRankingPolicy
   src/escalation.rs   EscalationStep、next_step（§7.1）——**`EscalationLadder` 本阶段不建**，见 §7.1
   src/budget.rs       BudgetView（§333 的只读投影）
@@ -1503,3 +1527,24 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     即「自定义家族」这条偏好在实现上**是一个恒不命中的分支**。
     **收件人：规范维护者**（给出家族归属的判据，或明说它由实现自定）。
     **若判据给出**，它落进 `RankingPolicy` 的实现（§5.3）——`ModelProfile` / `RoutingRequest` 都不动。
+26. **本阶段这几条链在运行期没有调用者**（一条合并记账，不散成三句）。**共同事实只有一条**：
+    截至 D 的 Task 14，下列东西**除本 crate 的测试外零命中**——
+    - **画像读写的整条链**：`save_profile` / `load_profile` / `save_skill_observation` /
+      `load_skill_vector` / `load_skill_series` / `load_lifecycle`；
+    - **三张表**（`model_registry` / `model_profile` / `model_skill_score`）**既无写入方也无读取方**
+      ——唯一真实的运行期使用是 `main.rs` 注册迁移（建表），此后无人碰；
+    - **`ModelProfile` 的六个访问器**（`modalities` / `tools` / `failure_modes` / `evidence_count` /
+      `latency_profile` / `cost_profile`）**只被上面那条链消费**——链没有调用者，它们也就没有；
+    - **`TaskSkillRequirement` 的产生方**在语义层（未建，§5.1 只说它「落在请求上」）。
+
+    **与 §7.1 的 `EscalationLadder` 的区别要写清，否则会被合并成一类**：那些是**零产生方、
+    不可构造**，故**不建**；这里这些**有产生方、可构造、有照片**（各有用例），**只是消费方还没到**
+    ——它们**照建**。**本仓从未要求「有消费方才能建」**（P3A 的强制点 (1)、`continuum-secrets`
+    当年都是建了之后才等到消费方的）。
+    **但「整条链在运行期无调用者」这件事必须在设计里有一处落点**：它比「某个类型没有消费方」大一圈——
+    后者是点，前者是一条**从写入到读取全空**的链，而 §10 与前述各条只按点记（`EscalationLadder`、
+    `next_step`、`BudgetView` 各一条），没有一个地方说得出「画像这条链整条是空的」。
+    **收件人分两处**：**驱动侧装配点**（注册了迁移、却没有装配任何画像读写——
+    它今天只做到「建表」，没做到「用表」）**＋ 语义层**（`TaskSkillRequirement` 与 §22 onboarding 的产生方，
+    连同 §82 的 probe）。**与 §10 已列几条的分工**：§10 讲的是**拍不到什么照片**，
+    本条讲的是**谁还没来接**——同一件事的两面，两面都要有。
