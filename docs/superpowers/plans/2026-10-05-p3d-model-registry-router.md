@@ -342,7 +342,9 @@ git commit -m "feat(model-registry): §248 九维与 §24 的时间序列观测"
 是设计 §2.1 那条保证的直接后果。
 
 - `a_profile_carries_the_twelve_fields_of_247`（crate 内）：构造一个十二字段**全取非默认值**的画像，
-  逐字段比对（十二项各断言一次）。红的条件：某字段被漏存或与邻字段写串即红（全零/默认值会让这类缺陷静默）。
+  逐字段比对（十二项各断言一次）。红色的条件：某字段与邻字段写串即红（全零/默认值会让这类缺陷静默）。
+  **十二是「画像对象」的字段数，不是 `model_profile` 表的列数——后者是十一**（`skill_vector` 落在
+  `model_skill_score`），见 Task 5 的列清单用例与 Task 8。
 - `the_confidence_is_a_ratio_and_nothing_else`（crate 内）：`confidence` 是 `Ratio`；`Ratio` 的越界输入在构造期即被拒。
 - `a_profile_has_no_total_score`（crate 内）：**这条没有运行期形态**——它由 `tests/compile_fail/overall_score_cannot_be_read.rs`
   钉住（读 `profile.overall_score()`，判据是**编译失败**）。此条在用例清单里留名，以免被当成漏项（设计 §2.3 第 3 条 (a)）。
@@ -578,8 +580,13 @@ Task 6 不再新增这条边，`continuum-core` 与 `continuum-capability` 两�
 ——漏掉那一行时各用例会一起挂在 `no such table`，而报错位置指向被测函数（同 P3A 的 `tests/persist.rs` 首注）。
 
 - `the_three_tables_exist`：`model_registry` / `model_profile` / `model_skill_score` 三张表各查得到。
-- `the_model_profile_columns_are_exactly_the_twelve_fields`：`model_profile` 的列清单**逐列**断言
+- `the_model_profile_columns_are_exactly_the_eleven_columns`：`model_profile` 的列清单**逐列**断言
   （加一列即红）。这是 §2.3 第 2 条的结构性事实在库侧的落点，**不是**「顺便查一下表结构」。
+  **「§247 的十二个字段」与「`model_profile` 的十一列」是两个数，不许混用**：第十二个字段 `skill_vector`
+  **不在这张表里**，它落在 `model_skill_score`（每维度每版本一行）——故本用例的期望列数是 **11**，
+  照 12 去建表会多出一列。（本计划原稿把这条用例写成「十二字段」，brief 里也如此——**那是错的，已订正**；
+  实现者按设计 §3.1 落的表，用例名取的是 `…_the_eleven_columns`。）
+  第十二个字段的落点由 `a_skill_observation_round_trips_field_by_field`（Task 8）承重。
 - `the_model_profile_has_no_total_score_column`：`SELECT overall_score FROM model_profile` 得到**具体** `Err`
   （§2.3 第 3 条 (b)）；红的条件：谁给表加了这一列即红。
 
@@ -741,9 +748,10 @@ git commit -m "feat(model-registry): 登记项与生命周期的落库读写"
 
 - [ ] **Step 1: 写用例**
 
-- `a_profile_round_trips_field_by_field`：先 `register_model` + 迁到 `verified`，存一条十二字段全非默认的画像，
-  经 `load_profile` 读回，**逐字段**比对（含 `tools` 的元素是 `ToolId`、两个 `Option<Cost/Latency>` 的
-  `Some` / `None` 两侧）。红的条件：某列漏写或与邻列写串即红。
+- `a_profile_round_trips_field_by_field`：先 `register_model` + 迁到 `verified`，存一条**十二个字段**全非默认的
+  画像（**画像有十二个字段，而 `model_profile` 只有十一列**——第十二个 `skill_vector` 落在
+  `model_skill_score`，本用例不走它），经 `load_profile` 读回，**逐字段**比对（含 `tools` 的元素是 `ToolId`、
+  两个 `Option<Cost/Latency>` 的 `Some` / `None` 两侧）。红的条件：某列漏写或与邻列写串即红。
 - `saving_a_profile_before_verified_is_rejected_with_the_state`：**十态逐项**——六态（`verified` / `active` /
   `stale` / `degraded` / `quarantined` / `disabled`）`Ok`，四态（`discovered` / `unprofiled` / `researched` /
   `probed`）`Err(LifecycleError::ProfileBeforeVerified { state })` 且**断言是哪一枚**。
