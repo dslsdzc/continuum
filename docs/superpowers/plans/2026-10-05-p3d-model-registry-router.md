@@ -169,7 +169,9 @@ crates/continuum-runtime/tests/startup.rs                 三处迁移计数断�
 `tests/profile.rs`（本 task 只放两个取值类型的用例）：
 
 - `ratio_round_trips_through_its_text_encoding`：对 `0.0` / `0.5` / `0.94` / `1.0` / 极小与极大的**有限**值，
-  断言 `Ratio::parse(&r.as_str()) == Some(r)`。**红的条件**：`as_str` 用**截断格式**（如 `{:.2}`）时变红。
+  断言 `Ratio::parse(&r.as_str()) == Some(r)`。**红的条件**：`as_str` 用**截断格式**（如 `{:.2}`）时变红
+  ——**但那一半承重的是「极小 / 极大有限值」两档**：`{:.2}` 对 `0.0` / `0.5` / `0.94` / `1.0` 恰好仍能往返
+  （`"0.94"` → `0.94`），故**若夹具把这两档换成普通值，这个变异就不红了**。**实现者实跑时按此核一遍**。
   **`Debug` 之所以不变红，要写进用例注释**：Rust 的 `f64` 的 `Debug` 与 `Display` 是**同一套最短精确往返算法**
   （实现者用探针实测：各取值丢精度 0 格；把 `as_str` 换成 `{:?}` 跑全量 `exit=0`、不变红）。
   这**不是等价变异体**——两版输出确实不同（`1e300`：`Display` 三百多个字符 vs `Debug` 的 `1e300`），
@@ -859,9 +861,15 @@ git commit -m "feat(model-registry): 画像的落库与「画像早于 verified 
   **且原行内容不变**（裸 `INSERT`）。红的条件：改成 `OR REPLACE` 即红——那会让「补记一次观测」静默覆盖历史，
   而 §24 要的正是历史。
 - `a_series_comes_back_in_ascending_score_version`：同维度存三个版本，`load_skill_series` 返回**三条且升序**
-  （顺序固定，调用方才不必自己排）。红的条件：去掉 `ORDER BY` 或缺一条即红。
+  （顺序固定，调用方才不必自己排）。**红的条件：把 `ORDER BY` 的排序方向改成 `DESC`，或漏掉一条即红。**
+  **原稿写的是「去掉 `ORDER BY` 即红」——实测不成立**（Task 8 实现者的变异实测）：复合主键
+  `(model_id, dimension, score_version)` 的索引序**恰好与升序 `ORDER BY` 一致**，故删掉那一句时
+  输出顺序不变、**假绿**。这是本项目那条「**等价变异体不算变红**」的实例——判据是「这两版在哪个入参上
+  会给出不同结果」，举不出即是等价；处理是**换真变异体**（改 `DESC`），**不是补用例**。
 - `the_vector_takes_one_observation_per_dimension_by_highest_version`：两版本、**`version` 大的 `time_range` 更早**
   → 向量里的当前值是 `version` 大的那条（与 Task 2 的纯函数用例同一条判据，此处钉的是**落库路径**也用它）。
+  **红的条件：把「取 `version` 最大」改成「按 `time_range` 最晚取」——原稿若写「取最后一条即红」，那句同样不成立**
+  （同一索引序，末条恰是 `version` 最大的那条），处理同上：换真变异体。
 - `every_dimension_without_an_observation_is_absent_not_zero`：九维**逐项**断言 `None`；
   另一侧：写入两维后，这两维 `Some`、其余七维仍 `None`（**两侧都钉**）。
 - `the_dimension_column_is_lowercase_with_underscores`：直接查表，断言 `tool_use` 与 `constraint_following`
@@ -1082,7 +1090,10 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 - `shuffling_the_input_does_not_change_the_output`：打乱输入顺序，输出**逐项**相同（全序且确定的照片）。
   红的条件：`compare` 的兜底一档不按 `ModelId` 升序即红。
 - `tied_candidates_are_ordered_by_model_id`：两条 `compatibility` / `confidence` 全同、`ModelId` 不同 →
-  输出按 `ModelId` 升序。红的条件：去掉兜底那一档即红（`sort_by` 变成不稳定次序）。
+  输出按 `ModelId` 升序。红的条件：去掉兜底那一档即红——**但这条有个前提，实现者须实跑核**：
+  Rust 的 `sort_by` 是**稳定**排序，故**夹具必须把两条同分候选按与 id 升序相反的顺序喂入**，
+  否则去掉兜底档后输出照样是 id 升序、**假绿**（同一现象见 Task 8 的 `ORDER BY` 那条：
+  「删掉某成分」型预测要先问**它有没有别的途径产生同样效果**）。
 - `the_same_model_twice_is_rejected_with_the_id`：同一个 `ModelId` 的两个候选 →
   `Err(RoutingError::DuplicateModelCandidate { id })`，**断言是哪一枚、id 是哪一个**。
   它是 `compare` 的「全序」这条断言的守门人：两条 `ModelId` 相同的候选无从定序，兜底档也兜不住。
@@ -1221,7 +1232,9 @@ git commit -m "feat(model-registry): §250 的输出面与 rank 的全序"
   只读「有没有观测」；分数本身不参与。
 - `changing_a_score_value_does_not_change_the_order`：把某维的 `SkillScore` **数值**改掉（保持有无不变），
   排序**不变**。红的条件：改用 `score` 的数值加权即红——这正是 §2.4「只用序、不用量」的落点，
-  也是本层唯一能拍的「不依赖单一总分」的行为面照片。
+  也是本层唯一能拍的「不依赖单一总分」的行为面照片。**这条的前提要由夹具保证、并由实现者实跑核**：
+  **被改写的那几个 `SkillScore` 数值，必须使「按数值加权」算出的次序与「按有无」算出的次序相反**，
+  否则加权版会给出同一个次序、变异不红（同 Task 8 那两处的形态）。
 - `adding_an_observation_changes_the_order`：改「有无」（多一维有观测）→ 排序**变**。
   **与上一条两侧对钉**：只有上一条时，一个「什么都不读、永远返回同一个顺序」的策略照样全绿。
 - `same_family_candidates_rank_before_cross_family_ones`：§19 的家族偏好排在数值之前；`Auto` 时全部视为
