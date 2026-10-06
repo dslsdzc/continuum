@@ -108,7 +108,7 @@ fn one(id: &'static str, description: &'static str) -> Arc<dyn ToolProvider> {
 async fn a_registered_tool_is_described_by_id() {
     let mut registry = ProviderRegistry::new();
     registry
-        .register_tool(vec![tool("echo")], Arc::new(FakeTool))
+        .register_tool(vec![tool("echo")], Arc::new(FakeTool::echo()))
         .expect("首次登记应成功");
 
     let described = registry
@@ -134,7 +134,7 @@ async fn a_registered_tool_is_described_by_id() {
 async fn an_unregistered_tool_id_is_reported_as_unregistered() {
     let mut registry = ProviderRegistry::new();
     registry
-        .register_tool(vec![tool("echo")], Arc::new(FakeTool))
+        .register_tool(vec![tool("echo")], Arc::new(FakeTool::echo()))
         .expect("首次登记应成功");
 
     let err = registry
@@ -276,7 +276,7 @@ async fn registering_a_group_of_tool_ids_is_all_or_nothing() {
 async fn list_tools_reports_an_adapter_failure_as_provider() {
     let mut registry = ProviderRegistry::new();
     registry
-        .register_tool(vec![tool("echo")], Arc::new(FakeTool))
+        .register_tool(vec![tool("echo")], Arc::new(FakeTool::echo()))
         .expect("首次登记应成功");
     registry
         .register_tool(vec![tool("broken")], Arc::new(FailingList))
@@ -300,7 +300,7 @@ async fn describe_tool_routes_by_registration_not_by_the_adapters_list_tools() {
     // `FakeTool::list_tools()` 只含 "echo"；登记是**按 id 显式**给出的，故两者可以不一致
     // （设计 §3.1 末段、§3.3 代价一）。登记到 "m" 之后，路由的权威是登记，不是适配器的清单。
     registry
-        .register_tool(vec![tool("m")], Arc::new(FakeTool))
+        .register_tool(vec![tool("m")], Arc::new(FakeTool::echo()))
         .expect("登记应成功");
 
     let routed = registry

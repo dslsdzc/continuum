@@ -79,7 +79,7 @@ async fn a_registered_tool_is_invoked_and_its_result_returned() {
     let (_dir, auth) = authorized("echo");
     let mut registry = ProviderRegistry::new();
     registry
-        .register_tool(vec![ToolId::new("echo")], Arc::new(FakeTool))
+        .register_tool(vec![ToolId::new("echo")], Arc::new(FakeTool::echo()))
         .unwrap();
 
     let result = registry

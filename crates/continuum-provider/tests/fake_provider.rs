@@ -51,7 +51,7 @@ async fn fake_implementations_satisfy_the_frozen_interfaces() {
     ));
     assert_eq!(m.health().await, ProviderHealth::Healthy);
 
-    let t = FakeTool;
+    let t = FakeTool::echo();
     assert_eq!(t.list_tools().await.unwrap().len(), 1);
 
     let c = FakeConnector;

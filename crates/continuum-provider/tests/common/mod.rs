@@ -100,12 +100,64 @@ impl ModelProvider for FakeModel {
     }
 }
 
-/// 工具侧夹具（Task 2 从 `tests/fake_provider.rs` 原样搬来）。
+/// `FakeTool` 的三种 `invoke` 形态（Task 7 加后两种）。
+///
+/// **为什么把 `FakeTool` 三态化**：设计 §11 那一行写的是「用 `FakeTool`」同时验工具级失败与
+/// provider 级失败两条，而一个单元结构体产不出两条失败通道。三态化是让那一行字面成立的
+/// **最小**改动。**这是本计划对夹具形状的读数，不是设计给的判据**——设计没有规定夹具长什么样
+/// （计划 Task 7 Step 1；设计 §11）。
+enum FakeToolOutcome {
+    /// 回显输入，`is_error: false`（今天的、也是 `fake_provider.rs` 用到的那一种）。
+    Echo,
+    /// 工具**跑起来了但自身失败**：`Ok(ToolResult { is_error: true, .. })`。
+    ToolLevel,
+    /// **适配器自己**没跑成：`Err(ProviderError::Transport(..))`。
+    ProviderLevel,
+}
+
+/// 工具侧夹具（Task 2 从 `tests/fake_provider.rs` 原样搬来；Task 7 加失败通道）。
 ///
 /// 它声明一个工具 `echo`，`describe_tool` 对声明之外的 id 返 `ProviderError::Unavailable`
 /// ——**这正是设计 §5.2 记的那个既有实例**：工具侧没有 `UnknownModel` 那样的「不是我的」取值，
 /// 故适配器只能把「无此工具」报成一个瞬时类。注册表要做的正是别让它污染路由层的判据。
-pub struct FakeTool;
+///
+/// **两条失败通道承载的是 C 加在适配器上的约定**（设计 §7.1）：工具级失败走
+/// `Ok(ToolResult { is_error: true, .. })`、provider 级失败走 `Err`。**这条约定 §316 里没有
+/// 出处、也没有任何强制**——真实适配器完全可以对工具级失败返 `Err(Protocol)`；用本夹具写的
+/// 用例钉的**只是这份夹具对约定的服从，不是真实适配器**，而真实适配器上这条分流**拍不到**
+/// （设计 §9）。照片在 `tests/contract.rs`。
+///
+/// **本夹具与 F 的库级夹具是同一约定的两份副本，裁决明写「不合并」**
+/// （`docs/superpowers/p3bcdf-followups.md` §七 第 8 条）：跨 crate 的 `tests/` 目录不可互相导入，
+/// F 的库级用例装进本注册表时只能另写一份（它按本文件的形状写）。代价据实记：**两者若漂移，
+/// 「工具级失败走 `Ok(is_error: true)`」这条约定只在本 crate 的用例上红**，F 那份不会；
+/// 这条不设护栏，靠评审。
+pub struct FakeTool {
+    outcome: FakeToolOutcome,
+}
+
+impl FakeTool {
+    /// 今天的行为：回显输入、`is_error: false`。
+    pub fn echo() -> Self {
+        Self {
+            outcome: FakeToolOutcome::Echo,
+        }
+    }
+
+    /// 工具**跑起来了但自身失败**——按约定报 `Ok(ToolResult { is_error: true, .. })`。
+    pub fn failing_at_tool_level() -> Self {
+        Self {
+            outcome: FakeToolOutcome::ToolLevel,
+        }
+    }
+
+    /// **适配器自己**没跑成——按约定报 `Err(ProviderError::Transport(..))`。
+    pub fn failing_at_provider_level() -> Self {
+        Self {
+            outcome: FakeToolOutcome::ProviderLevel,
+        }
+    }
+}
 
 #[async_trait]
 impl ToolProvider for FakeTool {
@@ -125,14 +177,28 @@ impl ToolProvider for FakeTool {
             .ok_or_else(|| ProviderError::Unavailable(id.as_str().to_owned()))
     }
 
+    /// 三条通道各按 C 的约定交出结果（设计 §7.1）。**这是夹具对约定的服从**，
+    /// 不是「适配器都这么干」——真实适配器上这条分流拍不到（设计 §9）。
+    ///
+    /// 工具级那条的 `output` 取一个固定的、与输入**不同**的值：若它回显输入，`is_error`
+    /// 就成不了区分「跑起来了但失败」与「跑通了」的唯一载荷。
     async fn invoke(
         &self,
         call: AuthorizedToolInvocation<'_>,
     ) -> Result<ToolResult, ProviderError> {
-        Ok(ToolResult {
-            output: call.input().clone(),
-            is_error: false,
-        })
+        match self.outcome {
+            FakeToolOutcome::Echo => Ok(ToolResult {
+                output: call.input().clone(),
+                is_error: false,
+            }),
+            FakeToolOutcome::ToolLevel => Ok(ToolResult {
+                output: json!({"error": "工具跑起来了但自身失败"}),
+                is_error: true,
+            }),
+            FakeToolOutcome::ProviderLevel => {
+                Err(ProviderError::Transport("适配器自己没跑成".to_owned()))
+            }
+        }
     }
 
     async fn cancel(&self, _call: &continuum_core::model::CallId) -> Result<(), ProviderError> {

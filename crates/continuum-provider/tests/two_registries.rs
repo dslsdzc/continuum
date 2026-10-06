@@ -112,7 +112,7 @@ fn an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call() {
     // 服务哪个 id 由**登记**给出，不看适配器自己声明什么（`FakeTool` 声明的是 `echo`）——
     // 登记是路由的权威（设计 §3.1 末段）。本用例只要求「注册表里有个适配器」，不碰它的任何方法。
     registry
-        .register_tool(vec![ToolId::new("t1")], Arc::new(FakeTool))
+        .register_tool(vec![ToolId::new("t1")], Arc::new(FakeTool::echo()))
         .unwrap();
 
     let tx = db.begin().unwrap();
