@@ -37,9 +37,9 @@ use crate::error::ModelCallError;
 /// **坐标订正（2026-10-07，原话照留）**：设计 §6.2 与本计划的这一条引的是
 /// `crates/continuum-provider/tests/fake_provider.rs:106`，**那个坐标在本树上已失效**——
 /// 实读 `wc -l crates/continuum-provider/tests/fake_provider.rs` 得 **104 行**（即 `:106`
-/// 越界），且该文件今天只含 `FakeConnector`；工具侧夹具由 C 的 Task 2 整块搬进了
-/// `tests/common/mod.rs`（搬家的记录就在被搬去的那份文档注释里）。上文那个行号是本条
-/// **实读后**的坐标。
+/// 越界），且该文件里的**夹具**今天只剩 `FakeConnector`（`fake_provider.rs:13`，另有
+/// `mod common;` 与两条用例）；工具侧夹具由 C 的 Task 2 整块搬进了 `tests/common/mod.rs`
+/// （搬家的记录就在被搬去的那份文档注释里）。上文那个行号是本条**实读后**的坐标。
 ///
 /// # `FailureClass::Resource` 这一格无输入
 ///
