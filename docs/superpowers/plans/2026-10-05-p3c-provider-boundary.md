@@ -1405,6 +1405,17 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 （外加 `async-trait` / `serde_json` / `tokio` / `futures-core` / `tempfile` / `trybuild` 六个外部 crate——
 它们**不进 `ALLOWED`**，那张表只逐对断言 workspace 成员之间的边）。
 
+> **订正注记（2026-10-07，Task 9 实读；原话照留）。** **上面那「六个外部 crate」是七个**——
+> 漏了 **`thiserror`**（`crates/continuum-provider/Cargo.toml` 的 `[dependencies]` 里那一行，
+> Task 1 为 `RegistryError` / `ToolCallError` 的 `thiserror::Error` 派生加的）。
+> **完整的七个**：`async-trait` / `serde_json` / `thiserror` / `tokio` / `futures-core` /
+> `tempfile` / `trybuild`。
+> **结论不变**：三个 workspace 成员精确、外部不进 `ALLOWED`——**变的只是清单本身**。
+> **判据（与 Task 1/3/4 补 `Cargo.toml` / `Cargo.lock` 是同一条）**：**清单要自足，且要与事实
+> 逐项相等**——`grep` 一遍 `Cargo.toml` 再逐个列，不凭印象写数目。
+> **来历**：那句「六个」写成时 `thiserror` 还没进这份清单（它是 Task 1 后加的一行，
+> 而这段预期是最早写的）——**一处事实改了两处，只有一处跟着改**。
+
 - [ ] **Step 2: 逐条核对完成判据（找不到证据的不得标注为覆盖）**
 
 | 判据（设计 §11 的行） | 照片 |
@@ -1417,7 +1428,7 @@ timeout 600 cargo tree -p continuum-provider --depth 1 --edges all --prefix none
 | 工具侧：`is_error` 与 `Err` 的分流（**约定**，非规范） | Task 7 两条（**钉夹具，不钉真实适配器**） |
 | 两个登记点不一致，向一 | Task 5 `…passes_authorize_then_fails_to_route` |
 | 两个登记点不一致，向二 | Task 5 `an_adapter_without_a_row_in_the_table_fails_authorize_before_any_call` |
-| 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，三种换写法的逃逸写在文件头 |
+| 中立性（模块面，§4.2 形态 4） | Task 8（**匹配前折叠空白**，裁决 C7）+ 它的正控制 `the_guard_sees_the_source_tree`；仍是**下界**，**换写法的逃逸（例如那几种）**写在文件头——**不是封闭枚举** |
 | 模型侧未登记 id | Task 1 `an_unregistered_model_id_is_reported_as_not_found` |
 | 工具侧未登记 id | Task 2 `an_unregistered_tool_id_is_reported_as_unregistered` |
 | 重复登记同一 id | Task 1 `registering_the_same_id_twice_is_rejected_as_duplicate` |
@@ -1504,8 +1515,10 @@ P1 的 Resource 义务     要求「P3 的 Router 必须为 RESOURCE 显式给�
 实现被写进中立 crate     §4.2 形态 4 的那条路径**没有行为照片**；守卫是 `src/lib.rs` 开头那句「不含实现」的
   内部                   定位声明
   内部                   + Task 8 的模块面断言 + 评审。Task 8 之后那三个字面拼法（**含空白变体**，
-                       归一化之后是同一个拼法）会被红掉；**全限定路径 / 别名 / include! 三种仍全绿**
-                       （设计 §4.1 末段；裁决 C7 已把空白变体从逃逸清单里划掉）。
+                       归一化之后是同一个拼法）会被红掉；**换写法的仍全绿——例如全限定路径 / 别名 /
+                       include!**（**原写「三种仍全绿」，「三种」是闭合读法、已证为假**：
+                       `impl<T> ModelProvider for Foo<T>`、`impl/*c*/ModelProvider for` 一样逃逸；
+                       **2026-10-07 与 Task 8 正文对齐**，设计 §4.1 末段，裁决 C7 已把空白变体从逃逸面划掉）。
 save_tool 登记期不变量   C 不接（设计 §7.4 接缝二、§12 第 15 条）：它约束的是 tool 表的**写入**，
                        属 continuum-capability。**裁决：所有者是 F**（`p3bcdf-followups.md` §七 第 1 条）。
 凭据要不要也交给         设计 §12 第 23 条：本阶段不做；若做，会引入 continuum-provider
@@ -1543,7 +1556,10 @@ AuthorizedToolInvocation  裁决 C2 已定：**构造入口 pub(crate)**，crate
                        仍成立的残留只有一条（设计 §7.1）：**适配器照着 id 做**这件事类型层管不住。
 模块面守卫的第四种逃逸    **已由裁决 C7 关掉**：守卫在匹配前折叠空白（空格 / tab / 换行折成一个空格），
                        `impl  ModelProvider for` 一类空白变体因此**是同一个字面拼法**，不再逃逸。
-                       **仍逃逸的只剩三种**（全限定路径 / 别名 / include!），设计 §4.1 末段列明。
+                       **仍逃逸的：例如全限定路径 / 别名 / include!**——**原写「只剩三种」**，
+                       **那是闭合读法、已证为假**（`impl<T> ModelProvider for Foo<T>`、
+                       `impl/*c*/ModelProvider for` 一样逃逸）；**2026-10-07 与 Task 8 正文对齐**：
+                       **这份清单不是穷尽的**，设计 §4.1 那张清单同理（已另派设计作者改）。
                        归一化本身的照片在 Task 8 的
                        `the_guard_folds_whitespace_before_matching`，以及 Step 2 那条
                        「两个空格」的探针（归一化若漏了，它会假绿）。
