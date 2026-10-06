@@ -4,7 +4,7 @@
 **节点放置**（`§291 §243 §93`），见 `docs/02-工程.md:225-226`。组件的边界见同文件 §4.2（`:228-240`），
 层内入边见 §4.3（`:252-253`），完成判据见 §4.4（`:262`）。
 
-**判据的唯一来源是规范本身**：`§287`–`§291`（`docs/spec/05-normative.md:1649-1737`）、`§243`
+**判据的唯一来源是规范本身**：`§287`–`§291`（`docs/spec/05-normative.md:1649-1744`）、`§243`
 （同文件 `:719-731`）、`§93`／`§94`（`docs/spec/02-positioning.md:1024`／`:1054`）、`§42`
 （`docs/spec/01-concepts.md:1646`）、`§240`（`docs/spec/05-normative.md:658`）、`§246`（同文件 `:777`）、
 `§301`–`§304`（同文件 `:1925-1984`）、`§342`（同文件 `:2680-2707`）、`§343`（同文件 `:2709`）。
@@ -29,6 +29,7 @@
 | 节点放置的硬闸门（隐私 × 信任） | §243 §94 §42 | **建**（§5.3） |
 | 节点放置的排序**接口** | §291 §304 | **建接口，不写数值**（§5.5） |
 | `NodeTrust` 的取值域 | §287（未给） | **取二值**，来源 §293／§342.7，**记缺口**（§3.3） |
+| **§4.3 的 `节点放置 ← Router 输出` 这条入边** | §4.3（`docs/02-工程.md:253`） | **本层不接，记为阻断**：它今天没有消费方，收下从不读的形参已按裁定删除（§6、§10 第 8 条） |
 | `capabilities` / `resources` / `availability` 的取值域 | §287（未给） | **只搬运，不解释**（§3.4） |
 | Job Capsule（§290 的五个字段） | §290 | **不建**；只消费它的 `required_artifacts` 那一面（§4.3） |
 | Authority Host、Device Join、Trust Graph | §292 §293 | **不建**（E 的组件表里没有它们），故**信任的产生方不存在**（§10 第 12 条） |
@@ -46,12 +47,33 @@
 | `PrivacyClass`（§243 的五档） | **已存在、已落库**。`Public / Personal / Private / Secret / LocalOnly` 五枚，`ALL` 是五枚，`as_str`／`parse` 是编码的唯一产生点，`parse` 对表外串返回 `None` | `crates/continuum-artifact/src/artifact.rs:87`（枚举）、`:100`（`ALL`）、`:112`（`as_str`）、`:129`（`parse`） |
 | `privacy_class` 的落库列 | `NOT NULL`，读出错串即 `PersistError`——**不是默认档次** | `crates/continuum-artifact/src/persist.rs:14-15`、`:120-123` |
 | `Artifact` | `pub privacy_class: PrivacyClass`（**不是 `Option`**） | `crates/continuum-artifact/src/artifact.rs:179` |
-| D 的 Router 输出面 | **已落地**（Task 11）：`rank`、`RankedExecutionCandidates`（`selected`／`alternatives`／`candidates`）、`ExecutionCandidate` 的五个访问器、`RoutingReason`、`RankingPolicy` | `crates/continuum-model-registry/src/router.rs:379`、`:388`、`:330`、`:340-361`、`:261`、`:409`、`:497` |
+| D 的 Router 输出面 | **已落地**（Task 11）：`rank`、`RankedExecutionCandidates`（`selected`／`alternatives`／`candidates`）、`ExecutionCandidate` 的五个访问器、`RoutingReason`、`RankingPolicy` | `crates/continuum-model-registry/src/router.rs`：`:394`（`RankedExecutionCandidates`）、`:403`（`selected`）、`:345`（`ExecutionCandidate`）、`:355-376`（`model`／`reason` 等访问器）、`:276`（`RoutingReason`）、`:424`（`RankingPolicy`）、`:512`（`rank`）。**行号按 2026-10-06 的**工作树**取**——该文件当时有未提交改动，较 `c46477f` 整体下移约 15 行（见 §6.3 末段） |
 | D 的具名基线 `BaselineRankingPolicy` | **尚未落地（Task 12）**。本设计只消费输出面的类型，不依赖它 | 同上 `:40`、`:407` |
 | `continuum_graph::NodeId` | **已存在**，指 ADFIR 节点 | `crates/continuum-graph/src/ids.rs:40` |
-| `Artifact.producer_node` 的实义 | `Option<NodeId>`，**ADFIR 节点 id**（P1 的读法），且落库列可空 | `docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:127`；`crates/continuum-artifact/src/artifact.rs:175` |
-| `ExecutionProfile.compute_node`（§246） | **本仓零命中**（无该类型、无该字段） | `grep -rn "ExecutionProfile" crates/` 无命中 |
-| 迁移号占用 | `1`、`2`（persist）、`10`（artifact）、`20`（graph）、`30`（workspace）、`40`（effect）、`41`（policy）、`50`（capability）、`80`（model-registry）。**`90` 未被占用** | 各 crate 的 `persist.rs`；注册处在 `crates/continuum-runtime/src/main.rs:83-91` |
+| `Artifact.producer_node` 的实义 | **实现是 `Option<String>`**（裸串；落库列可空）。P1 的**设计**写的类型是 `Option<NodeId>`（ADFIR 节点 id），与实现不一致 | `crates/continuum-artifact/src/artifact.rs:175`（`pub producer_node: Option<String>`）；`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:127`（设计侧写的是 `Option<NodeId>`） |
+| `ExecutionProfile`（§246） | **已存在**，定义在 `continuum-graph`：`compute_node: Option<String>`、`parallelism: Option<u32>` 都是裸类型，且**没有生产构造点**（`grep -rn "ExecutionProfile" crates/` 共 11 处，`src/` 里零构造，构造只出现在 `tests/`） | `crates/continuum-graph/src/execution.rs:20`（类型）、`:25`（`compute_node`）、`:27`（`parallelism`）；`crates/continuum-graph/src/lib.rs`（导出） |
+| 迁移号占用 | `1`、`2`（persist）、`10`（artifact）、`20`（graph）、`30`（workspace）、`40`（effect）、`41`（policy）、`50`（capability）、`80`（model-registry）。**`90` 未被占用** | 各 crate 的 `persist.rs`；注册处在 `crates/continuum-runtime/src/main.rs:83-93` |
+
+> **订正（2026-10-06，评审查出；原话照留）**：本节初稿有两行是**假证据**，两行都被下游当证据用。
+>
+> 1. 初稿原文写「`Artifact.producer_node` 的实义｜`Option<NodeId>`，**ADFIR 节点 id**（P1 的读法）……
+>    ｜`…p1-execution-layer-design.md:127`；`crates/continuum-artifact/src/artifact.rs:175`」。
+>    **错法是「引了行号、没读那一行」**：`:175` 那一行是 `pub producer_node: Option<String>`。
+>    `Option<NodeId>` 是 **P1 设计**里写的类型（`:127`），不是实现。**后果不是措辞**：
+>    真相更尖锐——这一列**连强类型 id 都装不进去**，且**设计与实现两侧不同**（§3.6 与 §5.7 的
+>    论证据此重述）。
+> 2. 初稿原文写「`ExecutionProfile.compute_node`（§246）｜**本仓零命中**（无该类型、无该字段）
+>    ｜`grep -rn "ExecutionProfile" crates/` 无命中」。**该类型与字段都存在**：
+>    `crates/continuum-graph/src/execution.rs:20`／`:25`，同日定稿的兄弟设计（G 的设计 `:673`）
+>    正引着它。**来历（为什么没查出来）**：初稿那次 `grep` 带了 `| head -20`，
+>    而同一行模式里还有 `NodeId`——**前 20 条命中全是 `NodeId`，`ExecutionProfile` 的命中被截断了**，
+>    于是「被截断」被当成了「零命中」。**「零命中」是一句可实跑的断言，截断过的输出不能作它的证据。**
+>    **后果**：§8 第 1 条的「没有端到端照片」原本以「类型不存在」为理由，理由作废（§8 第 1 条已重述）；
+>    §10 第 14、15 条的前提同时作废（两条已重写）。
+>
+> **同类扫描**：初稿里另有 `§3.6`、`§5.7` 两处转述了第 1 行的类型，均已按实读改正；
+> §8 第 1 条与 §10 第 14、15 条转述了第 2 行，均已重写。**订正不放宽任何断言**：
+> §5.7 的结论（§93 无 locality 输入）与 §10 第 5 条不变，改的只是它的证据。
 
 ## 1.3 与《工程》§4.3 的三条入边
 
@@ -61,13 +83,28 @@
 节点放置 ← Compute Node 注册 + Artifact 隐私等级 + Router 输出
 ```
 
-三条入边本设计都接，且**都落在类型上**（不是「将来会接」）：
+三条入边里，**两条落在类型上**；第三条**本设计不接，并记为阻断**（裁定见下）：
 
 | 入边 | 落在哪里 | 形状 |
 |---|---|---|
 | Compute Node 注册 | `PlacementRequest::nodes` | `&[ComputeNode]`，由 §4 的注册表交出 |
 | Artifact 隐私等级 | `PlacementRequest::artifacts` | `&[Artifact]`，读它的 `privacy_class` 字段 |
-| Router 输出 | `PlacementRequest::candidates` | `&RankedExecutionCandidates`（D 的类型，见 §6） |
+| **Router 输出** | **不在本设计的请求面上** | **裁定取「删字段」，该边记为阻断**：它今天没有消费方，收下一个从不读的形参只是把「零产生方」翻转成「零消费方」，是同一缺陷的镜像。**逐条见 §6 与 §10 第 8 条**；裁定来源见下。 |
+
+> **订正（2026-10-06，评审查出；原话照留）**：本节初稿写「三条入边本设计都接，且**都落在类型上**
+> （不是『将来会接』）」，并给 `Router 输出` 一行落在 `PlacementRequest::candidates`。
+> **评审判该字段是死参数**：调用方可以调 `rank`、再把结果丢掉，什么也不影响——「收下但从不读」
+> 支撑不了「这条边已兑现」这句话。**裁定：取形状甲（删字段）**，出处
+> **`docs/superpowers/2026-10-06-p3e-decisions.md` 第一节**（**注意：它在 `docs/superpowers/` 下，
+> 不在 `specs/` 下**；本设计初稿曾按惯例去 `specs/` 找而误判它不存在）。**后果不只是删一行**：
+> 本 crate 对 `continuum-model-registry` 的依赖边随之消失（§7.2、§7.3），《工程》§4.3 的那条边
+> 在本层**今天没有落点**（§6、§10 第 8 条）。
+>
+> **裁定要求的三条配套，逐条落点**：① §10 第 8 条的「不阻塞接口」改写为「**阻塞接口，已按裁定取甲**」
+> ——已落；② 本节这句「都落在类型上」**逐条复核**——**已复核，剩下两条支得起来**：
+> `Compute Node 注册` 由 `place` 步骤 1（判重）读 `nodes`、`Artifact 隐私等级` 由步骤 2（过闸门）
+> 读 `artifact.privacy_class`，两条都有真读点（§5.2 的步骤表）；③ 新增「构造不依赖
+> `RankedExecutionCandidates`」的反侧照片——已写进 §6.3 与 §9 的对应行。
 
 **另有 §4.3 与 §9.2 的一条**：`docs/02-工程.md:252` 与 `:598` 都把「Compute Node 注册」列为**入度为零**
 的组件。故 §4 的注册表**不依赖任何内部 crate 的数据面**（它只用 E 自己的 `ComputeNode`）；
@@ -134,7 +171,7 @@ ComputeNode { id  class  capabilities  resources  trust  availability }
 | `capabilities` | 只给名字 | `Vec<String>`，**E 不解释、不比较** | 取值域规范未给（§3.4、§10 第 4 条） |
 | `resources` | 只给名字 | 同上 | 同上 |
 | `trust` | 只给名字 | `NodeTrust`，二值（§3.3） | §94 称之为 "Node trust **class**"，但没给这个 class 的取值域 |
-| `availability` | 只给名字 | `Vec<String>`，**E 不解释** | §291 的 "current load" 落在它上面；因注册表无刷新入口，它连「有一份状态」都谈不上（§10 第 10 条） |
+| `availability` | 只给名字 | `Vec<String>`，**E 不解释** | 因注册表无刷新入口，它连「有一份状态」都谈不上（§10 第 10 条）。**订正（2026-10-06，评审查出；原话照留）**：本行初稿写「§291 的 `current load` 落在它上面」——**规范没有给这个对应**，且本设计把它取为标签集，**装不下一个负载量**。那是把发明写成了事实，已删。 |
 
 **这张表是为了堵一处漏项**：§287 的六个字段里，只有 `class` 的取值域是规范给的。若只写
 「本设计实现 §287 的 `ComputeNode`」而不逐项说清另外四个字段的形状来自哪里，
@@ -249,9 +286,14 @@ impl ComputeNode {
 **不新建第二个 `NodeId`**——这与 P3A 当年判定「`ToolId` 复用而不新建第二个」是同一条纪律的反面
 用法：那里两者是同一个概念、故复用；这里两者不是同一个概念、故**改名**，而不是沿用同一个词。
 
-**一处既有事实，须记**：§240 的 `Artifact.producer_node` 在本仓的实现是 `Option<NodeId>`
-（P1 设计 `:127`），即**ADFIR 节点 id**，而 §93 要的「制品在哪台机器上」是**计算节点**。
-同一个词 `node` 在 §240 与 §287 指两件事（§10 第 5 条）。
+**一处既有事实，须记**：§240 的 `Artifact.producer_node` 在本仓的**实现**是 `Option<String>`
+（`crates/continuum-artifact/src/artifact.rs:175`，裸串），而 P1 的**设计**写的类型是 `Option<NodeId>`
+（`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:127`，即 ADFIR 节点 id）。
+**两侧不一致**，且裸串连强类型 id 都装不进去。§93 要的「制品在哪台机器上」是**计算节点**，
+故同一个词 `node` 在 §240 与 §287 指两件事（§10 第 5 条）。
+**订正（2026-10-06，评审查出；原话照留）**：本句初稿写「在本仓的实现是 `Option<NodeId>`（P1 设计
+`:127`），即 ADFIR 节点 id」，把**设计写的类型**当成了**实现的类型**——引了行号、没读那一行
+（§1.2 的订正块记了同一处的来历与后果）。
 
 ---
 
@@ -278,8 +320,10 @@ pub enum NodeRegistryError {
 **三条判据**：
 
 1. **形状沿用本仓已有的两个注册表**——`continuum-provider` 的 `ProviderRegistry`（C 的设计 §3.1）
-   与 `continuum-operator` 的 `registry.rs`：重复登记同一 id 返回 `Err(Duplicate)`，已有先例，
-   不另发明一套。
+   与 `continuum-operator` 的 `registry.rs`（`crates/continuum-operator/src/registry.rs:11` 的
+   `Duplicate { id, version }`，`:27` 是它被返回处）：重复登记同一 id 返回具名的 `Err`。
+   **沿用的是这个形状（具名变体、不静默），不是它的字段数**——本设计的键只有 `ComputeNodeId` 一个，
+   故变体只有一个字段。
 2. **重复登记不静默覆盖**：B 的实现阶段查出的 §八.20 与 §八.23 两处「静默后者胜」，
    在本仓一律判为留白。故新节点的登记要么成功、要么具名失败。
 3. **`nodes()` 的消费方是 `place` 的调用方**（它把 `&[ComputeNode]` 填进 `PlacementRequest`），
@@ -349,13 +393,11 @@ D 的计划 Task 5 与 §11 第 14 条都记着）。
 （D 的设计 §4.2 与 §5.3）。**两段的分界不是口味**：MUST 一侧若交给策略，一条宽松策略就能绕过
 §4.4 的完成判据；SHOULD 一侧若写死数值，就是发明规范没有的数。
 
-## 5.2 请求面
+## 5.2 请求面与入口签名
 
 ```rust
 /// 一次放置的请求。**纯数据，无 I/O**——与 D 的 `RoutingRequest` 同形（D 的设计 §5.1）。
 pub struct PlacementRequest<'a> {
-    /// §4.3 的「Router 输出」。见 §6。
-    pub candidates: &'a RankedExecutionCandidates,
     /// §290 的 `required_artifacts` 那一面。§243 的隐私输入从这里读。
     pub artifacts: &'a [Artifact],
     /// §4.3 的「Compute Node 注册」。由 `NodeRegistry::nodes()` 交出。
@@ -363,9 +405,48 @@ pub struct PlacementRequest<'a> {
 }
 ```
 
-**三个字段都是引用、都是必填**（不是 `Option`）：一个想忽略节点集或制品集的调用方，
+**两个字段都是引用、都是必填**（不是 `Option`）：一个想忽略节点集或制品集的调用方，
 必须先编出一个空切片，那是一次**看得见的选择**，不是一次遗漏——同 D 把 `budget: BudgetView`
 写成必填的理由（D 的设计 §5.3 末段）。
+
+**第三个字段（§4.3 的 Router 输出）已按裁定删除**，逐条见 §6 与 §1.3 的订正块。
+**反侧照片**：构造一枚 `PlacementRequest` **不需要经过 `rank`**——`tests/` 里有一个样例
+只给制品与节点就把请求建出来（§9 的对应行）。这条照片钉的是「本层不依赖 Router 输出」
+这个**否定命题**，按 `p3bcdf-followups.md` §四.4「否定式照片在本仓是被接受的」的裁决记。
+
+### 入口签名与它的步骤（C3：初稿缺这一处，三条核心保证悬空）
+
+```rust
+/// 一次放置。**同步纯函数**：收请求与策略，不接 `Tx`、不做 I/O、不读时钟（本节末段）。
+///
+/// 返回**单枚**节点——不是候选序列：§291 要的是「放在哪」，`ExecutionProfile.compute_node`
+/// 也只要一枚（§10 第 15 条）。序列是本函数内部的中间物（§5.9）。
+pub fn place<'a>(
+    request: &PlacementRequest<'a>,
+    policy: &dyn PlacementPolicy,
+) -> Result<&'a ComputeNode, PlacementError>;
+```
+
+**签名里的四处是刻意的**，逐条：
+
+- **收 `&PlacementRequest` 与 `&dyn PlacementPolicy` 两个入参**：§5.4(b) 的「表必填、无默认」由
+  前者保证，§5.3 的「闸门不可被策略放宽」由后者只在 `strictest` 的一侧出现保证
+  （`spec_floor` 不读 `policy`）；
+- **不接 `Tx` / 不接时钟**：与 D 的 `rank` 同形（D 的设计 §8.1「Router 的纯由签名保证」），
+  这也是 §5.8 删去 `Persist` 一类错误变体的**唯一依据**；
+- **返回 `&'a ComputeNode`**：借用自 `request.nodes`，其生命周期由签名钉住；
+- **返回 `Result`**：失败路径只有 §5.8 的两枚。
+
+**`place` 的步骤，按次序**（`DuplicateNode` 的检查点由此落在算法里，不再只写在 §5.9 的一句话里）：
+
+1. **判重**：`request.nodes` 里同一个 `ComputeNodeId` 出现两次即 `Err(DuplicateNode { id })`。
+   放在第一步，因为它是 §5.9 那条「确定」断言的前提，而不是结尾的卫生检查。
+2. **过闸门**：对每一枚 `request.artifacts`，算
+   `strictest(policy.rules().rule_for(artifact.privacy_class), spec_floor(artifact.privacy_class))`，
+   据此把节点集滤到剩下的那一批（§5.3）。
+3. **判空**：第 2 步之后一枚不剩即 `Err(NoPlaceableNode)`。
+4. **排序**：`sort_by(|a, b| policy.compare(a, b).then_with(|| a.id().cmp(b.id())))`（§5.9 的兜底档）。
+5. **取头**：返回排在第一的那一枚的借用。
 
 **为什么 `artifacts` 是 `&[Artifact]` 而不是一个新的 `(id, level)` 类型**：§243 的输入就是
 制品自己的等级，而 `Artifact` 已经把它记在 `pub privacy_class` 上（§1.2）。另建一个投影类型
@@ -441,9 +522,15 @@ fn strictest(a: TransferRule, b: TransferRule) -> TransferRule {
 |---|---|---|
 | **(a) 枚举穷尽** | `spec_floor` 对 `PrivacyClass` 的 `match` **穷尽且无通配臂**。加第六档时本函数编译不过，必须逐档归类 | 与 `PrivacyClass::as_str` 同形（`crates/continuum-artifact/src/artifact.rs:112-124` 的注释明写「加档时本函数编译不过，编码不会漏分支」）。**这条不是运行期可拍的**，据实记在 §8 第 5 条。 |
 | **(b) 表覆盖** | 调用方给的 `PlacementRules` **必须覆盖五档**，缺档即构造期 `Err`（见下） | 照片：只给四档的 `try_new` 返回 `Err(MissingLevel { level })`；给重复档返回 `Err(DuplicateLevel { level })` |
-| **(c) 字符串解码** | **E 从不经字符串读隐私等级**——进来的就是 `PrivacyClass` 值 | 唯一解码点是 `PrivacyClass::parse`（`artifact.rs:129`），表外串返回 `None`，落库侧把它翻成 `PersistError`（`persist.rs:120-123`）。故「未知等级」到不了 E。列 NOT NULL 使得「没有等级」也不可表达（`persist.rs:14`） |
+| **(c) 字符串解码** | **E 从不经字符串读隐私等级**——进来的就是 `PrivacyClass` 值 | 唯一解码点是 `PrivacyClass::parse`（`artifact.rs:129`），表外串返回 `None`，落库侧把它翻成 `PersistError`（`persist.rs:120-123`）。故「未知等级」到不了 E。列 NOT NULL 使得「没有等级」也不可表达（`persist.rs:15`） |
+
+> **注**：本行初稿引的是 `persist.rs:14`——**那一行是 `producer_node TEXT,`，是那张表里唯一可空的列**
+> （M1，2026-10-06 评审查出）；`NOT NULL` 在 `:15` 的 `privacy_class TEXT NOT NULL,`。已改。
 
 通道 (b) 的类型：
+
+`PlacementRules` 的值由谁产生，**本设计不指定**：它与 §224 的 `node_policy` 是不是同一件事，
+两种读法在本设计里都不选，逐条写在 §10 第 16 条。本设计只钉住「进来的必须是一张覆盖五档的表」。
 
 ```rust
 /// §94 的「privacy × trust class」表。**值由调用方给，本设计一个都不填。**
@@ -466,6 +553,20 @@ pub enum RulesError {
 **覆盖判据的来源是 `PrivacyClass::ALL`**（`artifact.rs:100`），不是本设计手写的一张五档清单：
 一张手抄清单在规范加档时**不会失败**，而 `ALL` 会。因此第 (b) 通道对**将来新增的档**仍然成立
 ——那时的旧表只有五条，`try_new` 判它 `MissingLevel`，即 fail-closed。
+
+**`LocalOnly` 那一格是装饰性的（I2，2026-10-06 评审查出）**：§5.3 的
+`strictest(rules.rule_for(LocalOnly), spec_floor(LocalOnly))` 里右侧恒为 `TrustedPersonalOnly`，
+故**调用方为 `LocalOnly` 填的那一格永远被吞掉**。这有两处后果，都要写明而不是留白：
+
+1. **`try_new` 的覆盖率判据仍强制它存在**（少一档即 `Err(MissingLevel)`），
+   故「五格都有意义」是错的读法——**第一格是给 `PrivacyClass::ALL` 的完整性用的，不是给判据用的**。
+2. **它是接口上的坑，不是安全问题**：一个以为「把 `LocalOnly` 填成 `AnyNode` 就放开了」的调用方
+   会发现放不开（§9 第 3 行正是这个反例，**这条照片因此有第二重用处**）。
+
+**被否掉的替代**：让 `PlacementRules` 只收其余四档、把 `LocalOnly` 从槽里去掉。
+否掉的理由是那会**松开 (b) 通道**——一张不覆盖全档的表正是「未归类」的形状，
+而 fail-closed 要的恰恰是「必须逐档表态」。**取舍记入 §10 第 17 条**（要不要给这个槽留一个
+「本档已被规范钉死」的显式取值）。
 
 ## 5.5 排序：接口在本层，数值不写
 
@@ -501,7 +602,7 @@ impl BaselinePlacementPolicy {
 
 ## 5.6 §291 的十一项因子逐项
 
-§291（`docs/spec/05-normative.md:1725-1737`）是 SHOULD，十一项。逐项处置：
+§291（`docs/spec/05-normative.md:1729-1740`）是 SHOULD，十一项。逐项处置：
 
 | §291 因子 | 本设计 | 依据 |
 |---|---|---|
@@ -515,7 +616,7 @@ impl BaselinePlacementPolicy {
 | `artifact locality` | **无输入** | §93 要「制品在哪台机器上」，而 `Artifact.producer_node` 在本仓是 ADFIR 节点 id（§3.6），且表里没有「当前所在计算节点」这一列。§5.7、§10 第 5 条 |
 | `latency` | **无输入** | 无单位、无取值域 |
 | `money` | **无输入** | 无单位；§93 的 compute cost 与 data movement cost 两项都算不出来 |
-| `current load` | **无输入** | 挂在 `availability` 上，而它取值域未给；且注册表**没有刷新入口**（§4.1），故它连「会变」都不成立。§10 第 10 条 |
+| `current load` | **无输入** | 取值域未给，且**规范没有把它与 §287 的任何一个字段对应起来**（初稿写「挂在 `availability` 上」是把发明写成了事实，已删，见 §3.1）；注册表也**没有刷新入口**（§4.1），故它连「会变」都不成立。§10 第 10 条 |
 
 **九项无输入、一项部分可用。** 这张表是为了堵一处漏项：只说「§291 是 SHOULD、故推迟」会让人以为
 缺的是**数值**，而实际缺的是**输入**——即便有人真去写一个基线策略，他也拿不到这九项里的任何一项。
@@ -526,9 +627,13 @@ impl BaselinePlacementPolicy {
 §93（`docs/spec/02-positioning.md:1024-1052`）说「分布式任务调度**必须知道 Artifact 在哪里**」，
 并给出 `placement cost = compute cost + data movement cost`。本设计的实读：
 
-- **「在哪里」这一事实在本仓没有落点**：`Artifact` 的 `producer_node` 是 `Option<NodeId>`
-  且是 ADFIR 节点 id（§3.6）；`artifact` 表（`crates/continuum-artifact/src/persist.rs:9-30`）
-  没有位置列。
+- **「在哪里」这一事实在本仓没有落点**：`Artifact` 的 `producer_node` **实现是 `Option<String>`**
+  （`artifact.rs:175`；P1 设计写的是 `Option<NodeId>`，两侧不一致，见 §3.6），
+  且它的设计意图是 **ADFIR 节点 id**，不是计算节点；`artifact` 表
+  （`crates/continuum-artifact/src/persist.rs:9-30`）没有位置列。
+  **订正（2026-10-06，评审查出；原话照留）**：本句初稿写「`producer_node` 是 `Option<NodeId>`
+  且是 ADFIR 节点 id」——把设计写的类型当成了实现的类型（§1.2 的订正块记了来历与后果）。**结论不变**，
+  改的是论据：一条裸串、且语义是 ADFIR 节点，更不可能回答「在哪台**计算**节点上」。
 - **两项成本都算不出来**：compute cost 需要 §291 的资源量与单价（都没有）；data movement cost
   需要制品大小（**有**，`Artifact.size: u64`）与两端的网络成本（无）。
 
@@ -555,8 +660,9 @@ pub enum PlacementError {
   而 `PlacementPolicy::rules()` 交出的是一枚**已构造的** `PlacementRules`，
   故「缺档」这条路径**到不了 `place`**（同 D 不收 `RequirementError` 的判据，D 的设计 §5.4）。
 - **不收 `Persist(...)`**：`place` 是纯函数、签名里没有 `Tx`（§5.2），产不出读库失败。
-- **不收「无候选模型」**：候选集非空是 D 的 `rank` 的既有不变量（D 的设计 §5.2 第一条断言），
-  故 `place` 不必替它再判一次；`PlacementRequest` 装的是**已构造的** `RankedExecutionCandidates`。
+- **不收「无候选模型」**：**本设计的请求面里没有候选模型**（§5.2 按裁定删去了那一格），
+  故这一类失败在本层没有操作数。D 的「候选集非空」那条不变量（D 的设计 §5.2 第一条断言）
+  仍然成立，只是**本层不再读它**——两种失败的边界因此在 D 那一侧，不在这一侧。
 
 **`NoPlaceableNode` 不区分「因为隐私被滤掉」与「本来就没节点」**，判据：区分它需要把
 「哪几个节点因哪一条被滤掉」记成一个输出（D 的 `RoutingReason` 那样的类型），而 §243／§291
@@ -566,7 +672,8 @@ pub enum PlacementError {
 
 ## 5.9 确定性
 
-排序必须有全序且不随输入顺序漂移——否则「排出来的节点」取决于调用方怎么排 `nodes` 切片。
+排序必须有全序且不随输入顺序漂移——否则**返回的那一枚节点**取决于调用方怎么排 `nodes` 切片。
+（排序是 `place` 内部的第 4 步，输出仍是单枚节点，§5.2 的签名。）
 
 **机制**：`place` 用 `sort_by(|a, b| policy.compare(a, b).then_with(|| a.id().cmp(b.id())))`，
 即**无论策略给出什么样的比较，`ComputeNodeId` 升序都是最后的兜底档**。
@@ -577,36 +684,71 @@ pub enum PlacementError {
 
 ---
 
-# 6. 与 D 的接缝：Router 输出怎么进本层
+# 6. 与 D 的接缝：§4.3 的 `节点放置 ← Router 输出` **今天没有落点**
 
 **本条是本设计要向复审与 D 表态的地方，故单独成节。**
 
-§4.3（`docs/02-工程.md:253`）要求 `节点放置 ← Router 输出`，故 `PlacementRequest::candidates`
-装的是 D 的 `&RankedExecutionCandidates`（不是 `ModelId`）。**理由有两条，第二条是硬的**：
+**结论（2026-10-06 裁定，取形状甲：删字段）**：`PlacementRequest` **不收** Router 输出。
+本条边因此**记为阻断**——不是「本层不接」，是**今天接不了**。
+
+**裁定的效力是有条件的，这一句必须写在前面**：依据是「**今天没有任何一行代码会读它**」，
+**不是「那条边不存在」**。《工程》§4.3 的边是规范原文，**它没有被推翻**，只是今天在本层无落点；
+故本条进遗留、**带具名收件人**（§10 第 8 条）。出处：
+`docs/superpowers/2026-10-06-p3e-decisions.md` 第一节（**在 `docs/superpowers/` 下，不在 `specs/` 下**）。
+
+## 6.1 为什么删：死参数不是兑现
+
+初稿在 `PlacementRequest` 上留了一个必填字段 `candidates: &'a RankedExecutionCandidates`，
+护身理由有两条：
 
 1. **把 §4.3 的那条边兑现成类型名**。若只装一枚 `ModelId`，本层对「Router」的依赖就只剩
    `continuum-core` 里的一个 id 类型，而 §4.3 那条边会变成「名不符实」——D 设计 §8.4 为
-   `Router ← … Capability Token` 那半行做过同样的自我订正，本设计不重犯。
-2. **`ExecutionCandidate` 没有 crate 外的构造点**（D 的设计 §5.2：字段私有，唯一构造点在 `rank` 内）。
-   故调用方**只能**把它从 `rank` 得到的那枚 `RankedExecutionCandidates` 整体交进来，
-   而不能自己拼一枚候选。这条不是设计选择，是既有封装的事实。
+   `Router ← … Capability Token` 那半行做过同样的自我订正。
+2. **`ExecutionCandidate` 没有 crate 外的构造点**（D 的设计 §5.2：字段私有，唯一构造点在 `rank` 内），
+   故调用方只能把 `rank` 得到的那枚 `RankedExecutionCandidates` 整体交进来。
 
-**一处必须明说的零读取**：本设计**今天不从 `candidates` 读任何东西**——
-`place` 的闸门只读 `artifacts` 与 `nodes`；§291 的十一项因子里没有一项与「选中哪个模型」有关，
-因为任务侧根本没有资源需求字段（§5.6）。本设计**不为此发明一个读取**（例如「按模型去挑节点」
-需要「哪个节点能跑哪个模型」这一事实，而 §287 的 `ComputeNode` 没有模型字段、§36 的
-「可以有 models」只是一句许可）。
+**复审指出两条理由都不支撑「收一个字段」**：第 2 条只支撑「调用方**能**交出什么形状」，
+不支撑「本层**要**它」；而**调用方可以调 `rank`、再把结果丢掉**，对本层毫无影响。
+即：一个从不被读的按值参数，**与「零产生方」是同一缺陷的镜像**——本项目删零产生方的类型，
+「收下但从不读」同样是把接口撑在一个不存在的事实上。**故删。**
 
-**这一条请求复审表态，也请求规范维护者回答**：§4.3 的 `节点放置 ← Router 输出` 到底指
-输出的哪一部分？两种读法都自洽——(a) 只指「这次要跑哪个模型」，那这一条边应改述为
-`节点放置 ← Model 选择`，且本字段可收窄；(b) 指整份候选排序（例如「首选模型放不下时试下一枚」），
-那就需要一条规范没有的**回退规则**，本设计**不发明**它（回退会改变实际运行的模型，
-与 §251 的升级阶梯是同一个轴，属 D）。**收件人：复审者 → 规范维护者**（§10 第 8 条）。
+**这也不是把 §4.3 那条边「解释掉」了。** 《工程》§4.3 是组件级依赖图，它写着这条边，
+而本层今天兑现不了；删字段只是让**接口不再假装兑现了它**，并把这件事从脚注提到本节与 §10 第 8 条。
 
-**D 侧需要的访问器，本设计一个都不缺**：`selected()`／`model()`／`state()`／`compatibility()`／
-`confidence()`／`reason()` 都已存在（`crates/continuum-model-registry/src/router.rs:388`、`:340-361`），
-且 `RoutingReason` 的四个访问器也在（`:287-306`）。**本设计不请求 D 新增任何面。**
-（D 的 `BaselineRankingPolicy` 是 Task 12，尚未落地；本设计不依赖它。）
+## 6.2 删掉之后，《工程》§4.3 那条边缺的是什么
+
+缺的是**规范没有回答的那个问题**：`节点放置` 要从 Router 输出里读什么？两种读法都自洽：
+
+- **(a) 只指「这次要跑哪个模型」**：那这一条边应改述为 `节点放置 ← Model 选择`，
+  且形状是模型侧的一个 id（`ModelId`，属 `continuum-core`），不是整份候选排序。
+- **(b) 指整份候选排序**（例如「首选模型放不下时试下一枚」）：那就需要一条规范没有的
+  **回退规则**，本设计**不发明**它——回退会改变实际运行的模型，与 §251 的升级阶梯是同一个轴，属 D。
+
+**两种读法在本设计里都不选**，因为选择权不在 E：无论取哪一种，**E 侧的形状都不变**
+（`place` 只读 `artifacts` 与 `nodes`，§5.2）。今天能断言的只有一件事：
+**在规范给出读法之前，本层对 Router 输出零读取，故本层对 `continuum-model-registry` 零依赖**（§7.2）。
+
+**收件人（按裁定原文）：规范维护者 ＋ 复审者**（前者回答读法，后者持有裁定的翻转条件）。
+见 §10 第 8 条。
+
+## 6.3 一条反侧照片（裁定要求的第三条配套）
+
+**「构造 `PlacementRequest` 不依赖 `RankedExecutionCandidates`」**——
+`tests/placement.rs` 里有一枚样例，只给 `artifacts` 与 `nodes` 就把请求建出来，**不调 `rank`**（§9）。
+判据是 `p3bcdf-followups.md` §四.4 的裁决：「**否定式照片在本仓是被接受的**」——
+F 的 P-19 与 B 的「不写审计」照片都是这一形状。
+
+**D 侧需要的访问器，本设计一个都不缺**（不因删字段而变）：`selected()`／`model()`／`state()`／
+`compatibility()`／`confidence()`／`reason()` 都已存在（`crates/continuum-model-registry/src/router.rs`
+工作树的 `:403`、`:355-376`），且 `RoutingReason` 的四个访问器也在（`:302-318`）。
+**本设计不请求 D 新增任何面，也不再请求 D 提供任何面**——若复审判定该边必须以 (b) 兑现，
+那要新增的是 D 侧的**回退接口**，届时应由复审重新提出，而不是由本设计预先占位。
+
+**一处时点提醒（M5，2026-10-06 评审查出；本设计已按它重取过一次）**：复审按 `c46477f` 核过
+这些行号，**逐条准确**；但**工作树里 `router.rs` 有未提交改动**（`M`，净增约 31 行、删约 17 行），
+行号已整体下移约 15 行。**本节与 §1.2 现在引的是工作树的号**（`RankedExecutionCandidates`
+`:394`、`selected` `:403`、`ExecutionCandidate` `:345`、`RoutingReason` `:276`、`rank` `:512`）；
+**计划接手前须重取**——本设计不据已位移的行号下判断。
 
 ---
 
@@ -640,22 +782,32 @@ crates/continuum-node/
 ## 7.2 依赖边（只登记实际用到的）
 
 ```
-continuum-node → continuum-artifact, continuum-model-registry
+continuum-node → continuum-artifact
 ```
 
 | 边 | 用到的具体东西 | 判据 |
 |---|---|---|
 | `continuum-artifact` | `Artifact`（`PlacementRequest` 的字段）、`PrivacyClass`（`TransferRule` 的判据面与 `PlacementRules` 的键） | 两个都是**已存在的类型**，本设计一个都不新建（§1.2） |
-| `continuum-model-registry` | `RankedExecutionCandidates` | §4.3 的那条入边（§6） |
+
+> **订正（2026-10-06，评审查出；原话照留）**：本节初稿登记**两条**边，第二条是
+> `continuum-model-registry`（用于 `PlacementRequest::candidates: &RankedExecutionCandidates`），
+> 理由是「§4.3 的那条入边（§6）」。**该字段已按裁定删除**（§6、§1.3 的订正块），
+> 故这条边**随之消失**——留着它就是本项目判过的「零使用的边即假边」。
+> **后果**：本 crate 的 `ALLOWED` 条目因此只有一条边（§7.3），
+> 且《工程》§4.3 的那条边在本层**今天没有落点**（§6、§10 第 8 条）。
 
 **明确不登记的边，以及为什么**：
 
 - **不登记 `continuum-core`**：本设计对它**零引用**（没有用到 `ModelId`、`ToolId`、
   `ProviderHealth` 中的任何一个）。**零使用的边即假边**——P2b 为此删过两条，
   `continuum-secrets` 也据同一条只登记了 `continuum-capability`（`dependency_direction.rs:103`）。
+- **不登记 `continuum-model-registry`**：§6 的裁定删去了唯一会用到它的字段。
+  **这一条要写明**，否则会被后来者当成漏登记（§1.2 的 `D 的 Router 输出面` 一行仍然记着 D 的现状，
+  那是**实读**，不是本层的依赖）。
 - **不登记 `continuum-persist` / `continuum-events`**：§4.2 判本设计不写库。
   `device join`／`device revoke` 两条审计是 §313 的必录项，但它们的**产生方是 Authority**，
-  不在 E 的范围（§4.3、§10 第 12 条）。**为它新增一个 `AuditKind` 变体等于扩 §313 的必录清单**，
+  不在 E 的范围（§4.3、§10 第 12 条——**该条已按《工程》§5.2 裁入长期范围**）。
+  **为它新增一个 `AuditKind` 变体等于扩 §313 的必录清单**，
   那是规范的事（D 为同一理由不登记 `continuum-events`，D 的设计 §8.2）。
 - **不登记 `continuum-graph`**：本设计对 ADFIR 图零引用（§93 的 locality 缺口的**后果**，不是理由）。
   §3.6 提到的 `continuum_graph::NodeId` 只是**解释本设计为何取名 `ComputeNodeId`**，不是一条边。
@@ -663,31 +815,39 @@ continuum-node → continuum-artifact, continuum-model-registry
 - **`continuum-runtime` 侧一条边都不加**：E 在 runtime 里没有调用点（§8 第 1 条）。
   **这一条要写明**，否则会被后来者当成漏登记。
 
-**按《工程》§9.1 的箭头读法**（被依赖者 → 依赖者，`docs/02-工程.md:560-566`）：
+**按《工程》§9.1 的箭头读法**（被依赖者 → 依赖者，`docs/02-工程.md:562-566`）：
 
 ```
-continuum-artifact        ──→ continuum-node
-continuum-model-registry  ──→ continuum-node
+continuum-artifact  ──→ continuum-node
 ```
 
-即本 crate **被它们二者依赖的反方向不存在**。反向边核过：`continuum-artifact` 的允许集合是
-`core / events / persist`（`:32-35`）、`continuum-model-registry` 的是 `capability / core / persist`
-（`:129-136`），**都不含 `continuum-node`**，故不构成环。
+即本 crate **被它依赖的反方向不存在**。反向边核过：`continuum-artifact` 的允许集合是
+`core / events / persist`（`:32-35`），**不含 `continuum-node`**，故不构成环。
+（初稿此处还核过 `continuum-model-registry` 的 `capability / core / persist`（`:129-136`）——
+**那一条随该边一并作废**，原话照留于此。）
+
+**一条可跑的守卫（M4，2026-10-06 评审查出）**：本节初稿对 `continuum-node` 的模块面写过一句
+「本 crate 对 `continuum-artifact` 的依赖**全部落在节点放置**一侧」——那是绝对措辞而无用例。
+**改为可跑的判据**：`src/registry.rs`（§4 的注册表）**不出现** `continuum_artifact`、
+`Artifact`、`PrivacyClass` 三个名字，由 §9 的源码文本断言钉住（它的证明力与 C 设计 §4.1 末段
+那条同形：**匹配的是字面拼法，是下界不是封闭判定**）。**故 §4 的「入度为零」（§1.3）不是靠这句话，
+是靠那条断言 + `ALLOWED` 条目。**
 
 ## 7.3 `ALLOWED` 表与 workspace 成员
 
 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 需要**新增一条**，
-按字母序放在 `continuum-model-registry` 之后：
+按字母序放在 `continuum-model-registry` 与 `continuum-persist` 之间
+（字母序：`artifact` < `model-registry` < `node` < `persist`）：
 
 ```rust
-    // P3 子项目 E：计算节点与放置。设计 §7.2 的两条边是 artifact（`Artifact` /
-    // `PrivacyClass`，§243 的隐私输入）与 model-registry（`RankedExecutionCandidates`，
-    // 《工程》§4.3 的「节点放置 ← Router 输出」）。**不登记 core**：本设计对它零引用。
-    // **不登记 persist / events**：本设计不写库（设计 §4.2）。
-    ("continuum-node", &["continuum-artifact", "continuum-model-registry"]),
+    // P3 子项目 E：计算节点与放置。设计 §7.2 的唯一一条边是 artifact（`Artifact` /
+    // `PrivacyClass`，§243 的隐私输入）。**不登记 model-registry**：《工程》§4.3 的
+    // 「节点放置 ← Router 输出」今天没有落点，收下从不读的形参已按裁定删去（设计 §6）。
+    // **不登记 core**：本设计对它零引用。**不登记 persist / events**：本设计不写库（§4.2）。
+    ("continuum-node", &["continuum-artifact"]),
 ```
 
-**同时 `Cargo.toml` 的 workspace `members` 要加一行**（`Cargo.toml:4-21` 是显式清单，不是通配）。
+**同时 `Cargo.toml` 的 workspace `members` 要加一行**（`Cargo.toml:3-21` 是显式清单，不是通配）。
 两者缺一即红，且**红的不是同一条断言**：`dependency_direction.rs` 的
 `every_crate_depends_only_on_its_allowed_set` 里有一步「workspace 成员必须在 `ALLOWED` 里」
 （`:246-262`），故漏登记 `ALLOWED` 会当场失败——这一点与 C 的 §4.3 说的那个年代不同，是本设计实读到的。
@@ -703,9 +863,13 @@ continuum-model-registry  ──→ continuum-node
 故必须回答「放置的隐私裁决是不是该走它」。**本设计的判定是：不走，且两者不是同一件事。**
 
 - **§243 的主语是 Scheduler**（`docs/spec/05-normative.md:731`），而 §304
-  （`docs/spec/05-normative.md:1973`）把 Resource Scheduler 定在第 4 层。故放置的隐私裁决归 E。
+  （`docs/spec/05-normative.md:1973-1985`）把 Resource Scheduler 的四项职责列出来。故放置的隐私裁决归 E。
+  **订正（2026-10-06，评审查出；原话照留）**：本行初稿写「§304 **把 Resource Scheduler 定在第 4 层**」
+  ——**§304 全文没有「第 4 层」这四个字**，它只列四项职责；层号来自 `docs/02-工程.md` 的 §4.2
+  （`:435`「Resource Scheduler 落在第 4 层」）与 §9.1 的层号。这是「引文不说所引之事」，
+  **结论（§243 的主语是 Scheduler、故归 E）不受影响**，改的是出处。
 - **策略层的 `PolicyContext` 里没有节点侧的事实**：它的事实集是 `explicit_current` / `privacy_class` /
-  `effect_type` / `task_class` / `duration_ms`（`context.rs:28-40`），
+  `effect_type` / `task_class` / `duration_ms`（`context.rs:31-39`），
   没有 `NodeClass`、没有 `NodeTrust`。故它今天**表达不出**「这一档等级 × 这一类节点」这个二元判定。
 - **两条边都登记会成环**吗——不会：`资源层 (4) → 边界层 (5)` 是既有方向（`docs/02-工程.md:577`）。
   故这**不是**一条被方向挡住的边，是**今天没有用处**的边：E 的闸门若要经策略层，
@@ -730,8 +894,13 @@ continuum-model-registry  ──→ continuum-node
 
 **本设计明确拍不到的照片，逐条列出**（按本项目纪律，写不出照片的把「为什么没有」写出来）：
 
-1. **端到端的一次真实分布式放置**：没有第二台计算设备、没有节点执行循环、
-   `ExecutionProfile`（§246）在本仓零命中（§1.2）。**没有产生方**，故没有端到端照片。
+1. **端到端的一次真实分布式放置**：没有第二台计算设备、没有节点执行循环。
+   **订正（2026-10-06，评审查出；原话照留）**：本句初稿写的理由是「`ExecutionProfile`（§246）
+   在本仓**零命中**」——**该理由为假**：那个类型存在（`crates/continuum-graph/src/execution.rs:20`，
+   `compute_node` 在 `:25`，见 §1.2 的订正块）。**重述后的理由**：`ExecutionProfile` 存在，
+   但**没有任何生产构造点**（`src/` 里零构造，构造只在 `tests/`），
+   而「节点执行时装配 `ExecutionProfile` 的那一步」在 G 的设计 §7 里已被记为缺失。
+   故缺的不是类型，是**装配那一步与第二台设备**——照片仍然没有，但理由换了，且换后的理由更接近真相。
 2. **§291 九项因子的实际权衡**：它们**没有输入**（§5.6），故没有任何用例能断言
    「选出来的节点是更合适的那一个」。能拍的只有机制：闸门、全序、确定、字段齐备。
 3. **OPEN-007 的赋值与传播规则**：制品等级由谁写入、产出制品如何继承输入的等级，规范未定
@@ -754,7 +923,10 @@ continuum-model-registry  ──→ continuum-node
 |---|---|
 | **判据 §4.4**：混合节点集下 `LocalOnly` 只落在 personal 且被信任的节点上 | 给定 `[云节点(temporary, outside), 桌面(personal, trusted)]`，断言 `place` 返回的那个，并逐项断言它的 `class() == Personal` 与 `trust() == TrustedPersonal` |
 | **判据 §4.4 的否定面** | 节点集只有云节点时返回 `Err(NoPlaceableNode)`（**上面一条与这一条是成对的**，单看任一条分不清两种 `Err`） |
-| **闸门不可被策略放宽** | 五档**全写** `AnyNode` 的 `PlacementRules`：`LocalOnly` 的制品仍只落在 `TrustedPersonalOnly` 那一类节点上（**逐档遍历**，不是只测 `LocalOnly` 一档） |
+| **放行侧（I1，2026-10-06 评审查出后补）** | `Public` 的制品 ＋ 表里 `Public` 那一档写 `AnyNode` ＋ 节点集**只有云节点** → **`Ok`**，断言返回的正是那枚云节点（顺带断言 `class() != Personal`）。**这一格是必需的**：没有它，一个「把所有制品都当 `LocalOnly` 一律拒掉」的实现能通过本表其余每一行——那正是 fail-closed 的反面（闸门静默拒绝一切）。**上面两行钉「该拒的拒」，这一行钉「该放的放」。** |
+| **闸门不可被策略放宽** | 五档**全写** `AnyNode` 的 `PlacementRules`：`LocalOnly` 的制品仍只落在 `TrustedPersonalOnly` 那一类节点上（**逐档遍历**，不是只测 `LocalOnly` 一档）。**顺带钉住 §5.4 的那句话**：`LocalOnly` 那一格被 `spec_floor` 覆盖，填什么都一样 |
+| **请求面不依赖 Router 输出（C4 裁定要求的反侧照片）** | `tests/placement.rs` 里有一枚样例，**只给 `artifacts` 与 `nodes`** 就把 `PlacementRequest` 建出来并调用 `place` ——**不调 `rank`、不构造任何候选集**。这是否定式照片（`p3bcdf-followups.md` §四.4 判它在本仓可接受） |
+| **注册表不引 artifact（M4 的守卫）** | 源码文本断言：`src/registry.rs` 里不出现 `continuum_artifact` / `Artifact` / `PrivacyClass` 三个名字。**证明力的边界**：匹配的是字面拼法，别名与全限定路径逃逸——是下界不是封闭判定（与 C 设计 §4.1 末段同形）；更硬的一层是 `ALLOWED` 的逐对断言（本 crate 整体） |
 | 确定性 | 打乱 `nodes` 顺序三次调用，返回同一个节点 |
 | 重复 id | `nodes` 里同一 `ComputeNodeId` 两次 → `Err(DuplicateNode { id })`，并断言是哪一枚 |
 | 空节点集 | `nodes` 为空 → `Err(NoPlaceableNode)` |
@@ -781,7 +953,10 @@ continuum-model-registry  ──→ continuum-node
    （`LocalOnly` ↛ 云），其余四档的规则**由调用方给，本设计一个都不填**，故那四档的宽严
    完全取决于调用方——一份把四档全写 `AnyNode` 的表会让 `Secret` 上临时节点。
    **这是一个显式选择，不是本设计的保证。** 收件人：规范维护者（给出那张表），
-   以及候选产生方（Contract 的 `data_policy`，§224；或用户策略）——**本设计不指定谁产生它**。
+   以及候选产生方（Contract 的 `data_policy` **与 `node_policy`**，§224；或用户策略）——
+   **本设计不指定谁产生它**。**订正（2026-10-06，评审查出；I3）**：本条初稿只点了 `data_policy`，
+   **漏了紧挨着它的 `node_policy`**（`docs/spec/05-normative.md:224-226` 三行相邻）——
+   一个节点侧组件对规范里的节点策略槽一字未提。**它与 `PlacementRules` 是不是同一件事，逐条见 §10 第 16 条。**
    **阻塞范围**：阻塞「保证的完整」，不阻塞接口冻结。
 3. **§287 的 `trust` 无取值域**：本设计取二值（§3.3）。若规范给出更细的分级，`NodeTrust` 要重取，
    且**放行方向会变**——`LocalOnly` 的闸门逐值归类，加值时必须重新归（§5.4 通道 (a)）。
@@ -789,8 +964,14 @@ continuum-model-registry  ──→ continuum-node
 4. **§287 的 `capabilities` / `resources` / `availability` 无取值域**：本设计只搬运（§3.4），
    故 §291 的十一项因子里九项**无输入**（§5.6）。收件人：规范维护者。
    **阻塞范围**：不阻塞接口，但它使「排序」这一半在数值上不可实现。
-5. **§93 的 artifact locality 无输入**：`producer_node` 在本仓是 ADFIR 节点 id（P1 设计 `:127`），
-   `artifact` 表无位置列；§240 与 §287 的 `node` 是两件事（§3.6）。收件人：规范维护者。
+5. **§93 的 artifact locality 无输入**：`producer_node` 的**实现**是 `Option<String>`
+   （`crates/continuum-artifact/src/artifact.rs:175`），它的**设计意图**是 ADFIR 节点 id
+   （P1 设计 `:127` 写的是 `Option<NodeId>`——**设计与实现两侧不同**），
+   且 `artifact` 表无「当前所在计算节点」列；§240 与 §287 的 `node` 是两件事（§3.6）。
+   **订正（2026-10-06，评审查出；原话照留）**：本条初稿写「`producer_node` 在本仓是 ADFIR
+   节点 id（P1 设计 `:127`）」——把**设计写的类型**当成了**实现的类型**（§1.2 的订正块记了
+   错法与来历）。**结论不变**（§93 仍无输入），改的是论据：一条裸串、语义是 ADFIR 节点，
+   更不可能回答「在哪台**计算**节点上」。收件人：规范维护者。
    **阻塞范围**：不阻塞（§93 是 SHOULD 的输入之一）。
 6. **「云端节点」在 §287 里没有对应轴**：本设计取 `class ≠ Personal`（超集，更严），
    多排除了朋友的电脑一类（§5.3 末段）。若规范本意是按地理／网络位置判，需要 §287 多一个轴。
@@ -799,11 +980,21 @@ continuum-model-registry  ──→ continuum-node
    `BaselinePlacementPolicy::compare` 对任何一对返回 `Equal`，次序由 `ComputeNodeId` 兜底。
    收件人：规范维护者 ＋ 语义层设计（若判定应由 `data_policy` 或用户策略给权重）。
    **阻塞范围**：不阻塞——判据 §4.4 是 MUST 侧的性质，不依赖排序数值。
-8. **§4.3 的 `节点放置 ← Router 输出` 指输出的哪一部分，本设计请求表态**：`PlacementRequest::candidates`
-   今天**零读取**（§6）。两种读法：(a) 只指「跑哪个模型」→ 该边应改述、字段可收窄；
-   (b) 指整份候选排序（含「首选放不下就试下一枚」）→ 需要一条规范没有的回退规则，
-   本设计不发明。收件人：**复审者 → 规范维护者**。**阻塞范围**：不阻塞接口；
-   但若取 (b)，`place` 与 D 的升降级阶梯之间会多一条接缝，须由 D 与 E 同时改。
+8. **§4.3 的 `节点放置 ← Router 输出` 指输出的哪一部分——本层今天没有落点（已裁：形状甲，删字段）**：
+   该字段已删（§6、§1.3 的订正块），裁定出处 `docs/superpowers/2026-10-06-p3e-decisions.md` 第一节。
+   两种读法：(a) 只指「跑哪个模型」→ 该边应改述为 `节点放置 ← Model 选择`（裁定里的**形状乙**）；
+   (b) 指整份候选排序（含「首选放不下就试下一枚」）→ 需要一条规范没有的**回退规则**，
+   本设计不发明（回退改变实际运行的模型，与 §251 的阶梯同轴，属 D）。
+   收件人（**按裁定原文**）：**规范维护者 ＋ 复审者**。
+   **阻塞范围（订正，2026-10-06，评审查出；原话照留）**：本条初稿写「**不阻塞接口**」——
+   **与 §6 自相抵**：初稿一边说该字段零读取、一边又让它成为冻结接口的一部分。
+   **按裁定原文改写为：「阻塞接口，已按裁定取甲」**。
+   一句区分要保留，否则「阻塞接口」会被读成「本设计做不下去」：**接口本身已按甲冻结**
+   （`placement` 的签名不含候选），**阻塞的是《工程》§4.3 那条边与本层之间的一致性**
+   ——图上有一条边，本层兑现不了，而这是一件**待规范回答、非待本设计回答**的事。
+   **翻转条件（裁定原文列了两条）**：若将来放置真的开始读模型侧信息（例如节点能力与模型要求
+   需比对）⇒ **那时加字段**，并**连同一个真会读它的用例一起加**（本裁定不构成「永远不收」）；
+   若规范维护者补出那条边的确切读法 ⇒ 按那个读法重取形状，乙或甲都可能成为对的。
 9. **§289 的四条默认禁止与 §290 的 Job Capsule 无落点**：
    `personal memory`／`global secret` 是**数据准入**，而「哪一档 `PrivacyClass` 对应它们」
    规范没有给，故 E 的闸门**不会**替它们兜底；`network discovery` 属网络层；
@@ -818,15 +1009,75 @@ continuum-model-registry  ──→ continuum-node
 12. **`NodeTrust` 的产生方不存在**：§288 说信任域由 Authority 控制，§292／§293 的
     Authority Host 与 Device Join **不在 E 的组件表里**，故本设计照抄调用方给的标签；
     §313 的 `device join`／`device revoke` 两条必录审计因此也没有产生方。
-    收件人：协调者（下一个子项目）＋ 规范维护者。**阻塞范围**：不阻塞 E。
-13. **本设计不落库、不取迁移号**（§4.2）：`90` 今天未被占用（§1.2 的实读），但**号段裁决不构成占号**
-    ——D 的设计 §11 第 14 条已记「每一档取用前仍须核对该档未占用」。
-    若复审判定节点应持久化，取号前须现场再核一次。收件人：复审者。**阻塞范围**：不阻塞。
-14. **§304 的「多少并行」无主**：§304（`docs/spec/05-normative.md:1973-1984`）的四项里，
-    节点放置归 E、用哪个模型归 D／G、哪个工具归 A／F，**「多少并行」在 §4.1 的组件表里
-    没有对应组件**。收件人：协调者 ＋ 规范维护者。**阻塞范围**：不阻塞 E。
-15. **`ExecutionProfile.compute_node`（§246）在本仓零命中**，而放置的结果正是它的输入；
-    G 的设计 §7 已把「装配 `ExecutionProfile` 的那一步」记为缺失，收件人写作
-    「**驱动侧的节点执行装配点**」。**本设计的收件人与它同一个人**（§8 第 1 条）。
+    **订正（2026-10-06，评审查出；收件人改）**：本条初稿把收件人写作「协调者（下一个子项目）＋
+    规范维护者」——**这个收件人是错的，它不是一条待派的缺口**：`docs/02-工程.md:292` 已把
+    **Authority Host 列入边界层 §5.1 的组件表**，`:312` 又明写「Authority Host 仅在其成为 Product Drive
+    对象时进入本层建设范围。**个人网络相关组件属于长期范围**（§58 第三阶段）」。
+    故这是**已裁的归属与已定的阶段**，不是未决项。**改动后的口径**：本设计照抄调用方给的信任标签，
+    这条照抄的**上游**由《工程》§5.1／§5.2 裁给边界层、阶段为长期——**收件人：《工程》维护者（备查，
+    无需动作）**。**阻塞范围**：不阻塞 E，且本条不构成任何待办。
+13. ~~**本设计不落库、不取迁移号**（§4.2）~~ —— **已删（2026-10-06，评审查出）**：
+    这一条是**§4.2 已经作出的裁决**，不是一条未决项；把一条已作的裁决再列进遗留，
+    会让后来者以为「要不要落库」还开着。**处置：从本表删去**（编号 13 空出，不重排下面各条，
+    以免与复审报告和上一版设计的编号错位）。§4.2 的正文一字不动，那里仍是它的落点。
+14. **§304 的「多少并行」有字段、无产生方**：§304（`docs/spec/05-normative.md:1973-1984`）的四项里，
+    节点放置归 E、用哪个模型归 D／G、哪个工具归 A／F，**「多少并行」既不在 §4.1 的组件表里、
+    也不在本设计的范围内**。
+    **订正（2026-10-06，评审查出；原话照留）**：本条初稿写「「多少并行」在 §4.1 的组件表里
+    **没有对应组件**」，并把它读成「无落点」——**前提是假的**：落点**已经存在**
+    （`crates/continuum-graph/src/execution.rs:27` 的 `pub parallelism: Option<u32>`，
+    属 §246 的 `ExecutionProfile`），缺的是**产生方**（同 §10 第 15 条：`src/` 里零构造）。
+    **重述后的口径**：这不是「无处可放」，是「**有字段、无产生方**」——与本设计 §5.6 对 §291
+    那九项因子的判词同形。收件人：**构造 `ExecutionProfile` 的那一方（驱动侧的节点执行装配点）**
+    ＋ 规范维护者。**阻塞范围**：不阻塞 E。
+15. **`ExecutionProfile.compute_node`（§246）是放置结果的落点，但**无产生方**：该字段存在且是
+    裸 `String`（`crates/continuum-graph/src/execution.rs:25` 的 `pub compute_node: Option<String>`），
+    放置的结果正是它的输入；G 的设计 §7 已把「装配 `ExecutionProfile` 的那一步」记为缺失，
+    收件人写作「**驱动侧的节点执行装配点**」。**本设计的收件人与它同一个人**（§8 第 1 条）。
+    **订正（2026-10-06，评审查出；原话照留）**：本条初稿写「`ExecutionProfile.compute_node`（§246）
+    **在本仓零命中**」——**为假**：类型与字段都存在（§1.2 的订正块记了错法与来历：
+    带 `head -20` 的 grep 把命中截断了）。**重述后更尖锐的一点**：字段在，但它是**裸 `String`**，
+    故本设计的 `ComputeNodeId` **塞不进去**（与 G 的设计 §7 记的 `model` 是 `Option<String>` 同一形状）
+    ——本设计**不擅自收紧它**（那是 G 的设计 §7 已收件的那一件事）。
     收件人：驱动侧的节点执行装配点 ＋ 协调者。**阻塞范围**：不阻塞——本设计的唯一生产调用方
     就是测试；这一条是「建好但无生产调用方」，按 P1 的清单写法据实记，不声称它已被接上。
+16. **§224 的 `node_policy` 与 §5.4 的 `PlacementRules` 是不是同一件事——本设计不定，两种读法都写出**
+    （2026-10-06，评审查出本条原先一个字都没有，属「沉默地定下了谁产生它」）。
+
+    **事实**：§224 的 `TaskContract` 有 `node_policy` 一个字段（`docs/spec/05-normative.md:226`），
+    与 `data_policy` / `model_policy` 并列，规范**只给名字、不给形状**；
+    语义层（P4）已把它定为 `Opaque` 并明写「不发明取值域」
+    （`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md:1012-1013`）。
+    本设计 §5.4 的 `PlacementRules` 是「哪一档隐私等级可以放到什么样的节点上」的那张表，
+    **由调用方给，本设计不填值**。
+
+    **读法一：E 是 `node_policy` 的消费方**（那张表就是 Contract 声明的节点策略）。
+    若取此读法，则存在一条**未登记的接缝**：`node_policy` 在 P4 侧是 `Opaque`，
+    而 E 要的是一张覆盖五档 `PrivacyClass` 的表；**从前者到后者的那一步没有人**——
+    语义层不解析它（P4 §7.1），E 也不解析它（本设计只收 `PlacementRules`）。
+    且它是一条**跨层边**：`语义层 (2) → 资源层 (4)` 是 §9.1 里既有的允许方向
+    （`docs/02-工程.md:570-571`），故**方向不挡它，是今天没有那一步**。
+
+    **读法二：E 不是 `node_policy` 的消费方**（那张表来自调用方／用户策略，
+    与 Contract 的声明字段是两件事）。若取此读法，**E 仍要把理由写出来**，
+    不能只留白：理由是 `node_policy` **没有形状**（规范只给名字），
+    而 E **不可能解析一个 `Opaque`**——若 E 去解释它，就是在发明它的取值域，
+    那正是 P4 §7.1 明确不做、本设计也不做的事。
+
+    **本设计的处置**：**两种读法都不选**，理由是本条的选择权不在 E——
+    E 的形状（收一张已构造的 `PlacementRules`）在**两种读法下都成立**，
+    故它**不阻塞本设计的接口与计划**；但**谁把 `node_policy` 变成那张表，今天没有答案**。
+    **收件人：语义层设计 ＋ 规范维护者**（若取读法一，还要由协调者指派那一步的归属）。
+    **阻塞范围**：不阻塞 E；若取读法一，E 与 P4 之间会多一条接缝，须两侧同改。
+17. **`PlacementRules` 里 `LocalOnly` 那一格是装饰性的，要不要给这个槽换个形状**（I2，2026-10-06 评审查出后新立）：
+    `spec_floor(LocalOnly)` 恒为 `TrustedPersonalOnly`，且 §5.3 的 `strictest` 取更严者，
+    故**调用方为这一档填的值永远被吞掉**；而 `try_new` 的覆盖率判据又**强制**它必须存在
+    （少一档即 `Err(MissingLevel)`）。§5.4 已写明这一格「是给 `PrivacyClass::ALL` 的完整性用的、
+    不是给判据用的」，并保留了「强制逐档表态」这个收益（它正是 (b) 通道的机制）。
+    **仍未定的是接口形状**：要不要给这一档一个显式取值（如
+    `TransferRule::FixedBySpec`）以消掉这个坑。**三种备选**：(a) 保持现状 + 文档写明（本设计今天的取法）；
+    (b) 加一枚 `FixedBySpec`，调用方对 `LocalOnly` 只能填它；(c) 只收其余四档、把 `LocalOnly` 从槽里去掉——
+    **已否**，理由见 §5.4（那会松开 (b) 通道，「未归类」正是 fail-closed 要排除的形状）。
+    **收件人：复审者**（形状取舍）＋ 规范维护者（若规范最终给出那张表，这一格就该由表本身承载）。
+    **阻塞范围**：不阻塞本设计的接口与计划——三种备选下 `place` 的行为**完全相同**
+    （`LocalOnly` 的判据都不读调用方那一格），故它是接口美观问题，不是语义问题。
