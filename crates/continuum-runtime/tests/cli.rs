@@ -8,8 +8,11 @@
 //! 本文件只放解析这一层。解析期的拒绝（如 `--backend` 是未知选项、`--effect` 目标为空）
 //! 同样经二进制可见，那几条落在 `task_cli.rs`。
 
+use continuum_core::tool::ToolId;
 use continuum_effect::EffectType;
-use continuum_runtime::cli::{self, CliError, Command, EffectSpec, RecoverArgs, SandboxMechanism};
+use continuum_runtime::cli::{
+    self, CliError, Command, EffectSpec, RecoverArgs, SandboxMechanism,
+};
 use continuum_workspace::IntentId;
 use std::path::PathBuf;
 
@@ -372,7 +375,7 @@ fn usage_is_plain_text_without_markdown_markers() {
 }
 
 /// `CliError` 的文档写着「每个变体都点名**具体是哪一个**选项/取值出了错」——
-/// 这也是一项枚举上的绝对断言，故这里把**全部十个变体**过一遍。
+/// 这也是一项枚举上的绝对断言，故这里把**全部十二个变体**过一遍。
 ///
 /// 唯一没有「出错对象」可点的是 `MissingSubcommand`（没有子命令，就没有出错的那个
 /// 东西），它的信息改为列出**可用的**子命令，同样是为了不让人逐个试；它单独断言。
@@ -433,6 +436,17 @@ fn every_error_variant_names_the_offending_token() {
             },
             "nope",
         ),
+        (
+            CliError::InvalidToolInput {
+                value: "{".to_owned(),
+                reason: "EOF while parsing an object".to_owned(),
+            },
+            "{",
+        ),
+        (
+            CliError::OptionRequiresEffect { option: "--approve" },
+            "--approve",
+        ),
     ];
     for (err, token) in named {
         assert!(
@@ -442,7 +456,7 @@ fn every_error_variant_names_the_offending_token() {
     }
 
     let msg = CliError::MissingSubcommand.to_string();
-    for available in ["task", "recover"] {
+    for available in ["task", "tool", "recover"] {
         assert!(
             msg.contains(available),
             "缺少子命令时应列出可用的 {available}，实际：{msg}"
@@ -486,4 +500,229 @@ fn an_unknown_subcommand_or_option_is_rejected() {
             name: "--base".to_owned()
         }
     );
+}
+
+// ── `tool` 子命令的解析面（F 设计 §2.1、§2.2） ───────────────────────────────
+//
+// 与 `task` 同法：本文件只放解析这一层，路径行为在 `tool_call.rs`（库级）里验。
+// 四条 `UnknownOption` 各一条、不抽代表——它们是四条独立分支（`--base` / `--exec` /
+// `--apply` / `--sandbox` 走的是同一个兜底臂，但四条选项名各自能漂移）。
+
+/// `tool` 子命令的最小合法前置部分：两个必填项。
+fn tool_prefix() -> Vec<&'static str> {
+    vec!["tool", "--db", "/db", "--tool", "t1"]
+}
+
+/// 在最小合法 `tool` 命令上追加若干 token，返回整条 argv。
+fn tool_argv(extra: &[&str]) -> Vec<String> {
+    let mut args: Vec<String> = tool_prefix().iter().map(|s| (*s).to_owned()).collect();
+    args.extend(extra.iter().map(|s| (*s).to_owned()));
+    args
+}
+
+/// 解析并断言落在 `Tool` 变体上。
+fn tool_args<I, S>(args: I) -> cli::ToolArgs
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    match cli::parse(args).expect("应解析成功") {
+        Command::Tool(a) => a,
+        other => panic!("应解析为 Tool，实际 {other:?}"),
+    }
+}
+
+/// 同上，但用最小合法命令加追加项。
+fn tool_with(extra: &[&str]) -> cli::ToolArgs {
+    tool_args(tool_argv(extra))
+}
+
+/// 各字段与命令行逐项相同。**工具 id 就是 `continuum_core::tool::ToolId`**（不另建
+/// 第二个）——本用例正是按那个类型断言，故「是不是同一个类型」这件事在此有照片。
+#[test]
+fn tool_parses_its_own_options() {
+    let a = tool_args([
+        "tool",
+        "--db",
+        "d",
+        "--tool",
+        "t1",
+        "--input",
+        r#"{"a":1}"#,
+        "--effect",
+        "charge:x",
+        "--intent",
+        "i1",
+    ]);
+
+    assert_eq!(a.db, PathBuf::from("d"));
+    assert_eq!(a.tool, ToolId::new("t1"));
+    assert_eq!(a.input, serde_json::json!({"a": 1}));
+    assert_eq!(a.intent, Some(IntentId::new("i1")));
+    assert!(!a.approve, "未给出 --approve 时为假");
+    assert_eq!(
+        a.effects,
+        vec![EffectSpec {
+            effect_type: EffectType::Charge,
+            target: "x".to_owned(),
+        }]
+    );
+
+    // `--approve` 是开关，与 `--effect` 同进同出时照常解析。
+    let a = tool_with(&["--effect", "charge:x", "--intent", "i1", "--approve"]);
+    assert!(a.approve);
+}
+
+/// 省略 `--input` → `json!({})`，**不是 `null`**。
+///
+/// 两者都是合法 JSON，故「返回了某个值」这条断言分不开它们——必须断言到具体的值。
+#[test]
+fn tool_input_defaults_to_an_empty_object() {
+    let a = tool_with(&[]);
+    assert_eq!(
+        a.input,
+        serde_json::json!({}),
+        "省略 --input 时输入是空对象（「没有参数」），不是 null（「没有输入」）"
+    );
+    assert!(!a.input.is_null(), "空对象与 null 是两回事");
+}
+
+/// `--input` 不是合法 JSON → **解析期**即 `Err`，断言到变体。
+#[test]
+fn tool_rejects_an_unparsable_input() {
+    let err = cli::parse(tool_argv(&["--input", "{"])).unwrap_err();
+    match err {
+        CliError::InvalidToolInput { value, reason } => {
+            assert_eq!(value, "{", "变体里应带上那段不可解析的原文");
+            assert!(!reason.is_empty(), "reason 取 serde_json 的消息，不该为空");
+        }
+        other => panic!("应报 InvalidToolInput，实际 {other:?}"),
+    }
+
+    // 合法的 JSON 不受影响——否则上面那条对「一律拒绝 --input」的实现照样成立。
+    let a = tool_with(&["--input", "[1, 2]"]);
+    assert_eq!(a.input, serde_json::json!([1, 2]));
+}
+
+/// 给出 `--effect` 而**未**给出 `--intent` → `Err`（效应没有幂等键的来源）。
+#[test]
+fn an_effect_without_an_intent_is_rejected() {
+    let err = cli::parse(tool_argv(&["--effect", "charge:x"])).unwrap_err();
+    assert_eq!(err, CliError::OptionRequiresEffect { option: "--intent" });
+}
+
+/// 反向：给出 `--intent` 或 `--approve` 而零 `--effect` → 各自 `Err`。
+///
+/// 两条断言各只给一个选项，故它们**钉不住次序**（两个选项不会同时出现）；次序由
+/// [`both_options_without_an_effect_report_the_intent`] 单独钉。
+#[test]
+fn an_intent_or_an_approval_without_an_effect_is_rejected() {
+    let err = cli::parse(tool_argv(&["--intent", "i1"])).unwrap_err();
+    assert_eq!(err, CliError::OptionRequiresEffect { option: "--intent" });
+
+    let err = cli::parse(tool_argv(&["--approve"])).unwrap_err();
+    assert_eq!(err, CliError::OptionRequiresEffect { option: "--approve" });
+}
+
+/// **次序的那条照片**：零效应下两个选项**同时**给出时，报 `--intent`。
+///
+/// 前一条的两条断言各只给一个选项，换成「先判 `--approve`」的实现它们照样全过——
+/// 故次序承诺没有那一条就没有照片。
+#[test]
+fn both_options_without_an_effect_report_the_intent() {
+    let err = cli::parse(tool_argv(&["--intent", "i1", "--approve"])).unwrap_err();
+    assert_eq!(
+        err,
+        CliError::OptionRequiresEffect { option: "--intent" },
+        "两个选项同时给出时报选项表次序靠前的 --intent"
+    );
+}
+
+/// 零效应的**正常侧**：一个必填项齐全、零 `--effect` 的命令照常解析。
+#[test]
+fn a_tool_call_without_any_effect_parses() {
+    let a = tool_with(&[]);
+    assert!(a.effects.is_empty());
+    assert_eq!(a.intent, None);
+    assert!(!a.approve);
+}
+
+/// `--base` / `--exec` / `--apply` / `--sandbox` 都不被 `tool` 接受（设计 §2.1）。
+///
+/// 四条各一条、不抽代表：它们落到**同一个兜底臂**上，但四条选项名是四个各自可漂移的
+/// 取值，而本用例断言的正是在信息里点名了哪一个。
+#[test]
+fn tool_rejects_the_task_options() {
+    let cases: [(Vec<String>, &'static str); 4] = [
+        (tool_argv(&["--base", "/b"]), "--base"),
+        (tool_argv(&["--exec", "true"]), "--exec"),
+        (tool_argv(&["--apply"]), "--apply"),
+        (tool_argv(&["--sandbox", "landlock"]), "--sandbox"),
+    ];
+    for (args, name) in cases {
+        let err = cli::parse(args).unwrap_err();
+        assert_eq!(err, CliError::UnknownOption { name: name.to_owned() });
+        assert!(
+            err.to_string().contains(name),
+            "错误信息应点名 {name}，实际：{err}"
+        );
+    }
+}
+
+/// 两个必填项缺任一 → `MissingOption`，**两条各一**（与 `task` 的四个缺项同法）。
+#[test]
+fn tool_requires_db_and_tool() {
+    let cases: [(Vec<&str>, &'static str); 2] = [
+        (vec!["tool", "--tool", "t1"], "--db"),
+        (vec!["tool", "--db", "/db"], "--tool"),
+    ];
+    for (args, missing) in cases {
+        let err = cli::parse(args).unwrap_err();
+        assert_eq!(err, CliError::MissingOption { option: missing });
+        assert!(
+            err.to_string().contains(missing),
+            "错误信息应点名 {missing}，实际：{err}"
+        );
+    }
+}
+
+/// `tool` 的四个带取值的选项各自只接受一次，第二次出现即 `Err`。
+///
+/// 与 `task` 的同一取向（模块文档「# 重复选项」）：静默取后者会让 `--tool a --tool b`
+/// 看起来像「指定了 a」而实际跑 b。**四条逐项过**，它们是四个各自手写的分支。
+#[test]
+fn a_duplicate_tool_option_is_rejected() {
+    let cases: [(Vec<&str>, &'static str); 4] = [
+        (
+            vec!["tool", "--db", "/a", "--db", "/b", "--tool", "t1"],
+            "--db",
+        ),
+        (
+            vec!["tool", "--db", "/db", "--tool", "a", "--tool", "b"],
+            "--tool",
+        ),
+        (
+            vec!["tool", "--db", "/db", "--tool", "t1", "--input", "{}", "--input", "{}"],
+            "--input",
+        ),
+        (
+            vec![
+                "tool", "--db", "/db", "--tool", "t1", "--intent", "i1", "--intent", "i2",
+                "--effect", "charge:x",
+            ],
+            "--intent",
+        ),
+    ];
+    for (args, option) in cases {
+        let err = cli::parse(args).unwrap_err();
+        assert_eq!(err, CliError::DuplicateOption { option });
+        assert!(
+            err.to_string().contains(option),
+            "错误信息应点名 {option}，实际：{err}"
+        );
+    }
+
+    // 开关型选项重复是幂等的（与 `task` 同一条口径）。
+    let a = tool_with(&["--effect", "charge:x", "--intent", "i1", "--approve", "--approve"]);
+    assert!(a.approve);
 }

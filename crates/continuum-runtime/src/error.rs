@@ -8,8 +8,15 @@
 //! **被否掉的替代**（设计 §3.2，记此免得后来者重提）：另建一个 lib 侧的
 //! `ToolCallPathError` + bin 侧逐变体映射——那会给同一批失败造出**第二个错误类型**，
 //! 正是本项目判为 Critical 的「同一件事两个类型」。
+//!
+//! **F 的 Task 3 加了两个包装变体**（[`TaskError::Capability`] / [`TaskError::ToolCall`]，
+//! 设计 §8 的失败面表），它们是**包装**而不是新造的判断：内层的错误类型各有唯一的产生方
+//! （`continuum-capability` 的强制点 (1)、`continuum-provider` 的唯一调用入口），
+//! 本层只把它们带出去。两个 `#[from]` 目标都在 `Cargo.toml` 的既有依赖里。
 
+use continuum_capability::CapabilityError;
 use continuum_persist::PersistError;
+use continuum_provider::ToolCallError;
 use continuum_sandbox::SandboxError;
 use continuum_workspace::{GateError, WorkspaceError};
 use thiserror::Error;
@@ -102,4 +109,15 @@ pub enum TaskError {
         context: String,
         source: Box<TaskError>,
     },
+    /// 强制点 (1) 的失败（工具未登记、出示/缺失能力、能力失效、读登记项或写审计失败）。
+    /// **只是包装**：把 `continuum-capability` 的错误原样带出去，不重判、不合并变体。
+    ///
+    /// 只有工具调用路径会产生它——命令路径没有工具 id，走不到强制点 (1)。
+    #[error("工具授权失败：{0}")]
+    Capability(#[from] CapabilityError),
+    /// 工具侧唯一入口（`ProviderRegistry::invoke_tool`）的失败：路由未命中
+    /// （`Unregistered`）或适配器自己报错（`Provider`）。**只是包装**——F 不另立
+    /// 「没有适配器」之类的词汇（同一件事两个变体正是本设计在讲的同一类毛病）。
+    #[error("工具调用失败：{0}")]
+    ToolCall(#[from] ToolCallError),
 }

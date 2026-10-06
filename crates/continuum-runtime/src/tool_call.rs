@@ -1,11 +1,15 @@
 //! 工具调用路径的共享面（设计 §3.2、§6.4）。
 //!
-//! 本模块今天放三样东西：
+//! 本模块今天放五样东西：
 //!
 //! 1. **时钟**（[`now_millis`]）与**能力寿命**（[`CAPABILITY_LIFETIME_MS`]）；
 //! 2. **强制点 (2) 的铸币判定**（[`mint_declared_effects`]）；
 //! 3. 它带过来的那几个判定小件（[`explicit_current_rule`] / [`arbitrate`] / [`mints`] /
-//!    [`decision_name`] / [`policy_context`] / `policy_context_for_effect`）。
+//!    [`decision_name`] / [`policy_context`] / `policy_context_for_effect`）；
+//! 4. **工具调用路径本身**（[`run_tool_call`]，F 的 Task 3 落地）；
+//! 5. 命令路径与工具路径**共用**的两个落库取值函数（[`effect_key`] /
+//!    [`authorization_field`]，F 的 Task 3 从 bin 的 `task_cmd.rs` 搬来——两条路径各写
+//!    一份就是同一件事两个产生点）。
 //!
 //! # 为什么整批搬进 lib
 //!
@@ -19,18 +23,31 @@
 //! # 公开面为什么比「应该」的大
 //!
 //! bin 是**另一个 crate**（`pub(crate)` 对它不可见），而 `task_cmd` 与它自己的单元用例
-//! 还要用 [`arbitrate`] / [`mints`] / [`explicit_current_rule`] 等，故这几个函数一律
-//! `pub`。它们不是给 crate 外用的接口，是 bin 与 lib 之间的接缝。
+//! 还要用 [`arbitrate`] / [`mints`] / [`explicit_current_rule`] / [`effect_key`] /
+//! [`authorization_field`] 等，故这几个函数一律 `pub`。它们不是给 crate 外用的接口，
+//! 是 bin 与 lib 之间的接缝。
+//!
+//! **可见性按「搬完之后谁还调用它」定，不按「搬之前谁调用过」**（F 的 Task 3 口径）：
+//! [`run_tool_call`] 把**整条工具调用流程**搬进了 lib，那些调用点也随之进来；但
+//! [`effect_key`] / [`authorization_field`] 的**命令路径调用点仍在 bin**
+//! （`task_cmd.rs` 的 `record_declared_effects` / `finish_declared_effects`），
+//! 故这两个仍必须是 `pub`。`policy_context_for_effect` 是唯一的例外，理由见它的文档。
 
-use continuum_capability::{AuthorizedEffect, CapabilityKind, mint};
-use continuum_effect::EffectType;
+use continuum_capability::{AuthorizedEffect, Capability, CapabilityKind, authorize, mint};
+use continuum_effect::{
+    Effect, EffectId, EffectState, EffectType, advance, find_by_idempotency_key, record_planned,
+};
+use continuum_persist::Db;
 use continuum_policy::{
     Condition, Decision, ExplicitApproval, Level, Policy, PolicyContext, Scope, decide,
+    load_policies,
 };
+use continuum_provider::ProviderRegistry;
+use continuum_workspace::IntentId;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::TaskError;
-use crate::cli::EffectSpec;
+use crate::cli::{EffectSpec, ToolArgs};
 
 /// 当前时刻，Unix 毫秒。
 ///
@@ -296,6 +313,237 @@ pub fn mint_declared_effects(
     Ok(authorized)
 }
 
+/// 工具调用路径（F 设计 §6.4）。**收已经打开的 `&Db` 与 `&ProviderRegistry`**：
+/// 开库与装配留在 bin（[`crate::cli`] 那一侧），本函数只做路径本身。
+///
+/// # 入库的**唯一**理由
+///
+/// 用例必须能注入一个持有**夹具适配器**的注册表——生产装配点今天是空的
+/// （设计 §10.2：**没有任何适配器可登记**，注册表空 ⇒ 第 6 步那一跳返回
+/// `Unregistered`）。**空装配点不是遗留物**：缺的是**一个可登记的适配器实现**，
+/// 而装配者＝驱动自己、收件人是驱动自己／将来的适配器子项目。
+///
+/// # 七步（与设计 §3 的表逐条对齐）
+///
+/// 1. **幂等键预检**：逐条 `--effect` 用 [`effect_key`] 查
+///    `find_by_idempotency_key`，任一已存在即 [`TaskError::EffectAlreadyRecorded`] 拒
+///    **整条**。次序照命令路径：幂等键检查排在**强制点之前**。
+/// 2. **读策略表一次**：`load_policies(&tx)`。
+/// 3. **强制点 (2)**：[`mint_declared_effects`] → `Vec<(AuthorizedEffect, Decision)>`。
+///    **不重写裁决、不新增判定点**；每条效应的 `Decision` 在这里被留下（下面写
+///    `authorization` 要用），不重调 `arbitrate`。
+/// 4. **强制点 (1)**：`presented` **由步骤 3 的产物逐枚 `capability().clone()` 而来，
+///    按 `--effect` 的声明次序**——不另建一个自由浮动的 `Vec<Capability>`（那会让同一批
+///    能力有两个可以各自构造的容器）。`now` 在这一步**取一次**，交给 `authorize` 与
+///    下面各条效应的 `planned_at` / `updated_at` 复用。失败 →
+///    [`TaskError::Capability`] 原样带出（`#[from]`）。
+/// 5. **写效应行并提交**：逐条 `PLANNED → AUTHORIZED → EXECUTING`，`authorization` 填
+///    **这条效应自己那次裁决**（[`authorization_field`]），`parameters` 填 `json!({})`
+///    （照 `task` 的先例）。**步骤 4 与 5 用同一个事务**——设计 §3.2 那条承重性质
+///    （审计行与 `EXECUTING` 行要么都在、要么都不在）的**来源**就是这一条：一次
+///    `commit`，中途不提交。
+/// 6. **那一跳**：[`ProviderRegistry::invoke_tool`]。**F 不构造也不命名请求类型**
+///    （那由 `invoke_tool` 在内部构造）；这里只把 `&AuthorizedTool` 与 `input` 交出去。
+///    失败（含 `Unregistered`）→ **各效应记 `FAILED`**（与 `task` 第 5 步机制选择失败
+///    时的处置一致），再把 [`TaskError::ToolCall`] 报出去。
+/// 7. **终态与 stdout**：按 `ToolResult.is_error` 写 `COMMITTED` / `FAILED`；**无论
+///    `is_error` 为何，先把 `output` 以 JSON 一行打到 stdout**（设计 §3.3：工具调用
+///    **没有子进程**，stdout 是调用方仅有的通道）。
+///
+/// # 今天没做完的那一格（据实写明，不是「没写」）
+///
+/// `is_error == true` 那一支**只写终态、只打印**，**不返回 `Err`**——它对应的
+/// [`TaskError`] 变体（`ToolReportedError`）按计划在 **Task 6** 落地。故今天一条
+/// 自报失败的调用以退出码 0 结束，而它的 `effect` 行是 `FAILED`。**这不是漏接线**：
+/// 计划把那一支整个留给 Task 6，本 task 不立那个词汇（先立一个只在一处可达的变体，
+/// 正是本项目一贯拒的形状）。
+///
+/// # 运行时：当前线程，不 `enable_all`
+///
+/// `invoke_tool` 是异步的（内层是 `async_trait` 的 `ToolProvider::invoke`，适配器在
+/// 调用里不做 I/O 的话不需要反应堆）。用
+/// `Builder::new_current_thread().build()`——**不 `enable_all()`**：workspace 的 tokio
+/// features 是 `["rt-multi-thread", "macros"]`，`enable_all` 按 `net` / `time` 等 feature
+/// 门控，可能不可用，而换 feature 会动 `Cargo.toml` 的依赖清单。构造失败**没有**承载它的
+/// 错误变体（那是资源耗尽，且本层不为此新立一个只在这一点可达的变体），故 `expect`。
+pub fn run_tool_call(
+    db: &Db,
+    registry: &ProviderRegistry,
+    args: &ToolArgs,
+) -> Result<(), TaskError> {
+    let tx = db.begin()?;
+
+    // 步骤 1：幂等键预检——先全查，再写任何一条。
+    for spec in &args.effects {
+        let key = effect_key(declared_intent(args), spec);
+        if find_by_idempotency_key(&tx, &key)?.is_some() {
+            return Err(TaskError::EffectAlreadyRecorded { key });
+        }
+    }
+
+    // 步骤 2：读策略表一次。工具路径**没有集成裁决**那一回事，故这一步只取表。
+    let policies = load_policies(&tx)?;
+
+    // 步骤 3：强制点 (2)。铸不出即拒整条（`Err` 时 `tx` 随作用域回滚，一条都没写）。
+    let authorized = mint_declared_effects(&policies, &args.effects, args.approve)?;
+
+    // 步骤 4：强制点 (1)。出示集由上面那批 `AuthorizedEffect` 逐枚取来——**不另建容器**。
+    let presented: Vec<Capability> = authorized
+        .iter()
+        .map(|(authorized_effect, _decision)| authorized_effect.capability().clone())
+        .collect();
+    let now = now_millis();
+    let authorized_tool = authorize(&tx, &args.tool, &presented, now)?;
+
+    // 步骤 5：写效应行。**与步骤 4 同一个事务**，一次提交（见本函数的文档）。
+    for (spec, (_authorized_effect, decision)) in args.effects.iter().zip(&authorized) {
+        let key = effect_key(declared_intent(args), spec);
+        let effect = Effect {
+            // `id` 与幂等键同源：同一个三元组、同一个函数 [`effect_key`]。
+            id: EffectId::new(key.clone()),
+            effect_type: spec.effect_type,
+            target: spec.target.clone(),
+            // 本子项目不填 parameters（设计 §6.1 只说它是 JSON、未规定内容）：
+            // **工具调用的 `--input` 因此今天不落库**，那是一处据实的缺口（设计 §14 第 6 条）。
+            parameters: serde_json::json!({}),
+            // 这条效应**自己**那次裁决（步骤 3 的产物），不是集成裁决——工具路径没有集成裁决。
+            authorization: authorization_field(args.approve, *decision),
+            idempotency_key: key,
+            state: EffectState::Planned,
+            planned_at: now,
+            updated_at: now,
+        };
+        record_planned(&tx, &effect)?;
+        // 三态一次写完（设计 §6.3）。每次 `advance` 在同一事务内追加一条审计。
+        advance(&tx, &effect.id, EffectState::Authorized, now)?;
+        advance(&tx, &effect.id, EffectState::Executing, now)?;
+    }
+
+    tx.commit()?;
+
+    // 步骤 6：那一跳。**唯一的工具调用入口**（设计 §6.1）——F 不自己开第二条路。
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("当前线程运行时构造失败（资源耗尽）：本层没有承载它的错误变体");
+    let result = runtime.block_on(registry.invoke_tool(&authorized_tool, args.input.clone()));
+
+    // 步骤 7：终态与 stdout。失败那一格按本函数文档的说明处置（写 FAILED 后带出错误）。
+    let tool_result = match result {
+        Ok(tool_result) => tool_result,
+        Err(e) => {
+            finish_declared_effects(db, args, EffectState::Failed, now)?;
+            return Err(TaskError::ToolCall(e));
+        }
+    };
+    let terminal = if tool_result.is_error {
+        EffectState::Failed
+    } else {
+        EffectState::Committed
+    };
+    finish_declared_effects(db, args, terminal, now)?;
+
+    // `Value` 的 JSON 是一行紧凑文本（`Display` 即 `serde_json::to_string`）；
+    // 无论 `is_error` 为何都打印——这是调用方仅有的那条通道（设计 §3.3）。
+    println!("{}", tool_result.output);
+    Ok(())
+}
+
+/// 步骤 6/7 用的终态写入：把各效应推到最后那个状态，一个事务、一次提交。
+///
+/// 零效应时不碰库（与 `task_cmd` 的 `finish_declared_effects` 同一条早退理由：一个空
+/// 事务没有意义，也会让无效应的调用凭空多一次写锁）。
+///
+/// 与 `task_cmd` 里的同名函数**不合并**：两者收的参数类型不同（[`ToolArgs`] /
+/// `TaskArgs`），合并要求先给两者造一个共同形状——而那正是「同一件事两个类型」的
+/// 反方向（为了合并而发明一个中间类型）。两处各三行，判据同源（[`effect_key`]）。
+fn finish_declared_effects(
+    db: &Db,
+    args: &ToolArgs,
+    to: EffectState,
+    now: i64,
+) -> Result<(), TaskError> {
+    if args.effects.is_empty() {
+        return Ok(());
+    }
+    let tx = db.begin()?;
+    for spec in &args.effects {
+        // 记录的 `id` 与幂等键同源（[`effect_key`]），故这里由同一次派生取回 id。
+        let id = EffectId::new(effect_key(declared_intent(args), spec));
+        advance(&tx, &id, to, now)?;
+    }
+    tx.commit()?;
+    Ok(())
+}
+
+/// 声明里那个意图 id。`--effect` 非空 ⇒ `--intent` 必为 `Some`（`cli::parse_tool` 的
+/// 同进同出判定的两个方向之一）。
+///
+/// 写成函数而不是在 [`run_tool_call`] 顶上取一次：零效应时那两个循环都不执行，本值也
+/// 用不到，而在顶上一取就会让一条**合法**的零效应调用 panic。故 `expect` 只在真的要用
+/// 它时触发，那时代码路径已在「有 --effect」这一侧。
+fn declared_intent(args: &ToolArgs) -> &IntentId {
+    args.intent
+        .as_ref()
+        .expect("cli 已保证：有 --effect 必有 --intent")
+}
+
+/// 效应的身份与幂等键（设计第 6.1、6.5 节）：由 意图 id / 类型 / 目标 派生。
+///
+/// **`Effect.id` 与 `idempotency_key` 取同一个值**——同一三元组、同一个函数，
+/// 不是一个字段各派一次。设计第 6.5 节只规定幂等键由该三元组派生；`id` 是表的主键
+/// （第 8 节），本子项目同样用它派生，以免给「这条记录是谁」再立第二个来源。
+///
+/// # 两条路径共用一个定义（F 的 Task 3 从 bin 搬来）
+///
+/// 命令路径（`task_cmd` 的 `record_declared_effects` / `finish_declared_effects`）与
+/// 工具调用路径（[`run_tool_call`]）都调它。**搬家的理由**：工具调用路径是 lib 函数，
+/// 而 bin 是另一个 crate——定义留一份在 bin，lib 就调不到，就地再写一份就是同一件事
+/// 两个产生点。**它仍是 `pub`**：搬完之后**命令路径的三个调用点仍在 bin**，故
+/// 「搬完之后谁还调用它」的答案是「两侧都有」。
+///
+/// # 为什么带长度前缀
+///
+/// `intent` 与 `target` 都是自由文本（`IntentId::new` 只收字符串，不做校验），只靠
+/// 分隔符拼接不是单射：`("a", publish, "b:publish:c")` 与 `("a:publish:b", publish, "c")`
+/// 会拼出同一个串，两条不同的声明被当成同一条，第二条被静默拒绝。长度前缀让三段的
+/// 分界可判定——键形如 `<意图字节长>:<意图>:<类型>:<目标>`，类型取自封闭枚举、不含
+/// 冒号，故目标即最后一段的全部。
+pub fn effect_key(intent: &IntentId, spec: &EffectSpec) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        intent.as_str().len(),
+        intent.as_str(),
+        spec.effect_type.as_str(),
+        spec.target
+    )
+}
+
+/// `authorization` 字段的内容（设计第 6.7 节）：**只记录、不校验**的不透明串。
+///
+/// 写入两件事：`--approve` 是否给出、以及策略的裁决结果。裁决取 [`Decision::as_str`]
+/// 的编码——与 `policy` 表同一份，不在这里手抄字面量。
+///
+/// # 两条路径填的是**不同的那次裁决**（F 设计 §7.2，一处刻意的不同）
+///
+/// 命令路径填的是**集成那次裁决**（`policy_context`，`effect_type` 缺省）；工具调用路径
+/// 填的是**这条效应自己那次裁决**（[`mint_declared_effects`] 成对返回的后一项）——
+/// 工具调用**没有集成裁决这一回事**，凭空造一次就是一次没有意义的判定。**编码形状
+/// 共用本函数**，这正是两条路径在此不各写一份的理由。
+///
+/// # 本子项目到此为止
+///
+/// **生产代码**不读回、不校验本字段（测试会读它，以钉住写入的内容与格式）。它是留给
+/// 对账与审计的记录，不是一道强制。**P3 起驱动确实有了 Capability 的输入**（强制点 (2)
+/// 已接上），但那条路径**不读回本字段**、也不靠它——本字段本身仍不被任何生产代码校验。
+/// 校验属 Capability（P3）与 Authority（长期）的职责，其中 Capability 那一半落在
+/// [`mint_declared_effects`]。
+/// **不要把本函数或这个字段读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
+///
+/// **它仍是 `pub`**：与 [`effect_key`] 同一条——搬完之后命令路径的调用点还在 bin。
+pub fn authorization_field(approved: bool, decision: Decision) -> String {
+    format!("approve={approved};policy={}", decision.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,6 +569,27 @@ mod tests {
             effect_type,
             target: target.to_owned(),
         }
+    }
+
+    /// 幂等键对三段是**单射**：设计第 6.5 节的键由 意图 id / 类型 / 目标 派生，
+    /// 若拼接有歧义，两条不同的声明会被当成同一条，第二条被静默拒绝。
+    ///
+    /// 用例给出一对**真的会撞**的三元组（`a` + `publish` + `b:publish:c` 与
+    /// `a:publish:b` + `publish` + `c`；`IntentId::new` 不校验，含冒号的意图是收下的）。
+    /// 带长度前缀时两者分得开；去掉长度前缀、改用普通分隔符拼接时本用例变红——
+    /// 这就是 [`effect_key`] 那条「长度前缀使拼接是单射」论据的对照片。
+    ///
+    /// **本用例随 [`effect_key`] 从 bin 的 `task_cmd.rs` 搬来**（F 的 Task 3）：函数的
+    /// 单元用例跟着函数走，留在 bin 会让「lib 里的函数由 bin 的用例覆盖」这一层错位
+    /// （同 Task 2 搬 `mint_declared_effects` 时连同两条用例一起搬的先例）。
+    #[test]
+    fn the_effect_key_separates_the_intent_from_the_target() {
+        let first = effect_key(&IntentId::new("a"), &spec(EffectType::Publish, "b:publish:c"));
+        let second = effect_key(&IntentId::new("a:publish:b"), &spec(EffectType::Publish, "c"));
+        assert_ne!(
+            first, second,
+            "两条不同的效应声明派生出同一个幂等键：第二条会被当成已登记而静默拒绝"
+        );
     }
 
     /// **每一条效应带的是它自己那次裁决**，不是第一条的、也不是集成那次的。
@@ -440,9 +709,15 @@ mod tests {
     /// # 这组断言的「守卫三件套」第三件不可得（据实写明）
     ///
     /// 变异 B（铸不出的记下、循环走完报**最后**一条）编得过、也红在**本用例自己的断言上**，
-    /// 但红在**前半段的第一条断言**（`:420` 那一行）⇒ **同测试体内其后全部断言（整个
-    /// 「对调次序」半段）根本不执行**，故第三件（「之前的断言全过而它独红」）在这种写法下
-    /// 构造不出来——**它的照片同样是与其后断言共有的**。
+    /// 但红在**前半段的第一条断言**（`charge_first` 那一半里 `("charge", "c1")` 那条
+    /// `assert_eq!`）⇒ **同测试体内其后全部断言（整个「对调次序」半段）根本不执行**，故第三件
+    /// （「之前的断言全过而它独红」）在这种写法下构造不出来——**它的照片同样是与其后断言
+    /// 共有的**。
+    ///
+    /// （**原写「`:420` 那一行」**，2026-10-07 改为结构性定位：那是**落笔即过期**的写法
+    /// ——写它的那次提交自己就把它作废了（同一提交在 `mod tests` 里加了行），`:420` 在最终
+    /// 字节上是**测试 A 的结束括号**，不是任何断言。而这个数所数的语料**包含它自己所在的
+    /// 文件**，故本文件里不写裸行号。）
     ///
     /// **更强的反证（别把它读成「后半段白写了」）**：该变异体下**后半段自己也是红的**
     /// （它会报 `charge:c1` 而非 `deploy:d1`）⇒ **后半段的区分力不落在 B 上**，而落在它

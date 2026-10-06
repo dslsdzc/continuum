@@ -11,6 +11,7 @@ mod recover_cmd;
 mod recovery;
 mod secrets;
 mod task_cmd;
+mod tool_cmd;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -54,6 +55,16 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("任务失败: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        // 与 `Task` 臂同形。**这一臂与 `cli::Command::Tool` 必须同批**：少了它就是
+        // `error[E0004]`（非穷尽），而 `cargo test --test cli` 单独能过（它不构 bin），
+        // 故自检里那条 `cargo build --workspace --all-targets` 才是这一臂的守卫。
+        Command::Tool(a) => match tool_cmd::run(&a) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("工具调用失败: {e}");
                 ExitCode::FAILURE
             }
         },

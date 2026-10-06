@@ -166,8 +166,17 @@ const ALLOWED: &[(&str, &[&str])] = &[
     //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
-    // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇；
-    // core / events / provider 在 runtime 内至今无任何引用（`grep -rn 'continuum_core\|…'` 无命中）。
+    // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇。
+    //
+    // **订正（2026-10-07，P3 子项目 F 的 Task 3）**：本段原先写「core / events / provider 在
+    // runtime 内**至今无任何引用**」——那半句对 core 与 provider **已假**：`src/cli.rs` 用
+    // `continuum_core::tool::ToolId`（`tool` 子命令的 `--tool`），`src/error.rs` /
+    // `src/tool_call.rs` / `src/tool_cmd.rs` 用 `continuum_provider` 的 `ToolCallError` /
+    // `ProviderRegistry`，两份 tests 也各引一处。**`events` 仍无引用**（`grep -rln
+    // continuum_events crates/continuum-runtime/` 无命中），故那句话的射程收成「events
+    // 至今无引用」。**原句是过宽的说法**，订正的来历记此，免得下一轮扫查照着它得出错的结论
+    // （设计 §10.1 点名要求本处随实现同步订正）。表的取值不变——本表本就不按使用点派生，
+    // 变的只是这段注释的真假。
     // 反向的边（真依赖却没登记）由本文件的断言抓住，不会静默。
     (
         "continuum-runtime",

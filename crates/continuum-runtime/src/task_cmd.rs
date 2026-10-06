@@ -153,10 +153,11 @@ use continuum_effect::{
 use continuum_persist::Db;
 use continuum_policy::{Decision, load_policies};
 use continuum_runtime::TaskError;
-use continuum_runtime::cli::{EffectSpec, TaskArgs};
+use continuum_runtime::cli::TaskArgs;
 use continuum_runtime::sandbox_select;
 use continuum_runtime::tool_call::{
-    arbitrate, decision_name, mint_declared_effects, mints, now_millis, policy_context,
+    arbitrate, authorization_field, decision_name, effect_key, mint_declared_effects, mints,
+    now_millis, policy_context,
 };
 use continuum_sandbox::Sandbox;
 use continuum_workspace::{
@@ -173,7 +174,7 @@ pub const IN_NAMESPACE_ENV: &str = "CONTINUUM_IN_NAMESPACE";
 
 /// 运行 `task` 子命令。
 ///
-/// `argv` 是**本次调用的原始参数**（不含 argv[0]），第 2 步重新执行自身时原样转交：
+/// `argv` 是**本次调用的原始参数**（不含 `argv[0]`），第 2 步重新执行自身时原样转交：
 /// 从解析结果重建命令行会丢掉调用方实际写的形状（同一个值可以有多种写法），而 re-exec
 /// 要的正是「把这一模一样的调用再跑一遍，只是换进命名空间里」。
 pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
@@ -304,7 +305,12 @@ pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
 ///
 /// 迁移集合与 `recover` 共用 [`crate::runtime_migrations`]：`task` 需要 `workspace` 表
 /// （第 3 步落库），而两处各写一份清单会让「注册的集合」有两个来源。
-fn open_db(path: &Path) -> Result<Db, TaskError> {
+///
+/// **`pub(crate)`（F 的 Task 3 起）**：`tool` 子命令的装配（bin 的 `tool_cmd.rs`）与
+/// `task` 共用同一份迁移集合，两处各写一份清单会让「注册的集合」有两个来源
+/// （F 设计 §3.5）。**不搬进 lib**：它做的事与 CLI 的库面无关（那条路径收的是**已经
+/// 打开**的 `&Db`，见 `continuum_runtime::tool_call::run_tool_call`）。
+pub(crate) fn open_db(path: &Path) -> Result<Db, TaskError> {
     let db = Db::open_with(path, runtime_migrations())?;
     db.migrate()?;
     Ok(db)
@@ -430,48 +436,26 @@ fn finish_declared_effects(
     Ok(())
 }
 
-/// 效应的身份与幂等键（设计第 6.1、6.5 节）：由 意图 id / 类型 / 目标 派生。
-///
-/// **`Effect.id` 与 `idempotency_key` 取同一个值**——同一三元组、同一个函数，
-/// 不是一个字段各派一次。设计第 6.5 节只规定幂等键由该三元组派生；`id` 是表的主键
-/// （第 8 节），本子项目同样用它派生，以免给「这条记录是谁」再立第二个来源。
-///
-/// # 为什么带长度前缀
-///
-/// `intent` 与 `target` 都是自由文本（`IntentId::new` 只收字符串，不做校验），只靠
-/// 分隔符拼接不是单射：`("a", publish, "b:publish:c")` 与 `("a:publish:b", publish, "c")`
-/// 会拼出同一个串，两条不同的声明被当成同一条，第二条被静默拒绝。长度前缀让三段的
-/// 分界可判定——键形如 `<意图字节长>:<意图>:<类型>:<目标>`，类型取自封闭枚举、不含
-/// 冒号，故目标即最后一段的全部。
-fn effect_key(intent: &IntentId, spec: &EffectSpec) -> String {
-    format!(
-        "{}:{}:{}:{}",
-        intent.as_str().len(),
-        intent.as_str(),
-        spec.effect_type.as_str(),
-        spec.target
-    )
-}
+// 效应的身份与幂等键（设计第 6.1、6.5 节）：由 意图 id / 类型 / 目标 派生。
+//
+// **实现已搬进 lib**（F 的 Task 3）：工具调用路径是 **lib** 函数（设计 §6.4），而 bin 是
+// 另一个 crate——定义留在这里，lib 就调不到，就地再写一份就是同一件事两个产生点。故
+// 它与 `authorization_field` 一并搬进 `continuum_runtime::tool_call`（函数名不变），
+// 本文件改为 `use` 它。**命令路径行为一字未改**：仍是同一三元组、同一个函数、同一个值
+// 同时充当 `Effect.id` 与 `idempotency_key`；判据（长度前缀使拼接是单射）与它的单元用例
+// 也随函数一起搬了过去。
 
-/// `authorization` 字段的内容（设计第 6.7 节）：**只记录、不校验**的不透明串。
-///
-/// 写入两件事：`--approve` 是否给出、以及策略的裁决结果。裁决取 [`Decision::as_str`]
-/// 的编码——与 `policy` 表同一份，不在这里手抄字面量。
-///
-/// # 本子项目到此为止
-///
-/// **生产代码**不读回、不校验本字段（测试会读它，以钉住写入的内容与格式）。它是留给
-/// 对账与审计的记录，不是一道强制。**本字段记的仍是集成那次裁决**
-/// （[`continuum_runtime::tool_call::policy_context`]，`effect_type` 缺省），与强制点 (2)
-/// 逐条效应的裁决（`policy_context_for_effect`，`effect_type` 已填）是两个问题、
-/// 两处各裁一次。**P3 起驱动确实有了 Capability 的输入**（强制点 (2) 已接上，见模块
-/// 文档），但那条路径**不读回本字段**、也不靠它——本字段本身仍不被任何生产代码校验。
-/// 校验属 Capability（P3）与 Authority（长期）的职责，其中 Capability 那一半落在
-/// [`mint_declared_effects`]。
-/// **不要把本函数或这个字段读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
-fn authorization_field(approved: bool, decision: Decision) -> String {
-    format!("approve={approved};policy={}", decision.as_str())
-}
+// `authorization` 字段的内容（设计第 6.7 节）：**只记录、不校验**的不透明串。
+//
+// **实现已搬进 lib**（F 的 Task 3），理由与 `effect_key` 逐字相同。
+//
+// 本子项目到此为止：**生产代码**不读回、不校验本字段（测试会读它，以钉住写入的内容与
+// 格式）。它是留给对账与审计的记录，不是一道强制。**命令路径写进它的是集成那次裁决**
+// （`continuum_runtime::tool_call::policy_context`，`effect_type` 缺省），与强制点 (2)
+// 逐条效应的裁决（`policy_context_for_effect`，`effect_type` 已填）是两个问题、两处各裁
+// 一次。**工具调用路径填的是后者**（它没有集成裁决这一回事），编码形状共用同一个函数
+// ——见 `continuum_runtime::tool_call::authorization_field` 的文档。
+// **不要把本字段读成「此处已强制」**（设计第 6.7 节要求显式声明此边界）。
 
 /// 第 5 步：在 Task 根内启动 `--exec` 的命令，等它结束。
 ///
@@ -642,7 +626,9 @@ fn reexecute_in_namespace(argv: &[OsString]) -> Result<(), TaskError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use continuum_effect::EffectType;
+    // `continuum_effect::EffectType` 与 `cli::EffectSpec` 两个导入随
+    // `the_effect_key_separates_the_intent_from_the_target` 一起搬走了（F 的 Task 3）——
+    // 本模块的其余用例不用它们，留着就是未使用的导入（bin 编译不报，`--all-targets` 会）。
     // 这几个只在用例里用得到：它们的生产消费者随 Task 2 搬进了 lib 的 `tool_call`
     // （`arbitrate` / `mints`），或被搬走的那些函数一并带走（`Condition` / `Level` /
     // `Policy` / `Scope` / `decide`）。放在 `mod tests` 里而不是文件顶部，是为了让
@@ -653,26 +639,10 @@ mod tests {
     // `arbitrate` / `mints` 由上面的 `use super::*` 带进来（它们在生产代码里也被用到）。
     use continuum_runtime::tool_call::explicit_current_rule;
 
-    /// 幂等键对三段是**单射**：设计第 6.5 节的键由 意图 id / 类型 / 目标 派生，
-    /// 若拼接有歧义，两条不同的声明会被当成同一条，第二条被静默拒绝。
-    ///
-    /// 用例给出一对**真的会撞**的三元组（`a` + `publish` + `b:publish:c` 与
-    /// `a:publish:b` + `publish` + `c`；`IntentId::new` 不校验，含冒号的意图是收下的）。
-    /// 带长度前缀时两者分得开；去掉长度前缀、改用普通分隔符拼接时本用例变红——
-    /// 这就是 [`effect_key`] 那条「长度前缀使拼接是单射」论据的对照片。
-    #[test]
-    fn the_effect_key_separates_the_intent_from_the_target() {
-        let spec = |target: &str| EffectSpec {
-            effect_type: EffectType::Publish,
-            target: target.to_owned(),
-        };
-        let first = effect_key(&IntentId::new("a"), &spec("b:publish:c"));
-        let second = effect_key(&IntentId::new("a:publish:b"), &spec("c"));
-        assert_ne!(
-            first, second,
-            "两条不同的效应声明派生出同一个幂等键：第二条会被当成已登记而静默拒绝"
-        );
-    }
+    // `the_effect_key_separates_the_intent_from_the_target` 随 `effect_key` 搬进了 lib
+    // （`continuum_runtime::tool_call` 的 `mod tests`，F 的 Task 3）——函数的单元用例跟着
+    // 函数走。它在这里仍编译得过（`use super::*` 带进了那个 `use`），但留在 bin 会让
+    // 「lib 的函数由 bin 的用例覆盖」这一层错位。
 
     /// 一条条件恒真（空合取）的规则：任何上下文都成立。
     ///
