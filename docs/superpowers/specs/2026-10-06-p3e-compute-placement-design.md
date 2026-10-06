@@ -48,7 +48,7 @@
 | `privacy_class` 的落库列 | `NOT NULL`，读出错串即 `PersistError`——**不是默认档次** | `crates/continuum-artifact/src/persist.rs:14-15`、`:120-123` |
 | `Artifact` | `pub privacy_class: PrivacyClass`（**不是 `Option`**） | `crates/continuum-artifact/src/artifact.rs:179` |
 | D 的 Router 输出面 | **已落地**（Task 11）：`rank`、`RankedExecutionCandidates`（`selected`／`alternatives`／`candidates`）、`ExecutionCandidate` 的五个访问器、`RoutingReason`、`RankingPolicy` | `crates/continuum-model-registry/src/router.rs`：`:394`（`RankedExecutionCandidates`）、`:403`（`selected`）、`:345`（`ExecutionCandidate`）、`:355-376`（`model`／`reason` 等访问器）、`:276`（`RoutingReason`）、`:424`（`RankingPolicy`）、`:512`（`rank`）。**行号按 2026-10-06 的**工作树**取**——该文件当时有未提交改动，较 `c46477f` 整体下移约 15 行（见 §6.3 末段） |
-| D 的具名基线 `BaselineRankingPolicy` | **尚未落地（Task 12）**。本设计只消费输出面的类型，不依赖它 | 同上 `:40`、`:407` |
+| D 的具名基线 `BaselineRankingPolicy` | **尚未落地（Task 12）**。本设计只消费输出面的类型，不依赖它 | `crates/continuum-model-registry/src/router.rs:53`、`:422`（工作树行号，见上一行的注）；`src/lib.rs:37` |
 | `continuum_graph::NodeId` | **已存在**，指 ADFIR 节点 | `crates/continuum-graph/src/ids.rs:40` |
 | `Artifact.producer_node` 的实义 | **实现是 `Option<String>`**（裸串；落库列可空）。P1 的**设计**写的类型是 `Option<NodeId>`（ADFIR 节点 id），与实现不一致 | `crates/continuum-artifact/src/artifact.rs:175`（`pub producer_node: Option<String>`）；`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:127`（设计侧写的是 `Option<NodeId>`） |
 | `ExecutionProfile`（§246） | **已存在**，定义在 `continuum-graph`：`compute_node: Option<String>`、`parallelism: Option<u32>` 都是裸类型，且**没有生产构造点**（`grep -rn "ExecutionProfile" crates/` 共 11 处，`src/` 里零构造，构造只出现在 `tests/`） | `crates/continuum-graph/src/execution.rs:20`（类型）、`:25`（`compute_node`）、`:27`（`parallelism`）；`crates/continuum-graph/src/lib.rs`（导出） |
@@ -781,6 +781,13 @@ crates/continuum-node/
 
 ## 7.2 依赖边（只登记实际用到的）
 
+> **读本节的人先看这一句**：《工程》§4.3 给「节点放置」列了**三条**入边
+> （`Compute Node 注册` ＋ `Artifact 隐私等级` ＋ `Router 输出`，`docs/02-工程.md:253`），
+> 而下表只有**一条 crate 边**。**第三条（`Router 输出`）已被裁定记为阻断**——它今天在本层
+> 没有落点，收下从不读的形参已删（§1.3 的订正块、§6、§10 第 8 条）。
+> **它不是漏登记**；`Compute Node 注册` 那一半也不产生 crate 边（注册表只用本 crate 自己的
+> `ComputeNode`，§1.3 的「入度为零」）。
+
 ```
 continuum-node → continuum-artifact
 ```
@@ -802,7 +809,9 @@ continuum-node → continuum-artifact
   `ProviderHealth` 中的任何一个）。**零使用的边即假边**——P2b 为此删过两条，
   `continuum-secrets` 也据同一条只登记了 `continuum-capability`（`dependency_direction.rs:103`）。
 - **不登记 `continuum-model-registry`**：§6 的裁定删去了唯一会用到它的字段。
-  **这一条要写明**，否则会被后来者当成漏登记（§1.2 的 `D 的 Router 输出面` 一行仍然记着 D 的现状，
+  **《工程》§4.3 的那条 `节点放置 ← Router 输出` 因此记为阻断**（不是「本层不接」，是**今天接不了**），
+  收件人见 §10 第 8 条。**这一条要写明**，否则会被后来者当成漏登记——将来读本节那张 `ALLOWED` 表的人
+  会问「另一条入边去哪了」，答案就在这一行（§1.2 的 `D 的 Router 输出面` 仍记着 D 的现状，
   那是**实读**，不是本层的依赖）。
 - **不登记 `continuum-persist` / `continuum-events`**：§4.2 判本设计不写库。
   `device join`／`device revoke` 两条审计是 §313 的必录项，但它们的**产生方是 Authority**，
@@ -842,7 +851,8 @@ continuum-artifact  ──→ continuum-node
 ```rust
     // P3 子项目 E：计算节点与放置。设计 §7.2 的唯一一条边是 artifact（`Artifact` /
     // `PrivacyClass`，§243 的隐私输入）。**不登记 model-registry**：《工程》§4.3 的
-    // 「节点放置 ← Router 输出」今天没有落点，收下从不读的形参已按裁定删去（设计 §6）。
+    // 「节点放置 ← Router 输出」**已记为阻断**（今天无落点，收下从不读的形参按裁定删去，
+    // 设计 §6；收件人见 §10 第 8 条）——**不是漏登记**。
     // **不登记 core**：本设计对它零引用。**不登记 persist / events**：本设计不写库（§4.2）。
     ("continuum-node", &["continuum-artifact"]),
 ```
@@ -925,7 +935,7 @@ continuum-artifact  ──→ continuum-node
 | **判据 §4.4 的否定面** | 节点集只有云节点时返回 `Err(NoPlaceableNode)`（**上面一条与这一条是成对的**，单看任一条分不清两种 `Err`） |
 | **放行侧（I1，2026-10-06 评审查出后补）** | `Public` 的制品 ＋ 表里 `Public` 那一档写 `AnyNode` ＋ 节点集**只有云节点** → **`Ok`**，断言返回的正是那枚云节点（顺带断言 `class() != Personal`）。**这一格是必需的**：没有它，一个「把所有制品都当 `LocalOnly` 一律拒掉」的实现能通过本表其余每一行——那正是 fail-closed 的反面（闸门静默拒绝一切）。**上面两行钉「该拒的拒」，这一行钉「该放的放」。** |
 | **闸门不可被策略放宽** | 五档**全写** `AnyNode` 的 `PlacementRules`：`LocalOnly` 的制品仍只落在 `TrustedPersonalOnly` 那一类节点上（**逐档遍历**，不是只测 `LocalOnly` 一档）。**顺带钉住 §5.4 的那句话**：`LocalOnly` 那一格被 `spec_floor` 覆盖，填什么都一样 |
-| **请求面不依赖 Router 输出（C4 裁定要求的反侧照片）** | `tests/placement.rs` 里有一枚样例，**只给 `artifacts` 与 `nodes`** 就把 `PlacementRequest` 建出来并调用 `place` ——**不调 `rank`、不构造任何候选集**。这是否定式照片（`p3bcdf-followups.md` §四.4 判它在本仓可接受） |
+| **请求面不依赖 Router 输出（C4 裁定要求的反侧照片）** | `tests/placement.rs` 里有一枚样例，**只给 `artifacts` 与 `nodes`** 就把 `PlacementRequest` 建出来并调用 `place` ——**不调 `rank`、不构造任何候选集**：裁定原文要的是「删字段之后它必须**仍然编得过、跑得过**」，「这就是『零读取』这件事的照片」。这是否定式照片（`p3bcdf-followups.md` §四.4 判它在本仓可接受）。**与其余各行不重复**：那些行断言的是给定 `nodes`／`artifacts` 时闸门的行为，这一行断言的是**请求的构造本身**不需要任何候选值 |
 | **注册表不引 artifact（M4 的守卫）** | 源码文本断言：`src/registry.rs` 里不出现 `continuum_artifact` / `Artifact` / `PrivacyClass` 三个名字。**证明力的边界**：匹配的是字面拼法，别名与全限定路径逃逸——是下界不是封闭判定（与 C 设计 §4.1 末段同形）；更硬的一层是 `ALLOWED` 的逐对断言（本 crate 整体） |
 | 确定性 | 打乱 `nodes` 顺序三次调用，返回同一个节点 |
 | 重复 id | `nodes` 里同一 `ComputeNodeId` 两次 → `Err(DuplicateNode { id })`，并断言是哪一枚 |
@@ -1018,9 +1028,15 @@ continuum-artifact  ──→ continuum-node
     无需动作）**。**阻塞范围**：不阻塞 E，且本条不构成任何待办。
 13. ~~**本设计不落库、不取迁移号**（§4.2）~~ —— **已删（2026-10-06，评审查出）**：
     这一条是**§4.2 已经作出的裁决**，不是一条未决项；把一条已作的裁决再列进遗留，
-    会让后来者以为「要不要落库」还开着。**处置：从本表删去**（编号 13 空出，不重排下面各条，
-    以免与复审报告和上一版设计的编号错位）。§4.2 的正文一字不动，那里仍是它的落点。
-14. **§304 的「多少并行」有字段、无产生方**：§304（`docs/spec/05-normative.md:1973-1984`）的四项里，
+    会让后来者以为「要不要落库」还开着。**处置：从本表删去**——**原话以删除线留原地**
+    （照本仓「订正把原话与来历留在原地」的惯例），**编号不重排**，以免与复审报告、
+    上一版设计与 `docs/superpowers/2026-10-06-p3e-decisions.md` 引的编号错位。
+    **§4.2 的正文一字未动**，那里仍是它的落点。
+
+> **编号说明（2026-10-06，协调者要求补）**：**第 13 条是「已判删」而不是「丢了一条」**——
+> 故本表在 13 与 14 之间不跳号地保留着那条删除线记录；读到它的人不必去找一份不存在的第 13 条。
+
+14. **§304 的「多少并行」有字段、无产生方**：§304（`docs/spec/05-normative.md:1973-1985`）的四项里，
     节点放置归 E、用哪个模型归 D／G、哪个工具归 A／F，**「多少并行」既不在 §4.1 的组件表里、
     也不在本设计的范围内**。
     **订正（2026-10-06，评审查出；原话照留）**：本条初稿写「「多少并行」在 §4.1 的组件表里
