@@ -42,9 +42,12 @@
 
 use continuum_core::model::{ModelId, ProviderHealth};
 use continuum_model_registry::{
-    BudgetView, FamilyPreference, RequirementError, RoutingRequest, SkillDimension,
-    TaskSkillRequirement,
+    BudgetView, CandidateScore, FamilyPreference, FamilyRelation, LifecycleState, ModelProfile,
+    RankedExecutionCandidates, RankingPolicy, Ratio, RequirementError, RoutableModel, RoutableState,
+    RoutingError, RoutingRequest, RoutingReason, SkillDimension, TaskSkillRequirement, load_profile,
+    p3d_model_migrations, rank, register_model,
 };
+use continuum_persist::{Db, Migration, Tx, Value, builtin_migrations};
 
 /// §19 的五项（`docs/spec/01-concepts.md:933-960` 的封闭清单）与**手写的**落库编码字面量。
 ///
@@ -277,4 +280,813 @@ fn the_same_availability_can_be_paired_with_each_family() {
         );
         assert_eq!(carried.availability, snapshot);
     }
+}
+
+// ===== Task 11：`rank` 的候选集构造、全序与输出面（设计 §5.2、§5.3、§5.4） =====
+//
+// # 夹具链：裸 SQL 播两行 → `load_profile` → `RoutableModel::try_new`
+//
+// [`RoutableModel`] 只能由 [`ModelProfile`] 产出，而画像在 crate 外构造不出来（Task 3），
+// `save_profile` 又收一枚画像做入参——链条不能自举，故**第一枚画像由裸 SQL 播下**
+// （与 Task 7 的夹具同一处置：`tests/persist.rs` 的 `insert_profile_row`）。
+//
+// **每一行画像必须先登记**：`model_profile.id REFERENCES model_registry(id)`，没登记就播画像，
+// 外键会拒（`Db::open_with` 开了 `PRAGMA foreign_keys=ON`）。
+//
+// # 本文件的用例需要 0 维观测
+//
+// `load_profile` 会组合 `load_skill_vector` 填画像的第十二个字段（Task 8），而**本文件的策略
+// 不读 `skill_vector`**（`rank` 交付的是机制，具体打分是 Task 12 的 `BaselineRankingPolicy`）。
+// 故这里唯一需要的是「画像在」——观测一维都不播。需要 1 / N 维的用例（Task 12）在播下画像
+// 之后再调 `save_skill_observation`。
+//
+// # 每个候选都**必须**有 `availability` 条目
+//
+// `rank` 对「候选集里有、`availability` 里没有」的模型返回 `Err(UnknownAvailability)`（设计 §5.3，
+// 不当作可用）。漏给一条条目会以 `Err` 的形式失败、且报错位置指向被测函数，
+// 故 `availability(...)` 是唯一入口——需要别的健康度时显式写出来，不靠默认值。
+
+/// 建一个装了三张表的临时库。
+fn db() -> (tempfile::TempDir, Db) {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("t.db");
+    let mut migrations: Vec<Migration> = builtin_migrations();
+    migrations.extend(p3d_model_migrations());
+    let db = Db::open_with(&path, migrations).unwrap();
+    db.migrate().unwrap();
+    (dir, db)
+}
+
+/// 播一行登记项 ＋ 一行画像。**每个 id 只调一次**——两条写都是裸 `INSERT`，第二次即主键拒。
+///
+/// 画像的十一列里只有 `confidence` 由调用方给（本文件的策略读它，见 `StubPolicy::evaluate`），
+/// 其余取固定字面量：本 task 不读它们，而它们必须是**合法取值**，否则 `load_profile` 的解码
+/// 会以 `Err` 的形式失败（报错位置同样指向被测函数）。三个列表列是**手写** JSON 文本。
+fn seed_candidate(tx: &Tx<'_>, model: &str, confidence: &str) {
+    register_model(tx, &ModelId::new(model)).unwrap();
+    tx.execute(
+        "INSERT INTO model_profile
+           (id, version, provider, model_revision, modalities, tools, failure_modes,
+            cost_profile, latency_profile, evidence_count, confidence)
+         VALUES (?1, 'version-beta', 'provider-gamma', 'revision-delta',
+                 ?2, ?3, '[]', NULL, NULL, 42, ?4)",
+        &[
+            Value::text(model),
+            Value::text(r#"["text"]"#),
+            Value::text(r#"["tool-epsilon"]"#),
+            Value::text(confidence),
+        ],
+    )
+    .unwrap();
+}
+
+/// 从已播下的那一行读回画像（**crate 外唯一的画像来源**）。
+fn profile_of(tx: &Tx<'_>, model: &str) -> ModelProfile {
+    load_profile(tx, &ModelId::new(model))
+        .unwrap()
+        .unwrap_or_else(|| panic!("画像已由裸 SQL 播下，{model} 应读得到"))
+}
+
+/// 一个候选：已播下的画像 ＋ 过闸门的状态。
+fn routable(tx: &Tx<'_>, model: &str, state: LifecycleState) -> RoutableModel {
+    RoutableModel::try_new(profile_of(tx, model), state)
+        .expect("用例给的状态应在可路由六态里")
+}
+
+/// `RoutingRequest::availability` 的条目，按 §315 的三种取值显式写出。
+fn availability(entries: &[(&str, ProviderHealth)]) -> Vec<(ModelId, ProviderHealth)> {
+    entries
+        .iter()
+        .map(|(model, health)| (ModelId::new(*model), *health))
+        .collect()
+}
+
+/// 一个候选的**全部可观察面**（五个访问器 ＋ `reason` 的四个字段），用于「逐项相同」的断言。
+///
+/// 用它而**不给这些类型派生 `PartialEq`**：本模块的类型按设计不派生东西（`router.rs` 的模块头），
+/// 而「相同」的判据要走**访问器**——那是消费者真正拿到的东西。
+type Fingerprint = (
+    String,
+    RoutableState,
+    f64,
+    f64,
+    FamilyRelation,
+    Vec<SkillDimension>,
+    Vec<SkillDimension>,
+    Vec<String>,
+);
+
+fn fingerprint(ranked: &RankedExecutionCandidates) -> Vec<Fingerprint> {
+    ranked
+        .candidates()
+        .iter()
+        .map(|candidate| {
+            (
+                candidate.model().as_str().to_string(),
+                candidate.state(),
+                candidate.compatibility().get(),
+                candidate.confidence().get(),
+                candidate.reason().family(),
+                candidate.reason().matched().to_vec(),
+                candidate.reason().missing().to_vec(),
+                candidate.reason().notes().to_vec(),
+            )
+        })
+        .collect()
+}
+
+/// 表驱动的测试策略：`ModelId` → `(compatibility, family)`，`confidence` 取**画像上的**那一个
+/// （§247，与设计 §5.3 的基线同源）。`matched` / `missing` / `notes` 三个字段全表共用一份。
+///
+/// **本 task 交付的是机制**（接口、全序、候选集构造），具体打分函数是 Task 12 的
+/// `BaselineRankingPolicy`（设计 §5.3 的「第二步」）。故这里的策略是一张**手写的**表，
+/// 让用例能把 compatibility / family 与排序结果对上。
+struct StubPolicy {
+    scores: Vec<(&'static str, f64, FamilyRelation)>,
+    matched: Vec<SkillDimension>,
+    missing: Vec<SkillDimension>,
+    notes: Vec<String>,
+}
+
+impl StubPolicy {
+    fn new(scores: Vec<(&'static str, f64, FamilyRelation)>) -> Self {
+        Self {
+            scores,
+            matched: vec![SkillDimension::Coding],
+            missing: vec![SkillDimension::Media, SkillDimension::Verification],
+            notes: vec![String::from("策略写下的一条事实陈述")],
+        }
+    }
+}
+
+impl RankingPolicy for StubPolicy {
+    fn evaluate(&self, _request: &RoutingRequest, model: &RoutableModel) -> CandidateScore {
+        let id = model.profile().id().as_str();
+        let (_, compatibility, family) = self
+            .scores
+            .iter()
+            .find(|(name, ..)| *name == id)
+            .unwrap_or_else(|| panic!("策略表里没有 {id}"));
+
+        CandidateScore {
+            compatibility: Ratio::try_new(*compatibility)
+                .expect("用例给的 compatibility 应是合法 Ratio"),
+            confidence: model.profile().confidence(),
+            reason: RoutingReason::new(
+                *family,
+                self.matched.clone(),
+                self.missing.clone(),
+                self.notes.clone(),
+            ),
+        }
+    }
+}
+
+/// **输出有序，且 `selected()` 是表头**（§84 的 `selected_model`，设计 §5.2）。
+///
+/// 三个候选的 `compatibility` 递减，故表头就是最高的那个；`confidence` 的取值**不参与**
+/// 这个次序（它只在 `compatibility` 并列时起作用）。
+///
+/// 红的条件：`rank` 不排序即红（表头会随输入顺序漂移）。
+#[test]
+fn the_result_is_ordered_and_selected_is_its_head() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.1");
+    seed_candidate(&tx, "model-bravo", "0.2");
+    seed_candidate(&tx, "model-charlie", "0.3");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+        routable(&tx, "model-charlie", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.9, FamilyRelation::SameFamily),
+        ("model-bravo", 0.5, FamilyRelation::SameFamily),
+        ("model-charlie", 0.3, FamilyRelation::SameFamily),
+    ]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+            ("model-charlie", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("三个候选都有可用性条目，应排出序来");
+
+    assert_eq!(
+        ranked.selected().model().as_str(),
+        "model-alpha",
+        "`compatibility` 最高的那一个应是表头（§84 的 selected_model）"
+    );
+    let ordered: Vec<&str> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+    assert_eq!(ordered, vec!["model-alpha", "model-bravo", "model-charlie"]);
+
+    tx.commit().unwrap();
+}
+
+/// §84 的 `alternatives` **不是第二份数据**，是同一份有序列表的表尾（设计 §5.2）。
+///
+/// 判据是**指针相同**（`as_ptr()`）而不是「内容相等」：内容相等在「另拷一份表尾」的实现下
+/// 照样成立，而设计要的正是「不另设 `alternatives` 字段」那条——同一份数据只有一个落点。
+///
+/// 红的条件：`alternatives()` 返回一份拷贝（指针不同）或返回的不是表尾（长度或首元素不对）。
+#[test]
+fn alternatives_is_the_tail_of_the_same_list() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.1");
+    seed_candidate(&tx, "model-bravo", "0.2");
+    seed_candidate(&tx, "model-charlie", "0.3");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+        routable(&tx, "model-charlie", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.9, FamilyRelation::SameFamily),
+        ("model-bravo", 0.5, FamilyRelation::SameFamily),
+        ("model-charlie", 0.3, FamilyRelation::SameFamily),
+    ]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+            ("model-charlie", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("三个候选都应过");
+
+    let candidates = ranked.candidates();
+    let alternatives = ranked.alternatives();
+
+    assert_eq!(alternatives.len(), candidates.len() - 1, "表尾比整表少表头一个");
+    assert_eq!(
+        alternatives.as_ptr(),
+        candidates[1..].as_ptr(),
+        "`alternatives()` 必须是同一份列表的表尾，不是另拷的一份数据"
+    );
+    let tail: Vec<&str> = alternatives
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+    assert_eq!(tail, vec!["model-bravo", "model-charlie"]);
+
+    tx.commit().unwrap();
+}
+
+/// `ExecutionCandidate` 的**五个访问器逐项各一条**（不抽代表）。
+///
+/// 五个都是接口冻结处的必需品：`selected()` 交给消费者，消费者下一步拿着 `model()` 去
+/// 调 provider（子项目 G）；`state()` 让消费者决定是否降权／重试；两个 `Ratio` 是 §84 的示例值；
+/// `reason()` 是 §84 要输出的那件事（设计 §5.2）。
+///
+/// 取值刻意**偏离默认**：`state` 取 `Active`（不是六态里的第一个 `Discovered`）、
+/// `compatibility` 取 0.75、`confidence` 取画像上的 0.4、`family` 取 `SameFamily`——
+/// 每一项都能与「访问器读错了另一个字段」区分开。
+///
+/// 红的条件：五个访问器里任一返回别的字段（`state()` 返回 `RoutableState::Discovered`、
+/// `compatibility()` 返回 `confidence`、`reason()` 不是策略给的那一枚，等等）。
+#[test]
+fn every_candidate_accessor_has_a_photo() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.4");
+    let models = vec![routable(&tx, "model-alpha", LifecycleState::Active)];
+    let policy = StubPolicy::new(vec![("model-alpha", 0.75, FamilyRelation::SameFamily)]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("唯一候选有可用性条目，应过");
+    let candidate = ranked.selected();
+
+    assert_eq!(candidate.model(), &ModelId::new("model-alpha"), "访问器 model()");
+    assert_eq!(
+        candidate.state(),
+        RoutableState::Active,
+        "访问器 state()：它是过闸门后的六态值，取自输入那个模型（不是默认态）"
+    );
+    assert_eq!(
+        candidate.compatibility().get(),
+        0.75,
+        "访问器 compatibility()：策略给的那个数"
+    );
+    assert_eq!(
+        candidate.confidence().get(),
+        0.4,
+        "访问器 confidence()：§247 画像上的 confidence，不是策略另算的一个数"
+    );
+    assert_eq!(
+        candidate.reason().family(),
+        FamilyRelation::SameFamily,
+        "访问器 reason()：策略给的那一枚 reason（本条与下一条用例两侧对钉 family）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// `RoutingReason` 的**四个字段逐项**（`family()` / `matched()` / `missing()` / `notes()`）。
+///
+/// `missing` 是 `Vec<SkillDimension>`，**不是一个数值**——本设计不把「缺一个维度」折算成任何
+/// 扣分，因为那需要一个规范没有的权重（设计 §5.2）。
+///
+/// 本条的 `family` 取 `CrossFamily`，与上一条的 `SameFamily` 构成两侧：一个把 `family()`
+/// 写死成任一取值的实现，必在其中一条上红。
+///
+/// 红的条件：任一访问器返回别的字段或换了形状（`missing()` 折成一个 `Ratio` 即编译不过，
+/// 转而返回 `matched()` 的内容即红）。
+#[test]
+fn the_reason_carries_family_matched_missing_and_notes() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    let models = vec![routable(&tx, "model-alpha", LifecycleState::Active)];
+    let policy = StubPolicy::new(vec![("model-alpha", 0.5, FamilyRelation::CrossFamily)]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("唯一候选有可用性条目，应过");
+    let reason = ranked.selected().reason();
+
+    assert_eq!(reason.family(), FamilyRelation::CrossFamily, "reason.family()");
+    assert_eq!(
+        reason.matched(),
+        &[SkillDimension::Coding],
+        "reason.matched()：命中的需求维度"
+    );
+    assert_eq!(
+        reason.missing(),
+        &[SkillDimension::Media, SkillDimension::Verification],
+        "reason.missing()：未命中的维度 —— 是**一个向量**，不是一个折算过的数"
+    );
+    assert_eq!(
+        reason.notes(),
+        &[String::from("策略写下的一条事实陈述")],
+        "reason.notes()：策略写入的事实陈述"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 打乱输入顺序，输出**逐项**相同（全序且确定的照片，设计 §5.3）。
+///
+/// 夹具里 `model-bravo` 与 `model-charlie` 的 `compatibility` 与 `confidence` **全同**：
+/// 这一档并列，次序只能由兜底档（`ModelId` 升序）定。**若没有并列，本用例在删掉兜底档后
+/// 照样绿**——`sort_by` 是稳定排序，无并列时次序与输入顺序无关。
+///
+/// 红的条件：`compare` 的兜底一档不按 `ModelId` 升序即红（两种输入顺序会给出两种输出）。
+#[test]
+fn shuffling_the_input_does_not_change_the_output() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+    seed_candidate(&tx, "model-charlie", "0.5");
+
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.9, FamilyRelation::SameFamily),
+        ("model-bravo", 0.5, FamilyRelation::SameFamily),
+        ("model-charlie", 0.5, FamilyRelation::SameFamily),
+    ]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+            ("model-charlie", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let fingerprints: Vec<Vec<Fingerprint>> = [
+        ["model-alpha", "model-bravo", "model-charlie"],
+        ["model-charlie", "model-bravo", "model-alpha"],
+        ["model-bravo", "model-charlie", "model-alpha"],
+    ]
+    .iter()
+    .map(|order| {
+        let models: Vec<RoutableModel> = order
+            .iter()
+            .map(|model| routable(&tx, model, LifecycleState::Active))
+            .collect();
+        fingerprint(&rank(&request, &models, &policy).expect("三种输入顺序都应排出序来"))
+    })
+    .collect();
+
+    let ordered: Vec<&str> = fingerprints
+        .iter()
+        .flat_map(|items| items.iter().map(|item| item.0.as_str()))
+        .collect();
+    assert_eq!(
+        ordered,
+        vec![
+            "model-alpha",
+            "model-bravo",
+            "model-charlie",
+            "model-alpha",
+            "model-bravo",
+            "model-charlie",
+            "model-alpha",
+            "model-bravo",
+            "model-charlie",
+        ],
+        "三种输入顺序的输出应逐项相同，且并列的两条按 ModelId 升序"
+    );
+    assert_eq!(fingerprints[0], fingerprints[1], "打乱输入不改变输出");
+    assert_eq!(fingerprints[1], fingerprints[2], "打乱输入不改变输出");
+
+    tx.commit().unwrap();
+}
+
+/// 两条 `compatibility` / `confidence` 全同、`ModelId` 不同 → 输出按 `ModelId` **升序**。
+///
+/// **夹具把两条同分候选按与 id 升序相反的顺序喂入**（`model-bravo` 在前）：Rust 的 `sort_by`
+/// 是**稳定**排序，若按 id 升序喂入，则删掉兜底档后输出照样是 id 升序——**假绿**。
+///
+/// 红的条件：去掉 `compare` 的兜底那一档即红（输出会是 `["model-bravo", "model-alpha"]`）。
+#[test]
+fn tied_candidates_are_ordered_by_model_id() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    let models = vec![
+        routable(&tx, "model-bravo", LifecycleState::Active),
+        routable(&tx, "model-alpha", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::SameFamily),
+        ("model-bravo", 0.5, FamilyRelation::SameFamily),
+    ]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("两个候选都应过");
+    let ordered: Vec<&str> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+
+    assert_eq!(
+        ordered,
+        vec!["model-alpha", "model-bravo"],
+        "两条候选全同分时，兜底档按 ModelId 升序——输入顺序是反的，故这不是稳定排序的副作用"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// `compatibility` 并列时，`confidence` **降序**决定次序（设计 §5.3 的缺省 `compare`：
+/// 「按 (compatibility, confidence) 降序」）。
+///
+/// **这条用例是补上来的，不在计划 Step 2 的清单里**（来历记在此处，免得被当成漏项或越权）：
+/// 实跑变异「去掉 confidence 那一档」时**全绿**——上面两条排序用例里并列的候选在
+/// `compatibility` 与 `confidence` 上是**同时**并列的，故那一档从来没有被判据碰到。
+/// 而 `compare` 的文档注释与设计 §5.3 都**写死了**它是第二档：注释里的绝对措辞要有照片
+/// （本仓已立过这条），故在此补一条，不推给 Task 12——Task 12 的用例清单里也没有它。
+///
+/// 夹具的形态是承重的：两条候选 `compatibility` 全同（0.5），`confidence` 不同
+/// （0.4 对 0.8），且按 `ModelId` **升序**喂入（`model-alpha` 在前），而期望的表头是
+/// `model-bravo`。故本条在三种实现下都红：**去掉第二档**（稳定排序保序 → alpha 在前）、
+/// **把第二档写反**（升序 → alpha 在前）、**只剩兜底档**（`ModelId` 升序 → alpha 在前）。
+#[test]
+fn confidence_breaks_a_compatibility_tie() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.4");
+    seed_candidate(&tx, "model-bravo", "0.8");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::SameFamily),
+        ("model-bravo", 0.5, FamilyRelation::SameFamily),
+    ]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("两个候选都应过");
+    let ordered: Vec<&str> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+
+    assert_eq!(
+        ordered,
+        vec!["model-bravo", "model-alpha"],
+        "`compatibility` 并列时按 `confidence` 降序：0.8 的那个在前，尽管它是 id 更大的那个"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 同一个 `ModelId` 的两个候选 → `Err(RoutingError::DuplicateModelCandidate { id })`，
+/// **断言是哪一枚、id 是哪一个**。
+///
+/// 它是 `compare` 的「全序」这条断言的守门人：两条 `ModelId` 相同的候选无从定序，
+/// 兜底档也兜不住（设计 §5.3、§5.4）。两条候选由**同一行画像读两次**得到——它们的 `ModelId`
+/// 相同而身份不同，这正是「同一个模型的两次打分」那条排除对象的形态。
+///
+/// 红的条件：去掉判重即红（`rank` 会给出一份「两条同名候选」的排序）。
+#[test]
+fn the_same_model_twice_is_rejected_with_the_id() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-alpha", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![("model-alpha", 0.5, FamilyRelation::SameFamily)]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+    );
+
+    assert_eq!(
+        rank(&request, &models, &policy).err(),
+        Some(RoutingError::DuplicateModelCandidate {
+            id: ModelId::new("model-alpha")
+        }),
+        "同一个 ModelId 出现两次即无从定序，带出的是那个 id"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **一个候选都没有 → `Err(NoEligibleCandidate)`，三条例各一条**（设计 §5.3、§5.4）。
+///
+/// 三条路径都汇到同一枚 `Err`：
+/// 1. **空输入**（一个模型都没登记）；
+/// 2. **全部被闸门挡下**——`RoutableModel::try_new` 对 `stale` 失败，故候选集为空
+///    （被挡下的模型进不了 `&[RoutableModel]`，闸门在类型上就把它拦住了）；
+/// 3. **唯一候选不可用**——被可用性过滤清空。
+///
+/// `NoEligibleCandidate` **不合并进 `NotRoutable`**：前者是「没有可用的」，后者是
+/// 「有一枚被点名挡下了」，调用方（§110 的流程）对两者的处置不同。
+///
+/// 红的条件：任一条路径返回别的 `Err`（或 `Ok`）即红。
+#[test]
+fn no_eligible_candidate_is_its_own_error() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    let policy = StubPolicy::new(vec![("model-alpha", 0.9, FamilyRelation::SameFamily)]);
+
+    // 一、空输入。
+    let empty = request(FamilyPreference::Auto, Vec::new());
+    assert_eq!(
+        rank(&empty, &[], &policy).err(),
+        Some(RoutingError::NoEligibleCandidate),
+        "一个候选都没有时返回 NoEligibleCandidate，不是空列表"
+    );
+
+    // 二、全部被闸门挡下：`stale` 构造不出 `RoutableModel`，故它在候选集里无处安放。
+    assert_eq!(
+        RoutableModel::try_new(profile_of(&tx, "model-alpha"), LifecycleState::Stale).err(),
+        Some(RoutingError::NotRoutable {
+            state: LifecycleState::Stale
+        }),
+        "闸门这一侧：漂移中的模型进不了候选集"
+    );
+    assert_eq!(
+        rank(&empty, &[], &policy).err(),
+        Some(RoutingError::NoEligibleCandidate),
+        "被闸门挡下之后候选集为空，与「一个模型都没登记」汇到同一枚 Err"
+    );
+
+    // 三、唯一候选不可用：过闸门了，但被可用性过滤清空。
+    let models = vec![routable(&tx, "model-alpha", LifecycleState::Active)];
+    let filtered = request(
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Unavailable)]),
+    );
+    assert_eq!(
+        rank(&filtered, &models, &policy).err(),
+        Some(RoutingError::NoEligibleCandidate),
+        "唯一候选被可用性过滤掉之后，也与前两条汇到同一枚 Err"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **`ProviderHealth::Unavailable` 的模型不进候选集**，且**两侧对钉**（设计 §5.3）。
+///
+/// 夹具让**不可用的那一个分数更高**（`model-bravo` 0.9 对 `model-alpha` 0.5）：若过滤不存在，
+/// `selected()` 会是 `model-bravo`——故「表头是另一个」这条断言是承重的，不是碰巧成立。
+///
+/// 另一侧：把同一个候选由 `Unavailable` 改回 `Healthy` → 它**回到**输出里、并成为表头。
+/// **缺了这一侧，一个「把所有候选都丢掉」的实现也全绿**（它同样让 `selected()` 是另一个？
+/// 不——它会连 `model-alpha` 一起丢，返回 `NoEligibleCandidate`，见另一条用例；但只钉一侧
+/// 就无法区分「正确地滤掉了一条」与「恰好只剩它」）。
+///
+/// 红的条件：去掉 `Unavailable` 那一档过滤即红（表头变成 `model-bravo`）。
+#[test]
+fn an_unavailable_model_is_not_a_candidate() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::SameFamily),
+        ("model-bravo", 0.9, FamilyRelation::SameFamily),
+    ]);
+
+    // 不可用的那个分数更高：过滤掉它之后表头才是另一个。
+    let with_bravo_down = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Unavailable),
+        ]),
+    );
+    let ranked = rank(&with_bravo_down, &models, &policy).expect("还有一个可用的候选");
+    assert_eq!(
+        ranked.candidates().len(),
+        1,
+        "`Unavailable` 的那一个不在候选集里（它是「不可用即不是候选」，不是「降权」）"
+    );
+    assert_eq!(
+        ranked.selected().model().as_str(),
+        "model-alpha",
+        "分数更高的那一个不可用，故表头是另一个"
+    );
+
+    // 另一侧：改回 `Healthy`，它回到输出里。
+    let with_bravo_up = request(
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+    let ranked = rank(&with_bravo_up, &models, &policy).expect("两个候选都应过");
+    let ordered: Vec<&str> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect();
+    assert_eq!(
+        ordered,
+        vec!["model-bravo", "model-alpha"],
+        "改回 `Healthy` 之后它回到候选集里，并按分数成为表头"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **`Healthy` 与 `Degraded` 都留在候选集里，且两者之间排序不变**（设计 §5.3）。
+///
+/// 这一条是「**不发明降权判据**」的照片：设计写死只过滤 `Unavailable`，`Degraded` 该不该降权、
+/// 降到什么程度，**规范未给判据**（§250 只说「考虑」、§84 没有给这一维的算法），
+/// 故基线不为它改排序——健康度原样带进 `reason`，让策略自己决定（§11 第 24 条）。
+///
+/// 注意撞名：这里的 `ProviderHealth::Degraded` 是**供应商侧的可用性**，与
+/// `LifecycleState::Degraded`（§249 的生命周期异常态）是两个轴上的两个东西。
+///
+/// 红的条件：给 `Degraded` 加一档降权（表头变化）或把它一并滤掉（少一条候选）即红。
+#[test]
+fn healthy_and_degraded_both_stay_and_the_order_does_not_change() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::SameFamily),
+        ("model-bravo", 0.9, FamilyRelation::SameFamily),
+    ]);
+
+    let fingerprints: Vec<Vec<Fingerprint>> = [ProviderHealth::Healthy, ProviderHealth::Degraded]
+        .iter()
+        .map(|health| {
+            let request = request(
+                FamilyPreference::Auto,
+                availability(&[("model-alpha", ProviderHealth::Healthy), ("model-bravo", *health)]),
+            );
+            fingerprint(&rank(&request, &models, &policy).expect("两个候选都应过"))
+        })
+        .collect();
+
+    assert_eq!(fingerprints[0].len(), 2, "两条候选都留着（`Degraded` 不被滤掉）");
+    assert_eq!(
+        fingerprints[0], fingerprints[1],
+        "健康度在 Healthy 与 Degraded 之间来回改，两次输出逐项相同"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 候选集里的某个 `ModelId` 在 `RoutingRequest::availability` 里**没有条目** →
+/// `Err(RoutingError::UnknownAvailability { id })`，**断言是哪一枚、id 是哪一个**。
+///
+/// **不当作可用**——按未知放行是 fail-open 的形状（设计 §5.3）。
+///
+/// 红的条件：把「列表里没有」当成「可用」而放行即红。
+#[test]
+fn a_candidate_missing_from_availability_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let policy = StubPolicy::new(vec![
+        ("model-alpha", 0.5, FamilyRelation::SameFamily),
+        ("model-bravo", 0.9, FamilyRelation::SameFamily),
+    ]);
+    // `model-bravo` 这一条**刻意不给**。
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+    );
+
+    assert_eq!(
+        rank(&request, &models, &policy).err(),
+        Some(RoutingError::UnknownAvailability {
+            id: ModelId::new("model-bravo")
+        }),
+        "列表里没有条目即「未知」，带出的是缺条目的那个 id"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **与闸门那一侧配对的正面照片**：一个 `Active` 的模型经 `rank` **确实成为 `selected()`**。
+///
+/// 只钉「`stale` 被挡下」而不钉这一侧，整条路由路径可以在「永远返回 `NoEligibleCandidate`」
+/// 的情况下全绿——而那正是 fail-open 的反面（设计 §5.3 的可用性过滤、`## 遗留` 的同一判据）。
+///
+/// 红的条件：`rank` 对合法输入返回 `Err`，或表头不是那个 `Active` 的模型。
+#[test]
+fn a_routable_model_does_come_out_as_the_selected_candidate() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    let models = vec![routable(&tx, "model-alpha", LifecycleState::Active)];
+    let policy = StubPolicy::new(vec![("model-alpha", 0.5, FamilyRelation::SameFamily)]);
+    let request = request(
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+    );
+
+    let ranked = rank(&request, &models, &policy).expect("一个 Active 的模型应真的被选中");
+    assert_eq!(ranked.selected().model().as_str(), "model-alpha");
+    assert_eq!(ranked.selected().state(), RoutableState::Active);
+
+    tx.commit().unwrap();
 }

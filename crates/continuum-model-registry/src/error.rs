@@ -121,7 +121,13 @@ pub enum LifecycleError {
 
 /// 路由侧的错误（设计 §5.3）。
 ///
-/// # 只有一枚变体：其余**不由 Task 10** 增补，由 Task 11 增补
+/// # 四枚变体，到此为止
+///
+/// **订正（2026-10-06，Task 11 完工后）**：本段下面那句「其余三枚……**由 Task 11 增补**」
+/// 写的是时点，而**那个时点已经过去**——Task 11 落了 `NoEligibleCandidate` /
+/// `DuplicateModelCandidate { id }` / `UnknownAvailability { id }`，**共四枚，到此为止**
+/// （该 task 的 Interfaces 一栏列的就是这三枚）。
+/// 原句照留作来历，见下一段。
 ///
 /// Task 4 落 [`RoutingError::NotRoutable`]——它是可路由闸门
 /// （[`crate::lifecycle::RoutableModel::try_new`]）的失败值，产生方在本 task 之内。
@@ -154,6 +160,37 @@ pub enum RoutingError {
     /// 恰恰不在 `RoutableState` 里，若这里收窄，错误值就表达不出「是哪一个被拒了」。
     #[error("状态 {state:?} 不可进入自动路由路径（§249 的三态 ＋ 已裁的 stale）")]
     NotRoutable { state: LifecycleState },
+
+    /// **一个候选都没有**：输入为空、或全部被可用性过滤掉（设计 §5.4）。
+    ///
+    /// **不合并进 [`RoutingError::NotRoutable`]**：这一枚是「没有可用的」，那一枚是
+    /// 「有一枚被点名挡下了」，调用方（§110 的流程）对两者的处置不同。
+    ///
+    /// **也不返回空列表**：`rank` 在任何情况下都不产出空列表，那是
+    /// [`crate::router::RankedExecutionCandidates::selected`] 不必返回 `Option` 的前提。
+    ///
+    /// **产生方只有 [`crate::router::rank`]**。`NotRoutable` 到不了它——被挡下的四态在
+    /// [`crate::lifecycle::RoutableModel::try_new`] 就失败了，进不了 `rank` 的签名。
+    #[error("一个可执行的候选都没有（输入为空，或全部被可用性过滤掉）")]
+    NoEligibleCandidate,
+
+    /// 候选集里**同一个模型出现了两次**（设计 §5.4）。`id` 原样带出。
+    ///
+    /// **它是 `RankingPolicy::compare` 的「全序」这条断言的守门人**：两条 `ModelId` 相同的候选
+    /// 无从定序，兜底档也兜不住（兜底档靠的是「两个 `ModelId` 两两可比且无相等」）。
+    ///
+    /// **不只是去重**：静默去掉一条会让「同一个模型的两次打分」这种输入看起来被处理过了，
+    /// 而它其实是候选集构造侧的一个错——产生方应当修正的是输入，不是让本层猜留哪一条。
+    #[error("候选集里同一个模型 {id:?} 出现了两次，无从定序")]
+    DuplicateModelCandidate { id: ModelId },
+
+    /// 候选集里的某个模型在 `RoutingRequest::availability` 里**没有条目**（设计 §5.3、§5.4）。
+    /// `id` 原样带出，缺的是哪一个一目了然。
+    ///
+    /// **不把它当「可用」**：缺席即未知，而按未知放行是 **fail-open 的形状**——
+    /// 一个连供应商侧快照都没有的模型会被排进可执行候选里。
+    #[error("模型 {id:?} 在可用性列表里没有条目：缺席即未知，不当作可用")]
+    UnknownAvailability { id: ModelId },
 }
 
 /// 需求侧的构造错误（设计 §5.1 的「空需求」一段）。

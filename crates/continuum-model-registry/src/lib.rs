@@ -29,8 +29,12 @@
 //! [`load_profile`] **组合** [`load_skill_vector`] 填上画像的第十二个字段——三张表的行级读写
 //! 至此齐了；Task 9 补 §333 的只读预算投影 [`BudgetView`]（[`budget`]）；
 //! Task 10 补 §250 的**请求面**——非空需求 [`TaskSkillRequirement`]、
-//! family 偏好 [`FamilyPreference`] 与请求 [`RoutingRequest`]（[`router`]）。
-//! 候选集、输出与排序策略在 Task 11，阶梯在后续 task，各自落在自己的模块里。
+//! family 偏好 [`FamilyPreference`] 与请求 [`RoutingRequest`]（[`router`]）；
+//! Task 11 补 §250 的**输出面与 [`rank`]**——候选集构造（判重、可用性过滤）、
+//! 排序接口 [`RankingPolicy`] 与它的全序缺省实现、输出 [`RankedExecutionCandidates`]
+//! 与 [`ExecutionCandidate`] / [`RoutingReason`] / [`FamilyRelation`]，
+//! 以及 [`RoutingError`] 的三枚新变体。
+//! **具名基线策略 `BaselineRankingPolicy` 在 Task 12**，阶梯在后续 task，各自落在自己的模块里。
 
 pub mod budget;
 pub mod error;
@@ -50,4 +54,7 @@ pub use profile::{
     current_observation, ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore,
     SkillVector,
 };
-pub use router::{FamilyPreference, RoutingRequest, TaskSkillRequirement};
+pub use router::{
+    CandidateScore, ExecutionCandidate, FamilyPreference, FamilyRelation, RankedExecutionCandidates,
+    RankingPolicy, RoutingReason, RoutingRequest, TaskSkillRequirement, rank,
+};

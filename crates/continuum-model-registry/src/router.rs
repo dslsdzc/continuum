@@ -18,19 +18,35 @@
 //! **请求进得去表驱动用例，策略可以换一份重跑同一组用例。** 故本模块**不出现**那三个策略输入
 //! 的任何字段或类型——给 [`RoutingRequest`] 加上它们，等于把一个未定义的形状钉在请求面上。
 //!
-//! # 本模块的类型**不派生任何东西**，判据与 [`crate::budget::BudgetView`] 同
+//! # 请求面的三个类型**不派生任何东西**，判据与 [`crate::budget::BudgetView`] 同
 //!
 //! 它们是**纯数据**：字段 `pub`（或只有一条构造闸门），从构造到读回之间**没有本 crate 的代码**，
 //! 故「读回来还是原值吗」这类运行期断言必然恒真。派生的判据是**有没有当场消费方**：
-//! 本模块的**三个**类型（[`TaskSkillRequirement`] / [`FamilyPreference`] / [`RoutingRequest`]）
-//! 今天一个消费者都没有（`rank` 在 Task 11），故 `Debug` / `PartialEq` 等
-//! 一律不加。**要加的那一天，连同一个真用得上的用例一起加。**
+//! Task 10 落地时本模块的**三个**类型（[`TaskSkillRequirement`] / [`FamilyPreference`] /
+//! [`RoutingRequest`]）一个消费者都没有，故 `Debug` / `PartialEq` 等一律不加；
+//! **Task 11 给 [`RoutableModel`] 这一侧接上了消费者，而下面那三个新类型仍然不派生**
+//! ——`rank` 的用例走的是访问器，不是整值比对。**要加的那一天，连同一个真用得上的用例一起加。**
+//!
+//! **唯一的例外是 [`FamilyRelation`]**：用例要断言「是哪一枚」（`assert_eq!` 要
+//! `Debug` ＋ `PartialEq`），且 `family()` 按值返回它（`Copy`）——四项派生各有一个当天用得上的
+//! 消费方，故它带派生。这是本模块**唯一**带派生的类型，不是一次口味上的放宽。
+//!
+//! # Task 11 的落点（设计 §5.2、§5.3、§5.4）
+//!
+//! [`rank`] 是**同步纯函数**：候选集构造（判重 → 查可用性 → 只滤掉 `Unavailable`）、
+//! 逐个 [`RankingPolicy::evaluate`]、`sort_by` [`RankingPolicy::compare`]、取头。
+//! 输出面是 [`RankedExecutionCandidates`]（字段私有，唯一的构造点在 `rank` 内），
+//! 排序的**机制**在本层，**具体打分函数的数值明确推迟**（设计 §5.3 的三条依据），
+//! 具名基线是 Task 12 的 `BaselineRankingPolicy`。
+
+use std::cmp::Ordering;
 
 use continuum_core::model::{ModelId, ProviderHealth};
 
 use crate::budget::BudgetView;
-use crate::error::RequirementError;
-use crate::profile::SkillDimension;
+use crate::error::{RequirementError, RoutingError};
+use crate::lifecycle::{RoutableModel, RoutableState};
+use crate::profile::{Ratio, SkillDimension};
 
 /// **非空**的 §248 维度集合：一次路由请求需要这个任务具备哪几个维度。
 ///
@@ -183,4 +199,345 @@ pub struct RoutingRequest {
     /// 每个 `Some` 今天都只能由测试构造（设计 §10 第 2 条）。
     /// 照片形态因此是**签名层**的：`tests/compile_fail/a_routing_request_without_a_budget.rs`。
     pub budget: BudgetView,
+}
+
+// ===== Task 11：输出面与 `rank`（设计 §5.2、§5.3、§5.4） =====
+
+/// §19 的两族关系，落在候选的 `reason` 里（设计 §5.2、§5.3）。
+///
+/// # 它的定义归本 task（协调者裁定，2026-10-06）
+///
+/// 原稿把 `pub enum FamilyRelation { SameFamily, CrossFamily }` 写在 **Task 12** 的代码块里，
+/// 而本模块的 [`RoutingReason`] 已经用它——**一个类型不能在它存在之前就被引用**，照原稿执行
+/// 本 task 编不过（E0412／E0432）。判据是「[`FamilyRelation`] 是 [`RoutingReason`] 的字段类型，
+/// 定义随宿主走」，且本 task 的 Interfaces 一栏已认领 [`RoutingReason`]。
+/// 两枚变体的名字取自设计 `:793` / 计划 `:1310`，**不另取**；Task 12 **不得再定义一次**。
+///
+/// # 它是比较的第三档
+///
+/// [`RankingPolicy::compare`] 的缺省实现里，`SameFamily` 排在 `CrossFamily` 前面
+/// （§19「优先同一 model family」）。**顺序的判据写在一个显式的 rank 函数里**，
+/// 不靠变体的声明序——声明序是一种「没说出口的规格」。
+///
+/// # 派生集
+///
+/// `Debug` / `PartialEq` 供用例断言「是哪一枚」（`assert_eq!` 两者都要）；`Eq` 由
+/// 「两个变体之外没有第三个取值」成立；`Clone` 由 `Copy` 要求；`Copy` 供
+/// [`RoutingReason::family`] 按值返回（与 [`crate::lifecycle::RoutableState`] 的 `state()` 同形）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FamilyRelation {
+    /// 候选与请求偏好同族（§19 的 `Auto` 下全部视为这一档，那一条落在 Task 12）。
+    SameFamily,
+    /// 候选跨族。
+    CrossFamily,
+}
+
+/// [`FamilyRelation`] 在 [`RankingPolicy::compare`] 里的序：`SameFamily` 在前，故它的秩最小。
+///
+/// **不派生 `Ord`**：那会让次序由变体的声明序给出，而声明序是一种没说出口的规格。
+/// match 穷尽且无通配臂：加第三枚时本函数编译不过，排序不会漏分支。
+fn family_rank(family: FamilyRelation) -> u8 {
+    match family {
+        FamilyRelation::SameFamily => 0,
+        FamilyRelation::CrossFamily => 1,
+    }
+}
+
+/// §84 的 reason。**结构化而非一行文本**：字段要供后续对账取用（设计 §5.2）。
+///
+/// # 字段私有，但有一个公开的构造入口
+///
+/// 四个字段私有，读口是四个访问器——它们**今天没有具名消费方**，只是 §84 要输出的内容的读口
+/// （设计 §5.2 刻意把这句话写得比 [`ExecutionCandidate`] 那五个访问器弱）。
+///
+/// **然而 [`CandidateScore`] 的字段是 `pub` 的、[`RankingPolicy::evaluate`] 是公开 trait 的方法**，
+/// 故 crate 外的策略实现者（以及本 crate 的测试策略）**必须**能造出一枚 [`RoutingReason`]：
+/// 没有构造入口，`RankingPolicy` 这个「可替换的基线」就只是一个实现不出来的 trait。
+/// 故有 [`RoutingReason::new`]——**这是接口冻结处的必需品，不是提前铺开的 API**。
+///
+/// 它不做任何校验：四个字段都是纯数据（`FamilyRelation` 是枚举、两个 `Vec` 的元素类型各自
+/// 在构造期已把关），没有可再失败的判据，故不发明一个永不出现的 `Err`
+/// （同 [`crate::profile::ModelProfile::try_new`] 的处置）。
+pub struct RoutingReason {
+    family: FamilyRelation,
+    matched: Vec<SkillDimension>,
+    missing: Vec<SkillDimension>,
+    notes: Vec<String>,
+}
+
+impl RoutingReason {
+    /// 四个字段全量传入，**顺序原样保留**（两个 `Vec` 不排序、不去重）：匹配是一个集合运算，
+    /// 但「原样保留」是这里唯一不需要解释的选择——排一次序就要为「凭什么按这个序」找出处，
+    /// 而规范没给（同 [`TaskSkillRequirement::try_new`] 的理由）。
+    pub fn new(
+        family: FamilyRelation,
+        matched: Vec<SkillDimension>,
+        missing: Vec<SkillDimension>,
+        notes: Vec<String>,
+    ) -> Self {
+        Self {
+            family,
+            matched,
+            missing,
+            notes,
+        }
+    }
+
+    /// §19 的两族关系。按值返回（它是 `Copy` 的两变体枚举，与 [`RoutableState`] 同形）。
+    pub fn family(&self) -> FamilyRelation {
+        self.family
+    }
+
+    /// 命中的需求维度。返回切片：调用方要的是「读这批维度」，不是本类型容器的那几个方法。
+    pub fn matched(&self) -> &[SkillDimension] {
+        &self.matched
+    }
+
+    /// **未命中**的需求维度。**是 `Vec<SkillDimension>`，不是一个数值**——本设计**不把
+    /// 「缺一个维度」折算成任何扣分**，因为那需要一个规范没有的权重（设计 §5.2）。
+    pub fn missing(&self) -> &[SkillDimension] {
+        &self.missing
+    }
+
+    /// 策略写入的事实陈述。**来源是策略**：本层不替它写一句（那会是一条本层没有判据的断言）。
+    pub fn notes(&self) -> &[String] {
+        &self.notes
+    }
+}
+
+/// 一个候选的打分。**没有总分字段**——§248 的「不依赖单一总分」在接口上也看得见（设计 §5.3）。
+///
+/// 字段 `pub`：它是 [`RankingPolicy::evaluate`] 的返回值，由**策略**（crate 外也可以是）构造，
+/// 故 `pub` 是接口的一部分，不是「懒得写访问器」。
+pub struct CandidateScore {
+    /// §84 的 compatibility。含义规范未定义（§84 只说「A 更合理」），本层只保证它是 `[0,1]` 的
+    /// 已构造 [`Ratio`]——故 [`RankingPolicy::compare`] 的前两档**可以假定**操作数合法。
+    pub compatibility: Ratio,
+    /// §84 的 confidence。取值与含义同上。
+    pub confidence: Ratio,
+    /// §84 的 reason。
+    pub reason: RoutingReason,
+}
+
+/// 一个**可执行**的候选：模型、已过闸门的状态、两个 §84 的读数与 reason。
+///
+/// 字段私有且**只有 `rank` 构造它**——故「候选」这个词在本层与「过了闸门且可用」是同一件事。
+///
+/// # 五个访问器是接口冻结处的必需品
+///
+/// [`Self::model`] 是给**消费者**的（子项目 G）：消费者下一步就是拿着这个 `ModelId` 去
+/// 调 provider，拿不到这一步就走不下去。其余四个同理（设计 §5.2）。**不是「将来可能有人用」。**
+pub struct ExecutionCandidate {
+    model: ModelId,
+    state: RoutableState,
+    compatibility: Ratio,
+    confidence: Ratio,
+    reason: RoutingReason,
+}
+
+impl ExecutionCandidate {
+    /// §247／§315 的模型 id。消费方据此发起调用。
+    pub fn model(&self) -> &ModelId {
+        &self.model
+    }
+
+    /// **过闸门之后**的六态值（不是十态：被挡下的四态进不到这里，见
+    /// [`crate::lifecycle::RoutableModel`]）。消费者据此决定是否降权／重试（§4.2 末段）。
+    pub fn state(&self) -> RoutableState {
+        self.state
+    }
+
+    /// §84 的 compatibility。
+    pub fn compatibility(&self) -> Ratio {
+        self.compatibility
+    }
+
+    /// §84 的 confidence。
+    pub fn confidence(&self) -> Ratio {
+        self.confidence
+    }
+
+    /// §84 的 reason。
+    pub fn reason(&self) -> &RoutingReason {
+        &self.reason
+    }
+}
+
+/// §250 的输出：一份**有序**的候选列表（设计 §5.2）。
+///
+/// # 字段私有，唯一的构造点在 [`rank`] 内，且构造前先判空
+///
+/// 这条保证撑起 [`Self::selected`] 的签名：无候选时 `rank` 返回
+/// `Err(RoutingError::NoEligibleCandidate)` 而**不返回空列表**，故 `selected()` 不必返回
+/// `Option`——§84 的 `selected_model` 总是存在。不可表达性命题的照片是
+/// `tests/compile_fail/ranked_candidates_cannot_be_built.rs`（字段私有，E0451）。
+///
+/// # 不另设 `alternatives` 字段
+///
+/// §84 的 `alternatives` **不是第二份数据**，是**同一份有序列表的表尾**：它是
+/// [`Self::alternatives`] 这个访问器算出来的，不是存下来的（同一件事两个落点，设计 §5.2）。
+pub struct RankedExecutionCandidates {
+    candidates: Vec<ExecutionCandidate>,
+}
+
+impl RankedExecutionCandidates {
+    /// §84 的 `selected_model`：表头。**不返回 `Option`**——列表非空是构造期的保证（见类型文档）。
+    ///
+    /// 索引 `[0]` 而不是 `.first()`：`.first()` 会给出一个编译期就消除了的 `None` 分支，
+    /// 而那个分支不可能被走到；这里的下标由「构造前先判空」兜住。
+    pub fn selected(&self) -> &ExecutionCandidate {
+        &self.candidates[0]
+    }
+
+    /// §84 的 `alternatives`：**同一份列表**的表尾（可能为空——只有一个候选时就是空切片）。
+    pub fn alternatives(&self) -> &[ExecutionCandidate] {
+        &self.candidates[1..]
+    }
+
+    /// 整份有序列表。调用方要「按序看全部候选」（表头在那一段用例里是单独读的）时用它。
+    pub fn candidates(&self) -> &[ExecutionCandidate] {
+        &self.candidates
+    }
+}
+
+/// 排序的**机制与接口**在本层；**具体打分函数的数值明确推迟**（设计 §5.3 的三条依据：
+/// §84 未给两个读数的算法与含义、§25 的 Population Feedback 是 OPEN-008、
+/// §247／§87／§333 的量纲没有单位）。
+///
+/// 具名基线（`BaselineRankingPolicy`）是 Task 12；本 trait 的存在让「换一份策略重跑同一组用例」
+/// 成为可能（设计 §5.1 的请求／策略分界）。
+pub trait RankingPolicy {
+    /// 给一个**已过闸门**的候选打分。收 `&RoutableModel`（要读画像）与 `&RoutingRequest`
+    /// （要读需求与偏好）。
+    ///
+    /// **不返回 `Result`**：这条签名是 [`TaskSkillRequirement`] 非空那条保证的理由之一——
+    /// 空需求会让 `compatibility = matched / required` 成为 `0/0`，而 `Ratio` 拒 NaN，
+    /// 实现者只剩 panic 或编一个值两条路（设计 §5.1 末段）。空需求在**构造期**就被拒，到不了这里。
+    fn evaluate(&self, request: &RoutingRequest, model: &RoutableModel) -> CandidateScore;
+
+    /// **全序**比较：`Ordering::Less` 表示 `a` 排在 `b` 前面。
+    ///
+    /// 缺省实现按 `(compatibility, confidence)` 降序，再按 family、model id 兜底：
+    ///
+    /// 1. `compatibility` 降序；
+    /// 2. `confidence` 降序；
+    /// 3. [`FamilyRelation`]：`SameFamily` 在前（§19 的「优先同一 model family」）；
+    /// 4. [`ModelId`] **升序**——**全序的最后兜底**。
+    ///
+    /// 操作数就是 [`ExecutionCandidate`]——**不另立一个 `Scored` 类型**（同一件事的第二个落点），
+    /// 缺省实现经 §5.2 的访问器读数，不动私有字段。
+    ///
+    /// # 「全序」由三件事合起来成立（逐条落实）
+    ///
+    /// - 前两档可比：[`Ratio`] 在**构造期**就拒 NaN 与 ±∞，故两个已构造的取值必有确定的大小关系
+    ///   （`tests/profile.rs` 的 `ratio_rejects_non_finite_and_out_of_range`）；
+    /// - 第三档：`FamilyRelation` 只有两枚，[`family_rank`] 给出确定的秩；
+    /// - 第四档是**最后兜底**：两个 `ModelId` 两两可比且**无相等**，故比较不会以 `Equal` 收尾
+    ///   （除非两条候选本就是同一个模型）。而**同一个模型的两次打分由建候选集时判重排除**——
+    ///   `rank` 对重复的 id 返回 `Err(RoutingError::DuplicateModelCandidate { id })`。
+    ///
+    /// # 为什么本处**没有** NaN 的排序用例（写成「为什么没有」，免得被读成漏项）
+    ///
+    /// [`crate::profile::Ratio`] 的文档里写着「NaN 会让 `sort_by` 不是全序」——那句理由是对的，
+    /// 但**它在 [`Ratio`] 上拍不到**：NaN 在构造期就被拒，**进不到 `compare` 的入参里**
+    /// （两个操作数都是已构造的 `Ratio`）。故本处造不出这条用例，也**不该**造——
+    /// 它真正的落点是**构造期**，照片就是上面那条 `ratio_rejects_non_finite_and_out_of_range`。
+    /// 前两档因此**可以假定**操作数是合法 `Ratio`。
+    ///
+    /// # 比较用的是 `total_cmp` 而不是 `partial_cmp`
+    ///
+    /// 两个取值都是有限实数（构造期的保证），`partial_cmp` 与 `total_cmp` 在它们上给出相同的序，
+    /// 唯一的分歧格是 `-0.0` 与 `0.0`（`PartialEq` 判它们相等，`total_cmp` 判前者小）。
+    /// 取 `total_cmp` 是为了让这一档**自身**也是全序、不出现「按 `Eq` 相等而按 `cmp` 不等」的
+    /// 半序收尾——排序要的是确定的结果，不是与 `Eq` 对齐。
+    fn compare(&self, a: &ExecutionCandidate, b: &ExecutionCandidate) -> Ordering {
+        b.compatibility()
+            .get()
+            .total_cmp(&a.compatibility().get())
+            .then_with(|| b.confidence().get().total_cmp(&a.confidence().get()))
+            .then_with(|| family_rank(a.reason().family()).cmp(&family_rank(b.reason().family())))
+            .then_with(|| a.model().as_str().cmp(b.model().as_str()))
+    }
+}
+
+/// §250 的路由：**建候选集 → 逐个打分 → 排序 → 取头**（设计 §5.3 的骨架）。
+///
+/// 纯函数：不接 `Tx`、不做 I/O（设计 §1.2）。拿到的是**已过闸门**的模型——被挡下的四态
+/// （`unprofiled` / `stale` / `quarantined` / `disabled`）在类型上就进不到这个签名里
+/// （[`RoutableModel::try_new`]），故 `NotRoutable` 到不了这里。
+///
+/// # 三条 `Err` 的判定次序
+///
+/// 本实现取「**判重 → 可用性 → 空判定**」。**次序没有判据**（设计未定），故本 crate 的用例
+/// 都不构造两条 `Err` 同时可能的输入——换一个次序不会让哪条用例变绿或变红。这是刻意的：
+/// 次序没有判据，用例就不该依赖它。
+///
+/// # 建候选集这一步的三件事，逐条写死（设计 §5.3）
+///
+/// 1. **判重**：同一个 `ModelId` 出现两次 → [`RoutingError::DuplicateModelCandidate`]。
+///    它不只是去重：两条同 id 的候选**无从定序**（`compare` 的兜底档也兜不住），
+///    故这一条是「全序」那条断言的守门人。
+/// 2. **可用性**：候选在 [`RoutingRequest::availability`] 里**没有条目** →
+///    [`RoutingError::UnknownAvailability`]，**不当作可用**——按未知放行是 fail-open 的形状。
+/// 3. **只滤掉 `ProviderHealth::Unavailable`**，且这一条是「**不可用即不是候选**」而不是
+///    「可用性低就降权」：本函数的输出是 `RankedExecutionCandidates`，即**可执行的**候选，
+///    排进去一个供应商侧已不可用的模型，「拿它跑」那一步必然失败。
+///    **`Healthy` 与 `Degraded` 都进候选集，两者之间没有判据**——`Degraded` 该不该降权、
+///    降到什么程度规范未给判据（§250 只说「考虑」、§84 没有给这一维的算法），故本层不发明：
+///    状态由 [`ExecutionCandidate::state`] 与候选的 `reason` 原样带出，让策略自己决定
+///    （§11 第 24 条）。
+///
+/// # 空判定在最后
+///
+/// 筛完之后一个候选都没有（输入为空、或全被可用性过滤掉）→
+/// [`RoutingError::NoEligibleCandidate`]，**不返回空列表**——那是
+/// [`RankedExecutionCandidates::selected`] 不必返回 `Option` 的前提。
+/// 它**不合并进** [`RoutingError::NotRoutable`]：前者是「没有可用的」，后者是
+/// 「有一枚被点名挡下了」，调用方（§110 的流程）对两者的处置不同（设计 §5.4）。
+pub fn rank(
+    request: &RoutingRequest,
+    models: &[RoutableModel],
+    policy: &dyn RankingPolicy,
+) -> Result<RankedExecutionCandidates, RoutingError> {
+    // 一、判重：两条同 id 的候选无从定序（见函数文档）。
+    let mut seen: Vec<&ModelId> = Vec::with_capacity(models.len());
+    for model in models {
+        let id = model.profile().id();
+        if seen.contains(&id) {
+            return Err(RoutingError::DuplicateModelCandidate { id: id.clone() });
+        }
+        seen.push(id);
+    }
+
+    // 二、可用性：查条目（缺席即 `Err`）→ 只滤掉 `Unavailable`。两件事同一步做，
+    //     故「不可用」与「未知」的差别就是「列表里有没有这一条」。
+    let mut candidates: Vec<ExecutionCandidate> = Vec::with_capacity(models.len());
+    for model in models {
+        let id = model.profile().id();
+        let Some((_, health)) = request.availability.iter().find(|(known, _)| known == id) else {
+            return Err(RoutingError::UnknownAvailability { id: id.clone() });
+        };
+        if *health == ProviderHealth::Unavailable {
+            continue;
+        }
+
+        let score = policy.evaluate(request, model);
+        candidates.push(ExecutionCandidate {
+            model: id.clone(),
+            state: model.state(),
+            compatibility: score.compatibility,
+            confidence: score.confidence,
+            reason: score.reason,
+        });
+    }
+
+    // 三、空判定：无候选时不返回空列表（见函数文档）。
+    if candidates.is_empty() {
+        return Err(RoutingError::NoEligibleCandidate);
+    }
+
+    // 排序是本层唯一改变次序的地方，且它必须是全序（`compare` 的文档里逐条落实了）。
+    candidates.sort_by(|a, b| policy.compare(a, b));
+
+    Ok(RankedExecutionCandidates { candidates })
 }
