@@ -872,7 +872,9 @@ continuum-node → continuum-artifact
 
 - **不登记 `continuum-core`**：本设计对它**零引用**（没有用到 `ModelId`、`ToolId`、
   `ProviderHealth` 中的任何一个）。**零使用的边即假边**——P2b 为此删过两条，
-  `continuum-secrets` 也据同一条只登记了 `continuum-capability`（`dependency_direction.rs:103`）。
+  `continuum-secrets` 也据同一条只登记了 `continuum-capability`
+  （锚点是 `("continuum-secrets", &["continuum-capability"])` 那一条，
+  2026-10-07 读数 `dependency_direction.rs:112`；**原引 `:103`，是 `0e0f253` 树上的读数，见 §7.3 的订正块**）。
 - **不登记 `continuum-model-registry`**：§6 的裁定删去了唯一会用到它的字段。
   **《工程》§4.3 的那条 `节点放置 ← Router 输出` 因此记为阻断**（不是「本层不接」，是**今天接不了**），
   收件人见 §10 第 8 条。**这一条要写明**，否则会被后来者当成漏登记——将来读本节那张 `ALLOWED` 表的人
@@ -896,9 +898,11 @@ continuum-artifact  ──→ continuum-node
 ```
 
 即本 crate **被它依赖的反方向不存在**。反向边核过：`continuum-artifact` 的允许集合是
-`core / events / persist`（`:32-35`），**不含 `continuum-node`**，故不构成环。
-（初稿此处还核过 `continuum-model-registry` 的 `capability / core / persist`（`:129-136`）——
-**那一条随该边一并作废**，原话照留于此。）
+`core / events / persist`（锚点是 `("continuum-artifact", &[…])` 那一条，2026-10-07 读数 `:41-44`），
+**不含 `continuum-node`**，故不构成环。
+（初稿此处还核过 `continuum-model-registry` 的 `capability / core / persist`
+（锚点是 `("continuum-model-registry", &[…])` 那一条，2026-10-07 读数 `:138-145`）——
+**那一条随该边一并作废**，原话照留于此。**两条的旧读数分别是 `:32-35` 与 `:129-136`，见本节末的订正块。**）
 
 **一条可跑的守卫（M4，2026-10-06 评审查出）**：本节初稿对 `continuum-node` 的模块面写过一句
 「本 crate 对 `continuum-artifact` 的依赖**全部落在节点放置**一侧」——那是绝对措辞而无用例。
@@ -912,7 +916,8 @@ continuum-artifact  ──→ continuum-node
 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 需要**新增一条**，
 放在 `continuum-model-registry` 之后（**该表整体不是字母序**：`continuum-persist` 在 `:28`，
 排在 `continuum-events` 之后、`continuum-provider` 之前；本条目按「新条目跟在同族的
-`continuum-model-registry`（`:129-136`）之后」放，与已登记各条的相邻关系一致）：
+`continuum-model-registry`（锚点是它那一条，2026-10-07 读数 `:138-145`）之后」放，
+与已登记各条的相邻关系一致）：
 
 ```rust
     // P3 子项目 E：计算节点与放置。设计 §7.2 的唯一一条边是 artifact（`Artifact` /
@@ -923,10 +928,36 @@ continuum-artifact  ──→ continuum-node
     ("continuum-node", &["continuum-artifact"]),
 ```
 
-**同时 `Cargo.toml` 的 workspace `members` 要加一行**（`Cargo.toml:3-21` 是显式清单，不是通配）。
+**同时 `Cargo.toml` 的 workspace `members` 要加一行**（显式清单，不是通配；2026-10-07 读数 `:3-22`——
+**E 的 Task 1 已把 `"crates/continuum-node",` 加进该清单**，它在 `:21`）。
 两者缺一即红，且**红的不是同一条断言**：`dependency_direction.rs` 的
 `every_crate_depends_only_on_its_allowed_set` 里有一步「workspace 成员必须在 `ALLOWED` 里」
-（`:246-262`），故漏登记 `ALLOWED` 会当场失败——这一点与 C 的 §4.3 说的那个年代不同，是本设计实读到的。
+（锚点是那句 `"workspace 成员 {name} 未列入 ALLOWED，它的依赖方向不会被检查"`，
+2026-10-07 读数 `:261-278`），故漏登记 `ALLOWED` 会当场失败——这一点与 C 的 §4.3 说的那个年代不同，
+是本设计实读到的。
+
+> **行号订正（2026-10-07，评审报出；原话照留）**：本节与 §7.2 原先引的四个行号
+> **全是 `0e0f253` 那棵树上的读数**，在该树到 `c871c08` 之间该文件长了 **15 行**（295 → 310），
+> 故四个号全部过期。逐条对照（**行号只是「当时读数」，锚点是文本**——这是本仓本轮定下的引用方式，
+> E 的计划 `7d5c4e0` 已按它改过）：
+>
+> | 引的是什么 | 原引（`0e0f253` 树） | 2026-10-07 读数 | 增量 |
+> |---|---|---|---|
+> | `continuum-secrets` 的条目（§7.2） | `:103` | **`:112`** | +9 |
+> | `continuum-artifact` 的允许集合（§7.2） | `:32-35` | **`:41-44`** | +9 |
+> | `continuum-model-registry` 的允许集合（§7.2、§7.3） | `:129-136` | **`:138-145`** | +9 |
+> | 「workspace 成员必须在 `ALLOWED` 里」那一步（§7.3） | `:246-262` | **`:261-278`** | +15 |
+> | `Cargo.toml` 的 `members` 清单（§7.3） | `:3-21` | **`:3-22`** | +1 |
+>
+> **两段增量各有来源，不是一处漂移**：**+9** 来自 `a0a8a07`(+5) 与 `0b83d81`(+4)，
+> **早于 E 的 Task 1**；**再加 +6** 来自 **E 的 Task 1 自己**（`ce335dd` → `c871c08`，
+> 它登记了 `continuum-node` 的条目）。故「workspace 成员」那一步是 +15，其余三条是 +9；
+> `continuum-persist` 在 `:28` **未动**（它排在新增点之前），故那一处原样成立。
+> **`Cargo.toml:3-21` 那一行还有第二重过期**：它写的是「**要**加一行」，而 Task 1 已经加了——
+> **旧读数与旧状态同时过期**，两样都留在此处。
+> **判据（本轮定下）**：`引用 ＝ 文件 ＋ 定位`，**定位是断言的一部分**；
+> **行数是全篇最廉价、也最容易被查的一句**，故一律写成「锚点文本 ＋ 当时读数」，
+> 读的人按文本定位、按读数核对当时那棵树。
 
 **多写者单文件**：`Cargo.toml` 与 `dependency_direction.rs` 是本轮多份计划共写的文件。
 按 `docs/superpowers/p3bcdf-followups.md` §七.7 的裁决，**本子项目只登记自己这两条**，
