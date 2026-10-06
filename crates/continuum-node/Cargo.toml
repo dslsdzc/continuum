@@ -1,0 +1,17 @@
+[package]
+name = "continuum-node"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`placement.rs` 的 `PlacementRequest` 装 `Artifact`，
+# `TransferRule` 的判据面与 `PlacementRules` 的键取 `PrivacyClass`（设计 §7.2 的唯一一条边）。
+# 两个都是**既有类型**，本 crate 一个都不新建。
+continuum-artifact = { path = "../continuum-artifact" }
+# 本 crate 的使用点：`error.rs` 的 `PlacementError` / `RulesError` 派生 `thiserror::Error`。
+thiserror = { workspace = true }
+
+# 本 task 为空：`trybuild` 由 Task 2 登记、`serde_json` 由 Task 5 登记——「边由用它的
+# 那个 task 登记」，不提前铺开（设计 §7.1 的清单要点）。
+[dev-dependencies]
