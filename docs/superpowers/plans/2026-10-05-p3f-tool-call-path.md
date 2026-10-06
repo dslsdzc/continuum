@@ -493,6 +493,12 @@ git commit -m "refactor(runtime): TaskError 与 sandbox_select 移进 lib，提�
 > **同一条假句子还活在实现里**：Task 3 的实现在 `crates/continuum-runtime/src/main.rs` 的
 > `Command::Tool` 臂注释里照抄了原计划的口径（「`cargo test --test cli` 单独能过（它不构 bin）」）。
 > **那一处须由实现者另行订正，本计划不代改 `crates/`**——记此以免它躲过下一轮扫查。
+> **这条待办的带时刻读数**（本仓「引用＝文件＋定位」的用法）：**在 `b367356` 这棵树上**，
+> `crates/continuum-runtime/src/main.rs` 的 **blob sha 是
+> `adcf3b9ffbab2884ed4a282f9d1a910624a1c571`**，那句假话在 **`:62`**；`git log -- <该文件>`
+> 在 `dfefb54` 之后再无提交。**故它是一条真待办，不是指向已完成事项的过期指针。**
+> **下一轮扫查若得出「零命中」，先核 blob sha**——对不上就说明读的不是这棵树（本机的 cwd 会在
+> 主检出与各 worktree 之间翻，分支也会换），**别照着一次读数把这条删掉**。
 
 **Files:**
 - Modify: `crates/continuum-runtime/src/cli.rs`
@@ -759,6 +765,10 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
   它不是「唯一能看到 `E0004` 的命令」。**旧话留此**，免得后来者靠一句假的理由去判断守卫的覆盖面。
 - **同一条假句子还活在实现里**：Task 3 的实现在 `crates/continuum-runtime/src/main.rs` 的
   `Command::Tool` 臂注释里照抄了原计划的口径。**那一处须由实现者另行订正**（本计划不代改 `crates/`）。
+  **带时刻的读数**：**在 `b367356` 这棵树上**，该文件的 blob sha 是
+  `adcf3b9ffbab2884ed4a282f9d1a910624a1c571`、那句假话在 **`:62`**；`git log -- <该文件>` 在
+  `dfefb54` 之后再无提交。**故它是真待办**；下一轮扫查若得「零命中」，先核 blob sha 再下结论
+  （见本 task 开头那条订正块的完整说明）。
 
 - [ ] **Step 9: 跑测试，确认转绿**
 
