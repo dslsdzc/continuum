@@ -166,7 +166,7 @@ fn registering_the_same_id_twice_is_a_named_error() {
 /// `registering_two_nodes_keeps_the_registration_order`）；**错的是紧跟的那句推论**——
 /// 它把射程丢掉、由「**我没试出来**」跳到了「**不存在**」。**这两件事不同**：
 /// 前者是「试过的形态不够」，后者才是「没有照片」，而后者需要把**所有**形态走遍才能说。
-/// 评审造出的 M7／M8 两枚即是反例，**故本段只写「本 task 试过的**那些**形态里没有」**。
+/// 评审造出的 M7／M8 两枚即是反例，**故本段只写「本 task 原先那 11 个变异体里，两枚都单独红不了」**（引号内是本段实句；初稿在此引的「试过的那些形态里没有」**本段没有**，修复轮 2 订正）。
 #[test]
 fn a_failed_registration_does_not_overwrite() {
     let mut registry = NodeRegistry::new();
