@@ -6,9 +6,13 @@
 //!
 //! # 走到哪为止
 //!
-//! 本 task（Task 1）只建骨架：crate 文档与 workspace 登记。`src/node.rs`、
-//! `src/registry.rs`、`src/placement.rs`、`src/error.rs` 四个模块与它们的导出面由后续
-//! task 各自登记自己那几行；本 task 的 `lib.rs` 里没有 `pub mod` 声明。
+//! Task 1 建骨架：crate 文档与 workspace 登记。
+//! Task 2 补 §287 的 [`ComputeNode`] 与它的三个取值类型 [`ComputeNodeId`] / [`NodeClass`] /
+//! [`NodeTrust`]（[`node`] 模块），并以 `tests/type_level.rs` ＋
+//! `tests/compile_fail/compute_node_fields_are_private.rs` 钉住「crate 外写不出 `ComputeNode`
+//! 的字段字面量」这条不可表达性。
+//! `src/registry.rs`、`src/placement.rs`、`src/error.rs` 三个模块与它们的导出面由后续
+//! task 各自登记自己那几行。
 //!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-model-registry` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
@@ -19,3 +23,10 @@
 //! 不登记 `continuum-model-registry` 的理由（《工程》§4.3 的「节点放置 ← Router 输出」
 //! 已记为阻断）写在设计 §7.2 与 `crates/continuum-runtime/tests/dependency_direction.rs`
 //! 的 `ALLOWED` 条目里——**不是漏登记**。
+//!
+//! `trybuild` 是**外部 crate**，不进那张 `ALLOWED` 表——该表只断言 workspace 成员之间的边
+//! （设计 §7.3）；它在 `Cargo.toml` 的 `[dev-dependencies]` 里，由 Task 2 登记。
+
+pub mod node;
+
+pub use node::{ComputeNode, ComputeNodeId, NodeClass, NodeTrust};

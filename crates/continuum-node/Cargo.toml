@@ -12,6 +12,10 @@ continuum-artifact = { path = "../continuum-artifact" }
 # 本 crate 的使用点：`error.rs` 的 `PlacementError` / `RulesError` 派生 `thiserror::Error`。
 thiserror = { workspace = true }
 
-# 本 task 为空：`trybuild` 由 Task 2 登记、`serde_json` 由 Task 5 登记——「边由用它的
-# 那个 task 登记」，不提前铺开（设计 §7.1 的清单要点）。
+# `serde_json` 由 Task 5 登记——「边由用它的那个 task 登记」，不提前铺开（设计 §7.1 的清单要点）。
 [dev-dependencies]
+# Task 2 起的使用点：`tests/type_level.rs` 用编译失败样例钉住「crate 外写不出 `ComputeNode`
+# 的字段字面量」（设计 §3.5、§9）。与 continuum-model-registry 的用法同形。
+# **它是外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表只断言 workspace
+# 成员之间的边（设计 §7.3）。
+trybuild = { workspace = true }
