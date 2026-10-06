@@ -936,26 +936,36 @@ git commit -m "feat(model-registry): 技能观测的落库与「当前值」"
 **Interfaces:**
 - Produces: `continuum_model_registry::BudgetView`
 
-- [ ] **Step 1: 写用例**
+- [ ] **Step 1: 写**编译期**用例（本 task 没有运行期用例，这是刻意的）**
 
-- `the_view_carries_the_five_dimensions_of_333`：五个字段**逐项**给值并读回（`money` / `wall_time` / `token` /
-  `gpu_time` / `network_transfer`），断言字段名与类型（`Option<i64>`）。
-- `none_is_not_the_same_as_zero`：`None` = 该量纲当前不构成约束；`Some(0)` = 额度为零。
-  两侧各一条断言。**红条件的形态要写准（订正注记，Task 9 实现者报出）**：原稿写「把 `None` 折成 `0`
-  （或反之）即红」——**那句在本 crate 没有落点**：`BudgetView` 是纯数据投影（`pub` 字段、无方法、无判定），
-  「折叠」的代码在**驱动侧的投影**里，本 crate 里根本没有可以施加该变异的地方。
-  **本 crate 能红的形态是夹具里折起来**：让夹具分别构造 `None` 与 `Some(0)` 两种视图，
-  断言二者在**该用例自己的比较**上不同（两条各红在 `tests/budget.rs` 的断言上）。
-  **这不是「找不到变异点就当都红了」**——本 task 没有一条**实现体**变异，实现者应据实这样标注；
-  真正该守这条性质的实现体在**消费端**，见 `## 遗留` 的同名条。
-- `the_view_is_a_plain_data_projection`：字段是 `pub` 的（驱动直接构造，不经任何 trait、不经任何校验）。
-  **不定义 trait 是刻意的**：一个没有实现者的 trait 是**假接口**（设计 §6.1）。
+**判据（协调者裁决，2026-10-06）：纯数据投影没有实现体，故任何运行期断言都必然恒真。**
+`assert_eq!(view.money, Some(11))` 的两边是「刚写进去的字面量 → 字段读」，**中间没有一行实现代码**——
+它验的是 Rust 的字段读取，不是本 crate。**这与设计 §10 第 2 条一致**（那一条明写
+「本设计不为它写运行期用例，只钉类型与签名」，`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md` §10）。
+**原稿在 Step 1 列了三条运行期用例（`the_view_carries_the_five_dimensions_of_333`、
+`none_is_not_the_same_as_zero`、`the_view_is_a_plain_data_projection`），与设计 §10 第 2 条相抵——已订正**，
+来历留在此段。**另**：本计划先前为 `none_is_not_the_same_as_zero` 写过一段「红条件在夹具里折起来」的说明，
+**那段随着本条裁决一并作废**（它是同一个病：给一个没有实现体的类型找变异点）；**该性质的守卫点在消费端，
+见 `## 遗留` 的「`BudgetView` 的 `None` ≠ `Some(0)` 谁守」一条。**
+
+`tests/budget.rs` 的形态：**用字面量构造一个 `BudgetView`**（`const` 项，如
+`const _: BudgetView = BudgetView { money: Some(11), … };`），**五维的名字与类型由这次构造穷举钉住**。
+**它证明的东西是真的编译期事实**：`tests/` 是**独立的 crate**，**它能字面量构造出 `BudgetView`，
+就证明了「字段 `pub`、无强制闸门」**——实测的实证是 M2 的 **`E0616`**（字段私有），
+即把任何一维改成私有，这个文件就**编译不过**。**判据是编译通过本身，不是任何 `assert`。**
+**不定义 trait 也是刻意的**（一个没有实现者的 trait 是**假接口**，设计 §6.1）——它的照片同样在这里：
+文件里不出现任何 trait 名。
+若 `const` 构造因某种理由写不出来，退路是一个 `#[test]` 里**只做构造、不做断言**——**判据仍是编译通过**。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
 cargo test -p continuum-model-registry --test budget
 ```
+
+**这里的「失败」是编译失败**（`BudgetView` 尚未存在），**这是本 task 唯一的红形态**，也是它的照片形态——
+与 P3A 用 trybuild 钉「`full_access` 写不出来」同类：**类型层保证的证据形态就是编译失败**
+（不是「实现体变异导致用例断言红」那种；本 task 没有实现体，见 Step 1 的判据）。
 
 - [ ] **Step 3: 实现**
 
