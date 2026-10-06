@@ -327,7 +327,10 @@ G 只能把一个适配器的健康度**原样摊给它服务的每个模型**�
 是 `describe_model(&ModelId)`，它返回的是 `ModelDescriptor`（`:21-27`）、**不含健康度**——它能给的最多是
 某个按模型的 `Err`，而 `Unavailable` 这个变体在本仓已被另一件事占用（C §5.1 记的既有夹具：
 `crates/continuum-provider/tests/fake_provider.rs:106` 把「无此工具」这个**永久性配置缺陷**报成
-`Unavailable`），故它**不是可靠的可用性信号**。记在 §14 第 2 条（收件人：C 的设计 + 规范维护者）。
+`Unavailable`；**订正 2026-10-07（G Task 1 实测，原引坐标照留）**：该坐标**已不成立**——工具侧夹具已搬走，
+`fake_provider.rs` 现存 104 行、只剩 `FakeConnector`。实读的新坐标（p3g 树 `404c464`）是
+**`crates/continuum-provider/tests/common/mod.rs:177`**，`FakeTool::describe_tool` 的 `.ok_or_else`），
+故它**不是可靠的可用性信号**。记在 §14 第 2 条（收件人：C 的设计 + 规范维护者）。
 （**措辞射程**：带模型的不止它一个——`InvokeRequest` 里也有 `ModelId`
 （`crates/continuum-core/src/model.rs:44-48`），`invoke` 和 `stream` 都收它。本条要说的是
 **按 id 询问状态**这件事只有 `describe_model` 一个方法，故措辞收窄到「以 `&ModelId` 为入参」。）
@@ -619,7 +622,9 @@ C §5.1 拒绝把这张映射写成**边界上的**函数，理由之一是「�
 
 **一处已记在 C 侧的反例**（G 的分类表在模型路径上带着它）：既有夹具把**永久性配置缺陷**
 （「这个 provider 没有这个工具」）报成 `Unavailable`（`crates/continuum-provider/tests/fake_provider.rs:106`，
-C §5.1 记录了它）——若模型侧的真实适配器也这样用 `Unavailable`，那张表会把一次配置缺陷分成 `Transient`。
+C §5.1 记录了它；**订正 2026-10-07（G Task 1 实测，原引坐标照留）**：该坐标**已不成立**——工具侧夹具已搬走，
+`fake_provider.rs` 现存 104 行、只剩 `FakeConnector`，实读的新坐标（p3g 树 `404c464`）是
+**`crates/continuum-provider/tests/common/mod.rs:177`**）——若模型侧的真实适配器也这样用 `Unavailable`，那张表会把一次配置缺陷分成 `Transient`。
 **这不是本设计能修的**（修它在适配器），故它在此处是一条**已知的射程边界**，不是漏项。
 
 ## 6.3 产物今天没有消费方——据实记，不声称它驱动了重试
@@ -843,7 +848,10 @@ crate，而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的�
 `tests/common/mod.rs` 里那个 `FakeModel` 的第二份副本，两份不合并**（`p3bcdf-followups.md` §七.8：
 「两份各有其用」）。它需要 `continuum-runtime` 的 **dev 依赖** `async-trait` 与 `futures-core`
 （后者用于自写单分片流；判据同 `crates/continuum-provider/tests/fake_provider.rs:17-19` 的注释：
-`stream::iter` 属 `futures-util`，本仓不用它）。**订正**：本行初稿写「`async-trait`（F 已按 F8 加）」
+`stream::iter` 属 `futures-util`，本仓不用它；**订正 2026-10-07（G Task 1 实测，原引坐标照留）**：
+`fake_provider.rs:17-19` **已不成立**（该区间现存 `FakeConnector::descriptor` 的函数体，不是注释），
+那条注释随 `OnceStream` 搬进了 **`crates/continuum-provider/tests/common/mod.rs:31-32`**，实读，p3g 树 `404c464`）。
+**订正**：本行初稿写「`async-trait`（F 已按 F8 加）」
 ——**那个「已」也是假的**（同 §10.2）：F 尚未落地，故那两条 dev 边的登记方是**先落地的那一方**；
 G 若先落地就自己登记，F 若先落地就核一遍。
 

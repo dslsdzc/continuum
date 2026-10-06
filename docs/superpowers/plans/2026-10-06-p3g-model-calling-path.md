@@ -266,7 +266,11 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
 **Files:**
 - Modify: `crates/continuum-runtime/src/error.rs`（**由 F 创建**，本 task 只增补）
 - Modify: `crates/continuum-runtime/src/lib.rs`
-- Create: `crates/continuum-runtime/src/model_call.rs`（本 task 只放类型与转换，不含四段流程）
+- Create: `crates/continuum-runtime/src/model_call.rs`（本 task 只放**两个函数** `classify` / `into_call_error`，不含四段流程）
+  **订正（2026-10-07，G Task 1 实测；原话照留）**：原话写「本 task 只放**类型与转换**」——这读起来像
+  **类型也落在 `model_call.rs`**，**是错的**：**类型 `ModelCallError` 落 `crates/continuum-runtime/src/error.rs`**
+  （设计 §10.2 点名「G 向 `error.rs` 增补 `ModelCallError`」），`model_call.rs` 只放 `classify` 与
+  `into_call_error` 两个函数。实测实现即如此落的（`crates/continuum-runtime/src/model_call.rs`）。
 - Create: `crates/continuum-runtime/tests/model_call.rs`
 
 **Interfaces:**
@@ -290,11 +294,41 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
   `Cancelled` 得 `None`、`Transport` 得 `Some(..)`。
   **只钉一侧是 fail-open 的那一侧**：一个「什么都返回 `Some(Transient)`」的实现会让
   「四个失败臂各得类别」全绿，**只有这一条会红**。依据是设计 §6.1「它是调用方自己发的取消，不是失败」。
-  **红的条件（档位：放宽）**：把 `Cancelled` 也归成 `Transient` → 这条红，其余四条不红。
+  **订正（2026-10-07，G Task 1 实测；原话照留）**：上面那句「**只有这一条会红**」**不成立**——
+  只要用例一按本 brief 写了第五条（`Cancelled` → `None`），**用例一自己也会红**：
+  M2（把 `Cancelled` 也归成 `Transient`）实测的 red **同时**落在
+  `tests/model_call.rs:38`（用例一：`left: Some(Transient)` / `right: None`）
+  与 `tests/model_call.rs:57`（用例二）。
+  **本条真实的必要性**：它钉的是 **`Cancelled` 得 `None` 与 `Transport` 得 `Some(..)` 这一对镜像**
+  ——M2 实测红在 `tests/model_call.rs:57`、M3（「一律返回 `None`」）实测红在 `tests/model_call.rs:61`，
+  **两向互为镜像、各挡一侧**。**与用例一的分工**：用例一逐变体把每一枚 `ProviderError` 映射到的像钉死
+  （枚举式绝对断言，五臂各一张照片）；本条则把**同一对入参上「取消」与「失败」的对照**钉死——
+  用例一给的是「每一枚各自的像」，本条给的是「这两枚必须在同一次转换里分道」。
+  **用例本身保留不动。**
+  **红的条件（档位：放宽）**：把 `Cancelled` 也归成 `Transient` → 本条红（`tests/model_call.rs:57`）；
+  用例一内**只有 `Cancelled` 那一臂**红、四条失败臂不红，且**用例三也红**（`tests/model_call.rs:141`）。
+  **一条一般化判据**：**「必要性理由句写错」与「这条用例该不该留」是两件事**——
+  理由句被实测证伪时，要订正的是理由句，不是删掉用例。
 - `the_error_type_carries_the_provider_error_verbatim`：`ModelCallError::Provider { class, source }` 的
   `source` 是**给进去的那一枚**（逐变体各断一次：五个 `ProviderError` 各构一个 `ModelCallError`）。
   **`Cancelled` 走 `ModelCallError::Cancelled`，且那一枚不带 `class` 字段**。
   **红的条件（档位：取反）**：把 `Provider` 的两个字段写反（`class` / `source` 互换）→ 红。
+  **订正（2026-10-07，G Task 1 实测；原话照留）**：上面这句红条件**不可实现**，有两种读法、**两种都不成立**：
+  (a) 真去互换两个字段的值——`class: FailureClass` 与 `source: ProviderError` **不同型**，**写反根本编不过**，
+  产出的不是红用例而是编译错误；(b) 读成「对调两个具名字段的**声明次序**」——那是**等价变异体**
+  （具名字段与次序无关），**照样全绿**，不红。
+  **可表达的真变异体（各把红单独落在本条用例上，实测）**：
+  - **M4（档位：取反）**：`classify` 的 `source` 处换成**一枚钉死的常数**（不再逐字回读入参）→
+    本条红在 `tests/model_call.rs:84`（「`source` 该是给进去的那一枚，逐字回读」，`left: Unavailable("钉死的常数")`
+    / `right: Transport("连接被重置")`），另两条用例**仍全绿**。
+  - **M5（档位：放宽）**：把 `Cancelled` 那一支**改投 `Provider`** → 本条红在 `tests/model_call.rs:141`
+    （「`Cancelled` 该走 `Cancelled` 那一枚，实际 `Provider { class: Unknown, source: Cancelled(..) }`」），
+    另两条用例**仍全绿**。
+  实测日志：`.tmp/mut-m4_source_not_verbatim.log`、`.tmp/mut-m5_cancelled_routed_to_provider.log`
+  （汇总 `.tmp/mutations-summary.log`）。
+  **一般化判据**：**「互换两字段」只在两个字段同型时才是可观察变异——而它看上去与真变异体一模一样。**
+  写红条件前先问「这两枚值的类型相同吗」；不同型时的「互换」是编译错误，同型但具名时的「对调次序」是等价变异体，
+  两者都长得像一条真变异体。
   **这条是「错误类型不压平」的照片**：设计 §6.1 明写 `Routing` 要**带出 D 的错**、`Provider` 要**带出类别**，
   两者都不是「一枚同名的变体」。
 
@@ -345,6 +379,11 @@ pub fn into_call_error(e: ProviderError) -> ModelCallError;
   `Transport` 在一个适配器上可能是瞬时的、在另一个上可能是永久的，故这张表**是否为真本子项目答不出**）。
 - **已知射程边界，据实记**：既有夹具把**永久性配置缺陷**（「这个 provider 没有这个工具」）报成
   `Unavailable`（`crates/continuum-provider/tests/fake_provider.rs:106`，C §5.1 记录了它）——
+  **订正（2026-10-07，G Task 1 实测；原引坐标照留）**：上面这处 `fake_provider.rs:106` **已不成立**——
+  工具侧夹具在该文件之后被搬走，`fake_provider.rs` 现存 **104 行**、只剩 `FakeConnector`（`:13`／`:16`），
+  行 `:106` 根本不存在。**实读的新坐标**（p3g 树，commit `404c464`）：
+  **`crates/continuum-provider/tests/common/mod.rs:177`**（`FakeTool::describe_tool` 里的
+  `.ok_or_else(|| ProviderError::Unavailable(..))`；该文件 `:120-122` 的文档注释记了这条来由）。
   若模型侧的真实适配器也这样用，那张表会把一次配置缺陷分成 `Transient`。**修它在适配器，不在这里。**
 - **`FailureClass::Resource` 这一格无输入**：`ProviderError` 没有「限流 / 配额耗尽」的变体
   （C §12 第 7 条）。**G 不擅自扩 `continuum-core` 的取值域**——那是 §315 的接口类型。
@@ -390,11 +429,17 @@ git commit -m "feat(runtime): G 的错误类型与模型侧失败分类"
 `crates/continuum-runtime/Cargo.toml` 的 `[dev-dependencies]` 加：
 
 - `async-trait`：`ModelProvider` 是 `#[async_trait]` 的 trait，夹具实现它必须同法标注
-  （`continuum-provider` 自己的 `tests/fake_provider.rs` 就是这么写的）。**F 的 Task 2 也会加它**——
+  （`continuum-provider` 自己的 `tests/fake_provider.rs` 就是这么写的——**本处仍成立**
+  （2026-10-07 实读，p3g 树 `404c464`）：该文件仍在，且仍在 `:15-16` 以 `#[async_trait]`
+  实现 `Connector`（`FakeConnector`，`:13`），这处引据不受同批坐标搬迁影响）。**F 的 Task 2 也会加它**——
   两处是同一条边的两个使用者，**谁先落地谁登记**，后到的那个核一遍即可（不是重复登记）。
 - `futures-core`：手写单分片流要它的 `Stream` trait 与 `Pin`。
   **不用 `futures-util`**（`stream::iter` 在它里面，本仓不用它，判据同
   `crates/continuum-provider/tests/fake_provider.rs:17-19` 的注释）。
+  **订正（2026-10-07，G Task 1 实测；原引坐标照留）**：原引的 `fake_provider.rs:17-19` **已不成立**
+  （该区间现存的是 `FakeConnector::descriptor` 的函数体，不是注释）。那条「`futures-core` 只给 trait、
+  `stream::iter` 属 `futures-util`」的注释随 `OnceStream` 一起搬进了
+  **`crates/continuum-provider/tests/common/mod.rs:31-32`**（实读，p3g 树 `404c464`）。
 
 **两者都是外部 crate，`ALLOWED` 不动。** `dev-dependencies` 的边**也在** `ALLOWED` 的覆盖范围内
 （`every_crate_depends_only_on_its_allowed_set` 跑 `cargo tree --edges all`），但那张表只断言
@@ -435,6 +480,10 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 
 **单分片流**照 `crates/continuum-provider/tests/fake_provider.rs:19-29` 的 `OnceStream` 形状
 （`futures-core` 只给 trait，`stream::iter` 属 `futures-util`）。
+**订正（2026-10-07，G Task 1 实测；原引坐标照留）**：原引的 `fake_provider.rs:19-29` **已不成立**——
+`fake_provider.rs` 现存 104 行且**不含 `OnceStream`**（`grep -n OnceStream` 零命中）。实读的新坐标
+（p3g 树 `404c464`）：**`crates/continuum-provider/tests/common/mod.rs:33-41`**（`OnceStream` 的
+定义与其 `Stream` impl；`:35` 为 `impl Stream for OnceStream`）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
