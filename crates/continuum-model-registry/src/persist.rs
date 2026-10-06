@@ -5,8 +5,10 @@
 //! **`model_registry` 一表的行级读写**：`register_model` / `load_lifecycle` /
 //! `transition_in_tx`（设计 §3.2）。Task 7 落 **`model_profile` 一表的行级读写**
 //! （[`save_profile`] / [`load_profile`]）与它上面那道「画像早于 verified 被拒」的闸门
-//! （设计 §4.3）。**`model_skill_score` 一表的行级读写仍由后续 task 落进本文件**
-//! （`save_skill_observation` / `load_skill_vector` / `load_skill_series`）。
+//! （设计 §4.3）。Task 8 落 **`model_skill_score` 一表的行级读写**
+//! （[`save_skill_observation`] / [`load_skill_vector`] / [`load_skill_series`]），
+//! 并让 [`load_profile`] **组合** [`load_skill_vector`] 把画像的第十二个字段填上
+//! （设计 §24、§248）。三张表的行级读写至此齐了。
 //!
 //! # §22 的「初步画像」本层不落，这是决定不是遗漏
 //!
@@ -27,15 +29,15 @@
 //! 已有与尚缺的照片，别把「注释写了」读成「已覆盖」。
 //!
 //! 1. **`model_skill_score` 挂 `model_profile` 而不挂 `model_registry`**（设计 §3.1 第 1 条）：
-//!    观测是画像的一部分，没有画像就没有观测。落在 `load_skill_vector`（后续 task）上，
-//!    即它不可能是「对未画像的模型返回空向量」，只能是「返回该画像的向量」。
+//!    观测是画像的一部分，没有画像就没有观测。落在 [`load_skill_vector`] 上，即它不可能是
+//!    「对未画像的模型返回空向量」，只能是「返回该画像的向量」——画像不在时它给 `Ok(None)`。
 //! 2. **主键「同一维度的同一版本只有一次观测」的落点**（设计 §3.1 第 2 条）：`model_skill_score`
 //!    与 `model_registry` 的写入一律**裸 `INSERT`**、不 `OR REPLACE`——否则「补记一次观测」
-//!    会静默覆盖历史，而 §24 要的正是历史。**`model_registry` 那一半已有照片**：本表的写入
-//!    入口是 [`register_model`]（裸 `INSERT`），照片是
+//!    会静默覆盖历史，而 §24 要的正是历史。**两侧都已有照片**：`model_registry` 那半是
 //!    `tests/persist.rs` 的 `registering_the_same_id_twice_is_rejected_and_the_row_is_unchanged`
-//!    （原行先被迁离初值，故 `OR REPLACE` 会被区分出来）。**`model_skill_score` 那一半仍无照片**，
-//!    随它的写入函数在后续 task 落地。
+//!    （原行先被迁离初值，故 `OR REPLACE` 会被区分出来）；`model_skill_score` 那半是
+//!    `the_same_dimension_and_version_cannot_be_written_twice`（第二次写入五个字段全不同，
+//!    同理）。
 //! 3. **三个列表列取 JSON 数组容器**（`modalities` / `tools` / `failure_modes`），与 P3A 的
 //!    `tool.required_capabilities` 同形；**不建子表**是因为它们**没有逐元素属性**——与
 //!    `model_skill_score` 的分界是判据（版本、样本数、时间窗），不是「谁更长」。
@@ -50,7 +52,10 @@ use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
 
 use crate::error::LifecycleError;
 use crate::lifecycle::{LifecycleState, transition};
-use crate::profile::{ModelProfile, Ratio, SkillVector};
+use crate::profile::{
+    ModelProfile, Ratio, SkillDimension, SkillObservation, SkillScore, SkillVector,
+    current_observation,
+};
 
 /// `model_profile` 的列清单（设计 §3.1 的建表 SQL 是权威取值；顺序与建表语句一致）。
 ///
@@ -254,7 +259,8 @@ pub fn transition_in_tx(
 ///
 /// 画像有十二个字段，而 `model_profile` 只有**十一列**——`skill_vector` 落
 /// `model_skill_score` 那张键控时间序列表（同一维度多个版本，一个列装不下）。
-/// 故本函数**不按十二列写 SQL**，`skill_vector` 由 `save_skill_observation`（后续 task）写。
+/// 故本函数**不按十二列写 SQL**，`skill_vector` 由 [`save_skill_observation`] 写
+/// （观测的**唯一**写者；读侧见 [`load_profile`] 与 [`load_skill_vector`]）。
 pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), LifecycleError> {
     if let Some(state) = load_lifecycle(tx, profile.id())? {
         if !PROFILE_ALLOWED_STATES.contains(&state) {
@@ -288,19 +294,26 @@ pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), Lifecycle
 /// 按 id 读一份画像。**没有这一行返回 `Ok(None)`**，不是 `Err`（同 [`load_lifecycle`]；
 /// 设计 §2.1 把这条反例定为「画像必须来自库」的照片）。
 ///
-/// # 读回来的画像里 `skill_vector` **今天**是空的
+/// # 十二个字段齐全：`skill_vector` 由 [`load_skill_vector`] **组合**进来
 ///
-/// 不是默认值，也不是本函数漏读一列：`skill_vector` 根本不在 `model_profile` 表里
-/// （见 [`save_profile`] 末节）。它的装载者是 `load_skill_vector`（`model_skill_score` 表的
-/// **唯一**装载者，Task 8 交付），本 task 里那个函数还不存在，故 `try_new` 收到的是
-/// [`SkillVector::from_current`] 的空向量（九维全 `None`，即「尚无观测」——`None` 不是 0）。
+/// 画像有十二个字段，而 `model_profile` 只有**十一列**——`skill_vector` 落
+/// `model_skill_score` 那张键控时间序列表（见 [`save_profile`] 末节）。本函数读的是
+/// **十二个字段**：十一列之外，另调 [`load_skill_vector`] 拿该画像的向量填第十二个。
 ///
-/// **协调者已裁（2026-10-06，见计划 `## 遗留` 的「load_profile 的 skill_vector」条）**：
-/// Task 8 交付 `load_skill_vector` 时**一并让本函数调它来填这个字段**，故本函数读回的画像
-/// 到那时十二个字段齐全。**「组合」不等于「第二个装载者」**：查 `model_skill_score` 的只有
-/// `load_skill_vector` 一个，本函数只是把它的结果放进画像。
-/// **本 task 不预先铺这条通路**（`load_skill_vector` 还不存在），也**不要**在这里自己写一遍
-/// 那张表的查询——那是把唯一装载者拆成两个。
+/// **「组合」不等于「第二个装载者」**：查 `model_skill_score` 的只有 [`load_skill_vector`]
+/// 一个，本函数只是把它的结果放进画像（协调者裁决，2026-10-06；见计划 `## 遗留` 的
+/// 「`load_profile` 的 `skill_vector` 与 rank 的输入面」条）。**本函数不自己写一遍那张表的
+/// 查询**——那就是把同一数据的唯一装载者拆成两个。
+///
+/// # 连带面：本函数因此继承了那个装载者的失败面
+///
+/// 技能表里的表外取值会让**本函数本身**返回具体 `Err`（`PersistError`，与画像列的
+/// 表外取值同一条通路），不只是让 [`load_skill_vector`] 失败。画像行十一列全合法、
+/// 只有技能列是表外的那一格有照片：
+/// `tests/persist.rs` 的 `load_profile_fails_on_an_out_of_table_value_in_the_skill_table`。
+/// **两处的解码顺序是技能表在前**（先取向量再读十一列），故两处都坏时报出来的是技能表那一条。
+///
+/// [`load_skill_vector`] 的失败面逐类见它自己的文档；本函数不再重复那张清单。
 ///
 /// # 表外取值一律具体 `Err`（四类，逐类有照片）
 ///
@@ -321,6 +334,12 @@ pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), Lifecycle
 /// 把那里的 `.ok_or_else` 改成取默认值，两条用例**一起**红；(a) 与 (d) 各自独占一个转换点
 /// （[`decode_string_list`] / [`decode_tool_ids`]，以及 `u64::try_from`）。故**代码分支只有三处**。
 pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError> {
+    // 先取技能向量：它自带「画像在不在」的判据（不在则 `None`），而它与下面那次查询在
+    // **同一个事务**里读同一个库，故两处的结论不会不一致。`None` 就是「库里没有这个画像」。
+    let Some(skill_vector) = load_skill_vector(tx, id)? else {
+        return Ok(None);
+    };
+
     let rows = tx.query(
         &format!("SELECT {PROFILE_COLUMNS} FROM model_profile WHERE id = ?1"),
         &[Value::text(id.as_str())],
@@ -328,13 +347,17 @@ pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, P
     let Some(row) = rows.into_iter().next() else {
         return Ok(None);
     };
-    row_to_profile(&row).map(Some)
+    row_to_profile(&row, skill_vector).map(Some)
 }
 
 /// 一行 → 画像。列序与 [`PROFILE_COLUMNS`] 一一对应。
 ///
-/// 十二条字段里读十一条列：`skill_vector` 由空向量填（理由见 [`load_profile`]）。
-fn row_to_profile(row: &[Value]) -> Result<ModelProfile, PersistError> {
+/// 十二条字段里读十一条列：`skill_vector` 不在这张表里，由调用方（[`load_profile`]）
+/// 经 [`load_skill_vector`] 取好后传进来——**这一层不做那张表的查询**。
+fn row_to_profile(
+    row: &[Value],
+    skill_vector: SkillVector,
+) -> Result<ModelProfile, PersistError> {
     let id = ModelId::new(text_at(row, 0)?);
     let modalities = decode_string_list(&text_at(row, 4)?, "modalities")?;
     let tools = decode_tool_ids(&text_at(row, 5)?)?;
@@ -362,14 +385,218 @@ fn row_to_profile(row: &[Value]) -> Result<ModelProfile, PersistError> {
         text_at(row, 3)?,
         modalities,
         tools,
-        // 第十二个字段不在这张表里（见 `load_profile`）：空向量 = 九维都尚无观测。
-        SkillVector::from_current(Vec::new()),
+        // 第十二个字段不在这张表里（见 `load_profile`）：由调用方取好传进来。
+        skill_vector,
         failure_modes,
         latency_profile,
         cost_profile,
         evidence_count,
         confidence,
     ))
+}
+
+// ===== `model_skill_score` 的行级读写（设计 §3.1、§24、§248） =====
+
+/// `model_skill_score` 的解码列清单，**两个读函数共用**（向量按模型取全部行，序列按
+/// 模型 ＋ 维度取）。只写一份：两处的行形状相同（都要解出一条观测），差的是 `WHERE` 与排序。
+///
+/// 与 [`PROFILE_COLUMNS`] 同址、理由也同：写侧的列名是 `INSERT` 语句文本的一部分，
+/// 不引用本常量，故两处的列序只能靠用例的**原始值**断言钉——
+/// `tests/persist.rs` 的 `a_skill_observation_round_trips_field_by_field`。
+const SKILL_COLUMNS: &str = "dimension, score_version, score, confidence, sample_count, \
+                             time_range_start, time_range_end";
+
+/// §24 的一次观测落库。**裸 `INSERT`，不是 `INSERT OR REPLACE`**（设计 §3.1 第 2 条）：
+/// 同 `(model_id, dimension, score_version)` 的第二次写入由**复合主键**拒绝，故「补记一次
+/// 观测」不会静默覆盖历史——而 §24 要的正是历史（评分是时间序列，不是常数）。照片是
+/// `tests/persist.rs` 的 `the_same_dimension_and_version_cannot_be_written_twice`：
+/// 它的第二条与第一条五个字段全不同，故「被拒之后原行没动」在 `OR REPLACE` 下会被区分出来。
+///
+/// # 未画像的模型不在本函数里判
+///
+/// `model_id REFERENCES model_profile(id)` 会拒绝那一行——**没有画像就没有观测**
+/// （设计 §3.1 第 1 条）。本函数**不自己查画像在不在**：那个判据表结构表达得出，且自己再查
+/// 一遍就是同一判据的第二个产生点（设计 §3.2 那条分界：表结构表达得出的拒归 `PersistError`）。
+/// 照片是 `an_observation_for_an_unprofiled_model_is_rejected`。
+///
+/// # 编码委托
+///
+/// `dimension` 取 [`SkillDimension::as_str`]，`score` / `confidence` 各取
+/// [`SkillScore::as_str`] / [`Ratio::as_str`]——**不在本文件另建编码表**（全局约束）。
+/// `version` / `sample_count` 与时间窗两端是整数，直接落列。
+pub fn save_skill_observation(
+    tx: &Tx<'_>,
+    id: &ModelId,
+    dim: SkillDimension,
+    obs: &SkillObservation,
+) -> Result<(), PersistError> {
+    tx.execute(
+        "INSERT INTO model_skill_score
+           (model_id, dimension, score_version, score, confidence, sample_count,
+            time_range_start, time_range_end)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        &[
+            Value::text(id.as_str()),
+            Value::text(dim.as_str()),
+            Value::Int(i64::from(obs.version())),
+            Value::text(obs.score().as_str()),
+            Value::text(obs.confidence().as_str()),
+            Value::Int(obs.sample_count() as i64),
+            Value::Int(obs.time_range().0),
+            Value::Int(obs.time_range().1),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 该画像的**技能向量**：九维各取**当前**的那一次观测（设计 §2.2、§248）。
+///
+/// # 它是 `model_skill_score` 表的**唯一装载者**
+///
+/// 这张表的读取一律经本函数——[`load_profile`] **组合**它来填画像的第十二个字段，
+/// **不自己再查一遍这张表**（那是同一数据的第二个装载者，等同一次重复产生点；
+/// 协调者裁决 2026-10-06，见计划 `## 遗留` 的同名条）。故本函数的存在性判据、解码与
+/// 「取哪一条」的规则都只写一遍。
+///
+/// # 画像不存在 → `Ok(None)`；画像在、尚无观测 → `Ok(Some(空向量))`
+///
+/// 两件事不同，故 `Option` 问的是**画像在不在**，不是**有没有观测**：前者是「没有这个画像」，
+/// 后者是「画像在、九维都没观测」（同 [`load_profile`] / [`load_lifecycle`] 对 `Ok(None)`
+/// 的处置）。照片两侧各一张：`tests/persist.rs` 的
+/// `load_skill_vector_of_an_unknown_id_is_none` 与
+/// `every_dimension_without_an_observation_is_absent_not_zero` 的第 1 侧。
+///
+/// # 「当前的那一次」是 `version` 最大的那条
+///
+/// 「取哪一条」的判据不在本函数里另写一份：先按维度分组，再逐组调 [`current_observation`]
+/// （Task 2 的纯函数）。照片 `the_vector_takes_one_observation_per_dimension_by_highest_version`
+/// 让 `version` 与 `time_range` 的两种判据在**同一格上分歧**（`version` 大的那条时间窗更早），
+/// 故「按时间窗取」与「取最后写入的那条」都会红。
+///
+/// **分组用的维度来自数据本身**（库里有哪些维度就是哪些），故本函数没有一份「九维清单」：
+/// 加第十维时不会有一处静默漏掉它（`SkillVector::from_current` 对没给的维度填 `None`）。
+///
+/// # 表外取值一律具体 `Err`，**不取默认值**（逐类有照片）
+///
+/// 三类，按转换点分（**不是按用例条数分**）：
+/// - **维度 / 评分 / 置信度**：三列共用 `decode_literal` 那形状的转换（类型名与 `parse`
+///   是参数），同 [`load_profile`] 的 `Cost` / `Latency` / `Ratio` 那一处。`parse` 给 `None`
+///   即具体 `Err`——把表外串猜成某一枚维度或某个数值就是第二份表示。照片：
+///   `an_unknown_dimension_in_the_column_is_rejected`（维度）、
+///   `an_out_of_range_score_in_the_column_is_rejected`（评分与置信度）；
+/// - **时间窗反序**（`time_range_end < time_range_start`）：`model_skill_score` 没有
+///   `CHECK`，故列里存得下反序的两个端点，而 [`SkillObservation::try_new`] 只接受
+///   `end >= start`。那一枚 [`crate::ProfileError::BadTimeRange`] 在本函数里转成具体 `Err`。
+///   照片：`a_reversed_time_range_in_the_column_is_rejected`（同一张照片还钉了 `end == start`
+///   的退化区间必须**读得到**——两侧都钉）；
+/// - **整数列的越界**（`score_version` 的 `u32` 与 `sample_count` 的 `u64`）：经 [`narrow`]
+///   收窄，越界即具体 `Err`。照片：`an_out_of_range_version_and_sample_count_in_the_column_is_rejected`。
+///
+/// 非文本 / 非整数的列值另报 [`PersistError::ColumnType`]——那个转换点是 [`column_at`] 一处，
+/// 本表**没有单独的照片**（该转换点的照片在
+/// `tests/persist.rs` 的 `a_non_text_lifecycle_state_column_is_rejected`，钉的是同一个函数）。
+pub fn load_skill_vector(tx: &Tx<'_>, id: &ModelId) -> Result<Option<SkillVector>, PersistError> {
+    if !profile_exists(tx, id)? {
+        return Ok(None);
+    }
+
+    let rows = tx.query(
+        &format!("SELECT {SKILL_COLUMNS} FROM model_skill_score WHERE model_id = ?1"),
+        &[Value::text(id.as_str())],
+    )?;
+
+    // 先按维度分组（维度取自上一步解码出来的数据，见上文），再逐组取当前那一条。
+    let mut series: Vec<(SkillDimension, Vec<SkillObservation>)> = Vec::new();
+    for row in &rows {
+        let (dimension, observation) = row_to_observation(row)?;
+        match series.iter_mut().find(|(known, _)| *known == dimension) {
+            Some((_, group)) => group.push(observation),
+            None => series.push((dimension, vec![observation])),
+        }
+    }
+    let current = series
+        .into_iter()
+        .filter_map(|(dimension, group)| {
+            current_observation(&group).map(|observation| (dimension, observation.clone()))
+        })
+        .collect();
+
+    Ok(Some(SkillVector::from_current(current)))
+}
+
+/// 按 `score_version` **升序**返回该维度的**全部**观测（设计 §3.2）。
+///
+/// # 为什么现在就要它
+///
+/// 消费方是 §82 的行为指纹（「如果表现突然变化」，`docs/spec/02-positioning.md:736-764`）：
+/// 判「变化」至少要看两次观测，只存当前值会让那条判据无法成立。**它的产生方（周期性 probe）
+/// 本阶段不存在**——这一点按设计 §10 第 1 条写明（「没有产生方，故没有端到端照片」），
+/// 不靠一句将来时糊过去。故本函数的照片只能是对纯函数的直接调用。
+///
+/// 顺序**固定为升序**，调用方不必自己排；照片
+/// `tests/persist.rs` 的 `a_series_comes_back_in_ascending_score_version`（版本**乱序写入**，
+/// 另钉 `WHERE dimension` 那一半）。画像不在或该维度没有观测都返回**空列表**——
+/// 与 [`load_skill_vector`] 的 `Option` 不同，这里的「没有」就是零条。
+pub fn load_skill_series(
+    tx: &Tx<'_>,
+    id: &ModelId,
+    dim: SkillDimension,
+) -> Result<Vec<SkillObservation>, PersistError> {
+    let rows = tx.query(
+        &format!(
+            "SELECT {SKILL_COLUMNS} FROM model_skill_score
+             WHERE model_id = ?1 AND dimension = ?2
+             ORDER BY score_version ASC"
+        ),
+        &[Value::text(id.as_str()), Value::text(dim.as_str())],
+    )?;
+    rows.iter()
+        .map(|row| row_to_observation(row).map(|(_, observation)| observation))
+        .collect()
+}
+
+/// 该 id 在 `model_profile` 里有没有行。**只问「在不在」**，不读任何列的内容。
+///
+/// 与 [`load_skill_vector`] 的 `Option` 语义配成一对：观测挂在画像上（设计 §3.1 第 1 条），
+/// 故「画像不在」与「画像在、没有观测」要分得开。**只在这一处用**。
+fn profile_exists(tx: &Tx<'_>, id: &ModelId) -> Result<bool, PersistError> {
+    let rows = tx.query(
+        "SELECT 1 FROM model_profile WHERE id = ?1",
+        &[Value::text(id.as_str())],
+    )?;
+    Ok(!rows.is_empty())
+}
+
+/// 一行 → `(维度, 观测)`。列序与 [`SKILL_COLUMNS`] 一一对应。
+///
+/// 三个标量列经 [`decode_literal`]（与画像那三列同一个转换点），两个整数列经 [`narrow`]，
+/// 其余两列（时间窗两端）是 `i64` 原样；最后经 [`SkillObservation::try_new`] 把反序的时间窗
+/// 转成具体 `Err`。逐类的照片见 [`load_skill_vector`] 的文档。
+fn row_to_observation(row: &[Value]) -> Result<(SkillDimension, SkillObservation), PersistError> {
+    let dimension = decode_literal(&text_at(row, 0)?, "SkillDimension", SkillDimension::parse)?;
+    let version: u32 = narrow(int_at(row, 1)?, "score_version")?;
+    let score = decode_literal(&text_at(row, 2)?, "SkillScore", SkillScore::parse)?;
+    let confidence = decode_literal(&text_at(row, 3)?, "Ratio", Ratio::parse)?;
+    let sample_count: u64 = narrow(int_at(row, 4)?, "sample_count")?;
+    let start = int_at(row, 5)?;
+    let end = int_at(row, 6)?;
+    let observation =
+        SkillObservation::try_new(score, confidence, sample_count, version, (start, end)).map_err(
+            |e| PersistError::Database(format!("时间窗不自洽（start={start}, end={end}）：{e}")),
+        )?;
+    Ok((dimension, observation))
+}
+
+/// 把一个整数列收窄到 `T`（本文件里的两个用途是 `score_version` 的 `u32` 与
+/// `sample_count` 的 `u64`），越界即具体 `Err`，**不取默认值**。
+///
+/// 两列共用本函数，故「越界怎么办」这条判据只写一遍；`T` 与 `column` 不同只影响报出来的
+/// 类型与列名。SQLite 的 `INTEGER` 列既不禁止负数也不限上界，故这一格构得出——不折算成 0、
+/// 不取绝对值（同 `evidence_count` 的处置：替规范发明一个它没给的取值，会让越界的行与
+/// 合法的 0 在库里长得一样）。照片：
+/// `tests/persist.rs` 的 `an_out_of_range_version_and_sample_count_in_the_column_is_rejected`。
+fn narrow<T: TryFrom<i64>>(raw: i64, column: &str) -> Result<T, PersistError> {
+    T::try_from(raw).map_err(|_| PersistError::Database(format!("{column} 超出取值范围：{raw}")))
 }
 
 /// 存在性编码（同 P3A 的 `tool.cost`）：`None` → `NULL`（尚未登记画像），

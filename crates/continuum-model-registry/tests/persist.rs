@@ -8,7 +8,8 @@
 //!
 //! Task 6 起本文件另钉 `model_registry` 的**行级读写**：`register_model` / `load_lifecycle` /
 //! `transition_in_tx`（设计 §3.2）；Task 7 起另钉 `model_profile` 的**行级读写**：
-//! `save_profile` / `load_profile`（设计 §4.3）。`model_skill_score` 一表仍只钉结构。
+//! `save_profile` / `load_profile`（设计 §4.3）；Task 8 起另钉 `model_skill_score` 的**行级读写**：
+//! `save_skill_observation` / `load_skill_vector` / `load_skill_series`（设计 §3.1、§24、§248）。
 //!
 //! # 编码的格式在这三条链上被钉死（不是靠单条用例）
 //!
@@ -34,8 +35,9 @@ use continuum_capability::{Cost, Latency};
 use continuum_core::model::ModelId;
 use continuum_core::tool::ToolId;
 use continuum_model_registry::{
-    LifecycleError, LifecycleState, ModelProfile, Ratio, SkillDimension, load_lifecycle,
-    load_profile, p3d_model_migrations, register_model, save_profile, transition_in_tx,
+    LifecycleError, LifecycleState, ModelProfile, Ratio, SkillDimension, SkillObservation,
+    SkillScore, load_lifecycle, load_profile, load_skill_series, load_skill_vector,
+    p3d_model_migrations, register_model, save_profile, save_skill_observation, transition_in_tx,
 };
 use continuum_persist::{Db, Migration, PersistError, Tx, Value, builtin_migrations};
 
@@ -882,8 +884,10 @@ fn a_profile_round_trips_field_by_field() {
         42,
         0.94,
     );
-    // 第十二个字段不在这张表里（十一列 ≠ 十二字段）。读回来的向量是**空向量**：
-    // 九维全 `None`（「尚无观测」），不是九维全 0——那需要 `load_skill_vector`（后续 task）。
+    // 第十二个字段不在这张表里（十一列 ≠ 十二字段），它由 `load_profile` **组合**
+    // `load_skill_vector` 填上（Task 8）。本用例播的画像**一条观测都没有**，故读回来的是
+    // **空向量**：九维全 `None`（「尚无观测」），不是九维全 0——后者的逐项照片在 Task 8 的
+    // `every_dimension_without_an_observation_is_absent_not_zero`。
     for dimension in [
         SkillDimension::Reasoning,
         SkillDimension::Coding,
@@ -892,7 +896,7 @@ fn a_profile_round_trips_field_by_field() {
         assert_eq!(
             loaded.skill_vector().get(dimension),
             None,
-            "skill_vector 落 model_skill_score 表，不经 load_profile：{dimension:?} 应为 None"
+            "该模型尚无观测，{dimension:?} 应是 `None`（缺席不是 0）"
         );
     }
 
@@ -1551,4 +1555,781 @@ fn columns(tx: &Tx<'_>, table: &str) -> Vec<Col> {
         .iter()
         .map(|row| (text_of(&row[1]), text_of(&row[2]), int_of(&row[5])))
         .collect()
+}
+
+// ===== 技能观测的落库与「当前值」（设计 §3.1、§24、§248） =====
+//
+// 夹具形态与上一节同：观测的 `model_id` 外键挂在 `model_profile` 上（设计 §3.1 第 1 条），
+// 故每个用例都要先有一份**已画像**的模型，而第一枚画像只能由裸 SQL 播下——`save_profile`
+// 收的画像 crate 外造不出，链条不能自举（理由见上一节）。观测本身走类型化接口
+// （`save_skill_observation`），只有「表外取值」那一类才由裸 SQL 直接写列。
+
+/// §248 的九维**逐项**列出（不抽代表），顺序取 `SkillDimension` 的声明序。
+///
+/// 与 `src/profile.rs` 的 `as_str` / `parse` 是两处副本：集成测试拿不到 crate 内的枚举表，
+/// 加第十维时两处都要手工同步——这个点不设防，与 `tests/lifecycle.rs` 的 `ALL_STATES` 同形。
+const ALL_DIMENSIONS: [SkillDimension; 9] = [
+    SkillDimension::Reasoning,
+    SkillDimension::Coding,
+    SkillDimension::Vision,
+    SkillDimension::Planning,
+    SkillDimension::ToolUse,
+    SkillDimension::ConstraintFollowing,
+    SkillDimension::Verification,
+    SkillDimension::Spatial,
+    SkillDimension::Media,
+];
+
+/// 一条观测，五个字段由调用点给。**各用例的取值两两互不相同**：全取默认值时，
+/// 「某字段漏写」与「两个字段写串」两类缺陷都会静默（同上一节各夹具的理由）。
+fn observation(
+    score: f64,
+    confidence: f64,
+    sample_count: u64,
+    version: u32,
+    time_range: (i64, i64),
+) -> SkillObservation {
+    SkillObservation::try_new(
+        SkillScore::try_new(score).expect("夹具的评分应是有限实数"),
+        Ratio::try_new(confidence).expect("夹具的置信度应在 [0,1] 内"),
+        sample_count,
+        version,
+        time_range,
+    )
+    .expect("夹具的时间窗应自洽")
+}
+
+/// 登记 → 走完整条画像流水线到 `verified` → 裸 SQL 播一行画像：该模型「已画像」。
+fn seed_profiled_model(tx: &Tx<'_>, model: &str) {
+    register_model(tx, &id(model)).unwrap();
+    advance_to_verified(tx, model);
+    seed_profile_row(tx, model);
+}
+
+/// 裸 SQL 往 `model_skill_score` 写一行，**八列的字面量全部由调用点给**。
+///
+/// 用于造表外取值——类型化写入路径（`save_skill_observation`）造不出这些行
+/// （它收的是已构造好的 `SkillObservation` 与 `SkillDimension`）。
+fn insert_skill_row(
+    tx: &Tx<'_>,
+    model: &str,
+    dimension: &str,
+    version: i64,
+    score: &str,
+    confidence: &str,
+    sample_count: i64,
+    start: i64,
+    end: i64,
+) {
+    tx.execute(
+        "INSERT INTO model_skill_score
+           (model_id, dimension, score_version, score, confidence, sample_count,
+            time_range_start, time_range_end)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        &[
+            Value::text(model),
+            Value::text(dimension),
+            Value::Int(version),
+            Value::text(score),
+            Value::text(confidence),
+            Value::Int(sample_count),
+            Value::Int(start),
+            Value::Int(end),
+        ],
+    )
+    .unwrap();
+}
+
+/// `model_skill_score` 八列的**原始值**（声明序，**不经任何解码**）。
+///
+/// 列清单在本函数里**手写一遍**，不从被测实现里取——这样「实现把某列写到了邻列」
+/// 才会在原始值上暴露出来；若与实现共用一份列清单，两侧同错时不红。排序固定为
+/// `(dimension, score_version)` 升序，使多行的用例有确定的取行顺序。
+fn raw_skill_rows(tx: &Tx<'_>, model: &str) -> Vec<Vec<Value>> {
+    tx.query(
+        "SELECT model_id, dimension, score_version, score, confidence, sample_count,
+                time_range_start, time_range_end
+         FROM model_skill_score WHERE model_id = ?1 ORDER BY dimension, score_version",
+        &[Value::text(model)],
+    )
+    .unwrap()
+}
+
+/// `model_skill_score` 的行数。
+fn count_skill_rows(tx: &Tx<'_>) -> i64 {
+    int_of(&tx.query("SELECT COUNT(*) FROM model_skill_score", &[]).unwrap()[0][0])
+}
+
+/// §24 的五个字段**逐项**往返：写（八列的原始值对手写字面量）与读
+/// （五个字段逐项比对）**两侧都要**。
+///
+/// 只做读侧：`save_skill_observation` 一列都不写、或写到邻列，本用例照样全绿。
+/// 只做写侧：解码把两列读串，本用例照样全绿（手写值 → 列 → 读回，两处错相互抵消）。
+///
+/// 五个字段取**互不相同**的非默认值（评分 `9.2`、置信度 `0.75`、样本数 `17`、版本 `3`、
+/// 时间窗两端各是一个十三位的毫秒数）：任一字段漏写或与邻字段写串都在此变红。
+#[test]
+fn a_skill_observation_round_trips_field_by_field() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    let written = observation(9.2, 0.75, 17, 3, (1_700_000_000_123, 1_700_000_999_456));
+    save_skill_observation(&tx, &id("model-alpha"), SkillDimension::Coding, &written).unwrap();
+
+    // ===== 写侧：八列的原始值与手写字面量逐列比 =====
+    assert_eq!(
+        raw_skill_rows(&tx, "model-alpha"),
+        vec![vec![
+            Value::text("model-alpha"),
+            Value::text("coding"),
+            Value::Int(3),
+            Value::text("9.2"),
+            Value::text("0.75"),
+            Value::Int(17),
+            Value::Int(1_700_000_000_123),
+            Value::Int(1_700_000_999_456),
+        ]],
+        "八列的原始值应与手写字面量逐列相同（写错列、漏写列、两列写串都在此变红）"
+    );
+
+    // ===== 读侧：五个字段逐项比 =====
+    let series = load_skill_series(&tx, &id("model-alpha"), SkillDimension::Coding).unwrap();
+    assert_eq!(series.len(), 1, "只写了一条观测");
+    let read = &series[0];
+    assert_eq!(read.score().get(), 9.2, "§24 score");
+    assert_eq!(read.confidence().get(), 0.75, "§24 confidence");
+    assert_eq!(read.sample_count(), 17, "§24 sample_count");
+    assert_eq!(read.version(), 3, "§24 version");
+    assert_eq!(
+        read.time_range(),
+        (1_700_000_000_123, 1_700_000_999_456),
+        "§24 time_range 的**闭区间两端**"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 同 `(model_id, dimension, score_version)` 的第二次写入被**复合主键**拒，**且原行内容不变**
+/// （裸 `INSERT`，不是 `INSERT OR REPLACE`；设计 §3.1 第 2 条）。
+///
+/// **第二条与第一条五个字段全不同**：若原行停在第二条的值，「被拒之后原行没动」在
+/// `OR REPLACE` 下**照样成立**——那个形状的断言区分不出裸 `INSERT` 与 `OR REPLACE`
+/// （等价变异体的判据：这两版在哪个入参上会给出不同结果）。
+///
+/// 红的条件两条，各在一侧：`INSERT` 被改成 `OR REPLACE`（或先 `DELETE` 再写）→ 原始值那条红；
+/// 写入口整个坏掉（第二次照样被拒、第一次也写不进去）→ 第一条的 `unwrap` 就红。
+#[test]
+fn the_same_dimension_and_version_cannot_be_written_twice() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    let first = observation(1.0, 0.25, 5, 3, (100, 200));
+    save_skill_observation(&tx, &id("model-alpha"), SkillDimension::Coding, &first).unwrap();
+
+    let second = observation(2.0, 0.9, 9, 3, (300, 400));
+    match save_skill_observation(&tx, &id("model-alpha"), SkillDimension::Coding, &second) {
+        Err(PersistError::Database(m)) => assert!(
+            m.contains("UNIQUE constraint failed") && m.contains("model_skill_score"),
+            "第二次写入应由复合主键拒绝并点名该表，实际 {m}"
+        ),
+        Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+        Ok(()) => panic!("同 (model_id, dimension, score_version) 的第二次写入不应成功"),
+    }
+
+    assert_eq!(count_skill_rows(&tx), 1, "被拒的写入不得留下第二行");
+    assert_eq!(
+        raw_skill_rows(&tx, "model-alpha"),
+        vec![vec![
+            Value::text("model-alpha"),
+            Value::text("coding"),
+            Value::Int(3),
+            Value::text("1"),
+            Value::text("0.25"),
+            Value::Int(5),
+            Value::Int(100),
+            Value::Int(200),
+        ]],
+        "被拒的写入不得改写原行的任何一列（`OR REPLACE` 会让本断言红）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// §24 的「时间序列」：同维度存三个版本，`load_skill_series` 返回**三条且按 `score_version` 升序**
+/// （顺序固定，调用方才不必自己排）。
+///
+/// **版本乱序写入**（7 → 2 → 5）：物理顺序不是升序，排序才是被测的那件事。
+/// 另写**另一个维度**一条，故 `WHERE dimension` 那一半同时被钉——若漏掉它，本用例会读到四条。
+///
+/// 红的条件：排序方向反过来（`DESC`）即红；漏一个版本即红；`WHERE dimension` 漏掉即红。
+#[test]
+fn a_series_comes_back_in_ascending_score_version() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    for (version, score) in [(7_u32, 7.0), (2, 2.0), (5, 5.0)] {
+        save_skill_observation(
+            &tx,
+            &id("model-alpha"),
+            SkillDimension::Coding,
+            &observation(score, 0.5, 1, version, (0, 1)),
+        )
+        .unwrap();
+    }
+    // 另一个维度的一条：它不该出现在 `Coding` 的序列里。
+    save_skill_observation(
+        &tx,
+        &id("model-alpha"),
+        SkillDimension::ToolUse,
+        &observation(3.0, 0.5, 1, 9, (0, 1)),
+    )
+    .unwrap();
+
+    let series = load_skill_series(&tx, &id("model-alpha"), SkillDimension::Coding).unwrap();
+    assert_eq!(
+        series.iter().map(|o| o.version()).collect::<Vec<_>>(),
+        vec![2, 5, 7],
+        "同维度的三条应按 score_version 升序（只取该维度）"
+    );
+    assert_eq!(
+        series.iter().map(|o| o.score().get()).collect::<Vec<_>>(),
+        vec![2.0, 5.0, 7.0],
+        "升序之后各行的内容也逐条对得上（顺序对了但内容串行会在此变红）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 向量里的「当前值」是**该维 `version` 最大**的那次观测，**不是** `time_range` 最晚的那次
+/// （设计 §2.2；与 `src/profile.rs` 的 `current_observation` 用例同一条判据——此处钉的是
+/// **落库路径**也用它，不是另一套规则）。
+///
+/// 两条判据在这一格上**分歧**：`version = 2` 的那条时间窗更晚（`2000..3000`），
+/// `version = 5` 的那条更早（`1000..1500`）。取「时间窗最晚」或「最后写入的那条」即红。
+#[test]
+fn the_vector_takes_one_observation_per_dimension_by_highest_version() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    save_skill_observation(
+        &tx,
+        &id("model-alpha"),
+        SkillDimension::Coding,
+        &observation(1.0, 0.5, 1, 2, (2_000, 3_000)),
+    )
+    .unwrap();
+    save_skill_observation(
+        &tx,
+        &id("model-alpha"),
+        SkillDimension::Coding,
+        &observation(4.0, 0.5, 1, 5, (1_000, 1_500)),
+    )
+    .unwrap();
+
+    let vector = load_skill_vector(&tx, &id("model-alpha"))
+        .unwrap()
+        .expect("画像在，向量应是 `Some`");
+    let current = vector
+        .get(SkillDimension::Coding)
+        .expect("该维度有一次观测，应是 `Some`");
+    assert_eq!(current.version(), 5, "当前值是 version 最大的那条");
+    assert_eq!(current.score().get(), 4.0, "带出的是那一条的评分");
+    assert_eq!(
+        current.time_range(),
+        (1_000, 1_500),
+        "取的是 version 最大的那条，故时间窗是更早的那个（不是更晚的 `2000..3000`）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 「缺席不是 0」：无名观测的维度在向量里是 `None`，**不是**某个默认观测
+/// （设计 §2.2：没有样本就没有评分）。
+///
+/// 三侧都钉，缺一即漏一类坏法：
+/// 1. **有画像、零观测** → 九维**逐项** `None`（抽代表会漏掉能各自漂移的那几维）；
+/// 2. **写入两维** → 这两维 `Some`、其余七维仍 `None`（只钉第 1 侧时，「谁都返回 `None`」不红）；
+/// 3. **九维全写** → 九维全 `Some` 且各是写进去的那条（钉住分组不丢维度、也不串维度）。
+#[test]
+fn every_dimension_without_an_observation_is_absent_not_zero() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    // ===== 第 1 侧：有画像、一条观测都没有 =====
+    seed_profiled_model(&tx, "model-empty");
+    let empty = load_skill_vector(&tx, &id("model-empty"))
+        .unwrap()
+        .expect("画像是「有」的，故向量是 `Some(空向量)`，不是 `None`");
+    for dimension in ALL_DIMENSIONS {
+        assert_eq!(
+            empty.get(dimension),
+            None,
+            "{dimension:?} 尚无观测，应是 `None`（缺席不是 0）"
+        );
+    }
+
+    // ===== 第 2 侧：写入两维 =====
+    seed_profiled_model(&tx, "model-two");
+    save_skill_observation(
+        &tx,
+        &id("model-two"),
+        SkillDimension::Coding,
+        &observation(1.0, 0.5, 1, 1, (0, 1)),
+    )
+    .unwrap();
+    save_skill_observation(
+        &tx,
+        &id("model-two"),
+        SkillDimension::ToolUse,
+        &observation(2.0, 0.5, 1, 1, (0, 1)),
+    )
+    .unwrap();
+    let two = load_skill_vector(&tx, &id("model-two")).unwrap().unwrap();
+    assert!(
+        two.get(SkillDimension::Coding).is_some(),
+        "写过的维度应是 `Some`"
+    );
+    assert!(
+        two.get(SkillDimension::ToolUse).is_some(),
+        "写过的维度应是 `Some`"
+    );
+    for dimension in ALL_DIMENSIONS {
+        if matches!(
+            dimension,
+            SkillDimension::Coding | SkillDimension::ToolUse
+        ) {
+            continue;
+        }
+        assert_eq!(
+            two.get(dimension),
+            None,
+            "{dimension:?} 没写过观测，仍应是 `None`（不是被别的维度带出来的 0）"
+        );
+    }
+
+    // ===== 第 3 侧：九维全写，各维的评分**两两不同** =====
+    seed_profiled_model(&tx, "model-all");
+    for (i, dimension) in ALL_DIMENSIONS.iter().enumerate() {
+        save_skill_observation(
+            &tx,
+            &id("model-all"),
+            *dimension,
+            &observation(i as f64, 0.5, 1, 1, (0, 1)),
+        )
+        .unwrap();
+    }
+    let all = load_skill_vector(&tx, &id("model-all")).unwrap().unwrap();
+    for (i, dimension) in ALL_DIMENSIONS.iter().enumerate() {
+        assert_eq!(
+            all.get(*dimension).map(|o| o.score().get()),
+            Some(i as f64),
+            "{dimension:?} 应是写进去的那一条（评分 {i}）——分组丢维或串维都在此变红"
+        );
+    }
+
+    tx.commit().unwrap();
+}
+
+/// 列里存的是**手写字面量**（小写、`_` 连接），**不是** `Debug` 表示（全局约束、设计 §2.4）。
+///
+/// 两侧都走：写侧经**被测写入路径**读**原始列值**，与手写字面量逐字比；反向把手写字面量
+/// **直接写进库**，`load_skill_series` 应解出对应的那一枚——反向那侧不依赖 `as_str`，
+/// 故「写侧与读侧同时漂移」不会让本用例静默。
+///
+/// 只举 `tool_use` 与 `constraint_following` 两个**多词**维度：单词维度上
+/// 「小写」与「`Debug` 表示」只差首字母大小写，多词维度才同时钉住 `_` 连接
+/// （九维的编码表逐项照片在 `tests/profile.rs` 的 `skill_dimension_encoding_is_lowercase_with_underscores`；
+/// 此处钉的是**列里的字节**）。
+#[test]
+fn the_dimension_column_is_lowercase_with_underscores() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    save_skill_observation(
+        &tx,
+        &id("model-alpha"),
+        SkillDimension::ToolUse,
+        &observation(1.0, 0.5, 1, 1, (0, 1)),
+    )
+    .unwrap();
+    save_skill_observation(
+        &tx,
+        &id("model-alpha"),
+        SkillDimension::ConstraintFollowing,
+        &observation(2.0, 0.5, 1, 1, (0, 1)),
+    )
+    .unwrap();
+
+    let literals: Vec<String> = tx
+        .query(
+            "SELECT dimension FROM model_skill_score WHERE model_id = ?1 ORDER BY dimension",
+            &[Value::text("model-alpha")],
+        )
+        .unwrap()
+        .iter()
+        .map(|row| text_of(&row[0]))
+        .collect();
+    assert_eq!(
+        literals,
+        vec!["constraint_following".to_string(), "tool_use".to_string()],
+        "多词维度的列内容应是手写字面量（`ToolUse` 那样的 `Debug` 表示会让本断言红）"
+    );
+
+    // 反向：手写字面量直接写进库，读侧应解出对应的那一枚。
+    seed_profiled_model(&tx, "model-literal");
+    for (dimension, literal) in [
+        (SkillDimension::ToolUse, "tool_use"),
+        (SkillDimension::ConstraintFollowing, "constraint_following"),
+    ] {
+        insert_skill_row(&tx, "model-literal", literal, 1, "1", "0.5", 1, 0, 1);
+        assert_eq!(
+            load_skill_series(&tx, &id("model-literal"), dimension)
+                .unwrap()
+                .len(),
+            1,
+            "手写字面量 {literal} 应解出 {dimension:?}"
+        );
+    }
+
+    tx.commit().unwrap();
+}
+
+/// 列里的 `dimension` 是表外取值 → `load_skill_vector` 报**具体** `Err`，**不取默认值**。
+///
+/// 把表外串猜成某一枚维度正是设计要拦的（`SkillDimension::parse` 的注释：那是第二份表示）。
+/// 两个形状各一条：未知词 `empathy`，以及 `Debug` 表示 `ToolUse`——后者正是「落库编码写错」
+/// 时的典型形状，它若真被写进库，本用例是发现它的那条链的终点。
+///
+/// 断言里点名那个表外串：只写 `is_err()` 的话，「报了个错」与「说清了是哪个串」分不出来。
+#[test]
+fn an_unknown_dimension_in_the_column_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    insert_skill_row(&tx, "model-alpha", "empathy", 1, "1", "0.5", 1, 0, 1);
+    for raw in ["empathy", "ToolUse"] {
+        tx.execute(
+            "UPDATE model_skill_score SET dimension = ?1 WHERE model_id = ?2",
+            &[Value::text(raw), Value::text("model-alpha")],
+        )
+        .unwrap();
+
+        match load_skill_vector(&tx, &id("model-alpha")) {
+            Err(PersistError::Database(m)) => assert!(
+                m.contains("未知 SkillDimension") && m.contains(raw),
+                "应为「未知 SkillDimension: {raw}」，实际 {m}"
+            ),
+            Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+            Ok(read) => panic!(
+                "表外维度 {raw:?} 应被拒，实际读回成功（is_some={}）",
+                read.is_some()
+            ),
+        }
+    }
+
+    // 对照臂：写回合法维度后读得到——挡住的是那个取值，不是这一行。
+    tx.execute(
+        "UPDATE model_skill_score SET dimension = 'coding' WHERE model_id = ?1",
+        &[Value::text("model-alpha")],
+    )
+    .unwrap();
+    assert!(
+        load_skill_vector(&tx, &id("model-alpha")).unwrap().is_some(),
+        "对照臂：合法维度应读得到"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 列里的 `score` / `confidence` 是表外取值 → **具体** `Err`，**不取默认值**。
+///
+/// # 这两列共用同一个转换点，据实写明
+///
+/// 两个列都经 `decode_literal` 那形状的转换（类型名与 `parse` 是参数），
+/// 与 `model_profile` 的 `cost_profile` / `confidence` 同一处置。故这不是两条独立分支：
+/// 把那个 `.ok_or_else` 改成取默认值，本用例的三条会**一起**红。
+///
+/// 三个入参覆盖两类失败：非有限（`NaN`）、非数值（`not-a-number`）、越界（`confidence = 1.5`）。
+/// `score` 的取值域在规范里未定义（§23 只给示例 `9.2`），故 `score` 只拒「不是有限实数」那一类；
+/// 越界那一类只在 `confidence` 上构得出。
+#[test]
+fn an_out_of_range_score_in_the_column_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    insert_skill_row(&tx, "model-alpha", "coding", 1, "1", "0.5", 1, 0, 1);
+
+    // 每轮只坏一个列，其余先写回合法值：解码按列序走，前一列坏着的话后一条断言会先撞上
+    // 前一个列的错误，就点不到本条要验的那个列。
+    for (column, type_name, raw, legal) in [
+        ("score", "SkillScore", "NaN", "1"),
+        ("score", "SkillScore", "not-a-number", "1"),
+        ("confidence", "Ratio", "1.5", "0.5"),
+    ] {
+        tx.execute(
+            &format!("UPDATE model_skill_score SET {column} = ?1 WHERE model_id = ?2"),
+            &[Value::text(raw), Value::text("model-alpha")],
+        )
+        .unwrap();
+
+        match load_skill_vector(&tx, &id("model-alpha")) {
+            Err(PersistError::Database(m)) => assert!(
+                m.contains(&format!("未知 {type_name}")) && m.contains(raw),
+                "{column} = {raw:?} 应报「未知 {type_name}: {raw}」，实际 {m}"
+            ),
+            Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+            Ok(read) => panic!(
+                "{column} = {raw:?} 应被拒，实际读回成功（is_some={}）",
+                read.is_some()
+            ),
+        }
+
+        tx.execute(
+            &format!("UPDATE model_skill_score SET {column} = ?1 WHERE model_id = ?2"),
+            &[Value::text(legal), Value::text("model-alpha")],
+        )
+        .unwrap();
+    }
+
+    // 对照臂：两列都合法后读得到。
+    assert!(
+        load_skill_vector(&tx, &id("model-alpha")).unwrap().is_some(),
+        "对照臂：两列合法时应读得到"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 列里的**时间窗反序**（`time_range_end < time_range_start`）→ **具体** `Err`，**不取默认值**。
+///
+/// `model_skill_score` 没有 `CHECK (time_range_end >= time_range_start)`，故这一格构得出
+/// （裸 SQL 写反序的两个端点）；而 `SkillObservation` 的构造期判据是 `end < start` 即
+/// `ProfileError::BadTimeRange`（设计 §2.4）。**落库路径要把那一枚转成具体 `Err`**，
+/// 不能吞掉——把反序的时间窗读成一个兜底观测，等于替规范发明一个它没给的取值。
+///
+/// 红的条件：把 `SkillObservation::try_new` 的 `Err` 吞掉（换成一个兜底观测、
+/// 或把反序的那条跳过）即红。
+#[test]
+fn a_reversed_time_range_in_the_column_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    insert_skill_row(&tx, "model-alpha", "coding", 1, "1", "0.5", 1, 3_000, 2_000);
+
+    // `3_000 -> 2_000`（反序）与 `2_000 -> 2_000`（退化区间，自洽）只差一格：
+    // 后者必须**读得到**，故本用例两侧都钉——只写反序那侧时，把守卫改成 `end <= start` 不红。
+    assert!(
+        matches!(load_skill_vector(&tx, &id("model-alpha")), Err(PersistError::Database(m)) if m.contains("2000") && m.contains("3000")),
+        "反序的时间窗应被拒，且点名那两个端点"
+    );
+
+    tx.execute(
+        "UPDATE model_skill_score SET time_range_start = 2000 WHERE model_id = ?1",
+        &[Value::text("model-alpha")],
+    )
+    .unwrap();
+    assert!(
+        load_skill_vector(&tx, &id("model-alpha")).unwrap().is_some(),
+        "对照臂：`end == start` 是退化区间，自洽，应读得到"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 列里的 `score_version` / `sample_count` 在各自类型的取值域之外 → **具体** `Err`。
+///
+/// 两个列在 Rust 侧是 `u32` / `u64`，而 `INTEGER` 列不禁止负数（也不限制上界），故这三格
+/// 构得出：`score_version = -1`、`score_version = 2^32`、`sample_count = -1`。
+/// **不取默认值**（不折算成 0、不取绝对值）——同 `Ratio` / `evidence_count` 的处置：
+/// 替规范发明一个它没给的取值，会让「越界的行」与「合法的 0」在库里长得一样。
+///
+/// 三格各一条而不是只取 `-1`：`u32` 与 `u64` 的**上界**是两回事，只钉负数就漏掉了溢出那一侧
+/// （`2^32` 对 `u32` 越界、对 `i64` 不越界，故它钉的是 `u32` 的转换而不是 SQLite 的存储）。
+#[test]
+fn an_out_of_range_version_and_sample_count_in_the_column_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    insert_skill_row(&tx, "model-alpha", "coding", 1, "1", "0.5", 1, 0, 1);
+
+    for (column, raw) in [
+        ("score_version", -1_i64),
+        ("score_version", 4_294_967_296),
+        ("sample_count", -1),
+    ] {
+        tx.execute(
+            &format!("UPDATE model_skill_score SET {column} = ?1 WHERE model_id = ?2"),
+            &[Value::Int(raw), Value::text("model-alpha")],
+        )
+        .unwrap();
+
+        match load_skill_vector(&tx, &id("model-alpha")) {
+            Err(PersistError::Database(m)) => assert!(
+                m.contains(column) && m.contains(&raw.to_string()),
+                "{column} = {raw} 应被拒且点名该列与该值，实际 {m}"
+            ),
+            Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+            Ok(read) => panic!(
+                "{column} = {raw} 应被拒，实际读回成功（is_some={}）",
+                read.is_some()
+            ),
+        }
+
+        tx.execute(
+            &format!("UPDATE model_skill_score SET {column} = 1 WHERE model_id = ?1"),
+            &[Value::text("model-alpha")],
+        )
+        .unwrap();
+    }
+
+    // 对照臂：两列都写回合法值后读得到。
+    assert!(
+        load_skill_vector(&tx, &id("model-alpha")).unwrap().is_some(),
+        "对照臂：两列合法时应读得到"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// 未画像的模型写观测被**外键**拒绝（`model_id REFERENCES model_profile(id)`，设计 §3.1 第 1 条）。
+///
+/// 这是「没有画像就没有观测」的**库侧落点**：`save_skill_observation` 自己不查画像在不在
+/// （那会是同一个判据的第二个产生点），拒绝由外键给出。登记了但还没走过画像流水线的模型
+/// 就是这一格——它在 `model_registry` 里有一行，在 `model_profile` 里没有。
+///
+/// 断言到内层变体：外层须是 `PersistError::Database` 且信息里点了外键约束。只写 `is_err()`
+/// 的话，「报了个错」与「说清了是哪一类拒绝」分不出来。
+///
+/// 末尾一条对照臂：播下画像之后**同一条观测**存得进去——挡住的是「没有画像」，
+/// 不是这条观测本身有什么毛病。
+#[test]
+fn an_observation_for_an_unprofiled_model_is_rejected() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    // 登记了（`model_registry` 有一行），但画像流水线还没走完（`model_profile` 没有行）。
+    register_model(&tx, &id("model-a")).unwrap();
+    let obs = observation(1.0, 0.5, 1, 1, (0, 1));
+
+    match save_skill_observation(&tx, &id("model-a"), SkillDimension::Coding, &obs) {
+        Err(PersistError::Database(m)) => assert!(
+            m.contains("FOREIGN KEY constraint failed"),
+            "应是 model_skill_score.model_id 上的外键拒绝这一行，实际 {m}"
+        ),
+        Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+        Ok(()) => panic!("未画像的模型不该存得下观测"),
+    }
+    assert_eq!(count_skill_rows(&tx), 0, "被拒的写入不得留下行");
+
+    // 对照臂：画像播下之后，同一条观测存得进去。
+    advance_to_verified(&tx, "model-a");
+    seed_profile_row(&tx, "model-a");
+    save_skill_observation(&tx, &id("model-a"), SkillDimension::Coding, &obs).unwrap();
+    assert_eq!(count_skill_rows(&tx), 1, "画像就位后同一条观测应存得下去");
+
+    tx.commit().unwrap();
+}
+
+/// 库里不存在的 id → `load_skill_vector` 给 `Ok(None)`（**不是** `Err`，也不是空向量）。
+///
+/// 画像不存在与「画像在、尚无观测」是两件事，两者都取 `Option` 的两侧：前者是 `None`
+/// （没有这个画像），后者是 `Some(空向量)`（画像在、九维都没观测）。本用例钉前者，
+/// 后者的逐项照片在 `every_dimension_without_an_observation_is_absent_not_zero`。
+///
+/// 两侧对钉：先断言不存在的 id 是 `None`，再断言**播种之后**同一 id 读得到——只写 `None`
+/// 那侧时，「`load_skill_vector` 恒返回 `None`」这种坏法不会红。
+#[test]
+fn load_skill_vector_of_an_unknown_id_is_none() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    assert!(
+        load_skill_vector(&tx, &id("model-absent")).unwrap().is_none(),
+        "库里没有这个画像，读到的是「没有」，不是空向量"
+    );
+
+    // 对照臂：登记 + 播画像之后，同一个 id 读得到（内容为空向量）。
+    seed_profiled_model(&tx, "model-absent");
+    let vector = load_skill_vector(&tx, &id("model-absent"))
+        .unwrap()
+        .expect("对照臂：画像在，应是 `Some`");
+    for dimension in ALL_DIMENSIONS {
+        assert_eq!(
+            vector.get(dimension),
+            None,
+            "对照臂：还没有观测，{dimension:?} 应是 `None`"
+        );
+    }
+
+    tx.commit().unwrap();
+}
+
+/// `load_profile` **继承**了技能表的失败面（协调者裁决，2026-10-06；见计划 `## 遗留` 的
+/// 「load_profile 的 skill_vector 与 rank 的输入面」条）。
+///
+/// `load_profile` 组合 `load_skill_vector` 来填第十二个字段，故技能列里的表外取值会让
+/// **`load_profile` 本身**失败——这条通路与画像列的表外取值同一条（`PersistError`）。
+/// 不写出来的话，「画像读不出来」会被读成「`model_profile` 那一行坏了」，而实际坏的是
+/// 另一张表。
+///
+/// 本用例的画像行**十一列全部合法**（由 `seed_profile_row` 播下），只有技能列是表外的：
+/// 故失败只可能来自技能表。
+///
+/// 红的条件：`load_profile` 不调 `load_skill_vector`（或调用时把它的 `Err` 吞掉、
+/// 换成空向量）即红——它会照样读出 `Ok(Some(...))`。
+///
+/// 对照臂：删掉那一条坏观测之后 `load_profile` 读得到——挡住的是那个取值，不是这份画像。
+#[test]
+fn load_profile_fails_on_an_out_of_table_value_in_the_skill_table() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+    seed_profiled_model(&tx, "model-alpha");
+
+    insert_skill_row(&tx, "model-alpha", "empathy", 1, "1", "0.5", 1, 0, 1);
+
+    match load_profile(&tx, &id("model-alpha")) {
+        Err(PersistError::Database(m)) => assert!(
+            m.contains("未知 SkillDimension") && m.contains("empathy"),
+            "技能列的表外取值应让 load_profile 报具体 Err，实际 {m}"
+        ),
+        Err(other) => panic!("应为 PersistError::Database，实际 {other:?}"),
+        Ok(read) => panic!(
+            "技能列有表外取值时 load_profile 应失败，实际读回成功（is_some={}）",
+            read.is_some()
+        ),
+    }
+
+    // 对照臂：删掉那一条坏观测，同一份画像（十一列没动过）读得到。
+    tx.execute(
+        "DELETE FROM model_skill_score WHERE model_id = ?1",
+        &[Value::text("model-alpha")],
+    )
+    .unwrap();
+    let read = load_profile(&tx, &id("model-alpha"))
+        .unwrap()
+        .expect("对照臂：画像那一行一直是好的，应读得到");
+    assert_profile_fields(
+        &read,
+        "version-beta",
+        "provider-gamma",
+        "revision-delta",
+        &["text", "image"],
+        &["tool-epsilon", "tool-zeta"],
+        &["loses constraints in very long tasks"],
+        Some(Cost),
+        None,
+        42,
+        0.94,
+    );
+
+    tx.commit().unwrap();
 }
