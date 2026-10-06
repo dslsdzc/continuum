@@ -45,6 +45,11 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
   **外部 crate（`thiserror` / `tempfile` / `trybuild` / `tokio` / `serde_json` / `futures-core` / `async-trait`）
   按需加进 `Cargo.toml`，不进这张表、也不构成这条约束意义上的「依赖边」**（设计 §10 末段）。
   **本计划里凡写「不新增依赖边」的地方，一律按「不新增内部 crate 的边」读**——外部 crate 是另一回事。
+- **清单要自足（2026-10-06 立）**：**凡新增依赖（内部或外部）的 task，Files 里必须带上 `Cargo.lock`；
+  凡改动公开夹具的构造形状的 task，Files 里必须列出它的全部构造点。**
+  **判据**：**漏项不靠读清单发现，靠编译器发现**——故这一类的检查是
+  **`grep` 构造点 / `grep` 依赖，再逐个列回清单**，不是把清单读一遍。
+  与其靠别处的兜底句，不如让清单自足。
 - **多写者单文件，各自登记自己那几条**（`p3bcdf-followups.md` §七 第 7 条）：
   `dependency_direction.rs` 的 `ALLOWED`、`main.rs` 的注册、workspace `members` 是**单一文件、多写者**，
   四份计划都要碰。故**不设集中登记 task**，**每份计划各自登记自己那几条**（照 P3A 的 Tasks 3/4/5 做法），
@@ -104,6 +109,24 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
    `RegistryError::NotFound` / `RegistryError::Duplicate` / `ToolCallError::Unregistered` / `ToolCallError::Provider`。
    **但「断言是哪一种」不等于「把互斥的另一臂也否一遍」**：`matches!(A)` 之后再加 `!matches!(B)`
    （`A`/`B` 是同一个枚举的两个变体）是**蕴含型**，按第 2 之补**删**。
+
+**两种红，判据相反（2026-10-06 立；本轮最重要的一条区分）**：本计划的每个 task 都会说「红」，
+而**两件不同的事都叫「红」**，**判据相反**，故凡说「红」的地方都要说清是哪一种：
+
+- **红阶段（TDD）的红**：**编译失败是正当的**——判据是「**红的原因是该接口 / 该类型尚不存在**」
+  （Task 1 / Task 2 / Task 4 属于这类）；**若有中间态可造，则优选中间态**
+  （如 Task 7 的「结构在位、行为未接」——夹具先落结构、`invoke` 暂不读 `outcome`，
+  于是两条断言各自红，而不是一跑就绿）。
+- **变异的红**：**编译失败不算红**——判据是「**变异体编得过，且红在该用例自己的断言上**」
+  （与纪律 1(c) 同一条：`could not compile` / `error[E….` 都不是「变红」）。
+
+**混用这两种判据的两个方向都会出错**：**把编译失败当成变异红 ⇒ 假红**；
+**要求一个被测对象尚不存在的 task 给出断言红 ⇒ 无谓返工**。
+
+**这条二分怎么用（一条落地口径）**：差别在**「有没有中间态可造」，不在「哪个 task 更严」**。
+Task 7 有中间态（夹具的形状可以先落、行为后接），故它**不该**以编译失败为红——实现者按中间态做
+是对的；Task 1 / Task 2 / Task 4 **没有**中间态（整个 API 尚不存在，造不出「结构在位、行为未接」），
+**故它们以编译失败为红是正当的**。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），
 **命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志——
@@ -216,6 +239,15 @@ Cargo.lock                                               随依赖变化（见 G
 - Modify: `crates/continuum-provider/tests/fake_provider.rs`（改为 `mod common;`）
 - Create: `crates/continuum-provider/tests/registry_models.rs`
 
+> **订正注记（2026-10-06，本计划扫同类；原话照留）。** **这份清单漏了两项**：
+> **`crates/continuum-provider/Cargo.toml`（`[dependencies]` 加一行 `thiserror`）
+> 与 `Cargo.lock`（随之 +1 行）**。本 task 的代码块用 `#[derive(thiserror::Error)]`，
+> 而本 crate 当时没有这个依赖；Step 5 的 `git add crates/continuum-provider` 能兜住这份清单，
+> 但**清单本身漏了**，下一个人仍要从编译错误里反推。
+> **来历**：补 `Cargo.toml` 的指令原先只住在 Task 1 那段订正注记里，**Files 五行没跟着改**。
+> 按 Global Constraints 的「清单要自足」那条，**补进 Files**（依赖类漏项的判据是 `grep` 依赖，
+> 不是把清单读一遍）。
+
 **Interfaces:**
 - Consumes: 既有的 `continuum_core::model::ModelId`、**`continuum_core::tool::ToolId`**
   （`ToolCallError::Unregistered { id }` 要用它）、`continuum_provider::model::ModelProvider`、
@@ -294,6 +326,10 @@ Cargo.lock                                               随依赖变化（见 G
 ```bash
 timeout 300 cargo test -p continuum-provider --test registry_models
 ```
+
+**这一处是「红阶段（TDD）的红」，编译失败正当**——被测对象（`ProviderRegistry`）正是本 task 新建的，
+**没有中间态可造**，故红只能来自「该类型尚不存在」。**别把它与变异红混用**（变异红要求变异体编得过），
+见「两条纪律」之后的**「两种红，判据相反」**那段。
 
 预期：**`E0432`**（`unresolved imports`：`continuum_provider::ProviderRegistry` 不存在）
 ——**这个码取自实跑**（`.superpowers/sdd-p3c-impl/task-1-report.md` 第 2 节，日志 `.tmp/step2-red.log`）。
@@ -489,6 +525,10 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
 timeout 300 cargo test -p continuum-provider --test registry_tools
 ```
 
+**这一处是「红阶段（TDD）的红」，编译失败正当**——被测的 `register_tool` / `list_tools` / `describe_tool`
+正是本 task 新建的，**没有中间态可造**，故红只能来自「该接口尚不存在」。**别把它与变异红混用**
+（变异红要求变异体编得过、且红在该用例自己的断言上），见「两条纪律」之后的**「两种红，判据相反」**那段。
+
 - [ ] **Step 3: 实现**
 
 ```rust
@@ -547,6 +587,8 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 - Modify: `crates/continuum-provider/Cargo.toml`（**normal 只加 `continuum-capability`**）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（**`ALLOWED` 的 provider 条目**，
   本 task 的终值 `["continuum-capability", "continuum-core"]`；`continuum-persist` 由 Task 4 增量加）
+- Modify: `Cargo.lock`（新增内部依赖 `continuum-capability` 随之变化；**Global Constraints 只说「按本行办」，
+  按「清单要自足」那条在此列出**）
 - Modify: `crates/continuum-provider/tests/common/mod.rs`（`FakeTool::invoke` 换参）
 
 **Interfaces:**
@@ -694,8 +736,16 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
 **Files:**
 - Modify: `crates/continuum-provider/src/registry.rs`、`src/lib.rs`
 - Modify: `crates/continuum-provider/Cargo.toml`（**dev** + `continuum-persist`、`tempfile`）
+- Modify: `crates/continuum-provider/tests/common/mod.rs`（**加一个「把收到的授权回吐出来」的记录型夹具**，
+  供 `the_adapter_is_handed_the_authorization_that_was_passed_in` 用）
+- Modify: `Cargo.lock`（dev 依赖变化，按「清单要自足」列出）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（provider 条目加 `continuum-persist`，补成三元素）
 - Create: `crates/continuum-provider/tests/invoke_tool.rs`
+
+> **订正注记（2026-10-06，本计划扫同类；原话照留）。** **这份清单漏了 `tests/common/mod.rs`**：
+> 本节正文 Step 1 明写「这条要一个『把收到的授权回吐出来』的适配器（**`common` 里加一个记录型 fixture**）」，
+> 而 Files 四项里没有它。**与 Task 7 的 `FakeTool` 三态化同形**（动公开夹具的形状，清单必须跟着列），
+> 故按 Global Constraints 的「清单要自足」那条补进 Files。
 
 **Interfaces:**
 - Consumes: Task 1 的 `ProviderRegistry`、Task 3 的 `AuthorizedToolInvocation`、
@@ -777,6 +827,10 @@ git commit -m "feat(provider): §316 请求面换成 AuthorizedToolInvocation，
 ```bash
 timeout 300 cargo test -p continuum-provider --test invoke_tool
 ```
+
+**这一处是「红阶段（TDD）的红」，编译失败正当**——被测的 `invoke_tool` 正是本 task 新建的，
+**没有中间态可造**（整个方法尚不存在），故红只能来自「该接口尚不存在」。**别把它与变异红混用**，
+见「两条纪律」之后的**「两种红，判据相反」**那段。
 
 - [ ] **Step 3: 实现**
 
@@ -1168,6 +1222,12 @@ timeout 300 cargo test -p continuum-provider --test contract
 > （一律走 `Echo` 那一支）**；于是**两条用例各自在自己的断言上红**（工具级那条拿到
 > `is_error: false`、provider 级那条拿到 `Ok` 而不是 `Err`）；**再把 `invoke` 接上 `outcome`**，
 > 两例转绿。**两次红都不是编译失败**，都是断言失败，且**各自红在该用例自己的断言上**。
+>
+> **按「两种红，判据相反」那段重看这一处（2026-10-06）**：本 task **有中间态可造**——夹具的形状
+> 可以先落、行为后接——**故它不该以编译失败为红**，实现者按中间态做是**对的**。
+> 这与 Task 1 / Task 2 / Task 4 的处境**恰好相对**：那三处**没有**中间态可造（整个 API 尚不存在），
+> **故它们以编译失败为红是正当的**。**差别在「有没有中间态可造」，不在「哪个 task 更严」**——
+> 谁都不该在**有**中间态时偷懒用编译失败当红，谁也不必在**没有**中间态时硬造一个。
 >
 > **判据（本项目通用，写进原地）**：**当被测对象在同一个 task 里被造出来时，「先写用例看它红」
 > 这个序列产不出红——红必须来自一个中间态（结构在位、行为未接）。**
