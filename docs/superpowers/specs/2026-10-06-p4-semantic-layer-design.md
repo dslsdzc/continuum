@@ -1568,12 +1568,28 @@ pub struct Dimensions {
 （`Allocation` / `Reservation` / `Remaining` 各一条，断言「除设计指定的那个入口外无第二个公开构造路径」，
 形态照 P3A 对 `AuthorizedTool` 的 trybuild 样例）。**收件人：`plan-p4`。**
 
-**故 §12.6.1 的解构是两步**（这一条在这里写死，免得两处不能同真）：
+**故解构分两侧，形状不同——写死如下**（免得两处不能同真）：
 
 ```rust
-let Remaining(dims) = r;                       // newtype：无公开构造函数，此处由 remaining() 得来
-let Dimensions { money, wall_time, token, gpu_time, network_transfer } = dims;  // pub 字段
+// 定义侧（crate 内）：元组 newtype 的字段私有，crate 内可解构。
+let Remaining(dims) = r;
+let Dimensions { money, wall_time, token, gpu_time, network_transfer } = dims;
+
+// 引用侧（跨 crate，含 §12.6.1 那两条断言所在的驱动）：字段私有，**解构不了**，
+// 故三个角色各自公开一个读法 `dims() -> &Dimensions`，由它换取五个量纲。
+let Dimensions { money, wall_time, token, gpu_time, network_transfer } = *r.dims();
 ```
+
+**三个角色各自公开 `dims() -> &Dimensions`**（2026-10-06 写死，原先是缺口，
+计划曾为此自定三个公开读法——**那是计划替设计补的，现收回设计自己定**）：
+
+- **它不构成第二条构造路径**（**这一条判过**）：`dims()` 返回 **`&Dimensions`**，
+  而 `Dimensions` **不是角色**——拿一个 `&Dimensions` 造不出 `Allocation` / `Reservation` /
+  `Remaining` 中的任何一个（三个 newtype 的元组字段仍私有、无公开构造函数）。
+  故 §12.6.1 的「把余量填进上限的位置在类型上不可写」**不受影响**。
+- **它不新增可写性**：返回共享引用，调用方读得到五个量纲，改不了。
+- 照片：`dims()` 的签名断言（返回 `&Dimensions`，不是 `Dimensions`、不是 `&mut`）；
+  外加「三个角色的公开构造路径各只有设计指定的那一个」——**这条断言记在计划的收口要求里**（见上）。
 
 > **订正（2026-10-06，计划作者查出）**：本节先前只写「三个 newtype 各包一个 `Dimensions`」，
 > 而 §12.6.1 写的是**一步按名解构** `let Remaining { money, … }`——
@@ -1607,15 +1623,43 @@ I3: settled(n, d) + reserved(n, d) ≤ allocation(n, d)
 **结算**：`settle(reservation, actual: Dimensions) -> Result<SettleOutcome, BudgetError>`，
 `SettleOutcome ∈ { Within { refunded: Dimensions }, Over { dimension, by: i64 } }`。
 
-**`actual` 的符号：拒收，不截断**（2026-10-06，评审查出后补）。补 `BudgetError` 第二枚：
+## 12.2.1 `BudgetError` 的**唯一一份**变体清单
+
+**本节是它的定义处；§12.4 与 §14 一律引用这里，不另列**（2026-10-06，计划作者同步时查出
+先前三处各列一套、「三处三个集合」）：
 
 ```rust
+/// 预算层的失败。**恰好三枚**——别处不得再加，也不得删减。
 pub enum BudgetError {
+    /// 树上没有该 owner 的分配记录（`budget_node` 里查不到它）。
     UnknownOwner { owner: BudgetOwner },
-    /// `actual` 的某一维为负。
-    NegativeActual { dimension: DimensionKind, value: i64 },
+    /// 预扣时某一维余量不足。**承载「是哪一维」**（I1 的判据点，见上）。
+    Insufficient { dimension: DimensionKind },
+    /// 一个本该非负的量纲取了负值。**`settle` 的 `actual` 与 `check` 的 `estimate` 共用本枚**
+    /// ——两者的语义同为「一个本该非负的量纲取了负值」（见下）。
+    NegativeAmount { dimension: DimensionKind, value: i64 },
 }
 ```
+
+**三个使用者与它们各自可能返回哪几枚**（写死，免得再出现「三处三个集合」）：
+
+| 函数 | 可能返回 |
+|---|---|
+| `reserve` | `Insufficient`、`UnknownOwner` |
+| `settle` | `NegativeAmount`、`UnknownOwner` |
+| `check`（§12.4） | `NegativeAmount`、`UnknownOwner` |
+
+**`check` 为什么也拒负 `estimate`**：负的估计会让 §12.4 的比较**恒为 `Within`**——
+那是一处与 `settle` 负值**同形的 fail-open**（计划不因它被拦下）。故两处共用同一枚。
+
+> **订正（2026-10-06，计划作者同步时查出）**：先前 `BudgetError` **三处各列一套**——
+> §12.2 正文写 `Insufficient{dimension}`、§12.2 的枚举只列 `UnknownOwner` ＋ `NegativeActual`、
+> §12.4 的枚举只列 `UnknownOwner` 且写着「**只收一种**」。
+> **而「`reserve` 返回具体哪一维」当时没有任何变体承载**。原句留在此处；
+> 现已写死为上面**唯一一份三枚清单**，并把 `NegativeActual` 改名为 **`NegativeAmount`**
+> （因为它现在有两个使用者，`Actual` 这个名字会把它锁给 `settle`）。
+
+**`actual` 的符号：拒收，不截断**（2026-10-06，评审查出后补）。用上表里的 `NegativeAmount`：
 
 判据两条：
 
@@ -1626,7 +1670,7 @@ pub enum BudgetError {
    吞掉，账面上看不出发生过什么。拒收把这个 bug **当场暴露**，与本层
    `UnknownOwner` 的 fail-closed 同侧。
 
-**照片两条**：(a) 某一维为负的 `actual` ⇒ `Err(NegativeActual { dimension, value })`，
+**照片两条**：(a) 某一维为负的 `actual` ⇒ `Err(NegativeAmount { dimension, value })`，
 **并断言账本未变**（`reserve` 仍活跃、`settled` 未动——失败路径不但断言哪一种 `Err`，
 还要断言**没有半写的副作用**）；(b) **反例**：`actual` 各维为 0 ⇒ `Ok(Within { .. })` 且额度全额退回
 （只钉拒绝那侧会让「`0` 也被拒」漂过去）。
@@ -1688,21 +1732,17 @@ pub enum BudgetVerdict {
 pub fn check(estimate: &Dimensions, owner: BudgetOwner, ...) -> Result<BudgetVerdict, BudgetError>
 ```
 
-**`Err` 的判据（2026-10-06 补，计划作者查出本节原先没给）**：`BudgetError` 只收**一种**——
-
-```rust
-pub enum BudgetError {
-    /// 树上没有该 owner 的分配记录（`budget_node` 里查不到它）。
-    UnknownOwner { owner: BudgetOwner },
-}
-```
+**`Err` 的判据（2026-10-06 补，计划作者查出本节原先没给）**：`BudgetError` 的变体清单
+**见 §12.2.1，本节不另列**（先前本节自列一份、写着「只收一种」，与 §12.2 对不上）。
+`check` 可能返回的是其中**两枚**：`UnknownOwner` 与 `NegativeAmount`（§12.2.1 的表）。
 
 三条写清楚：
 
 1. **超支不是 `Err`**，是 `BudgetVerdict::Exceeds`——§110 的流程要把「预计超支」当**一个可处置的结论**
    往下走（找替代方案 → 找不到则 Decision），做成 `Err` 会让调用方把它当失败而中止。
 2. **量纲的单位／取值域不是 `Err`**：§333 未给单位（§16 第 19 条），本层不解释，
-   故「值看起来不合理」在本层**没有判据**，不做校验。
+   故「值看起来不合理」在本层**没有判据**，不做校验。**但「负值」不是「不合理」而是「不可能」**，
+   它由 `NegativeAmount` 拒收（否则比较恒为 `Within`，见 §12.2.1）。
 3. **`UnknownOwner` 是 fail-closed 的**：查不到分配记录时**不给 `Within`**
    （给 `Within` 等于对一棵不存在的子树放行）。这条与 §12.2 的 I1 同侧。
 
@@ -1840,10 +1880,13 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 
    **实现机制写死为「穷尽解构／结构体字面量」，不用 serde**（2026-10-06 定）：
 
+   引用侧（**跨 crate**）与定义侧（**crate 内**）形状不同，这里写的是**引用侧**：
+
    ```rust
-   // 两行解构都**不得带 `..`**（见下「谁保证」）。两个方向都写。
-   let BudgetView { money, wall_time, token, gpu_time, network_transfer } = project(&r);
-   let Remaining  { money, wall_time, token, gpu_time, network_transfer } = unproject(&v);
+   // 引用侧：经三个角色各自公开的 `dims()` 读法拿 `&Dimensions`，再按名解构。
+   // 两行解构都**不得带 `..`**（见下「谁保证」）。
+   let BudgetView { money, wall_time, token, gpu_time, network_transfer } = v.dims();
+   let Dimensions  { money, wall_time, token, gpu_time, network_transfer } = *r.dims();
    // 逐个绑定比，不比较整个结构体——故**不需要 `PartialEq`**（见下）。
    assert_eq!(money, r.money());          // 五维各一行，逐维断言（运行期的照片）
    assert_eq!(wall_time, r.wall_time());
@@ -1854,20 +1897,30 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 
    **「谁保证」逐条写清**（评审查出后补——这句话本身是一句断言，不能由「编译器」三个字背书）：
 
-   | 保证 | 由谁 | 强度 |
+   | 保证 | **今天**由谁 | 强度 |
    |---|---|---|
-   | 全绑 ＋ `..` | **编译器**（需 crate 级 `#![deny(clippy::rest_pat_in_fully_bound_structs)]`） | 编译不过 |
-   | **部分绑 ＋ `..`**（删掉一个绑定再加 `..`） | **不由编译器保证**——该 lint 只管「全绑了还写 `..`」 | **仅由站点注释 ＋ 复审守** |
-   | 任一侧加字段（在两行都不带 `..` 的前提下） | **编译器**：模式不再穷尽 | 编译不过 |
+   | 全绑 ＋ `..` | **今天没有人**——那张牌是 `#![deny(clippy::rest_pat_in_fully_bound_structs)]`，而**本仓门禁是 `cargo test` ＋ `cargo build`，不含 clippy**，`clippy::` tool lint 在 `cargo test` 下**不生效** | **仅由站点注释 ＋ 复审守** |
+   | **部分绑 ＋ `..`**（删掉一个绑定再加 `..`） | **今天没有人**——该 lint 本就只管「全绑了还写 `..`」，即便 clippy 在门禁里也不管这一格 | **仅由站点注释 ＋ 复审守** |
+   | 任一侧加字段（在两行都不带 `..` 的前提下） | **`rustc`**：模式不再穷尽，**这一格与 clippy 无关** | 编译不过 |
 
-   **故「由编译器保证」这句只覆盖上表第 1、3 行；第 2 行是**约定**，不是结构。**
-   落地时把这张表连同「那两行不得带 `..`」写进代码注释；**若将来要连第 2 行一起钉**，
-   缺的是一条**自定义检查**（例如在测试里读那两行源码、断言不含 `..`）——
-   **本设计不建它**（今天没有产生方，且它会引入一处读源码的测试）；**收件人：实现者**（见 §16）。
+   **故三行里只有第 3 行今天真的会响**；第 1、2 行都是**约定**。
+   **若要第 1 行由编译器保证，须先把 clippy 纳入门禁**——那是一件**独立的事**（它会影响全仓，
+   不只是这两行），**不在本设计范围**。
 
-   **断言的落点**：它同时要 `continuum_semantics::Remaining` 与
+   > **订正（2026-10-06，计划作者同步时查出）**：本表初稿把第 1 行写成「**编译器** …… 编译不过」。
+   > **那一格今天是空的**——那张牌要靠 clippy，而 clippy 不在门禁里，
+   > 故它**实际也回落到「约定」**。**判据**：**一张说「谁保证」的表，每一行都必须指到一个
+   > 今天真的会响的东西**——否则它比不写更坏（读者会以为那一行已经有人守了）。
+   > **这与本节先前那次是同一件事**：当时把「由编译器保证」只留给第 1、3 行、把第 2 行标为约定，
+   > **现在的发现说明第 1 行也在第 2 行那一类里**。原句留在此处。
+
+   落地时把这张表连同「那两行不得带 `..`」写进代码注释；
+   **若要连第 1、2 行一起钉**，缺的是一条**自定义检查**（例如在测试里读那两行源码、断言不含 `..`）——
+   **本设计不建它**（今天没有产生方，且它会引入一处读源码的测试）；**收件人：实现者**（见 §16 第 34 条）。
+
+   **断言的落点**：它同时要 `continuum_budget::Remaining` 与
    `continuum_model_registry::BudgetView`，**故住在驱动**（`continuum-runtime`，
-   它已经依赖 model-registry；再加 `continuum-semantics` 是 §1.2.1 约定的合法方向）。
+   它已经依赖 model-registry；再加 `continuum-budget` 是 §1.2.1 约定的合法方向）。
 
    选择的两条判据：
 
@@ -1948,9 +2001,10 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 
 ### 形状甲的代价与前史（照留）
 
-- **甲的形状**：删 `BudgetView`，`.model-registry` 直接收 `continuum_semantics::Remaining`
-  （登记 `continuum-model-registry ← continuum-semantics`；§1.2.1 的约定下读作
-  「model-registry 依赖 semantics」），驱动不再做投影。
+- **甲的形状**：删 `BudgetView`，`.model-registry` 直接收 `continuum_budget::Remaining`
+  （登记 `continuum-model-registry ← continuum-budget`；§1.2.1 的约定下读作
+  「model-registry 依赖 budget」——**注意这条边指向预算层、不是 `continuum-semantics`**，
+  因为 `Remaining` 住 `continuum-budget`），驱动不再做投影。
 - **甲的代价**（协调者第 1、2 条的展开）：D 的 `BudgetView` 是**已落地并过审的代码**
   （`crates/continuum-model-registry/src/budget.rs:34-44`），删它要连带改 D 的设计 §6.1、
   D 的计划里那个类型／构造／五个用例、`RoutingRequest` 的字段类型；
@@ -2146,7 +2200,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 恢复链（§332 §107） | 只改指名字段、**其余字段逐项不变**；失败路径断言**四张表无半写行**（不只断言 `Err` 哪一种） |
 | Constraint Validator（§225 §6） | §225 的 MAY 七条逐项放行 ＋ MUST NOT 三条逐项拦下（第四条见 `ViolatesRequired`）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下；**三侧**：悬空键 `Err(UnknownConstraintKey)` 一条 ＋ `constraints` 为空不是 `Err` 一条 ＋ **命中 `PREFERRED` 键不是 `Err`、也不拦下一条**（第三条钉住「判据与 `class` 无关」） |
 | 两道门分离（§2.2） | §11.5 的三条（两条 `ALLOWED` 条目 + 方法集断言） |
-| 预算不变量（§12.2） | I1 / I2 / I3 **各一条**违规断言；`reserve` 返回**具体哪一维**（逐维五条）；`settle` 的 `Over` 断言 `dimension` 与 `by`；**`actual` 负值**：一条 `Err(NegativeActual{dimension,value})` **并断言账本未变**（无半写副作用）＋ **反例**一条（各维为 0 ⇒ `Ok(Within)` 且全额退回） |
+| 预算不变量（§12.2 §12.2.1） | `BudgetError` 的**三枚各一条**（别处不再另列）；`reserve` 返回**具体哪一维**（逐维五条）；I1 / I2 / I3 **各一条**违规断言；**`check` 的负 `estimate`**：一条 `Err(NegativeAmount{..})`（与 `settle` 同枚）；`settle` 的 `Over` 断言 `dimension` 与 `by`；**`actual` 负值**：一条 `Err(NegativeAmount{dimension,value})` **并断言账本未变**（无半写副作用）＋ **反例**一条（各维为 0 ⇒ `Ok(Within)` 且全额退回） |
 | 无读数按预扣（§12.3） | 三条（流式 / 恢复 / **有读数时不按预扣**） |
 | Budget Validator（§110） | `Within` 一条；`Exceeds` **逐维五条**；判据是 `remaining` 不是 `allocation`（构造一个「按 allocation 判会放行、按 remaining 判超支」的用例） |
 | 探索预算（§334） | 四个默认判据**各两条**（放行/门控，共八条）；策略收紧一条；`has_external_effect` 那一格 `dimension` 为 `None` |
