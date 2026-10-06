@@ -753,7 +753,11 @@ git commit -m "feat(model-registry): 登记项与生命周期的落库读写"
 Task 5 只建表。
 **这一步不许靠上面这三个行号做完就收工**：Task 5 的实现者只报出两处，第三处（`:379`）是评审补出来的——
 **按短清单逐行改，正是这类错标的典型遗留形态**（改完还剩一句自称「Task 5」的残句，而它看起来像已订正过）。
-故落地时的判据是**在 `src/` 里 grep `Task 5` 与 `load_profile` 的共现行**，逐条确认，改完再 grep 一遍为零。
+故落地时的判据是：**在 `src/` 里 grep 出所有含 `Task 5` 的行，逐处连同它的上一行与下一行一起读**，
+确认它讲的是不是 `load_profile`（是则改），改完再 grep 一遍为零。
+**为什么不是「grep 两者的共现行」**：同一句话被折成两行时同线匹配会漏——本 task 的第三处错标正是这样
+（`load_profile` 在 `profile.rs:414`，而同一句的 `Task 5` 在**上一行** `:413`），只查共现行只找到 2 处、漏掉 1 处。
+**这类判据的通病是「按行匹配、按句断言」**：凡用 grep 当判据，都要按**类别**取候选、再**人工读邻行**。
 **收件人：Task 7 的实现者。**
 
 - [ ] **Step 1: 写用例**
@@ -762,6 +766,11 @@ Task 5 只建表。
   画像（**画像有十二个字段，而 `model_profile` 只有十一列**——第十二个 `skill_vector` 落在
   `model_skill_score`，本用例不走它），经 `load_profile` 读回，**逐字段**比对（含 `tools` 的元素是 `ToolId`、
   两个 `Option<Cost/Latency>` 的 `Some` / `None` 两侧）。红的条件：某列漏写或与邻列写串即红。
+  **本用例的入参画像怎么来，是这一步第一件要解决的事**：`save_profile` 收一枚 `ModelProfile`，
+  而它 crate 外造不出、`load_profile` 又要求库里先有行——**故「先写后读」不能自举**。
+  本 task 的处置（Task 7 实现者已按此落地）：**先用裸 SQL 播下一行**（`INSERT INTO model_registry` ＋
+  `INSERT INTO model_profile`），再走类型化接口读回、改、写。**两个方向都要**：裸 SQL 只用来造第一枚，
+  余下的断言仍走 `save_profile` / `load_profile`，否则「往返」这件事就没有被测到。
 - `saving_a_profile_before_verified_is_rejected_with_the_state`：**十态逐项**——六态（`verified` / `active` /
   `stale` / `degraded` / `quarantined` / `disabled`）`Ok`，四态（`discovered` / `unprofiled` / `researched` /
   `probed`）`Err(LifecycleError::ProfileBeforeVerified { state })` 且**断言是哪一枚**。
@@ -829,6 +838,10 @@ git commit -m "feat(model-registry): 画像的落库与「画像早于 verified 
 - Consumes: Task 2 的 `SkillVector` / `current_observation`、Task 7 的 `save_profile`
 - Produces: `continuum_model_registry::{save_skill_observation, load_skill_vector, load_skill_series}`
 
+**夹具**：观测的外键挂在 `model_profile` 上，故每个用例都要先有一份**已画像**的模型。
+**第一枚画像同样只能由裸 SQL 播下**（理由与做法见 Task 7 的 `a_profile_round_trips_field_by_field`
+与 Task 11 的夹具段——`save_profile` 收的画像 crate 外造不出，链条不能自举）。
+
 - [ ] **Step 1: 写用例**
 
 - `a_skill_observation_round_trips_field_by_field`：五个字段（score / confidence / sample_count / version /
@@ -867,9 +880,14 @@ pub fn load_skill_series(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension)
     -> Result<Vec<SkillObservation>, PersistError>;
 ```
 
-`load_skill_series` 的消费方是 §82 的行为指纹（「如果表现突然变化」）——判「变化」至少要看两次观测，
-故它现在就必须有；只存当前值会让 §82 的判据无法成立。**它的产生方（周期性 probe）本阶段不存在**，
-这一点按设计 §10 第 1 条写明，**不靠一句将来时糊过去**。
+**本 task 还交付一步（协调者裁决，2026-10-06，见 `## 遗留` 的同名条）**：交付 `load_skill_vector` 的同时，
+**让 `load_profile` 调它来填画像的 `skill_vector`**——`load_profile` 现在读回的画像十二个字段齐全。
+**两条一起写进文档注释，不许含糊**：
+- **`load_skill_vector` 是 `model_skill_score` 表的唯一装载者**；`load_profile` **组合**它，
+  **不自己再查一遍那张表**（那就是同一数据的第二个装载者，等同一次重复产生点）；
+- 故 `load_profile` 的返回值变为 `Result<Option<ModelProfile>, PersistError>` **不变**，
+  但**它现在可能因技能表里的表外取值而失败**（`PersistError`，与画像列的表外取值同一条通路）——
+  这条要补进它的文档注释，并补一条用例：**画像列全合法、技能列有表外取值 → `load_profile` 返回具体 `Err`**。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -1025,9 +1043,15 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 - [ ] **Step 1: 写测试夹具（这是本 task 的第一件事）**
 
 `rank` 是纯函数，但它的输入 `RoutableModel` 只能由 `load_profile` 产出（`ModelProfile` crate 外不可构造，Task 3）。
-故 `tests/router.rs` 需要一个夹具：起临时库 → `register_model` → 迁到 `verified` → `save_profile` →
-`load_profile` → `RoutableModel::try_new`。**夹具的这一步不写出来，本 task 的所有用例都无从下笔**——
-它不是测试技巧，是设计 §2.1 那条保证的直接后果。
+**而这个链条不能自举，写成 `save_profile → load_profile` 是自指的**：`save_profile` 要一枚 `ModelProfile` 做入参，
+画像又只能由 `load_profile` 读回——**第一枚画像必须由裸 SQL 播下**（`INSERT INTO model_registry` 一行、
+`INSERT INTO model_profile` 一行），再走类型化接口。Task 7 的实现者在自己的夹具里遇到的是同一件事，处置相同。
+夹具链因此是：**裸 SQL 播两行 → `load_profile` → `RoutableModel::try_new`**。
+**夹具的这一步不写出来，本 task 的所有用例都无从下笔**——它不是测试技巧，是设计 §2.1 那条保证的直接后果。
+
+**另有一处本计划已知、尚未闭合的缺口，先在这里点名，免得实现者卡在半路**：`load_profile` 读回的
+`skill_vector` **恒为空向量**（`model_skill_score` 由 `load_skill_vector` 单独装载），故这样造出的候选
+**没有任何「有观测」的维度**——它直接影响 Task 12 的兼容度用例。**本 task 不自行给出路**：见 `## 遗留` 的同名条。
 **夹具还必须为每个候选给出一条 `availability` 条目**（`Healthy` 或缺省的那一档）：`rank` 对
 「列表里没有条目」的候选返回 `UnknownAvailability`，故漏给会以 `Err` 的形式而不是断言的形式失败，
 报错位置还会指向被测函数。**这条不是可选项**，用 `unavailable` / `degraded` 两个具名参数让需要它的用例显式覆盖。
@@ -1171,6 +1195,11 @@ git commit -m "feat(model-registry): §250 的输出面与 rank 的全序"
 - Consumes: Task 11 的 `RankingPolicy` / `rank`
 - Produces: `continuum_model_registry::BaselineRankingPolicy`
 
+**夹具**：沿用 Task 11 的 `tests/router.rs` 夹具（含「**第一枚画像由裸 SQL 播下**」那一步）。
+**但本 task 多一项前置**：下面的兼容度用例要读**某维有没有观测**，而 Task 11 的夹具经 `load_profile`
+拿到的画像 `skill_vector` **恒为空向量**——**在 `## 遗留` 那条缺口闭合之前，这一组用例写不出来**。
+实现者开工前先读那一条；**不许自行挑一条出路改掉设计的形状**（三条候选出路都在那条遗留里，收件人是设计作者＋协调者）。
+
 - [ ] **Step 1: 写用例**
 
 - `the_baseline_counts_the_dimensions_that_have_an_observation`：`compatibility = matched / required`，
@@ -1310,6 +1339,12 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 第一条**预期零命中**（注释里也不该出现 `ModelProvider` 的调用面）；第二条**只允许出现 `Cost` / `Latency`**。
 任何一条不符即据实报告，不自行改设计。
 
+**这两条是「按词根取候选、再人工读」的判据，不是「命中数即结论」的判据**：grep 按**行**匹配，
+故**跨行折行会漏**（`ModelProvider::` 与 `invoke` 被折到两行时，第一条的零命中是假的）。
+**故零命中不是充分证据**——本轮判据的实际做法是：grep 出候选行后，**对 `src/` 的调用面逐处通读**
+（本 crate 只有 `profile / lifecycle / persist / router / budget / escalation / error` 七个文件，通读代价很小），
+**结论以通读为准、grep 只用来定位**。同一通病见 Task 7 的连带面判据。
+
 - [ ] **Step 3: 逐条核对完成判据**
 
 | 判据 | 证据 |
@@ -1423,6 +1458,20 @@ LifecycleError::Persist  **已闭（commit `531c548`）——原稿记的是「�
                       来历留在上面：它曾是「计划记了一件事、实现侧随后做了却没回来改计划」的那一类，
                       判据是「凡是『本轮未补』记进遗留的，补上之后必须回来改那一条」——
                       否则它就成了**已闭记成未闭**，后来者会照它去做一件已经做过的事）。
+load_profile 的           **已裁（协调者，2026-10-06）：取 A——`load_profile` 也把 `skill_vector` 填上**，
+skill_vector 与 rank      **由 Task 8 交付 `load_skill_vector` 时一并让 `load_profile` 调它来填**。
+的输入面                  **判据三条**：(1) 设计 §247 说 `ModelProfile` 有十二个字段（§2.1 的表里
+                          `skill_vector` 是其中之一）——**存储分成两张表是存储的事**，不该让对象少一个字段；
+                          (2) **`rank` 的签名不变**（仍收 `&[RoutableModel]`），故**不必动 `RoutableModel` 的形状**，
+                          改动面最小；(3) **观测值只有一个装载者**（`load_skill_vector`），`load_profile` 只是
+                          **组合**它——若 `load_profile` 自己再查一遍 `model_skill_score`，就成了同一数据的
+                          两个装载者，而这正是本设计掐别的重复产生点时的同一判据。
+                          **原稿把它记为「缺口，未闭」，三条候选出路照留作前史**：
+                          (i) `load_profile` 一并装载（**取的就是它**；当时担心的「多一个装载点」由判据 (3) 化解：
+                          装载者仍是 `load_skill_vector`，这里是组合）；
+                          (ii) `RoutableModel` 改装 `(ModelProfile, SkillVector)`——**未取**，判据 (2)：动形状没有必要；
+                          (iii) 由调用方（G）在构造候选集前合并——**未取**，它需要一条新的 crate 内入口。
+                          **遗留里不再有未决项**；Task 8 与 Task 11/12 的落点见各自正文。
 Degraded 的降权判据      §250 的八项 MUST 考虑里，可用性**只写死了「过滤 Unavailable」这一档**
                       （设计 §5.3）：`Healthy` 与 `Degraded` 之间**没有判据**——§250 只说「考虑」、
                       §84 没给这一维的算法。本设计不发明，`Degraded` 原样带进 `reason`。
