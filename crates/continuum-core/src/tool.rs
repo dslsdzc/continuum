@@ -23,12 +23,6 @@ pub struct ToolDescriptor {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ToolInvocation {
-    pub tool: ToolId,
-    pub input: Value,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolResult {
     pub output: Value,
     pub is_error: bool,

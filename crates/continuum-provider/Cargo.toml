@@ -6,6 +6,11 @@ rust-version.workspace = true
 
 [dependencies]
 continuum-core = { path = "../continuum-core" }
+# Task 3 起的使用点：`tool.rs` 的 `AuthorizedToolInvocation` 要能命名
+# `continuum_capability::AuthorizedTool`（§316 请求面换血，设计 §4.1 订正段）。
+# **normal 边只这一条**：本 task 没有运行用例，故 `continuum-persist` / `tempfile`
+# 那两条 **dev 边**由真正用它们的 Task 4 增量加。
+continuum-capability = { path = "../continuum-capability" }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 # Task 1 起的使用点：`registry.rs` 的 `RegistryError` / `ToolCallError` 派生

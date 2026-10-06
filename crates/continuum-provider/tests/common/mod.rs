@@ -17,10 +17,10 @@ use continuum_core::model::{
     CallId, InvokeRequest, InvokeResponse, ModelDescriptor, ModelId, ModelStream, ProviderHealth,
     StreamChunk, Usage,
 };
-use continuum_core::tool::{ToolDescriptor, ToolId, ToolInvocation, ToolResult};
+use continuum_core::tool::{ToolDescriptor, ToolId, ToolResult};
 use continuum_core::ProviderError;
 use continuum_provider::model::ModelProvider;
-use continuum_provider::tool::ToolProvider;
+use continuum_provider::tool::{AuthorizedToolInvocation, ToolProvider};
 use futures_core::Stream;
 use serde_json::json;
 use std::pin::Pin;
@@ -123,9 +123,9 @@ impl ToolProvider for FakeTool {
             .ok_or_else(|| ProviderError::Unavailable(id.as_str().to_owned()))
     }
 
-    async fn invoke(&self, call: ToolInvocation) -> Result<ToolResult, ProviderError> {
+    async fn invoke(&self, call: AuthorizedToolInvocation<'_>) -> Result<ToolResult, ProviderError> {
         Ok(ToolResult {
-            output: call.input,
+            output: call.input().clone(),
             is_error: false,
         })
     }

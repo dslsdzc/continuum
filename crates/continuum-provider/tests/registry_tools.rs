@@ -9,9 +9,9 @@ mod common;
 use async_trait::async_trait;
 use common::FakeTool;
 use continuum_core::model::CallId;
-use continuum_core::tool::{ToolDescriptor, ToolId, ToolInvocation, ToolResult};
+use continuum_core::tool::{ToolDescriptor, ToolId, ToolResult};
 use continuum_core::ProviderError;
-use continuum_provider::tool::ToolProvider;
+use continuum_provider::tool::{AuthorizedToolInvocation, ToolProvider};
 use continuum_provider::{ProviderRegistry, RegistryError, ToolCallError};
 use serde_json::json;
 use std::sync::Arc;
@@ -46,9 +46,9 @@ impl ToolProvider for OneTool {
         }
     }
 
-    async fn invoke(&self, call: ToolInvocation) -> Result<ToolResult, ProviderError> {
+    async fn invoke(&self, call: AuthorizedToolInvocation<'_>) -> Result<ToolResult, ProviderError> {
         Ok(ToolResult {
-            output: call.input,
+            output: call.input().clone(),
             is_error: false,
         })
     }
@@ -78,9 +78,9 @@ impl ToolProvider for FailingList {
         })
     }
 
-    async fn invoke(&self, call: ToolInvocation) -> Result<ToolResult, ProviderError> {
+    async fn invoke(&self, call: AuthorizedToolInvocation<'_>) -> Result<ToolResult, ProviderError> {
         Ok(ToolResult {
-            output: call.input,
+            output: call.input().clone(),
             is_error: false,
         })
     }

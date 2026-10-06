@@ -17,4 +17,4 @@ pub mod tool;
 pub use connector::Connector;
 pub use model::ModelProvider;
 pub use registry::{ProviderRegistry, RegistryError, ToolCallError};
-pub use tool::ToolProvider;
+pub use tool::{AuthorizedToolInvocation, ToolProvider};

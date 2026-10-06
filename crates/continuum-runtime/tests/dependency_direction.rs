@@ -26,7 +26,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("continuum-core", &[]),
     ("continuum-events", &["continuum-core"]),
     ("continuum-persist", &["continuum-events"]),
-    ("continuum-provider", &["continuum-core"]),
+    // P3 子项目 C 的 Task 3 起加上 capability：`tool.rs` 的 `AuthorizedToolInvocation`
+    // 要能命名 `continuum_capability::AuthorizedTool`（§316 请求面换血，层内边，
+    // 设计 §4.1 订正段）。数组按字母序。
+    // `continuum-persist` 是 Task 4 的 **dev 边**（那时 `invoke_tool` 的用例要起真库）。
+    // **本 task 终端值就是下面这一条**，persist 由用它的那个 task 增量加。
+    ("continuum-provider", &["continuum-capability", "continuum-core"]),
     // Task 15 起 artifact 直接依赖 continuum-events：`save_artifact` 与元数据
     // 同事务写入 ArtifactCreated（§16）。
     (
