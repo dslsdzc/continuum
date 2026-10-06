@@ -61,6 +61,26 @@ Budget Validator（§110 §333 §334）。
 而 §9.1 的箭头读**被依赖者 → 依赖者**（`docs/02-工程.md:563-567` 的订正段，
 判据是 §9.2「入度为零的组件……不依赖任何其他组件」）。
 
+### 1.2.0 本设计的箭头约定（**全篇唯一一种**）
+
+> **订正（2026-10-06，评审查出）**：本文初稿**两义混用**了 `→`——
+> 引 §9.1 时按「被依赖者 → 依赖者」，而在几处描写「谁依赖谁」时又按「依赖者 → 被依赖者」
+> （§1.2.2 的规则 2、§1.3、§2.2 的边表、§12.6、§13.2、§13.4、§16 第 22/24 条的箭头都受此影响）。
+> **两义混用的后果是具体的**：`执行层 → 语义层` 一半读作「语义层可被执行层依赖」（合法），
+> 一半读作「执行层可被语义层依赖」（反向边）——**同一串字符在同一个文件里指向两条相反的边**。
+> 错因是本文在引文与自述之间切换时没有重定约定。
+
+以下是本文的**唯一**约定，与 §9.1 一致，此后全篇遵守：
+
+| 写法 | 读作 | 例 |
+|---|---|---|
+| `A → B` | **A 被 B 依赖**（B 依赖 A） | `语义层 → 执行层` = 执行层依赖语义层 |
+| `A ← B` | **A 依赖 B**（B 被 A 依赖） | `continuum-semantics ← continuum-persist` = semantics 依赖 persist |
+| 「X 依赖 Y」「X 的边指向 Y」 | 用文字，不用 `→` | —— |
+
+**引用他文时**：若引文里的 `→` 用的是相反约定，**原样照录并在引文后标注**
+（照本项目「原话照留、加订正注记」的惯例），不改引文里的箭头。
+
 两处同时成立的唯一读法是：
 
 > **「不依赖下层」说的是语义不依赖——本层的每一条判定，其真值来源都在本层与规范里，
@@ -79,8 +99,17 @@ Budget Validator（§110 §333 §334）。
 1. **依赖边在 `ALLOWED` 表里可见**。`crates/continuum-runtime/tests/dependency_direction.rs:22-160`
    的 `ALLOWED` 逐对断言，本层三个 crate 的允许集只含 `continuum-persist`（＋层内前驱）。
    **任何一条指向 graph／capability／provider／connector／model-registry／policy 的边都会当场变红**。
-2. **§9.1 的箭头因此保持单向**：`执行层 → 语义层` 是**唯一**允许的跨层方向，
-   而它今天**没有消费者**（执行器不存在），故本层落地时跨层边**一条都不登记**（§2.3）。
+2. **§9.1 的箭头因此保持单向**：按 §1.2.0 的约定，§9.1 里以本层为被依赖者的边
+   **有两条**——`语义层 → 执行层` 与 `语义层 → 资源层`（`docs/02-工程.md:570-571`），
+   即**执行层与资源层都可以依赖本层**，而本层不依赖它们中任何一个。
+   **两条今天都没有消费者**（执行器未建；`BudgetView` 的投影由驱动做，§12.6），
+   故本层落地时跨层边**一条都不登记**（§2.3）。
+
+   > **订正（2026-10-06，评审查出）**：本条的初稿写「`执行层 → 语义层` 是**唯一**允许的跨层方向」，
+   > **两处错**：(i) 箭头方向按的是相反约定，按 §1.2.0 应写作 `语义层 → 执行层`；
+   > (ii) 「**唯一**」是假的——§9.1 里有**两条**以本层为被依赖者的边（执行层与资源层各一条），
+   > 且本层还依赖 P0 基础设施。错因是把「本层作为被依赖者的边」写成了「跨层方向只有一个」。
+   > 原句留在此处。
 3. **跨层输入不引入类型耦合**：候选集、`Node.execution_policy`、外部副作用标志、
    失败读数都由装配方以值交出（§13 逐条列出），本层不 `use` 它们的定义 crate。
 
@@ -93,7 +122,7 @@ Budget Validator（§110 §333 §334）。
 | 地方 | 规范要求 | 本设计的碰法 | 是否登记边 |
 |---|---|---|---|
 | **存储** | §222 §223 §224 §228 §331 都要持久化 | 经 P0 的 `Tx` / `Migration`（`crates/continuum-persist/src/tx.rs:12`、`db.rs:14`）；状态迁移与对应事件**同一事务**（照 P1 的 `apply_transition` 形状） | 是（`continuum-persist`，属 P0 基础设施，不在八层之内） |
-| **ContractDiff 被第 3 层消费** | §226：「受影响的 ADFIR 节点 MUST 被重新判定有效性」 | 本层**产出** diff（四类差异，§7.3）；**受影响节点的判定与施加在执行层**（§8） | 否。**今天没有消费者**；将来由执行器取 `执行层 → 语义层` 这条边 |
+| **ContractDiff 被第 3 层消费** | §226：「受影响的 ADFIR 节点 MUST 被重新判定有效性」 | 本层**产出** diff（四类差异，§7.3）；**受影响节点的判定与施加在执行层**（§8） | 否。**今天没有消费者**；将来由执行器取 `语义层 → 执行层` 这条边（§1.2.0 的约定：执行层依赖本层） |
 | **Constraint Validator 判「候选计划」** | §6 §225 | 「候选计划」是**值**：§228 的 `Plan` ＋ 声明的影响面（§11.2）。**图的 `Node.execution_policy` 与 `Node.constraints` 以 `&str` / `serde_json::Value` 原样传入**，本层不 `use continuum_graph` | 否 |
 
 第 3 行是本层最容易做错的一处：`crates/continuum-graph/src/node.rs:17` 写着
@@ -111,7 +140,7 @@ Budget Validator（§110 §333 §334）。
 **本设计的处置**：把「Intent 存储 ← Canonicalization」**按类型依赖读，不按判定依赖读**——
 Intent 存的 `goal` 是规范化后的表示（§270 的 `Canonical Representation` 在 `Intent Compiler` 之前），
 故 Intent 表的外键面依赖 `EntityId` 这一个类型，而 Intent 的**任何判定**都不查 Canonicalization。
-以此为准，`continuum-semantics → continuum-canonical` 是一条「类型边」。
+以此为准，`continuum-semantics ← continuum-canonical` 是一条「类型边」（§1.2.0 的约定）。
 **§9.2 那一格与 §2.3 的相抵据实记在 §16，收件人：规范维护者**（两处都要改一处，本设计不改文档）。
 
 ---
@@ -138,19 +167,25 @@ Intent 存的 `goal` 是规范化后的表示（§270 的 `Canonical Representat
 
 ## 2.2 依赖边
 
+按 §1.2.0 的约定（`A ← B` 读作「A 依赖 B」）：
+
 ```
 continuum-canonical  ← continuum-persist
 continuum-semantics  ← continuum-canonical, continuum-persist
 continuum-budget     ← continuum-semantics, continuum-persist
 ```
 
-| 边 | 使用点 | 何时登记 |
+| 边（左依赖右） | 使用点 | 何时登记 |
 |---|---|---|
-| `canonical → persist` | `alias` 表（§4.6）经 `Tx` 读写 | 用它的那个 task |
-| `semantics → canonical` | `Intent.goal` 存规范化表示，取 `EntityId` 这一个类型（§1.3） | 同上 |
-| `semantics → persist` | 五张表经 `Tx`；状态迁移与 `Event` 同事务（§5.3） | 同上 |
-| `budget → semantics` | 预算树的 owner 取 `IntentId`（§12.2） | 同上 |
-| `budget → persist` | 账本表经 `Tx`；`RecoveryHook` 的读写在恢复路径上（§12.5） | 同上 |
+| `canonical ← persist` | `alias` 表（§4.6）经 `Tx` 读写 | 用它的那个 task |
+| `semantics ← canonical` | `Intent.goal` 存规范化表示，取 `EntityId` 这一个类型（§1.3） | 同上 |
+| `semantics ← persist` | 五张表经 `Tx`；状态迁移与 `Event` 同事务（§5.3） | 同上 |
+| `budget ← semantics` | 预算树的 owner 取 `IntentId`（§12.2） | 同上 |
+| `budget ← persist` | 账本表经 `Tx`；`RecoveryHook`（`recovery.rs:39`）的读写在恢复路径上（挂 `MarkLostExecutions` 态，§13.1） | 同上 |
+
+> **订正（2026-10-06，评审查出）**：本表初稿五行写的是 `canonical → persist` 这种形式，
+> 与 §1.2.0 的约定相反。**含义没变**（左依赖右），改的是箭头的朝向与标题的注明，
+> 以免同一份文件里 `→` 指向两条相反的边。
 
 **按「叶子 crate 的条目记实际依赖」的既有口径**（`crates/continuum-runtime/tests/dependency_direction.rs:104-108`）：
 上表的边**逐条由用它的 task 登记**，不预先声明齐。**没有一条指向 `continuum-core`**——
@@ -171,9 +206,34 @@ continuum-budget     ← continuum-semantics, continuum-persist
 
 ## 2.4 迁移号段
 
-P0 内置 1、2（`crates/continuum-persist/src/db.rs:27-58`）；P1 取 10、20；P2 取 30、40、41；
-P3 取 50、60、70、80、90（`crates/continuum-runtime/tests/dependency_direction.rs` 与各 crate 的
-`persist.rs` 实测）。**本层取 100 段**：
+**已占用的号（逐 crate 实读，2026-10-06）**：
+
+| 段 | 已占用 | 出处 |
+|---|---|---|
+| P0 | 1、2 | `crates/continuum-persist/src/db.rs:30`、`:47` |
+| P1 | 10、20 | `crates/continuum-artifact/src/persist.rs:9`、`crates/continuum-graph/src/persist.rs:15` |
+| P2 | 30、40、41 | `crates/continuum-workspace/src/persist.rs:22`、`crates/continuum-effect/src/persist.rs:28`、`crates/continuum-policy/src/persist.rs:31` |
+| P3 | **50、80** | `crates/continuum-capability/src/persist.rs:42`、`crates/continuum-model-registry/src/persist.rs:107` |
+
+> **订正（2026-10-06）**：本节初稿写「P3 取 50、60、70、80、90……实测」。
+> **「实测」是假的**：P3 实际只占了 **50 与 80** 两个号——
+> 60（B 的连接器）与 70（C 的 Provider）**至今没有迁移**（`continuum-connector/src` 与
+> `continuum-provider/src` 里没有 `persist.rs`），90（E）也没有。
+> 50/60/70/80/90 那个列表是 `docs/superpowers/p3bcdf-followups.md` §七.4 的**号段分配**，
+> 不是实际占用——**分配与占用是两件事**，初稿把它们写成了一句「实测」。
+> 原句留在此处。
+
+**两处「号相同但不是同一条链」的干扰项**（现场核对时会被误判为空号被占）：
+
+- `60` 出现在 `crates/continuum-persist/src/bin/crash-writer.rs:17` 与
+  `crates/continuum-persist/tests/crash_atomicity.rs:9`；
+- `100` 出现在 `crates/continuum-persist/tests/migrations.rs:45`（表名 `layer_table`）。
+
+**这四处都在各自的测试/工具 `Db` 里，不进生产链**（`Db::open_with` 的迁移集由调用方给，
+`run_recovery`/`migrate` 只作用在那一个实例上）。故它们**不占用**号段，
+但**读到它们时不要以为 P4 的 100 已被占**。
+
+**本层取 100 段**：
 
 | 号 | 表 | crate |
 |---|---|---|
@@ -261,7 +321,7 @@ pub enum Canonicalized {
 - §200（`docs/spec/04-method.md:634-659`）：「禁止：没有正确候选 → 强行选择最相似候选，
   否则系统会产生**稳定的错误确定性**。」
 
-本设计把它折成**两条互补的断言**，一条管上界、一条管下界：
+本设计把它折成**四条断言**：三条管「什么时候**可以**返回 `Resolved`」，一条管「什么时候**不可以**」。
 
 **（断言 A，闭集）`Resolved(e)` 蕴含 `e` 是输入候选集里的成员。**
 不是「e 与某个候选相似」，而是**同一个 `EntityId` 值**。
@@ -273,10 +333,32 @@ pub enum Canonicalized {
 构造 N 个候选、每个恰好违反一条不同的显式约束，断言 N 次结果里**没有一次**是 `Resolved`，
 且返回的具体是哪一态（`Unknown` 还是 `ConfirmRequired`）逐次断言。
 
-**（断言 C，单侧守卫的反面）候选集为空 ⟹ `Unknown`。**
-三条一起钉住「不强行绑定」的两侧：空集不产出 `Resolved`（C），非空但不合格也不产出（B），
-产出 `Resolved` 时必须真的是集合里的成员（A）。
-**A 与 B 是 fail-open 的那一侧**（少了它们，系统仍会返回一个 `Resolved`，看不出错），故两条都必须有照片。
+**（断言 C，空集）候选集为空 ⟹ `Unknown`。**
+
+**（断言 D，唯一合格）`Resolved(e)` 蕴含 `e` 满足**全部**显式约束，且候选集里**没有第二个**满足者。**
+
+> **订正（2026-10-06，评审查出）**：本节的初稿只写了 A / B / C 三条。
+> **三条不穷尽**——它们钉住的是「`e` 在集合里」（A）与「全不合格时不许绑定」（B），
+> **漏掉了两种同样会产出错误 `Resolved` 的情形**：
+> (i) `Resolved` 指向的候选**在集合里但在约束下不合格**（例如集合里既有合格者又有不合格者，
+> 解析器绑定到了不合格的那个——A 判不出来，因为它在集合里）；
+> (ii) **多个合格候选却返回 `Resolved`**（正确结果是 `Ambiguous`——B 也判不出来，
+> 因为不是「全部不合格」）。**两种都是 §206 的「多个候选仍然成立」被违反**，
+> 而两者都产出 `Resolved`，是不可从返回值上看出的错。
+
+**D 的两条照片**（评审查出后补，逐条对应上面两种情形）：
+
+1. **`Resolved` 指向合格者、且集合里另有不合格者**：构造候选集 `{c₁ 满足全部约束, c₂ 违反一条} `，
+   断言结果 `Resolved(c₁)`——**正例**，钉住「合格的那一个能被选出来」，
+   同时钉住 A 不足以替代 D（`c₂` 也在集合里，若绑定到它，A 仍成立）。
+2. **多个合格候选 ⟹ 不是 `Resolved`**：构造 `{c₁ 合格, c₂ 合格}`（两者满足同一组显式约束），
+   断言结果是 `Ambiguous` 而**不是** `Resolved(c₁)`——**这是 D 的负例**，
+   也是本节初稿最直接的缺口。
+
+四条一起钉住两侧：空集不产出（C），全不合格不产出（B），
+产出时必须是集合成员（A）、**必须合格（D 前半）、且必须唯一（D 后半）**。
+**A、B、D 三条都在 fail-open 侧**（少了任何一条，系统仍会返回一个 `Resolved`，看不出错），故三条都必须有照片；
+C 在 fail-closed 侧，一条即可。
 
 ## 4.3 候选集合以**值**进入（§201 的约束解析，§1.2 的边界）
 
@@ -458,17 +540,41 @@ pub struct ResolutionRisk {
 （`docs/superpowers/p1-followups.md` §一.1）：写入函数返回 `Err` 之后调用方必须回滚、不得提交——
 故本层的写函数**都不自己 `commit`**，与 P1 同形。
 
-**本层是四个 `EventType` 与两个 `AuditKind` 的首个生产方**（实测：全仓除 `continuum-events`
-与测试外零命中）：
+**本层写六项**，其中**四项是首个生产方、两项不是**——逐项实测如下
+（判据：`grep -rn "EventType::<X>" --include="*.rs" crates/`，排除 `continuum-events`
+自身与测试目录后的命中数）：
 
-| 类型 | 本层的写入点 | 依据 |
-|---|---|---|
-| `EventType::IntentCreated` | `Intent` 首次落库 | §310 |
-| `EventType::IntentCompleted` | 迁移到 `COMPLETED` | §310 |
-| `EventType::PlanReviewRequired` | Plan 进入 `REVIEW` 前的审查挂起点 | §310 §229 |
-| `EventType::DecisionRequired` | `Decision` 创建（§10） | §310 §331 |
-| `AuditKind::ContractChanges` | Contract 新版本创建（§7.3） | §313「contract changes」 §226 |
-| `AuditKind::UserApprovals` | `DecisionResult` 落库、Plan 进 `USER_APPROVED`（§10.3、§9.3） | §313「user approvals」 §332 §229 |
+| 类型 | 本层的写入点 | 依据 | 今天有无生产方（实测） |
+|---|---|---|---|
+| `EventType::IntentCreated` | `Intent` 首次落库 | §310 | **无**（仅 `continuum-persist/tests/transaction.rs` 出现） |
+| `EventType::IntentCompleted` | 迁移到 `COMPLETED` | §310 | **无生产方**；但 `crates/continuum-persist/src/tx.rs:369` 是它的**消费者**，见下 |
+| `EventType::PlanReviewRequired` | Plan 进入 `REVIEW` 前的审查挂起点 | §310 §229 | **无**（全仓零命中，连测试也没有） |
+| `EventType::DecisionRequired` | `Decision` 创建（§10） | §310 §331 | **无**（全仓零命中） |
+| `AuditKind::ContractChanges` | Contract 新版本创建（§7.3） | §313「contract changes」 §226 | **无**（除 `continuum-events` 外零命中） |
+| `AuditKind::UserApprovals` | `DecisionResult` 落库、Plan 进 `USER_APPROVED`（§10.3、§9.3） | §313「user approvals」 §332 §229 | **已有**：`crates/continuum-workspace/src/gate.rs:222`、`:303`、`:348`（Integration Gate） |
+
+> **订正（2026-10-06，评审查出）**：本节初稿写「本层是四个 `EventType` 与**两个** `AuditKind` 的
+> 首个生产方（实测：全仓除 `continuum-events` 与测试外零命中）」。**`AuditKind::UserApprovals`
+> 那一半是假的**——`continuum-workspace` 的 Integration Gate 早已在三处写它
+> （`apply_patch` / `cherry_pick` / `merge`，同文件 `:42` 的模块文档也写着这三项归它）。
+> **更坏的是那句括注「实测……零命中」**：本设计查过那三个文件（`grep` 的输出里就有它们），
+> 仍写出了「零命中」——**这是一句没做过的实测被写成做过**，与本项目反复栽的同一形状。
+> 错因：把「`IntentCreated` 只在测试里出现」这半边的结论顺手扩到了整行括注。
+> **原句与错因留在此处。**
+
+两处由此改写的细节：
+
+1. **`AuditKind::UserApprovals` 的载荷形状因此不止一种**：Gate 写的是操作名
+   （`"apply_patch"` 等，`crates/continuum-workspace/src/gate.rs:224`），本层写的是决策单与
+   被选项。`append_audit` 的 `payload` 是自由 JSON（`crates/continuum-persist/src/tx.rs:79-84`），
+   **同一个 kind 下不保证载荷同形**——读 `audit_log` 的一方不得假定「一个 kind 一种载荷」。
+   这是本层引入的第二种形状，**据实记在此**（不改 Gate，也不新增 kind）。
+2. **`EventType::IntentCompleted` 已经有一个消费者，它带一条 MUST**：
+   `crates/continuum-persist/src/tx.rs:369-373` 在事件日志扫描时断言
+   「**可跳过事件之后存在 `intent.completed`**」即报 `Err`。
+   故本层**写 `IntentCompleted` 的位置必须满足**：它之前不得有可跳过（不可解码／版本未知）的事件。
+   本层无法控制别层在此之前写了什么，**但可以保证自己的写入点在链尾**——
+   这条是既有的消费者强加给本层写路径的约束，记在此以免实现时踩上。
 
 **`EventType` / `AuditKind` 的变体一个不改、一张表不加**（两个枚举已含所需项）。
 **`EventType::ALL` 是第三份清单**（`crates/continuum-events/src/event.rs:35-45`），
@@ -700,23 +806,48 @@ pub struct ReviewIndependence {
 
 ## 9.5 用户审查视图（§341）
 
-§341（`docs/spec/05-normative.md:2661-2678`）：「用户默认只审 目标 / 重大设计 / 关键约束 /
-Milestone / 风险 / 成本 / 权限 / 验收条件」——**七项**（原文如此，第七项与第八项合并计为七类）。
+§341（`docs/spec/05-normative.md:2661-2678`）列的清单是**八项**，逐行照录：
 
-**落点是一个投影类型**，字段**恰好**这七项，且**没有**指向内部执行步骤的字段：
+```
+目标
+重大设计
+关键约束
+Milestone
+风险
+成本
+权限
+验收条件
+```
+
+**`成本` 与 `权限` 是分列的两行**，不是一行。
+
+> **订正（2026-10-06，评审查出）**：本节初稿把这两行合并成一个字段
+> `cost_and_authority`，并写「**七项**（原文如此，第七项与第八项合并计为七类）」。
+> **那句话把一个本层的合并说成了规范原文**——「原文如此」四个字是假的：§341 写的是八行。
+> 这是「把设计里说了的写成规范里有的」的同一形状。**原句与错因留在此处**，
+> 以免后来者以为八项是后人加的。
+
+**落点是一个投影类型**，字段**恰好**这八项，且**没有**指向内部执行步骤的字段：
 
 ```rust
-/// §341 的用户审查视图。**字段恰好七项**，逐项断言。
+/// §341 的用户审查视图。**字段恰好八项**，逐项断言。
+/// 字段名与 §341 的八行**一一对应**，不合并任何两行。
 pub struct UserReviewView {
-    pub objectives: ...,
-    pub major_designs: ...,
-    pub key_constraints: ...,
-    pub milestones: ...,
-    pub risks: ...,
-    pub cost_and_authority: ...,   // §341 的「成本」「权限」
-    pub acceptance_conditions: ...,
+    pub objectives: ...,            // 目标
+    pub major_designs: ...,         // 重大设计
+    pub key_constraints: ...,       // 关键约束
+    pub milestones: ...,            // Milestone
+    pub risks: ...,                 // 风险
+    pub cost: ...,                  // 成本
+    pub authority: ...,             // 权限
+    pub acceptance_conditions: ..., // 验收条件
 }
 ```
+
+**八项里任何两项都不得合并**：合并会改变「用户看得到什么」这一事实，
+而 §341 的八行是这个视图的**全部**判据。若将来判定「成本与权限在界面上应并排显示」，
+那是**呈现方**的事，不是这个投影类型的事（本组件不是 UI，见末段）——
+**本设计不做这个合并，也不为它留字段**。
 
 **照片**：字段清单逐项断言（**多一项即红**——这是负向的守卫，本仓接受否定式照片，
 见 `docs/superpowers/p3bcdf-followups.md` §四.4）。**本组件不是 UI**：§2.1 的组件表里没有
@@ -955,8 +1086,16 @@ I3: settled(n, d) + reserved(n, d) ≤ allocation(n, d)
 `continuum_core::model::Usage { input_tokens, output_tokens }`
 （`crates/continuum-core/src/model.rs:51`）——它**只覆盖 §333 五维中的 `token` 一维**，
 且形状与 §333 的 `token` 不同（拆成输入/输出）。其余四维（`money` / `wall_time` /
-`gpu_time` / `network_transfer`）**全仓零读数**；流式调用连 `Usage` 都没有
-（`StreamChunk` 只有 `delta` / `done`，同文件 `:64`；G 的设计 §14 第 8 条已报此条）。
+`gpu_time` / `network_transfer`）**没有任何产生方**：实测全仓命中只有两处，**两处都不是读数**——
+`crates/continuum-model-registry/src/budget.rs:38-43` 是 `BudgetView` 的**类型字段**，
+`crates/continuum-model-registry/tests/budget.rs:46-62` 是它的**测试夹具**。
+流式调用连 `Usage` 都没有（`StreamChunk` 只有 `delta` / `done`，同文件 `:64`；
+G 的设计 §14 第 8 条已报此条）。
+
+> **措辞订正（2026-10-06）**：初稿写「其余四维**全仓零读数**」。**「零读数」成立，
+> 但「全仓」这个作用域太宽**——四维在仓里有命中（上面两处），只是都不是读数。
+> 本仓已两次栽在「断言的作用域与事实不同宽」，故改写成「没有任何产生方 ＋ 逐条列出命中处」。
+> 原句的来历留在此处。
 
 **本设计的规则（一条，两处应用）**：
 
@@ -966,6 +1105,7 @@ I3: settled(n, d) + reserved(n, d) ≤ allocation(n, d)
 
 1. **流式调用**（G §14 第 8 条）：按预扣结算。
 2. **悬空的预留**（进程在预留与结算之间死掉）：**恢复钩子按预扣结算**，不释放。
+   钩子挂在 `RecoveryPhase::MarkLostExecutions`（§13.1 有挂该态的两条判据）。
 
 **理由一致**：无读数时，「实际 ≤ 预扣」没有依据；**按预扣结算永不低记**（fail-closed 在预算上），
 而释放余量是 fail-open（可能永久漏记一次真实消耗）。
@@ -1035,9 +1175,19 @@ pub enum ExplorationVerdict {
 ## 12.6 与 D 的 `BudgetView` 的投影（D §11 第 5 条）
 
 D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它投影成 `BudgetView` 传进 `RoutingRequest`**，
-故任何时刻都不出现 `语义层 → 资源层`。本设计**照此办，并补齐它缺的那一半**：
+故任何时刻都不出现「语义层造一个资源层的类型」这件事。本设计**照此办，并补齐它缺的那一半**：
 
-- D 侧待实现的是 `BudgetView`（五个 `Option<i64>`，`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md:917-923`）。
+> **引用说明（2026-10-06）**：D 的原文在这一句里写的是「`语义层 → 资源层` 这条反向边在任何时刻都不出现」。
+> **按 §1.2.0 的约定，`语义层 → 资源层` 读作「资源层依赖语义层」，正是 §9.1 已声明的合法方向**，
+> 不是反向边。D 那句话里的箭头用的是相反约定（它与 D 自己 §6.3 的订正段不一致）。
+> **本设计照录 D 的结论（「过渡期不出现反向边」），但不照抄它的箭头**——
+> 引文原样留在此处，读到它时按本节 §1.2.0 换算。
+
+- **D 侧的 `BudgetView` 已经落地为代码**：`crates/continuum-model-registry/src/budget.rs:34-44`
+  （五个 `pub Option<i64>`，无派生、无构造闸门，模块文档 `:20-22` 写着「不是一个 trait」的判据）。
+  **D 的设计 `:917-923` 与这份代码一致**，本设计按代码读。
+  它的文档还明写了一条与本层同源的区别（`:33-36`）：`None` = 该量纲不构成约束，
+  `Some(0)` = 额度为零，**两者不是同一件事**——本层的 `Remaining` 必须守同一条（§12.1 的 `Dimensions`）。
 - **本层产出的是 `Remaining`**（§12.1），五个 `Option<i64>`。
 - **投影是恒等映射，逐维**：`BudgetView { money: r.money(), wall_time: r.wall_time(), ... }`。
   照片：五个量纲**各一条**用例，断言投影后的值与 `remaining` 逐维相等（含 `None` 那一侧：
@@ -1046,12 +1196,34 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
   两侧的用例合起来才算钉住）。
 
 **对 D §11 第 5 条那句「若复审判定二者应合一，那是把只读投影塞进记账对象，本设计不同意」的答复**：
-**本设计同意不合一**，但把理由说准——`Remaining` **不是记账对象**（记账对象是
-`Allocation` + 账本），它与 `BudgetView` 是**同一组数字在两个层的两条只读表示**。
-**「同一组数字两个类型」本该是本仓判为缺陷的形状**（同一概念两个词汇表），
-这里之所以可接受，是因为它们**不是同一概念**：一个在预算树里、一个在资源层的排序输入面上，
-中间隔着一条**已声明的跨层边**（由驱动装配）。
-**若复审要合一，代价是接受一条 `资源层 → 语义层` 的边**（与 §9.1 相反），本设计不同意。
+
+**D 的理由在本设计上不成立**：`Remaining` **不是记账对象**（记账对象是 `Allocation` + 账本），
+它本身就是一条**现算的只读读法**。故「把只读投影塞进记账对象」这个形状**不会发生**——
+把 `Remaining` 与 `BudgetView` 合成一个类型，得到的是**一个只读读法**，不是把余量塞进上限。
+
+**而本设计初稿给的另一条理由（方向）是错的**，据实订正：
+
+> **订正（2026-10-06，评审查出）**：初稿写「若复审要合一，代价是接受一条
+> `资源层 → 语义层` 的边（与 §9.1 相反），本设计不同意」。**这个方向判断反了**：
+> 合并后的类型**住在语义层**时，资源层依赖它，那条边是 `语义层 → 资源层`——
+> **正是 §9.1 已画的那一条，不是反向边**。
+> 反向边只在**类型住在资源层**时出现（那时本层要依赖资源层）。
+> 故**合并在方向上没有代价**。原句与错因留在此处。
+
+**订正后的结论**：
+
+1. **合并在方向上可行**，唯一的方向要求是：**合并后的类型必须住在语义层**
+   （`continuum-semantics`），由资源层消费——`.model-registry` 取该类型的边即 §9.1 的 `语义层 → 资源层`。
+2. **本设计不反对合一**，但**不自作主张改 D 的已冻结面**：`BudgetView` 连同它的用例已写进
+   D 的设计与计划，改它要同时动那两份文件。故**裁定权交协调者**，并给出两种落地的确切形状：
+   - **合一**：删 `BudgetView`，`.model-registry` 直接收 `continuum_semantics::Remaining`
+     （登记 `continuum-model-registry ← continuum-semantics` 一条边；§1.2.0 的约定下这句读作
+     「model-registry 依赖 semantics」）。中间不再需要驱动做投影。
+   - **不合一**：保持今天的形状（驱动投影，两个类型，零跨层边）。
+     此时**必须在两处都写明它们是同一组数字的两条只读表示**，免得后来者以为它们是两个概念
+     ——这正是本仓判为 Critical 的形状，唯一的豁免理由是「有一条已声明的跨层边隔着」。
+3. **本设计对两种落地都不改动 `Remaining` 的定义**（五个 `Option<i64>`、逐维现算），
+   故无论裁哪一边，§12.1–§12.5 一字不改。
 **这一条记在 §16 第 22 条，收件人：复审者 + 协调者。**
 
 ---
@@ -1065,18 +1237,51 @@ D 的设计 §6.1 已划好：**语义层产出自己的 `Budget`，驱动把它
 | `Tx::query` / `execute` / `commit`（`tx.rs:26-47`） | 本层全部读写经它；**写函数不自己 commit** | 不改 |
 | `Tx::append_event` / `append_audit`（`tx.rs:49`、`tx.rs:79`） | §5.4 的六个写入点 | 不改 |
 | `Migration` / `Db::open_with` / `migrate`（`db.rs:14`、`:72`、`:96`） | 100 / 110 / 120 三个迁移；由 `continuum-runtime` 的 `runtime_migrations()` 追加 | 加三行注册（由用它的 task 登记） |
-| `RecoveryHook`（`recovery.rs:39`） | **本层注册一个钩子**：起库时把悬空的 `reserve` 按预扣结算（§12.3 第 2 处） | 不改；注册在 `main.rs`（照 P2 的做法） |
+| `RecoveryHook`（`crates/continuum-persist/src/recovery.rs:39`）与 `RecoveryPhase`（同文件 `:12-20`） | **本层注册一个钩子**：起库时把悬空的 `reserve` 按预扣结算（§12.3 第 2 处） | 不改；注册点在 `crates/continuum-runtime/src/recover_cmd.rs:38-41`（`RecoveryRegistry::new()` ＋ 两次 `register`），**不是 `main.rs`** |
 
-**唯一的一条请求**：`RecoveryHook` 的注册点是 `continuum-runtime` 的装配处，
-本层需要在那里加一个 `phase`（照 `RecoveryPhase` 的既有取值）。
-**这条由本层的实现 task 做，不推给别处。**
+**本层的钩子挂在 `RecoveryPhase::MarkLostExecutions` 这一态，不新增 phase。**
+判据两条：
+
+1. **`RecoveryPhase` 的态集不得扩充**：`crates/continuum-persist/src/recovery.rs:24` 的注释写着
+   「**顺序即 §319 的执行顺序，不得改动**」，五态是 §319 的转录。
+   本层**没有** §319 的判据去加第六态。
+2. **`MarkLostExecutions` 是「判定一次执行已丢失」的那一步**，而 §12.3 的规则正是
+   「**无读数即按预扣结算**」——「判丢失」这个动作与「结算为预扣」这个后果**同一个触发点**。
+   挂到 `ResumeEligibleTasks` 就晚了（那时额度已被后续任务读走）。
+
+> **订正（2026-10-06，评审查出）**：本行与随后的段落初稿有三处事实错：
+> (i) 说 `RecoveryHook` 定义在 `continuum-runtime` 的同名文件——**它在 `continuum-persist`**；
+> (ii) 说注册在 `main.rs`——**今天唯一注册点是 `recover_cmd.rs:38-41`**
+> （`main.rs` 里零命中；该函数是从 `main.rs` 迁过来的，这一句写在 `recover_cmd.rs:44-46` 的注释里，
+> 我把它读成了「今天还在 main.rs」）；
+> (iii) 说「加一个 `phase`（照 `RecoveryPhase` 的既有取值）」——**自相矛盾**：
+> 既有取值是五态封闭集，「加一个」就不是「照既有取值」；
+> 而 `:24` 的「不得改动」明写它不能扩。
+> **原句与三处错因留在此处。**
+
+**这条由本层的实现 task 做，不推给别处**（改的是 `recover_cmd.rs` 的注册块，
+不是 `main.rs`；**五态一个不动**）。
 
 ## 13.2 P1（`continuum-graph`）——**本设计要在这里改两处**
 
 | 处 | 现状（实读） | 本设计的请求 | 为什么现在提 |
 |---|---|---|---|
-| `adfir_graph` 缺 `contract_version` | `crates/continuum-graph/src/persist.rs:17-23` 的 `adfir_graph` 只有 `contract_id TEXT NOT NULL`（`:20`）；`AdfirGraph.contract_id: ContractIdRef`（`crates/continuum-graph/src/graph.rs:49`）也只带 id | **加一列 `contract_version INTEGER NOT NULL`**（P1 段新迁移号 21）。§226 的 ContractDiff 消费需要一个**基准版本**：没有它，「哪些已有节点受影响」没有比较的另一端 | §226 的 MUST 落在执行层，而这条信息**今天在图上不可表达**。图上补一列是一次迁移的成本；等执行器落地后再补，就要同时改执行器、恢复路径与既有行 |
-| `ContractIdRef` 与 `ContractId` 是同概念两类型 | `crates/continuum-graph/src/ids.rs:41` 的 `ContractIdRef` 是一个 `String` newtype | **裁定唯一的 `ContractId`**：本层定义真类型，`ContractIdRef` 改为复用它（那需要登记 `执行层 → 语义层` 这条**合法**方向的边），或明写 `ContractIdRef` 是**不透明字符串引用**、其权威在本层 | 本仓对「同一个概念两个类型」一贯判为 Critical（`ToolId` / `ModelId` 各有前例）。**早裁便宜**：今天 `ContractIdRef` 的生产方只有一个（测试与 `AdfirGraph::new`） |
+| `adfir_graph` 缺 `contract_version` | `crates/continuum-graph/src/persist.rs:17-23` 的 `adfir_graph` 只有 `contract_id TEXT NOT NULL`（`:20`）；`AdfirGraph.contract_id: ContractIdRef`（`crates/continuum-graph/src/graph.rs:49`）也只带 id | **新增一个迁移 21**：`ALTER TABLE adfir_graph ADD COLUMN contract_version INTEGER NOT NULL DEFAULT 1`。三条落地要求见下 | §226 的 MUST 落在执行层，而这条信息**今天在图上不可表达**。图上补一列是一次迁移的成本；等执行器落地后再补，就要同时改执行器、恢复路径与既有行 |
+
+**迁移 21 的三条落地要求**（评审查出，逐条都是会直接报错或静默失效的坑）：
+
+1. **必须带 `DEFAULT`**。SQLite 在**非空表**上执行 `ALTER TABLE … ADD COLUMN … NOT NULL`
+   **不带默认值时直接报错**（"Cannot add a NOT NULL column with default value NULL"）。
+   `adfir_graph` 在生产库里非空，故 `NOT NULL` 与 `DEFAULT` 必须同时给。
+2. **不得改迁移 20 的 SQL**。`migrate()` 按 `schema_migrations` 里已记录的 `version` 跳过
+   （`crates/continuum-persist/src/db.rs:96-113`），故**改 20 的 SQL 对已建库完全无效**——
+   那是一处「改了但没生效」的静默失效。**加列只能走新号 21**。
+3. **`DEFAULT` 的取值是一个语义声明，不是占位**：`DEFAULT 1` 表示「迁移之前的行按 Contract v1 读」。
+   这个值**没有规范依据**（§226 未规定既有图该按哪一版读），故它**必须与一列同批写进订正注记**，
+   且**在执行层落地时要被重新判定**——若那时判定「既有图无法确定基准版本，应当作不可复用」，
+   则改为 `DEFAULT 0` 并在读取侧把 0 判为「未绑定版本」。
+   **这一条记在 §16 第 24 条，收件人：执行层 ＋ 协调者**（不要让它悄悄变成一个看似有意义的 1）。
+| `ContractIdRef` 与 `ContractId` 是同概念两类型 | `crates/continuum-graph/src/ids.rs:41` 的 `ContractIdRef` 是一个 `String` newtype | **裁定唯一的 `ContractId`**：本层定义真类型，`ContractIdRef` 改为复用它（那需要登记 `语义层 → 执行层` 这条**合法**方向的边，§1.2.0 的约定：执行层依赖本层），或明写 `ContractIdRef` 是**不透明字符串引用**、其权威在本层 | 本仓对「同一个概念两个类型」一贯判为 Critical（`ToolId` / `ModelId` 各有前例）。**早裁便宜**：今天 `ContractIdRef` 的生产方只有一个（测试与 `AdfirGraph::new`） |
 
 **不改的**：`Node.constraints` / `Node.execution_policy` 的类型不动（§11.2 按原样读）；
 `propagate_invalidation` 的签名不动（§8.2 由执行层调）。
@@ -1110,7 +1315,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | 处 | 本层的处置 |
 |---|---|
 | D 的 `BudgetView` | §12.6：本层产出 `Remaining`，投影恒等；不合一 |
-| D §11 第 12 条：`ExecutionProfile.cost_budget` 的类型收紧 | **本层交付了那个类型**：`cost_budget` 收成 **`Allocation`**（上限，不是余量）——D §6.3 的角色判据与本设计一致。**收紧的动作归执行层**（那列在 `crates/continuum-graph/src/persist.rs:60`），不是本层；`budget → semantics` 的边方向也允许 `graph → semantics`。**收件人：执行层（接线时）＋ 协调者** |
+| D §11 第 12 条：`ExecutionProfile.cost_budget` 的类型收紧 | **本层交付了那个类型**：`cost_budget` 收成 **`Allocation`**（上限，不是余量）——D §6.3 的角色判据与本设计一致。**收紧的动作归执行层**（那列在 `crates/continuum-graph/src/persist.rs:60`），不是本层；那一步需要执行层依赖本层（`语义层 → 执行层`，§1.2.0 的约定），是 §9.1 已声明的方向。**收件人：执行层（接线时）＋ 协调者** |
 | G §14 第 5 条：`usage()` 的语义（累计？会话？） | **本层作为对账方给出答案：不需要那个定义。** 预扣—结算要的是**逐次**读数（一次 `invoke` / 一次 `stream` 的增量），累计是**账本**的职责，不是 `usage()` 的。故 §315 的 `usage()` 按「单次」实现即可，**本层不消费它**（本层消费的是调用方交来的 `Dimensions`）。**这一条把 C §12 第 3 条与 G §14 第 5 条从「定不了」降为「不必定」** |
 | G §14 第 8 条：流式无用量读数 | §12.3：按预扣结算。**本层给出的是保守处置，不是要求 G 补读数**——补读数要先有 §315 的承载位置（G §14 第 4 条同一条缝） |
 | C §6（`docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md:487-489`）：「预算视图来自语义层，不是 provider 的 `usage()`」 | **确认，并按 §12.6 落实**。附一条实读：`Usage` **只覆盖 `token` 一维**且拆成输入/输出，故「用 `usage()` 当成本输入」在**形状上也不可能**（五个量纲只对上一维） |
@@ -1128,7 +1333,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 |---|---|
 | 规范化的两条互补结果（§2.4 第 1 条） | `Canonicalized` 的两个变体各一条；含错别字／简称／中英混写／代词四类输入**各一条**；有未解 mention 时断言得 `NeedsResolution`（不是 `Canonical`） |
 | 四态**逐项**（§271 §206） | 四态各至少一条；每条断言是**哪一枚**（不是 `is_ok`） |
-| 不强行绑定（§273 §200） | §4.2 的断言 A / B / C：A 一条（`Resolved` 的 id ∈ 候选集）；B **逐候选 N 条**；C 一条。**A 与 B 是 fail-open 侧，必须有** |
+| 不强行绑定（§273 §200 §206） | §4.2 的断言 A / B / C / D：A 一条（`Resolved` 的 id ∈ 候选集）；B **逐候选 N 条**；C 一条；**D 两条照片**（合格者被选中／多合格者得 `Ambiguous`）。**A、B、D 是 fail-open 侧，必须有** |
 | 单侧守卫的反面 | 「候选集非空且唯一合格 → `Resolved`」也有一条（只钉拒绑那侧会让解析器永远返回 `Unknown` 照样绿） |
 | `retrieval_score` 与 `ResolutionConfidence`（§272 §275） | `ResolutionResult` 字段清单逐项（加分数即红）；`ResolutionConfidence` 无可转 f64 的读者（trybuild）；两者不在同一类型的字段里 |
 | `ResolutionRisk` 是必填（§276） | 签名层面（无 `Option`、无 `Default`）；**运行期无照片**（§15 第 2 条） |
@@ -1143,7 +1348,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 | `ReviewFinding` 四 severity（§339） | 四值各一条 |
 | §340 的三条事实可观察 | 一次「同模型同上下文」的审查读回 `separate_context = false` 且两个 model ref 相同 |
 | Plan Change 十一例（§230） | 逐例一条，两条 class 各覆盖 |
-| `UserReviewView`（§341） | 字段清单**逐项**（多一项即红） |
+| `UserReviewView`（§341） | 字段清单**逐项八条**（多一项即红、少一项即红；**成本与权限各占一条**，合并即红） |
 | `Decision`（§331） | `options.len() == consequences.len()` 逐条读回；无「只带选项」的构造路径（trybuild）；`Decision` 公开面恰好一个类型（与 `PolicyDecision` 不混） |
 | 恢复链（§332 §107） | 只改指名字段、**其余字段逐项不变**；失败路径断言**四张表无半写行**（不只断言 `Err` 哪一种） |
 | Constraint Validator（§225 §6） | §225 的两条清单**逐项**（7 项 MAY 放行 + 3 项 MUST NOT 拦下）；`REQUIRED` 违反一条；`PREFERRED`/`FLEXIBLE`/`UNSPECIFIED` 违反三条各不拦下 |
@@ -1192,7 +1397,7 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 6. **表达式之间的强弱比较**（§8.1 的 `ExpressionChanged`）：本层判不了，
    故「`duration >= 4K` → `>= 2K` 算削弱」这件事**没有照片**，它有的是一条**显式标记**。
 7. **§340 的「独立性是否足够」**：三条事实可观察（有照片），但**判定没有判据**，故无照片。
-8. **真实用量读数**：除 `token` 一维外全仓零读数（§12.3），
+8. **真实用量读数**：除 `token` 一维外，其余四维**没有任何产生方**（§12.3，命中处逐条列出），
    故「结算算得对不对」在 `money` / `wall_time` / `gpu_time` / `network_transfer` 四维上
    **不可观察**；`token` 那一维也需把输入/输出两数合成一个（换算规则规范未给，§16 第 19 条）。
 9. **§110 的「先寻找合法低成本方案」**：不在本层（§12.4），
@@ -1270,8 +1475,11 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
 21. **§7 的 `network_transfer <= threshold` 与 `compute_cost <= threshold` 里的 threshold 没有数值**
     （§12.5）：ENG-005 只把 §7 的**前三条**数钉住，后两条原文就写作 `threshold`。
     **缺的是这两个数。收件人：规范维护者**。
-22. **`Remaining` 与 D 的 `BudgetView` 是否应合一**（§12.6）：本设计判**不合一**
-    （合一会写出 `资源层 → 语义层` 的边）。**收件人：复审者 ＋ 协调者**。
+22. **`Remaining` 与 D 的 `BudgetView` 是否应合一**（§12.6）：**本设计不反对合一，
+    且已撤回「合一会写出反向边」那条理由**（订正见 §12.6）——类型住在语义层时，
+    合并后的边是 `语义层 → 资源层`，正是 §9.1 已声明的那一条。
+    本设计不自作主张改 D 的已冻结面，故**两种落地形状都给出**（§12.6 第 2 点），裁定权交协调者。
+    **收件人：复审者 ＋ 协调者**。
 23. **P2 的 `PolicyContext.explicit_current` 与 §8.2 的第 2 级不是同一件事**（§13.3）：
     文档写「Explicit Current Task Contract 由 P4 运行期传入」，代码里是 `Option<ExplicitApproval>`。
     **本层不擅自改 P2 的类型**；若要落 §8.2 的原文，缺的是
@@ -1279,7 +1487,11 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     **收件人：P2 的设计 ＋ 协调者**。
 24. **`adfir_graph` 缺 `contract_version`，`ContractIdRef` 与 `ContractId` 是同概念两类型**（§13.2）：
     **这两条是本设计对已建之物的请求**（一列迁移 + 一次类型裁定）。
-    **收件人：执行层（P1）＋ 协调者**（裁定 `ContractId` 归谁）。
+    加列那一条附带一个**无规范依据的取值**：`ALTER TABLE … ADD COLUMN contract_version INTEGER NOT NULL
+    DEFAULT 1` 里的 `DEFAULT 1` 声明「迁移之前的行按 Contract v1 读」，
+    而 §226 **没有规定**既有图该按哪一版读——**那个 `1` 是本设计的暂定，不是规范给的**。
+    落地时必须**重新判定**（改为 `DEFAULT 0` ＋ 读取侧把 0 判为「未绑定版本」也是合法选择）。
+    **收件人：执行层（P1）＋ 协调者**（裁定 `ContractId` 归谁、以及 `DEFAULT` 取什么）。
 25. **`ExecutionProfile.cost_budget` 收成 `Allocation`**（§13.4）：类型本层已给，
     **收紧的动作归执行层**（列在 `crates/continuum-graph/src/persist.rs:60`）。
     **收件人：执行层的接线 task**（不是本层、也不是 D）。
@@ -1330,3 +1542,10 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     若判「不得加第五类」，则 `expression` 变化必须**归入四类之一或忽略**——
     归入任何一类都是发明判据，忽略则是静默漏判（fail-open）。
     **三条路本设计都不满意，故把选择权交出。收件人：复审者 ＋ 规范维护者**。
+33. **`AuditKind::UserApprovals` 在本层落地后有两个生产方、两种载荷形状**（§5.4）：
+    `continuum-workspace` 的 Integration Gate 写的是操作名（`gate.rs:224` 的 `"apply_patch"` 等），
+    本层写的是决策单与被选项。`append_audit` 的 `payload` 是自由 JSON（`tx.rs:79-84`），
+    **同一个 kind 下没有形状约束**，故读 `audit_log` 的一方**不得假定「一个 kind 一种载荷」**。
+    本设计**不改 Gate、也不为两种形状新增一个 kind**（新增 kind 会偏离 §313 的八行清单）。
+    若要收窄，缺的是「§313 的每个 kind 是否允许多种载荷」这一步——
+    **收件人：规范维护者**。
