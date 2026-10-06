@@ -46,19 +46,39 @@
 
 **Task 1–2 不依赖 C**（`save_tool` 不变量、lib 化）；**Task 3 起硬依赖 C**。
 执行者开工前须先确认：`crates/continuum-provider/src/registry.rs` 与 `src/tool.rs` 已存在，
-且**旧请求类型全仓零命中**：
+且 `crates/` 里**不再有非注释的旧请求类型引用**：
 
 ```bash
 cd /home/DslsDZC/Continuum && grep -rnw ToolInvocation crates/   # 预期：无输出，exit 1
 ```
 
-**判据必须是词边界匹配（`-w`），不能写成 `grep -rn ToolInvocation crates/`**：C 一落地
-`AuthorizedToolInvocation`，那条无边界的形式**必然命中**（子串包含，`AuthorizedToolInvocation` 里就有
-`ToolInvocation` 八个字母），判据永远不可能绿。`-w` 要求匹配两端都是非词字符，而
-`AuthorizedToolInvocation` 里 `ToolInvocation` 前面是 `d`（词字符），故不命中。**实跑确认**：
-在只有 `AuthorizedToolInvocation<'_>` 与该类型并存的行上，`grep -nw ToolInvocation` 只命中后者。
-**替代写法（等价，任选其一）**：把判据写成 `grep -rn 'core::tool::ToolInvocation' crates/` 零命中——
-它按完整路径匹配，不受子串影响。
+> **订正（2026-10-07）——上面这条命令不是判据，原话照留，它的来历与错因一并记此。**
+>
+> **它今天不成立，而且必然不成立，是本仓自己的规矩让它不成立的**：C 落地 `ToolInvocation` 的删除时，
+> 按本仓「**把错误说法与来历留在原地**」的既有做法，在注释里写下了那个已删的名字
+> （如 `crates/continuum-provider/src/registry.rs:195` 的「旧类型 `ToolInvocation` 已裁删……」与
+> `tests/compile_fail/a_bare_tool_id_cannot_be_passed_to_invoke_tool.rs:4` 的模块文档）。
+> **注释里的名字照样被 `grep` 命中**，故「零命中」这条断言与「留来历」那条规矩**直接相抵**。
+>
+> **它作为判据还依赖分支**（实测）：同一条命令在 **`p3cf`** 上返回 **2 处命中，全在注释里**；
+> 在**未合并 C 的 `p3d`（主检出）**上返回 **5 处命中，全是代码**（`core/src/tool.rs:26` 的定义、
+> `provider/src/tool.rs:5`/`:12`、`provider/tests/fake_provider.rs:7`/`:109`）。
+> **同一条命令在两处结论不同**，这本身就说明它不该当判据用。
+>
+> **判据改成**：**`crates/` 里不再有「非注释」的 `ToolInvocation` 引用**。
+> 做法是**先 `grep -rnw ToolInvocation crates/` 定位，再逐处读那几行、确认每一处都在注释里**——
+> 与本仓「**grep 只用来定位，结论以通读为准**」同一条。
+>
+> **原句的正面仍然成立、仍然需要，但它解决的是另一件事**：`-w` 词边界匹配**必须保留**——
+> 不能写成 `grep -rn ToolInvocation crates/`，因为 C 一落地 `AuthorizedToolInvocation`，那条无边界的形式
+> **必然把它子串命中**（`AuthorizedToolInvocation` 里就有 `ToolInvocation` 八个字母）。
+> 两件事不要混：**`-w` 解决的是「子串误命中」，本节订正解决的是「来历注释必然命中」**。
+>
+> **判据留档（本节最要紧的一句）**：**「某名字零命中」是对一个开放语料（全仓文本）的断言**，
+> 而本仓**要求**把删掉的名字留在注释里。**故凡「零命中」类判据，先问「本仓的哪条规矩会往那个语料里
+> 加字」**——答得出，那条判据就立不住，要改成对**行**的判据（读那几行、判它是不是注释），
+> 或改成对**结构化语料**的判据（编译产物、`cargo tree`、库表行数）。
+> （同一句错误断言也出现在共享面文档里，已由协调者订正；计划侧即本处。）
 
 B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁移 80/81 与 `main.rs`／
 `tests/migrations.rs`／`tests/startup.rs` 的连带改）**在本计划开工时已经落地**——F 只做收口复核
