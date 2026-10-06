@@ -105,7 +105,7 @@ crates/continuum-model-registry/
                       RankedExecutionCandidates、ExecutionCandidate、RoutingReason、
                       CandidateScore、RankingPolicy、BaselineRankingPolicy、rank
   src/budget.rs       BudgetView（§333 的只读投影）
-  src/escalation.rs   EscalationStep、EscalationLadder、next_step
+  src/escalation.rs   EscalationStep、next_step（**`EscalationLadder` 本阶段不建**，见 Task 13）
   src/error.rs        ProfileError、LifecycleError、RequirementError、RoutingError
   tests/profile.rs       取值类型、九维向量、画像（crate 外能观察到的部分）
   tests/lifecycle.rs     十态、迁移表、闸门
@@ -1374,12 +1374,33 @@ git commit -m "feat(model-registry): 具名基线策略"
 - Create: `crates/continuum-model-registry/tests/compile_fail/tier_one_low_is_not_a_step.rs`（配 `.stderr`）
 
 **Interfaces:**
-- Produces: `continuum_model_registry::{EscalationStep, EscalationLadder, next_step}`
+- Produces: `continuum_model_registry::{EscalationStep, next_step}`
+  ——**`EscalationLadder` 不在本阶段交付**（订正注记见下）。
+
+**订正注记（2026-10-06，原话照留）**：本 task 原先的 Interfaces 是
+「`{EscalationStep, EscalationLadder, next_step}`」，Files 亦以 `src/escalation.rs` 承载二者；
+**实现者没有建 `EscalationLadder`，协调者裁定该省略成立**。原话的另外两处（Step 3 的代码块里
+`pub struct EscalationLadder { steps: Vec<EscalationStep> }` 与「`next_step`…本层建阶梯的**有序步骤**」那句）
+一并按本条理解。**三条理由**：
+1. **零产生方**：设计 `:1142` 给它的骨架是**字段私有、无构造函数、无访问器**——本层没有任何代码造得出它；
+2. **零消费方**：评审全仓 grep，**Rust 侧无任何消费方**；
+3. **不可构造**：连测试都造不出（第 1 条的直接后果），故它连一条照片也不可能有。
+**先例同一**：`RoutingError::Persist` 正因零产生方被裁删（本计划「已闭」块内那一条）。
+**建它的触发条件**：**出现第一个消费者时**（例如将来某个「阶梯装配」的调用方），
+**届时连同一个读口一起加**（只加类型不加读口，就是再造一个不可构造的死物）。
+**判据写进原地**：**「设计里列了」不等于「本阶段该建」**——计划的 Interfaces 一栏是**交付承诺**，
+**凡列进去的必须有产生方且有消费方**（或就地写明「本阶段不建＋触发条件」）。
 
 - [ ] **Step 1: 写用例**
 
 - `the_ladder_has_exactly_the_five_steps_of_251`：`Tier1` / `Tier2` / `Tier2High` / `CrossFamily` / `Specialized`
-  **逐档**断言，并逐档钉落库编码（小写 `_` 连接）。
+  **逐档**断言。**订正注记（2026-10-06，原话照留）**：原句接着写「并逐档**钉落库编码**（小写 `_` 连接）」——
+  **那句与设计相抵**：设计 `:586-587` **点名 `EscalationStep`**，说它「不进任何列，**没有落库编码，
+  也就没有字面量可给**」（它因此与 `FamilyRelation` 同列——Task 11 正是照此没给它 `as_str`）。
+  **实现改成了**：**逐档钉变体 ＋ 一个无 `..` 的穷尽 `match`**（加第六枚即 **`E0004`**）。
+  **为什么穷尽 `match` 是更强的替代**：它让「枚举长出新成员」这件事**在编译期就让生产函数编译不过**
+  （评审复核：`src/escalation.rs:116` 的 `next_step` 那个 `match` 无 `..`），
+  而逐档断言字面量只能钉住**今天已经写下的那五档**——新成员不加断言照样绿。
 - `the_ladder_is_ordered_as_251_states`：顺序断言（不是集合断言）——`Tier1 → Tier2 → Tier2High → CrossFamily → Specialized`。
 - `next_step_walks_the_ladder_in_order`：逐档一条，给出下一档；末档 → `None`。**逐项有照片**，不抽代表。
 - `tier_one_low_is_not_a_step`（trybuild）：`EscalationStep::Tier1Low` **写不出来**。
@@ -1403,9 +1424,11 @@ cargo test -p continuum-model-registry --test escalation
 pub enum EscalationStep { Tier1, Tier2, Tier2High, CrossFamily, Specialized }
 
 /// §251 的阶梯（照录其**顺序**）。
+/// **本阶段不建**——零产生方、零消费方、不可构造，触发条件见本节开头的订正注记。
 pub struct EscalationLadder { steps: Vec<EscalationStep> }
 
 /// 「下一档」。**纯函数**——本层建阶梯的**有序步骤**，触发不在本层。
+/// **它不依赖 `EscalationLadder`**：收发都是裸 `EscalationStep`，故阶梯类型不建它照样成立。
 pub fn next_step(current: EscalationStep) -> Option<EscalationStep>;
 ```
 
