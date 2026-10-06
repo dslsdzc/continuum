@@ -1310,6 +1310,11 @@ pub struct BaselineRankingPolicy;
 pub enum FamilyRelation { SameFamily, CrossFamily }
 ```
 
+> **订正注记（2026-10-06，协调者裁定；照留原文作来历）**：上面这一行 `FamilyRelation` **不属于本 task**——
+> **它的定义归 Task 11**，随 `RoutingReason` 一起落。原稿把它写在这里，而 **Task 11 的 `RoutingReason`
+> 骨架（`:1200`）已经用它**，故照原稿执行**Task 11 编不过**（E0412/E0432）。
+> 裁定三条判据见 `## 遗留` 的同名条。**本 task 只构造 / 读它，不得在这里再定义一次**（重复定义是 E0428）。
+
 **基线是具名的、可替换的，不是对规范的声称。** 被否掉的两个候选打分法写进文档注释（不是可选说明）：
 **(a) 分数加权求和**——需要一个规范没有的尺度与方向；**(b) 阈值匹配**——需要一个规范没有的阈值。
 两者都撞在 §2.4 的同一条判据上。
@@ -1639,3 +1644,28 @@ register_model 的落态     设计 §3.2 的注释写「§21 发现即登记」
                       初步画像、version vs time_range、上下文长度、Tier 1 Low、Degraded 降权）。
                       收件人多为规范维护者；本计划**一条都不发明**。
 ```
+
+---
+
+**实现期间新增（协调者裁定，2026-10-06）**：
+
+- **`FamilyRelation` 的定义归 Task 11（随 `RoutingReason` 一起落），Task 12 只构造 / 读它。**
+  **来历**：原稿把 `pub enum FamilyRelation { SameFamily, CrossFamily }` 写在 **Task 12 Step 3** 的代码块里
+  （`:1310`，该处已加订正注记、原文照留），而 **Task 11 的 `RoutingReason` 骨架（`:1200`）已经带
+  `family: FamilyRelation` 这个字段**——**一个类型不能在它存在之前就被引用**，照原稿执行 Task 11 编不过。
+  **判据三条**：(a) **Task 11 的「Produces」一栏已认领 `RoutingReason`**，而 `FamilyRelation` 是它的字段类型，
+  定义随宿主走；(b) **Task 12 的「Interfaces / Produces」只认领 `BaselineRankingPolicy`**——
+  **清单比代码块权威**（本仓立的规矩是「代码块是示意、正文措辞才是约束」），故 Task 12 的代码块里那一行
+  属**放错了位置**，不是「Task 12 的所有物」；(c) **Task 11 的夹具必须构造它**——
+  `the_reason_carries_family_matched_missing_and_notes` 逐字段断言、`every_candidate_accessor_has_a_photo`
+  断言 `reason()`，故 Task 11 本就离不开这两枚变体的构造路径。
+  **两枚变体的名字**取设计 `:793`「`// SameFamily | CrossFamily`」与计划 `:1310` 的**原话**
+  （设计 `:586` 已写明这枚类型**不落库、无字面量编码**，故不存在第三处口径要对齐）。
+  **本条无翻转条件**：它是「声明先于使用」的编译期事实，不是取舍。
+  **同类扫查**：把本 task 正文里被引用的类型逐个核了出处（`grep "pub \(struct\|enum\|type\) <名>" crates/`），
+  九个各有其主且**都已落地**：`RoutableModel` / `RoutableState` ← Task 4（`src/lifecycle.rs`）、
+  `RoutingRequest` / `TaskSkillRequirement` ← Task 10（`src/router.rs`）、`Ratio` / `SkillDimension` ← Task 1/2
+  （`src/profile.rs`）、`ModelId` / `ProviderHealth` ← `continuum-core`（`src/model.rs`）、
+  `RequirementError` ← Task 10（`src/error.rs`）；两个函数 `load_profile` ← Task 7、`save_skill_observation` ← Task 8
+  （同在 `src/persist.rs`）。**只有 `FamilyRelation` 一处越位。**
+  （Task 10 的另一枚 `FamilyPreference` 在本 task 的正文里**没有出现**，不在此列。）
