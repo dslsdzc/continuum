@@ -34,7 +34,9 @@
 //! 排序接口 [`RankingPolicy`] 与它的全序缺省实现、输出 [`RankedExecutionCandidates`]
 //! 与 [`ExecutionCandidate`] / [`RoutingReason`] / [`FamilyRelation`]，
 //! 以及 [`RoutingError`] 的三枚新变体。
-//! **具名基线策略 `BaselineRankingPolicy` 在 Task 12**，阶梯在后续 task，各自落在自己的模块里。
+//! Task 12 补**具名基线策略** [`BaselineRankingPolicy`]——一个只读已定义输入、用缺省全序的
+//! 可替换实现（设计 §5.3 的「第二步」）。
+//! 阶梯在后续 task，各自落在自己的模块里。
 
 pub mod budget;
 pub mod error;
@@ -55,6 +57,7 @@ pub use profile::{
     SkillVector,
 };
 pub use router::{
-    CandidateScore, ExecutionCandidate, FamilyPreference, FamilyRelation, RankedExecutionCandidates,
-    RankingPolicy, RoutingReason, RoutingRequest, TaskSkillRequirement, rank,
+    BaselineRankingPolicy, CandidateScore, ExecutionCandidate, FamilyPreference, FamilyRelation,
+    RankedExecutionCandidates, RankingPolicy, RoutingReason, RoutingRequest, TaskSkillRequirement,
+    rank,
 };

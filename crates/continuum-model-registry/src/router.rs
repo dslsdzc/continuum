@@ -50,7 +50,15 @@
 //! 逐个 [`RankingPolicy::evaluate`]、`sort_by` [`RankingPolicy::compare`]、取头。
 //! 输出面是 [`RankedExecutionCandidates`]（字段私有，唯一的构造点在 `rank` 内），
 //! 排序的**机制**在本层，**具体打分函数的数值明确推迟**（设计 §5.3 的三条依据），
-//! 具名基线是 Task 12 的 `BaselineRankingPolicy`。
+//! 具名基线是 Task 12 的 [`BaselineRankingPolicy`]。
+//!
+//! # Task 12 的落点（设计 §5.3 的「第二步」）
+//!
+//! [`BaselineRankingPolicy`] 是本层交付的**具名基线**，**不是对规范的声称**：§84 未给打分函数，
+//! 故它是一个**可替换的实现**（设计 §5.3）。它只读**已定义**的输入——§248 维度的**有无**、
+//! §247 的 `confidence`、§19 的家族偏好、§249 的状态——并**用缺省的 [`RankingPolicy::compare`]**，
+//! 故「全序」这件事仍由本层的那四档负责。**两处选择写在该类型的文档里**：家族由 `provider` 判
+//! （§19 未给判据），以及被否掉的两个打分法。
 
 use std::cmp::Ordering;
 
@@ -555,4 +563,133 @@ pub fn rank(
     candidates.sort_by(|a, b| policy.compare(a, b));
 
     Ok(RankedExecutionCandidates { candidates })
+}
+
+// ===== Task 12：具名基线策略（设计 §5.3 的「第二步」） =====
+
+/// §19 的家族偏好 → 该偏好所指 provider 字面量的映射。**这是基线的选择，不是规范的定义。**
+///
+/// 设计 §5.3 只写死「同族优先、`Auto` 时全部视为 `SameFamily`」，**没有**说怎么从一个模型身上
+/// 看出它属于哪一族；§247 的十二个字段里唯一可能承载这件事的是 `provider`，而它的词表
+/// **规范未定义**（`crate::profile::ModelProfile::provider` 的文档：自由文本）。故基线取一条明确的规则：
+/// **逐字相等即同族**，字面量按 §19 的短语取小写（`OpenAI preferred` → `openai`，
+/// 与 [`FamilyPreference::as_str`] 取 `openai_preferred` 是同一条「按短语切词」的口径）。
+/// `Auto` 与 `Custom` 返回 `None`（**不产生区别**）：前者 §19 明说「全部视为 `SameFamily`」，
+/// 后者不带载荷、无从比对。
+///
+/// **这一处是命名基线的一次选择**：换一份策略可以换一套映射，规范一个字都没说
+/// （设计 §11 第 10 条，收件人是规范维护者）。故本函数**不是** `FamilyPreference` 的方法——
+/// 它不构成对该类型的一次规范声明。
+fn preferred_provider(family: &FamilyPreference) -> Option<&'static str> {
+    match family {
+        FamilyPreference::Auto | FamilyPreference::Custom => None,
+        FamilyPreference::OpenAiPreferred => Some("openai"),
+        FamilyPreference::ClaudePreferred => Some("claude"),
+        FamilyPreference::LocalPreferred => Some("local"),
+    }
+}
+
+/// 一个候选与请求偏好的 §19 族关系。**判据全在 [`preferred_provider`] 里**（含它为什么是基线的选择）。
+///
+/// [`preferred_provider`] 把 `Auto` 与 `Custom` 合到同一个 `None` 上，本函数于是也只有一条 `None` 臂：
+/// **偏好不指向任何 provider 时不产生跨族差别**。这一条对 `Auto` 是 §19 的正文，
+/// 对 `Custom` 是「无载荷可比」的后果——两者在代码里是同一件事，故不写成两臂。
+fn family_relation(family: &FamilyPreference, provider: &str) -> FamilyRelation {
+    match preferred_provider(family) {
+        Some(preferred) if provider == preferred => FamilyRelation::SameFamily,
+        Some(_) => FamilyRelation::CrossFamily,
+        None => FamilyRelation::SameFamily,
+    }
+}
+
+/// **具名基线策略**（设计 §5.3 的「第二步」）。名字里的「基线」是字面意思：
+/// 它是本层交付的一个**可替换**实现，**不是对规范的声称**——§84 未给打分函数，
+/// 故谁都可以换一份 [`RankingPolicy`] 重跑同一组用例（设计 §5.1 的请求／策略分界）。
+///
+/// # 它只读**已定义**的输入
+///
+/// §248 维度的**有无**（不读分数）、§247 的 `confidence`、§19 的家族偏好、§249 的状态：
+///
+/// - `compatibility` = 需求维度中**有观测**的那几个的占比（`matched / required`）。
+///   **只判「有没有观测」，`SkillScore` 的数值一概不读**——这正是 §2.4「只用序、不用量」的落点：
+///   占比是一个**有界的集合运算结果**，不是任何跨维度求和。
+/// - `confidence` = 画像上的 `confidence`（§247），原样带出。
+/// - `reason` 记 `matched` / `missing` / family（[`FamilyRelation`] 字段）与 state（写进 `notes`）。
+///
+/// # `compare` 用缺省实现，**本类型不重写**
+///
+/// 这是刻意的：四档（compatibility → confidence → family → `ModelId`）是设计 §5.3 写死的全序，
+/// 基线不引入第二份排序口径。**故删掉缺省实现里的 `family` 那一档会红在本层的用例上**
+/// （`tests/router.rs` 的 `same_family_candidates_rank_before_cross_family_ones`）——
+/// 那是「基线确实经缺省的 `compare` 定序」这件事的照片。
+///
+/// # 被否掉的两个候选打分法（写进文档，不是可选说明）
+///
+/// **(a) 分数加权求和**——需要一个规范没有的**尺度与方向**：`SkillScore` 的取值域与单位未定义
+/// （§23 的示例是 9.2，§24 未给范围），加权求和要先知道每一维怎么归一、往哪边算「更好」。
+/// **(b) 阈值匹配**——需要一个规范没有的**阈值**：「命中几个算够」§250 没有给。
+/// 两者都撞在 §2.4 的同一条判据上：**量纲未知时只做集合运算，不做算术**。
+///
+/// # 家族关系的判据
+///
+/// [`preferred_provider`] 与 [`family_relation`]：同族 = 模型的 `provider` 逐字等于该偏好所指的
+/// 字面量；`Auto` / `Custom` 不产生跨族差别。**这是一次基线的选择**，理由与出处写在
+/// [`preferred_provider`] 上。
+///
+/// # 它不读预算
+///
+/// [`RoutingRequest::budget`] 是**必填**的（不是 `Option`），故忽略它是一次**看得见的选择**，
+/// 不是一次遗漏——§333 的五个量纲没有单位，量值算不出来（设计 §5.3 末段、§10 第 2 条）。
+/// 用例 `the_baseline_does_not_read_the_budget` 的注释里逐句写明**这是「已写明未实现」而不是「忘了读」**。
+pub struct BaselineRankingPolicy;
+
+impl RankingPolicy for BaselineRankingPolicy {
+    /// 按 §5.3 的三条算：`compatibility` 是**有无**的占比、`confidence` 取画像、
+    /// `reason` 记四样（family 走字段，state 走 `notes`）。
+    ///
+    /// **不读 `SkillScore` 的数值、不读 `budget`、不读 `ProviderHealth`**——后两者本层拿不到，
+    /// 前者是 §2.4 的禁令。`missing` 是 `Vec<SkillDimension>`，**不折算成扣分**（那要权重）。
+    fn evaluate(&self, request: &RoutingRequest, model: &RoutableModel) -> CandidateScore {
+        let skill_vector = model.profile().skill_vector();
+
+        // 逐维判「有没有观测」——**只看 `is_some()`，不读 `score()`**。两个列表各收各的，
+        // 顺序原样保留（与 `RoutingReason::new` 的契约一致：不排序、不去重）。
+        let mut matched: Vec<SkillDimension> = Vec::new();
+        let mut missing: Vec<SkillDimension> = Vec::new();
+        for dimension in request.requirements.dimensions() {
+            if skill_vector.get(*dimension).is_some() {
+                matched.push(*dimension);
+            } else {
+                missing.push(*dimension);
+            }
+        }
+
+        // `required` 非空由 `TaskSkillRequirement::try_new` 在**构造期**保证，故此处不可能 `0/0`；
+        // `matched` 是 `required` 的子集，故商必落在 `[0,1]`——`Ratio` 的两条守卫都不会被踩到。
+        // 这个 `expect` 因此不是「随手写的一句」：它是上面那两条保证的收口。
+        let required = request.requirements.dimensions().len();
+        let compatibility = Ratio::try_new(matched.len() as f64 / required as f64)
+            .expect("matched / required ∈ [0,1]：matched ⊆ required，且 required 由构造期保证非空");
+
+        CandidateScore {
+            compatibility,
+            confidence: model.profile().confidence(),
+            reason: RoutingReason::new(
+                family_relation(&request.family, model.profile().provider()),
+                matched,
+                missing,
+                vec![state_note(model.state())],
+            ),
+        }
+    }
+}
+
+/// 策略写进 [`RoutingReason::notes`] 的那一条状态陈述（`reason` 记 state 的落点，设计 §5.3）。
+///
+/// **`notes` 是自由文本，不是落库编码**：本仓「不用 `Debug` 表示落库」那条纪律管的是列值，
+/// 而这一句不进任何列（`RoutingReason` 没有落库编码，设计 `:586`）。故这里用 `{:?}` 打出变体名，
+/// 与 `RoutableState` **不另建一张编码表**——`RoutableState` 是内存里的收窄类型，
+/// 设计明写它「不落库，故不需要编码」。
+fn state_note(state: RoutableState) -> String {
+    format!("state: {state:?}")
 }

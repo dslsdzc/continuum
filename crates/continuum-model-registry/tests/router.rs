@@ -42,10 +42,11 @@
 
 use continuum_core::model::{ModelId, ProviderHealth};
 use continuum_model_registry::{
-    BudgetView, CandidateScore, FamilyPreference, FamilyRelation, LifecycleState, ModelProfile,
-    RankedExecutionCandidates, RankingPolicy, Ratio, RequirementError, RoutableModel, RoutableState,
-    RoutingError, RoutingRequest, RoutingReason, SkillDimension, TaskSkillRequirement, load_profile,
-    p3d_model_migrations, rank, register_model,
+    BaselineRankingPolicy, BudgetView, CandidateScore, FamilyPreference, FamilyRelation,
+    LifecycleState, ModelProfile, RankedExecutionCandidates, RankingPolicy, Ratio, RequirementError,
+    RoutableModel, RoutableState, RoutingError, RoutingRequest, RoutingReason, SkillDimension,
+    SkillObservation, SkillScore, TaskSkillRequirement, load_profile, p3d_model_migrations, rank,
+    register_model, save_skill_observation,
 };
 use continuum_persist::{Db, Migration, Tx, Value, builtin_migrations};
 
@@ -93,12 +94,33 @@ fn no_budget_constraint() -> BudgetView {
 
 /// 一次自动路由的请求，四个字段按 §5.1 的签名装配（策略侧的三样不在请求里）。
 fn request(family: FamilyPreference, availability: Vec<(ModelId, ProviderHealth)>) -> RoutingRequest {
+    request_for(three_dimensions(), family, availability)
+}
+
+/// 同上，但**需求由调用方给**——Task 12 的基线用例按 `matched / required` 判兼容度，
+/// 故它们需要一个维数已知、且能逐维对上观测的集合（`three_dimensions` 的维数在别处也被用着，
+/// 改它会牵动 Task 10 的用例，故另开一个入口而不是改它）。
+fn request_for(
+    requirements: TaskSkillRequirement,
+    family: FamilyPreference,
+    availability: Vec<(ModelId, ProviderHealth)>,
+) -> RoutingRequest {
     RoutingRequest {
-        requirements: three_dimensions(),
+        requirements,
         family,
         availability,
         budget: no_budget_constraint(),
     }
+}
+
+/// 基线用例用的**两维**需求：`Coding` ＋ `Media`（§248 里两枚互不相同的维度）。
+///
+/// 维数取 2 是承重的：`compatibility = matched / required` 的取值因此只有 `{0, 0.5, 1}` 三格，
+/// 「某一维有/无观测」与「兼容度涨/跌」之间的对应是一一可见的，不会被 `1/3`、`2/3` 这种
+/// 分数掩盖。**顺序刻意是 §248 的声明序**：这一处不测顺序（Task 10 的用例测）。
+fn two_dimensions() -> TaskSkillRequirement {
+    TaskSkillRequirement::try_new(vec![SkillDimension::Coding, SkillDimension::Media])
+        .expect("两个维度是非空集合")
 }
 
 /// **空需求被构造期拒绝，且断言是哪一枚 `Err`。**
@@ -322,22 +344,63 @@ fn db() -> (tempfile::TempDir, Db) {
 /// 画像的十一列里只有 `confidence` 由调用方给（本文件的策略读它，见 `StubPolicy::evaluate`），
 /// 其余取固定字面量：本 task 不读它们，而它们必须是**合法取值**，否则 `load_profile` 的解码
 /// 会以 `Err` 的形式失败（报错位置同样指向被测函数）。三个列表列是**手写** JSON 文本。
+///
+/// `provider` 取 Task 11 一直在用的那个固定字面量——**Task 11 的策略不读它**，
+/// 故「换一个 provider」在那些用例里不构成变量。需要指定 provider 的用例（Task 12 的基线
+/// 按它判家族）走 [`seed_candidate_as`]。
 fn seed_candidate(tx: &Tx<'_>, model: &str, confidence: &str) {
+    seed_candidate_as(tx, model, confidence, "provider-gamma");
+}
+
+/// 同上，但**画像的 `provider` 由调用方给**。
+///
+/// 它是 [`BaselineRankingPolicy`] 判「同族／跨族」的唯一输入（该策略的文档里写明这是基线的选择，
+/// 出处与理由在 `src/router.rs` 的 `preferred_provider` 上），故家族用例必须能指定它。
+fn seed_candidate_as(tx: &Tx<'_>, model: &str, confidence: &str, provider: &str) {
     register_model(tx, &ModelId::new(model)).unwrap();
     tx.execute(
         "INSERT INTO model_profile
            (id, version, provider, model_revision, modalities, tools, failure_modes,
             cost_profile, latency_profile, evidence_count, confidence)
-         VALUES (?1, 'version-beta', 'provider-gamma', 'revision-delta',
-                 ?2, ?3, '[]', NULL, NULL, 42, ?4)",
+         VALUES (?1, 'version-beta', ?2, 'revision-delta',
+                 ?3, ?4, '[]', NULL, NULL, 42, ?5)",
         &[
             Value::text(model),
+            Value::text(provider),
             Value::text(r#"["text"]"#),
             Value::text(r#"["tool-epsilon"]"#),
             Value::text(confidence),
         ],
     )
     .unwrap();
+}
+
+/// 给某维播一次观测（§24 的 `save_skill_observation`，Task 8）。
+///
+/// **`version` 由调用方给，这是本夹具的承重点**：`load_profile` 经 `load_skill_vector` 取
+/// 「当前观测」时按 `version` **最大**的那次（[`current_observation`] 的口径）。故「同维再播一次、
+/// `version` 更大、`score` 不同」正好是「**有无不变、数值变**」——`changing_a_score_value_…`
+/// 那条用例的全部机制都压在这一句上。`confidence` / `sample_count` / `time_range` 取固定合法值：
+/// 基线的两个读数不读它们。
+fn observe(tx: &Tx<'_>, model: &str, dimension: SkillDimension, score: f64, version: u32) {
+    let observation = SkillObservation::try_new(
+        SkillScore::try_new(score).expect("用例给的应是有限评分"),
+        Ratio::try_new(0.5).expect("0.5 是合法置信度"),
+        1,
+        version,
+        (1_700_000_000_000, 1_700_000_001_000),
+    )
+    .expect("该时间窗应自洽（闭区间，start <= end）");
+    save_skill_observation(tx, &ModelId::new(model), dimension, &observation).unwrap();
+}
+
+/// 一个候选在**指定维**上的观测分数（没有观测 → `None`）。Task 12 的用例用它算夹具前提。
+fn observed_score(model: &RoutableModel, dimension: SkillDimension) -> Option<f64> {
+    model
+        .profile()
+        .skill_vector()
+        .get(dimension)
+        .map(|observation| observation.score().get())
 }
 
 /// 从已播下的那一行读回画像（**crate 外唯一的画像来源**）。
@@ -1220,6 +1283,500 @@ fn a_routable_model_does_come_out_as_the_selected_candidate() {
     let ranked = rank(&request, &models, &policy).expect("一个 Active 的模型应真的被选中");
     assert_eq!(ranked.selected().model().as_str(), "model-alpha");
     assert_eq!(ranked.selected().state(), RoutableState::Active);
+
+    tx.commit().unwrap();
+}
+
+// ===== Task 12：具名基线策略 `BaselineRankingPolicy`（设计 §5.3 的「第二步」） =====
+//
+// # 与 Task 11 的用例怎么分工
+//
+// Task 11 的照片是**机制**（接口、全序的四档、候选集构造）；本段是**一个具体实现**的行为。
+// 两者不重叠：本段的 fixture 全部经 `BaselineRankingPolicy::evaluate` **算出**两个读数与
+// `reason.family`，而 Task 11 用的是手写表的 `StubPolicy`。
+//
+// # 家族那一档的两条用例，各占一半
+//
+// `family_breaks_a_compatibility_and_confidence_tie`（Task 11）钉「`reason.family` 不同的两条
+// 候选怎么排」；本段的 `same_family_candidates_rank_before_cross_family_ones` 钉另一半——
+// **族由请求的偏好算出**（`OpenAiPreferred` 时同族优先、`Auto` 时全部视为 `SameFamily`）。
+// **两条都在**：删掉任一条，另一半就没有照片。
+
+/// 一份有序候选的模型 id 序列，用于「排序变没变」的比对。
+fn order_of<'a>(ranked: &'a RankedExecutionCandidates) -> Vec<&'a str> {
+    ranked
+        .candidates()
+        .iter()
+        .map(|candidate| candidate.model().as_str())
+        .collect()
+}
+
+/// **被基线否掉的那个打分法（a）分数加权求和**，在这里只为**验夹具前提**而实现。
+///
+/// 它**不是**被测代码，也不进 `src/`：`changing_a_score_value_does_not_change_the_order`
+/// 的承重前提是「按数值加权算出的次序与按有无算出的次序**相反**」——只在注释里写这句是假话，
+/// 必须实跑一遍才算数。故这里把它写出来，由那条用例断言它是「按有无」的**逆序**。
+/// 取「需求维上已观测分数的**均值**，缺观测按 0」：它落在 `[0,1]`，故与本层的 `Ratio` 同域，
+/// 不会靠 panic 制造一个假的「变红」。
+fn weighted_by_value_order<'a>(
+    models: &'a [RoutableModel],
+    dimensions: &[SkillDimension],
+) -> Vec<&'a str> {
+    let mut scored: Vec<(&str, f64)> = models
+        .iter()
+        .map(|model| {
+            let total: f64 = dimensions
+                .iter()
+                .map(|dimension| observed_score(model, *dimension).unwrap_or(0.0))
+                .sum();
+            (
+                model.profile().id().as_str(),
+                total / dimensions.len() as f64,
+            )
+        })
+        .collect();
+    // 降序（分高者在前），并列按 id 升序——与本层缺省 `compare` 的前两档同向。
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    scored.into_iter().map(|(id, _)| id).collect()
+}
+
+/// **`compatibility = matched / required`，只读「有没有观测」**（设计 §5.3 的第一条）。
+///
+/// 两条候选的**维数不同**（bravo 两维都有、alpha 只有一维），故这条用例同时钉住分子与分母：
+/// 一个「只数命中的维度、不除以需求维数」的实现会给 bravo 2.0、alpha 1.0——
+/// 两值都越过 `Ratio` 的上界 1.0，于是 `Ratio::try_new` 在 `evaluate` 里 `expect` 失败、用例 panic；
+/// 一个「分母写成 1」的实现给出同样的两个越界值。故分子分母两侧都在这条照片里。
+///
+/// **分数取 9.2（§83 的示例）是刻意的**：它是一个**大**数，若基线把 `score` 的值读进来，
+/// 这里的 1.0 / 0.5 两个干净占比就保不住——「分数本身不参与」这句话因此有照片
+/// （它的强形式是下一条用例：只改数值、不改有无，排序不变）。
+#[test]
+fn the_baseline_counts_the_dimensions_that_have_an_observation() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    observe(&tx, "model-alpha", SkillDimension::Coding, 9.2, 1);
+    observe(&tx, "model-bravo", SkillDimension::Coding, 9.2, 1);
+    observe(&tx, "model-bravo", SkillDimension::Media, 9.2, 1);
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let request = request_for(
+        two_dimensions(),
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let ranked = rank(&request, &models, &BaselineRankingPolicy).expect("两个候选都应过");
+
+    let scored: Vec<(&str, f64, Vec<SkillDimension>, Vec<SkillDimension>)> = ranked
+        .candidates()
+        .iter()
+        .map(|candidate| {
+            (
+                candidate.model().as_str(),
+                candidate.compatibility().get(),
+                candidate.reason().matched().to_vec(),
+                candidate.reason().missing().to_vec(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        scored,
+        vec![
+            (
+                "model-bravo",
+                1.0,
+                vec![SkillDimension::Coding, SkillDimension::Media],
+                Vec::new(),
+            ),
+            (
+                "model-alpha",
+                0.5,
+                vec![SkillDimension::Coding],
+                vec![SkillDimension::Media],
+            ),
+        ],
+        "compatibility = matched / required：bravo 2/2 = 1.0、alpha 1/2 = 0.5；\
+         且 `matched` / `missing` 逐维对应（命中的进 matched，没观测的进 missing）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **只改 `SkillScore` 的数值（保持有无不变）→ 排序不变**（设计 §9 的对应行，§2.4「只用序、不用量」）。
+///
+/// 这是本层**唯一**能拍的「不依赖单一总分」的行为面照片：一个把分数**数值**加权求和的策略，
+/// 在本条上会给出另一个次序。
+///
+/// # 夹具前提是承重的，且由本用例**实跑核**
+///
+/// 加权派生的变异体要能被抓住，前提是**改写后的数值**使「按数值加权」的次序与「按有无」
+/// **相反**。若两者同向，加权版会给出同一个次序，「排序不变」在两种实现下都成立——假绿
+/// （同 Task 8 那两处的形态）。故本用例不只断言「不变」，还**当场把加权次序算出来**
+/// （[`weighted_by_value_order`]）并断言它是按有无次序的**逆序**。改夹具改坏了这个前提，红的是
+/// 这条前提断言，不是那句「不变」——**这就是它承重的样子**。
+///
+/// # 数值怎么摆才相反
+///
+/// alpha **两维都有观测但分数低**（0.1 / 0.1）、bravo **只有一维但分数高**（1.0）：
+/// - 按有无：alpha `2/2 = 1.0` ＞ bravo `1/2 = 0.5` → alpha 在前；
+/// - 按加权：alpha `(0.1+0.1)/2 = 0.1` ＜ bravo `(1.0+0)/2 = 0.5` → bravo 在前。
+///
+/// 「改数值」的做法是**同维再播一次、`version` 更大**（`current_observation` 取 `version` 最大者），
+/// 故有无不变、只有数值变——这正是这条用例要的单一变量。
+///
+/// 红的条件：基线的 `compatibility` 读了 `SkillScore` 的值（加权）即红在「排序不变」那句。
+#[test]
+fn changing_a_score_value_does_not_change_the_order() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    // 初始：alpha 两维都有、bravo 只有一维（有无的差别在这一步就定下了）。
+    observe(&tx, "model-alpha", SkillDimension::Coding, 0.9, 1);
+    observe(&tx, "model-alpha", SkillDimension::Media, 0.9, 1);
+    observe(&tx, "model-bravo", SkillDimension::Coding, 1.0, 1);
+
+    let request = request_for(
+        two_dimensions(),
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+
+    let before_models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let before_ranked =
+        rank(&request, &before_models, &BaselineRankingPolicy).expect("两个候选都应过");
+    let before = order_of(&before_ranked);
+    assert_eq!(
+        before,
+        vec!["model-alpha", "model-bravo"],
+        "按有无：alpha 2/2 高于 bravo 1/2"
+    );
+
+    // 改数值、不改有无：同维再播一次、`version` 更大，把 alpha 的两维分数压低。
+    observe(&tx, "model-alpha", SkillDimension::Coding, 0.1, 2);
+    observe(&tx, "model-alpha", SkillDimension::Media, 0.1, 2);
+
+    // 重新读画像（观测落在库里，`load_profile` 才看得到新的当前观测）。
+    let after_models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let after_ranked =
+        rank(&request, &after_models, &BaselineRankingPolicy).expect("两个候选都应过");
+    let after = order_of(&after_ranked);
+
+    // 前提（实跑核过，不是假设）：按数值加权必须给出**相反**的次序，否则加权变异体是等价变异体。
+    let by_value = weighted_by_value_order(&after_models, two_dimensions().dimensions());
+    assert_eq!(
+        by_value,
+        vec!["model-bravo", "model-alpha"],
+        "夹具前提：改写后的数值使「按加权」把 bravo 排到前面（alpha (0.1+0.1)/2=0.1 ＜ bravo (1.0+0)/2=0.5）"
+    );
+    assert_eq!(
+        by_value,
+        before.iter().rev().copied().collect::<Vec<&str>>(),
+        "夹具前提：加权次序必须与按有无次序**相反**——同向则加权变异体不红（假绿）"
+    );
+
+    assert_eq!(
+        after, before,
+        "只改 `SkillScore` 的数值、不改「有没有观测」，排序不变（§2.4：只用序，不用量）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **改「有无」（多一维有观测）→ 排序变**（设计 §9 的对应行）。
+///
+/// **与上一条两侧对钉**：只写「数值变了排序不变」，一个**什么都不读、永远返回同一个顺序**的策略
+/// 照样全绿——它连观测列表都不看，「不变」对它恒真。故本条要求相反的事实：观测的**有无**是
+/// 基线的 `compatibility` 的输入，动它必须动次序。
+///
+/// 夹具取两条**都没有观测**起步：此时两条的 `compatibility` 都是 `0/2 = 0`、`confidence` 相同，
+/// 次序由兜底档的 `ModelId` 升序定（`[alpha, bravo]`）。给 bravo 加上一维观测后它是 `0.5`、
+/// alpha 仍是 `0`，bravo 升到表头。**「变」体现在表头从 alpha 换成 bravo**，不是「两份列表不同」。
+///
+/// 红的条件：基线的 `compatibility` 不读观测列表（恒为某个常数）即红——`after` 会停在
+/// `[alpha, bravo]`。
+#[test]
+fn adding_an_observation_changes_the_order() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+
+    let request = request_for(
+        two_dimensions(),
+        FamilyPreference::Auto,
+        availability(&[
+            ("model-alpha", ProviderHealth::Healthy),
+            ("model-bravo", ProviderHealth::Healthy),
+        ]),
+    );
+
+    // 起步：一条观测都没有。两条 compatibility 都是 0，次序只能由兜底档定。
+    let bare_models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let before_ranked =
+        rank(&request, &bare_models, &BaselineRankingPolicy).expect("两个候选都应过");
+    let before = order_of(&before_ranked);
+    assert_eq!(
+        before,
+        vec!["model-alpha", "model-bravo"],
+        "都无观测、confidence 相同 → 兜底档按 ModelId 升序"
+    );
+
+    // 只给 bravo 加一维观测：有无变了，数值没参与。
+    observe(&tx, "model-bravo", SkillDimension::Coding, 0.5, 1);
+
+    let observed_models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let after_ranked =
+        rank(&request, &observed_models, &BaselineRankingPolicy).expect("两个候选都应过");
+    let after = order_of(&after_ranked);
+
+    assert_eq!(
+        after,
+        vec!["model-bravo", "model-alpha"],
+        "bravo 有了 1/2 的观测（alpha 仍是 0/2），它升到表头——次序**变了**"
+    );
+    assert_ne!(after, before, "「有无」是兼容度的输入：动它必须动次序");
+
+    tx.commit().unwrap();
+}
+
+/// **§19 的家族偏好：同族排在跨族之前，且族由请求的偏好算出**（设计 §5.3 的第四条）。
+///
+/// 这条用例**独有「族由请求的偏好算出」这半边**（Task 11 的
+/// `family_breaks_a_compatibility_and_confidence_tie` 钉的是「`reason.family` 不同的两条候选
+/// 怎么排」，用的是手写表的 `StubPolicy`）。**两条都在，各占一半。**
+///
+/// 两侧都钉：
+/// 1. **`OpenAiPreferred`**：`provider == "openai"` 的 `model-bravo` 是 `SameFamily`、
+///    provider 为 `"other"` 的 `model-alpha` 是 `CrossFamily`，故表头是同族的 bravo。
+///    夹具承重——前两档全同（`compatibility` 都是 `1/2`、`confidence` 都是画像上的 0.5），
+///    且两条按 `ModelId` **升序**喂入而期望表头是 **id 更大**的 bravo：删掉缺省 `compare` 的
+///    第三档（变异 M7）次序就落到兜底档的 id 升序，红的是本用例自己的那句断言。
+/// 2. **`Auto`**：§19 明写此时「全部视为 `SameFamily`」，故不产生跨族差别，
+///    次序回到兜底档的 id 升序。**缺了这一侧，「把所有候选判成跨族、再靠别的档兜住」的实现
+///    照样绿**——那正是 fail-open 的一侧。
+///
+/// **`provider` 是家族判据的唯一输入，而这个判据是基线的选择**（§19 未给「怎么看出一个模型属于
+/// 哪一族」，§247 的十二个字段里唯一能承载的是自由文本的 `provider`）——理由与出处写在
+/// `src/router.rs` 的 `preferred_provider` 上，不在本文件重述。
+///
+/// 红的条件：第三档被删（M7）、或 `Auto` 下仍产生跨族差别、或族不从偏好算（写死）。
+#[test]
+fn same_family_candidates_rank_before_cross_family_ones() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate_as(&tx, "model-alpha", "0.5", "other");
+    seed_candidate_as(&tx, "model-bravo", "0.5", "openai");
+
+    // 两条的「有无」相同（各一维），故 `compatibility` 相同；`confidence` 同取画像上的 0.5。
+    observe(&tx, "model-alpha", SkillDimension::Coding, 0.5, 1);
+    observe(&tx, "model-bravo", SkillDimension::Coding, 0.5, 1);
+
+    // 按 id **升序**喂入（`model-alpha` 在前）——期望的表头是 id 更大的同族那个。
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let snapshot = availability(&[
+        ("model-alpha", ProviderHealth::Healthy),
+        ("model-bravo", ProviderHealth::Healthy),
+    ]);
+
+    // 一、`OpenAiPreferred`：同族的 bravo 在前，尽管它是 id 更大的那个。
+    let preferred = rank(
+        &request_for(
+            two_dimensions(),
+            FamilyPreference::OpenAiPreferred,
+            snapshot.clone(),
+        ),
+        &models,
+        &BaselineRankingPolicy,
+    )
+    .expect("两个候选都应过");
+    let preferred_faces: Vec<(&str, FamilyRelation)> = preferred
+        .candidates()
+        .iter()
+        .map(|candidate| (candidate.model().as_str(), candidate.reason().family()))
+        .collect();
+    assert_eq!(
+        preferred_faces,
+        vec![
+            ("model-bravo", FamilyRelation::SameFamily),
+            ("model-alpha", FamilyRelation::CrossFamily),
+        ],
+        "偏好的族由策略算出：provider == \"openai\" 的 bravo 同族、alpha 跨族；\
+         前两档全同时第三档把同族的排到前面（它是 id 更大的那个）"
+    );
+
+    // 二、`Auto`：全部视为 `SameFamily`，不产生跨族差别，次序回到兜底档的 id 升序。
+    let auto = rank(
+        &request_for(two_dimensions(), FamilyPreference::Auto, snapshot),
+        &models,
+        &BaselineRankingPolicy,
+    )
+    .expect("两个候选都应过");
+    let auto_faces: Vec<(&str, FamilyRelation)> = auto
+        .candidates()
+        .iter()
+        .map(|candidate| (candidate.model().as_str(), candidate.reason().family()))
+        .collect();
+    assert_eq!(
+        auto_faces,
+        vec![
+            ("model-alpha", FamilyRelation::SameFamily),
+            ("model-bravo", FamilyRelation::SameFamily),
+        ],
+        "`Auto` 下 §19 说全部视为同族：两条都是 `SameFamily`，跨族差别不存在，\
+         次序交给兜底档的 ModelId 升序（与喂入顺序相反也成立）"
+    );
+
+    tx.commit().unwrap();
+}
+
+/// **`Degraded` 的候选可见但不禁：它在表里、`state()` 读出 `Degraded`、`reason` 里看得到**
+/// （§4.2 末段，设计 §5.3「`reason` 记 state」）。
+///
+/// 设计写死只过滤 `Unavailable`（`ProviderHealth` 那一侧，Task 11 的照片），
+/// 而 `LifecycleState::Degraded` 是**另一个轴**上的东西（§249 的模型生命周期异常态）。
+/// 基线**不因它改排序**（§11 第 24 条：降权判据规范未给），但**把它带出来**——
+/// 消费者/后续策略据此决定是否降权，看不到这个信息就决定不了。
+///
+/// **两侧对钉**：`Active` 与 `Degraded` 各排一次，`state()` 与 `notes()` 都必须跟着变。
+/// 只写 `Degraded` 一侧的话，一个「把状态写死成 `degraded`」的实现照样绿。
+///
+/// `notes` 是**自由文本**（`RoutingReason::notes` 的契约），本用例钉的是基线写出的那一句
+/// `state: <变体名>`；它是策略的事实陈述，不是落库编码（见 `src/router.rs` 的 `state_note`）。
+///
+/// 红的条件：候选被挡下（`Degraded` 不进表）、`state()` 读错、或 `reason` 里没有状态这一句。
+#[test]
+fn the_state_is_visible_in_the_reason() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    observe(&tx, "model-alpha", SkillDimension::Coding, 0.5, 1);
+
+    let request = request_for(
+        two_dimensions(),
+        FamilyPreference::Auto,
+        availability(&[("model-alpha", ProviderHealth::Healthy)]),
+    );
+
+    for (lifecycle, expected_state, expected_note) in [
+        (LifecycleState::Active, RoutableState::Active, "state: Active"),
+        (
+            LifecycleState::Degraded,
+            RoutableState::Degraded,
+            "state: Degraded",
+        ),
+    ] {
+        let models = vec![routable(&tx, "model-alpha", lifecycle)];
+        let ranked = rank(&request, &models, &BaselineRankingPolicy)
+            .expect("可路由态（含 Degraded）都应成为候选");
+
+        assert_eq!(
+            ranked.candidates().len(),
+            1,
+            "{expected_note}：候选仍在表里（「可见但不禁」）"
+        );
+        assert_eq!(
+            ranked.selected().state(),
+            expected_state,
+            "{expected_note}：`state()` 读出的就是过闸门后的那个状态"
+        );
+        assert_eq!(
+            ranked.selected().reason().notes(),
+            &[String::from(expected_note)],
+            "{expected_note}：状态在 `reason` 里看得到——策略据此可以降权"
+        );
+    }
+
+    tx.commit().unwrap();
+}
+
+/// **基线不读预算：两次请求只差 `BudgetView` → 排序不变**（设计 §5.3 末段、§10 第 2 条）。
+///
+/// # 这是「已写明未实现」，不是「忘了读」——用例名与这段注释都写死这一点
+///
+/// §250 的「最终选择 MUST 考虑成本」在本设计里的兑现是**结构性的**：`RoutingRequest.budget`
+/// 是**必填参数**（不是 `Option`），一个策略想忽略它是一次**看得见的选择**。
+/// 而**它还不是「已实现」**：§333 的五个量纲没有单位，量值算不出来（设计 §6），
+/// 语义层未建，每个 `Some` 今天都只能由测试构造。
+/// 故本条拍的**不是**「成本算得对」，而是「**基线的输出不依赖预算**」——这条**已写明**的事实的照片。
+///
+/// 两侧取**最可能露馅**的一对：`None`（该量纲不构成约束）与 `Some(0)`（额度为零）。
+/// 一个偷偷读预算的策略若按「余额少就降权」做，这一对会把它的输出拉开
+/// （`BudgetView` 的文档明写 `None` ≠ `Some(0)`，两者不是同一件事）。
+///
+/// 红的条件：基线把 `budget` 纳入了 `compatibility` / `confidence` / `family` 中的任何一个。
+#[test]
+fn the_baseline_does_not_read_the_budget() {
+    let (_dir, db) = db();
+    let tx = db.begin().unwrap();
+
+    seed_candidate(&tx, "model-alpha", "0.5");
+    seed_candidate(&tx, "model-bravo", "0.5");
+    observe(&tx, "model-alpha", SkillDimension::Coding, 0.5, 1);
+
+    let models = vec![
+        routable(&tx, "model-alpha", LifecycleState::Active),
+        routable(&tx, "model-bravo", LifecycleState::Active),
+    ];
+    let snapshot = availability(&[
+        ("model-alpha", ProviderHealth::Healthy),
+        ("model-bravo", ProviderHealth::Healthy),
+    ]);
+
+    let unbounded = request_for(two_dimensions(), FamilyPreference::Auto, snapshot.clone());
+    let mut zeroed = request_for(two_dimensions(), FamilyPreference::Auto, snapshot);
+    zeroed.budget = BudgetView {
+        money: Some(0),
+        wall_time: Some(0),
+        token: Some(0),
+        gpu_time: Some(0),
+        network_transfer: Some(0),
+    };
+
+    let with_none = fingerprint(
+        &rank(&unbounded, &models, &BaselineRankingPolicy).expect("两个候选都应过"),
+    );
+    let with_zero =
+        fingerprint(&rank(&zeroed, &models, &BaselineRankingPolicy).expect("两个候选都应过"));
+
+    assert_eq!(
+        with_zero, with_none,
+        "两次请求只差 `BudgetView`，输出逐项相同——基线不读预算（已写明未实现，不是忘了读）"
+    );
 
     tx.commit().unwrap();
 }
