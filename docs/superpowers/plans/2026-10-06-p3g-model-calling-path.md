@@ -42,20 +42,54 @@ G 的公开面只接受 `&ExecutionCandidate`，**不接受 `ModelId`**（设计
 | `continuum_graph::failure::FailureClass` | **已交付** | 分类的像 |
 | `continuum_model_registry::{RoutingRequest, TaskSkillRequirement, FamilyPreference, BudgetView}` | **已交付**（D 的 Task 10） | `select` 组装请求 |
 | `continuum_model_registry::{RoutableModel, RoutingError, load_profile, register_model}` | **已交付** | `plan_candidates` 的闸门与画像 |
-| `continuum_model_registry::{rank, RankedExecutionCandidates, ExecutionCandidate, RankingPolicy, CandidateScore, RoutingReason}` | **未交付**（D 的计划 Task 11；实读 `grep -rn "pub fn rank\|RankedExecutionCandidates" crates/continuum-model-registry/src/` 零命中） | `select` 的输出、`call` 的入参 |
-| `continuum_model_registry::list_registered` | **未交付**（D 的计划 Task 14 Step 1，`docs/superpowers/plans/2026-10-05-p3d-model-registry-router.md:1408`） | `plan_candidates` 的 id 清单**唯一来源** |
-| `continuum_provider::{ProviderRegistry, RegistryError}`、`ProviderRegistry::model_for` | **未交付**（C 的计划 Task 1，`docs/superpowers/plans/2026-10-05-p3c-provider-boundary.md:326`；实现落在 `.worktrees/p3cf` 那条流里） | `plan_candidates` 解析适配器 |
-| `crates/continuum-runtime/src/error.rs`（F 的 `TaskError` / `ToolReportedError` 在里面） | **未交付**（实读：该文件不存在） | **`ModelCallError` 的落点**（设计 §10.2） |
+| `continuum_model_registry::{rank, RankedExecutionCandidates, ExecutionCandidate, RankingPolicy, CandidateScore, RoutingReason}` | ~~**未交付**（D 的计划 Task 11；实读 `grep -rn "pub fn rank\|RankedExecutionCandidates" crates/continuum-model-registry/src/` 零命中）~~ **已交付**（订正见下） | `select` 的输出、`call` 的入参 |
+| `continuum_model_registry::list_registered` | ~~**未交付**（D 的计划 Task 14 Step 1，`docs/superpowers/plans/2026-10-05-p3d-model-registry-router.md:1408`）~~ **已交付**（订正见下） | `plan_candidates` 的 id 清单**唯一来源** |
 
-### 哪些 task 在 C/D 未交付之前动不了
+**订正注记（2026-10-07，原话照留）**：上面那一格的「**未交付**」**在本计划写下的时点成立，现已过期**——
+D 的 Task 14 Step 1 已把它交付：`crates/continuum-model-registry/src/persist.rs` 的
+`pub fn list_registered(tx: &Tx<'_>) -> Result<Vec<(ModelId, LifecycleState)>, PersistError>`
+（**按 id 升序**；**不过滤状态**——闸门在 `RoutableModel::try_new`，此处滤掉会把「哪些模型存在」与
+「哪些能路由」混成一件），提交 `510a90d` / `80250f2`，照片是
+`list_registered_lists_every_registered_model`（`crates/continuum-model-registry/tests/persist.rs:535`）。
+故 **G 的 Task 6 起不再卡在这一项上**；其余与之相邻的状态词见下面的扫描结果。
+**同一条注记也覆盖上表那一格的 `rank` 一族**（原话照留：`未交付` ＋ 那句「实读 `grep …` 零命中」）：
+**两者都已交付**——D 的 **Task 11** 落的，`crates/continuum-model-registry/src/router.rs`
+有 `pub fn rank`（`:523`）与 `pub struct RankedExecutionCandidates`（`:405`），
+同模块还有 `ExecutionCandidate` / `RankingPolicy` / `CandidateScore` / `RoutingReason`。
+**故那句「零命中」现在也是错的**，而它**尤其危险**：它读起来像一次实测，却是**带时点的事实陈述**——
+时点一过，它与「我刚 grep 过」无法从字面区分。
+
+**判据写进原地**：**「未交付／尚未／待补」这类词是带时点的状态陈述，不是标签**——
+**写它要带时点（必要时带分支）；事实变了必须回来改那一条**，否则后来者会
+**照它去做一件已经做过的事**，或者**以为一件已经能做的事还做不了**
+（本仓已在 D 的计划里栽过一次同类：遗留条在代码落地前就写着「已补」）。
+它与本仓已立的「『会／不会 X』要问一句『在哪个时点』」是同一条。
+**另一条同源的判据（见 `:50` 那节）**：**状态陈述在「同一份计划被两条分支同时读」时会两边都像真的**
+——故凡「某处尚未存在」这类话，**要带分支与时点**。
+| `continuum_provider::{ProviderRegistry, RegistryError}`、`ProviderRegistry::model_for` | **截至 2026-10-07，在分支 `p3d` 上：未交付**（C 的计划 Task 1，`docs/superpowers/plans/2026-10-05-p3c-provider-boundary.md:326`；**实现落在 `.worktrees/p3cf` 那条流里**——同一天在该分支上它已存在） | `plan_candidates` 解析适配器 |
+| `crates/continuum-runtime/src/error.rs`（F 的 `TaskError` / `ToolReportedError` 在里面） | **截至 2026-10-07，在分支 `p3d` 上：未交付**（实读：该文件不存在；**F 的实现同样落在 `.worktrees/p3cf` 那条流里**） | **`ModelCallError` 的落点**（设计 §10.2） |
+
+### 哪些 task 在别的子项目交付之前动不了（**按子项目分别成立；带时点与分支**）
+
+**订正（2026-10-07，原话照留）**：本小节原标题是「哪些 task 在 **C/D 未交付**之前动不了」——
+**那句对 D 已不准**（D 的 Task 11 与 Task 14 Step 1 都已交付，见上表的订正注记），**对 C 仍准**。
+**故本节的结论一律按子项目分别读**，且**都要带时点与分支**：
+**截至 2026-10-07**，D 侧**在分支 `p3d` 上**已交付 `rank` 一族与 `list_registered`；
+**C 与 F 的实现落在 `.worktrees/p3cf` 那条流上**，**在 `p3d` 上尚未交付**。
+**判据写进原地**：**状态陈述在「同一份计划被两条分支同时读」时会两边都像真的**——
+**故凡「某处尚未存在」这类话，要带分支与时点**。
 
 - **Task 1–5 全不依赖 C 与 D**（`ModelCallError` 的落点除外，见下）：它们只用
   `continuum-core` 的既有类型、`ModelProvider`（已交付的 trait）、`FailureClass`、以及**源码文本**。
 - **Task 6 起全部硬依赖**：`plan_candidates` 要 `list_registered`（D）与 `model_for`（C）；
   `select` / `call` / `call_stream` / `abort` 的**签名里就写着** `RankedExecutionCandidates` / `ExecutionCandidate`，
   故 D 的 Task 11 未落地时**从 Task 6 起编不过**（不是「行为不对」，是**编译失败**）。
+  **订正（2026-10-07，原话照留）**：**D 的那一半已过期**——`rank` 一族与 `list_registered`
+  **截至 2026-10-07 在分支 `p3d` 上已交付**（证据见上表的订正注记）；**C 的那一半仍成立**
+  （`model_for` 实现在 `.worktrees/p3cf` 那条流上，`p3d` 上未交付）。故今日的实际阻塞项是 **C（＋F）**，不是 C/D。
 - **Task 1 的落点依赖 F**：设计 §10.2 把 `ModelCallError` 记在 `crates/continuum-runtime/src/error.rs`
-  （「F 已在那里放了 `TaskError` 与 `ToolReportedError`」）。**F 本轮尚未落地，该文件不存在**——
+  （「F 已在那里放了 `TaskError` 与 `ToolReportedError`」）。**截至 2026-10-07，在分支 `p3d` 上：
+  F 尚未落地、该文件不存在**（F 的实现落在 `.worktrees/p3cf` 那条流里）——
   故 G 的实际前置是 **C / D / F 三个**，而设计 §4/§10 只写了 C 与 D。
   **本计划不代 F 建那个文件**（那会让同一个文件有两个创建者，而 F 的 Task 2 还要把 `TaskError` 整块搬进去）。
   开工前先核：
@@ -73,7 +107,9 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
   **G 不改 `ProviderRegistry`、不改 `model_for` 的签名、不新增任何注册表入口**。
 - **交给 D 的实现者（消费方视角，不改其接口）**：G 调 `list_registered(tx)` 建候选集的 id 清单，
   并调 `rank(&RoutingRequest, &[RoutableModel], &dyn RankingPolicy)`
-  （设计 §4.1、§14 第 10 条：这条请求**已由 D 的计划 Task 14 Step 1 认领，尚未落地为代码**）。
+  （设计 §4.1、§14 第 10 条：这条请求**已由 D 的计划 Task 14 Step 1 认领**——**订正（2026-10-07，原话照留）：
+  「尚未落地为代码」已过期，它已交付**，见上表那一格的订正注记：`persist.rs` 的 `list_registered`、
+  提交 `510a90d` / `80250f2`、照片 `list_registered_lists_every_registered_model`）。
   **G 不重述、不改动这两个接口**。
 - **交给协调者**：`ModelCallError` 的落点文件依赖 F（见上）；设计 §3.1 代码块与正文的两处不一致（见 `## 遗留`）。
 - **规范维护者（本项目无此角色）**：设计 §14 的第 1、2、3、4、5、6、8、9 条——**本计划一条都不发明**，
@@ -272,7 +308,10 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
 cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
-预期：`E0433` / `E0425`（`ModelCallError`、`classify` 尚未存在）。
+预期：**「名字未解析」这一类**编译错误（`ModelCallError`、`classify` 尚未存在）。
+**订正（2026-10-07，原话照留）**：原句写死了 `E0433` / `E0425`，**两枚都无实跑记录**，
+按本仓今天的统一口径收成**类别**——**具体码以实跑为准**。判据是那条：
+**「预期报错码」必须来自实跑；`.stderr` 不会替你报错——码写错了它照样让用例绿。**
 
 - [ ] **Step 3: 实现**
 
@@ -1398,7 +1437,10 @@ Deadline 的 elapsed_ms 口径           **→ 已回写设计 §3.1 末段**：
 - **第 7 条**（`ExecutionProfile` 的模型侧两个字段）：收件人是**构造 `ExecutionProfile` 的那一方
   （驱动侧的节点执行装配点）＋ `continuum-graph` ＋ 规范维护者**。**G 这条路径不经过 `ExecutionProfile`**
   ——它只取 `timeout_ms` 的**值**（§3.5），故本计划**不改 `continuum-graph` 的任何文件**。
-- **第 10 条**（`list_registered`）：**已由 D 的计划 Task 14 Step 1 认领，尚未落地为代码**。
+- **第 10 条**（`list_registered`）：**已由 D 的计划 Task 14 Step 1 认领，且已交付**
+  （**订正 2026-10-07，原话照留**：原句结尾是「尚未落地为代码」，那句已过期；
+  交付证据见本计划上表那一格的订正注记——`persist.rs` 的 `list_registered`、提交 `510a90d` / `80250f2`、
+  照片 `list_registered_lists_every_registered_model`）。
   **G 侧只作消费方**（Task 6），**不重述、不改动那个接口**。
 - **第 11、12 条**（`model_providers()` 零消费方、C §6 第 2 步的混称）：**已闭（2026-10-06，C 已落实）**。
   **G 的处置是照现文写**：用 `model_for`（Task 6）、用 `health()`（Task 3）、
