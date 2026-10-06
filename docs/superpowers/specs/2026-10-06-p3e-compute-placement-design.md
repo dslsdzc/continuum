@@ -44,7 +44,7 @@
 
 | 东西 | 现状 | 出处 |
 |---|---|---|
-| `PrivacyClass`（§243 的五档） | **已存在、已落库**。`Public / Personal / Private / Secret / LocalOnly` 五枚，`ALL` 是五枚，`as_str`／`parse` 是编码的唯一产生点，`parse` 对表外串返回 `None` | `crates/continuum-artifact/src/artifact.rs:87`（枚举）、`:100`（`ALL`）、`:112`（`as_str`）、`:129`（`parse`） |
+| `PrivacyClass`（§243 的五档） | **已存在、已落库**。`Public / Personal / Private / Secret / LocalOnly` 五枚，`ALL` 是五枚，`as_str`／`parse` 是编码的唯一产生点，`parse` 对表外串返回 `None` | `crates/continuum-artifact/src/artifact.rs:87`（枚举）、`:100`（`ALL`）、`:119`（`as_str`）、`:137`（`parse`）。**订正（2026-10-06，定点复核查出；原话照留）**：本行初稿写 `:112`／`:129`——**那是同文件 `ArtifactType` 那一套**（`:47`／`:68`）。**这是四处同类错号里唯一落在本表内的一处**，也是复审上轮点名的那一处；我上一轮改了另外三处（§5.4 通道 (a)(c)、§8 第 5 条）**偏偏漏了这一行**。根因与订正块见 §5.4。 |
 | `privacy_class` 的落库列 | `NOT NULL`，读出错串即 `PersistError`——**不是默认档次** | `crates/continuum-artifact/src/persist.rs:14-15`、`:120-123` |
 | `Artifact` | `pub privacy_class: PrivacyClass`（**不是 `Option`**） | `crates/continuum-artifact/src/artifact.rs:179` |
 | D 的 Router 输出面 | **已落地**（Task 11）：`rank`、`RankedExecutionCandidates`（`selected`／`alternatives`／`candidates`）、`ExecutionCandidate` 的五个访问器、`RoutingReason`、`RankingPolicy` | `crates/continuum-model-registry/src/router.rs`：`:394`（`RankedExecutionCandidates`）、`:403`（`selected`）、`:345`（`ExecutionCandidate`）、`:355-376`（`model`／`reason` 等访问器）、`:276`（`RoutingReason`）、`:424`（`RankingPolicy`）、`:512`（`rank`）。**行号按 2026-10-06 的**工作树**取**——该文件当时有未提交改动，较 `c46477f` 整体下移约 15 行（见 §6.3 末段） |
@@ -954,6 +954,14 @@ continuum-artifact  ──→ continuum-node
 6. **§342.7「Temporary Node 不得自动进入 Personal Trust Domain」**：Authority 不存在，
    信任标签由调用方给（§3.3 限度 2），故拍不到「它没被自动放进去」。
 7. **§93 的 data movement cost**：locality 无输入（§5.7），故拍不到「搬运成本被算进去了」。
+8. **「调用方的表真的被读」这一条今天没有照片**（2026-10-06 定点复核要求补，与其余七条同级）：
+   本设计**无实现体**，故只有**逐字推演的论证**（写在上条与 §9 的「调用方收紧」格子里）；
+   实施期须**真跑**那个变异体（闸门只算 `spec_floor`、不读 `policy.rules()`），
+   红点须落在 **§9「调用方收紧」那一行的断言上**。
+   **它为什么单独列在这里**：§9 是「怎么验」，本节是「**今天还没有什么被验到**」——
+   这一条恰恰属于后者，且它埋在 §9 全表最长那一格的中段，计划读者扫表时容易只看到断言、
+   看不到「这只是论证」。**与其余七条的区别**：那七条是**永远拍不到**（缺设备、缺上游、缺规范），
+   这一条是**今天拍不到、实施期第一件事就能拍**——故它的措辞里带的是「须真跑」，不是「拍不到」。
 
 ---
 
@@ -964,7 +972,7 @@ continuum-artifact  ──→ continuum-node
 | **判据 §4.4**：混合节点集下 `LocalOnly` 只落在 personal 且被信任的节点上 | 给定 `[云节点(temporary, outside), 桌面(personal, trusted)]`，断言 `place` 返回的那个，并逐项断言它的 `class() == Personal` 与 `trust() == TrustedPersonal` |
 | **判据 §4.4 的否定面** | 节点集只有云节点时返回 `Err(NoPlaceableNode)`（**上面一条与这一条是成对的**，单看任一条分不清两种 `Err`） |
 | **放行侧（I1，2026-10-06 评审查出后补）** | `Public` 的制品 ＋ 表里 `Public` 那一档写 `AnyNode` ＋ 节点集**只有云节点** → **`Ok`**，断言返回的正是那枚云节点（顺带断言 `class() != Personal`）。**这一格是必需的**：没有它，一个「把所有制品都当 `LocalOnly` 一律拒掉」的实现能通过本表其余每一行——那正是 fail-closed 的反面（闸门静默拒绝一切）。**上面两行钉「该拒的拒」，这一行钉「该放的放」。** |
-| **调用方收紧（2026-10-06 定点复核补，I1 的走查发现本表缺这一侧）** | `Secret` 的制品 ＋ 表里 **`Secret` 那一档写 `TrustedPersonalOnly`** ＋ 节点集**只有云节点** → 断言 **`Err(NoPlaceableNode)`**。**这一格钉的是「调用方的表真的被读」**：一个**完全不读 `policy.rules()`、只算 `spec_floor(level)`** 的实现，在 `Secret` 上得 `AnyNode`，故会返 `Ok` ⇒ **在这一格自己的断言上变红**。**同时它是 §10 第 2 条那句「那四档的宽严完全取决于调用方」的照片**——没有这一格，那句话既无照片、又在「不读表」的实现下为假。**本表里唯一读 `policy.rules()` 的一格**：其余各格或是 `LocalOnly`（`spec_floor` 已钉死）、或是「五档全 `AnyNode`」（与不读表同解）、或走 `compare`／`try_new`／第一步判重，**在那个变异体下都仍为绿**——故它是那条变异体的唯一红点。**实施期须把该变异体真跑一遍**，红点须落在本行的断言上。 |
+| **调用方收紧（2026-10-06 定点复核补，I1 的走查发现本表缺这一侧）** | `Secret` 的制品 ＋ 表里 **`Secret` 那一档写 `TrustedPersonalOnly`** ＋ 节点集**只有云节点** → 断言 **`Err(NoPlaceableNode)`**。**这一格钉的是「调用方的表真的被读」**：一个**完全不读 `policy.rules()`、只算 `spec_floor(level)`** 的实现，在 `Secret` 上得 `AnyNode`，故会返 `Ok` ⇒ **在这一格自己的断言上变红**。**同时它是 §10 第 2 条那句「那四档的宽严完全取决于调用方」的照片**——没有这一格，那句话既无照片、又在「不读表」的实现下为假。**本表里唯一读 `policy.rules()` 的一格**：其余各格或是 `LocalOnly`（`spec_floor` 已钉死）、或是「五档全 `AnyNode`」（与不读表同解）、或走 `compare`／`try_new`／第一步判重，**在那个变异体下都仍为绿**——故它是那条变异体的唯一红点。**实施期须把该变异体真跑一遍**，红点须落在本行的断言上（**它的照片今天不存在，故同时记在 §8 第 8 条**）。 |
 | **闸门不可被策略放宽** | 五档**全写** `AnyNode` 的 `PlacementRules`：`LocalOnly` 的制品仍只落在 `TrustedPersonalOnly` 那一类节点上（**逐档遍历**，不是只测 `LocalOnly` 一档）。**顺带钉住 §5.4 的那句话**：`LocalOnly` 那一格被 `spec_floor` 覆盖，填什么都一样 |
 | **请求面不依赖 Router 输出（C4 裁定要求的反侧照片）** | `tests/placement.rs` 里有一枚样例，**只给 `artifacts` 与 `nodes`** 就把 `PlacementRequest` 建出来并调用 `place` ——**不调 `rank`、不构造任何候选集**：裁定原文要的是「删字段之后它必须**仍然编得过、跑得过**」，「这就是『零读取』这件事的照片」。这是否定式照片（`p3bcdf-followups.md` §四.4 判它在本仓可接受）。**与其余各行不重复**：那些行断言的是给定 `nodes`／`artifacts` 时闸门的行为，这一行断言的是**请求的构造本身**不需要任何候选值 |
 | **注册表不引 artifact（M4 的守卫）** | 源码文本断言：`src/registry.rs` 里不出现 `continuum_artifact` / `Artifact` / `PrivacyClass` 三个名字。**证明力的边界**：匹配的是字面拼法，别名与全限定路径逃逸——是下界不是封闭判定（与 C 设计 §4.1 末段同形）；更硬的一层是 `ALLOWED` 的逐对断言（本 crate 整体） |
