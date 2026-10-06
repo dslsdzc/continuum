@@ -26,7 +26,7 @@ Model Registry 生命周期（§249）、Router 与候选排序（§250 §84）�
 | Model Registry 生命周期 | §249 §21 §22 §82 | 建（状态类型 + 迁移表 + 可路由闸门，§4） |
 | Router 与候选排序 | §250 §84 | 建（输入/输出类型 + 排序策略接口 + 具名基线策略，§5） |
 | 成本输入（预算视图） | ENG-005 §4.1 §4.3 | 只建**接口投影**，不建记账（§6） |
-| 升级与降级 | §251 §85 §86 | 只建**阶梯的数据形状**；触发与预算前提的检查不在本层（§7.1） |
+| 升级与降级 | §251 §85 §86 | 只建**档的枚举 `EscalationStep` 与纯函数 `next_step`**；**阶梯本身（`EscalationLadder`）本阶段不建**（零产生方、零消费方、不可构造），触发与预算前提的检查也不在本层（§7.1） |
 | 路由探索 | §27 | **不建**（被 OPEN-014 与 OPEN-008 双阻断，§7.2） |
 | Provider Adapter / ToolProvider 注册与发现 | §315 §316 §80 | 不建（子项目 C） |
 | Connector 与权限细分 | §124 §125 | 不建（子项目 B） |
@@ -1120,7 +1120,7 @@ ENG-005 第五节把「`execution_profile.cost_budget` 的类型收紧」列为�
 
 # 7. 升降级与路由探索（§251 §85 §86 §27）
 
-## 7.1 升级与降级：阶梯的形状在本层，触发不在
+## 7.1 升级与降级：档与「下一档」在本层，阶梯本身与触发不在
 
 《工程》§4.1 把「升级与降级」列在资源层。本设计把它的**数据形状**建在本层，把**触发**留给别处：
 
@@ -1142,7 +1142,21 @@ pub enum EscalationStep {
 pub struct EscalationLadder { steps: Vec<EscalationStep> }
 ```
 
-**本层建**：阶梯的**有序步骤**，以及「下一档」这个纯函数 `next_step(cur) -> Option<EscalationStep>`。
+**本层建**：「下一档」这个纯函数 `next_step(cur) -> Option<EscalationStep>`。
+**阶梯本身（`EscalationLadder`）本阶段不建**——见紧随其后的那段。
+
+> **`EscalationLadder` 本阶段不建**（Task 13 的实现者与评审各自独立发现，协调者裁定：**省略成立**）。
+> 理由三条，合起来是「**不可构造**」：**零产生方**（本层没有任何东西会造出一个阶梯、
+> 也没有任何东西往里面塞步骤）、**零消费方**（全仓 grep 无 Rust 使用者；`next_step` 收发的都是裸
+> `EscalationStep`）、**字段私有且无构造函数、无访问器**——连测试都造不出一个 `EscalationLadder` 实例。
+> 这与本仓先例同一判据：`RoutingError::Persist` 正因**零产生方**被删（§5.4）。
+> **建它的触发条件**（写死，免得后来者以为漏了）：**出现第一个消费者时**才建，
+> **届时连同一个读口（访问器）一起加**，**并把这段触发条件一并删掉**——
+> 留一段「将来要建」的文字而真的建了它，那种文字就会变成谎。
+>
+> **为什么骨架仍留在设计里**：上面那段代码块描述的是**意图**（§251 的阶梯是「一串有序的档」），
+> 不是「本阶段建了什么」。**设计可以写意图，但必须把「本阶段建不建」写在紧邻处**——
+> 这一条正是本仓反复出现的形状「设计里列了、实现里没有」的解药。
 
 **§86 的 `Tier 1 Low` 不在这五档里，且这是规范自身的不一致。** §86 的降级例写「复杂规划 → Tier 2 High，
 随后 400 个机械文件检查 → **Tier 1 Low**」（`docs/spec/02-positioning.md:847-867`），而 §251 的阶梯五档里
@@ -1196,7 +1210,7 @@ crates/continuum-model-registry/
   src/lifecycle.rs    LifecycleState、RoutableState、RoutableModel、迁移表
   src/persist.rs      三张表的迁移与读写（与表定义同址）
   src/router.rs       RoutingRequest、RankedExecutionCandidates、RankingPolicy、BaselineRankingPolicy
-  src/escalation.rs   EscalationStep、EscalationLadder、next_step（§7.1）
+  src/escalation.rs   EscalationStep、next_step（§7.1）——**`EscalationLadder` 本阶段不建**，见 §7.1
   src/budget.rs       BudgetView（§333 的只读投影）
   src/error.rs        LifecycleError、RoutingError、ProfileError、RequirementError
   tests/{profile,lifecycle,persist,router,escalation,budget}.rs
@@ -1328,8 +1342,9 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
 2. **预算视图的真实语义**：语义层未建，`BudgetView` 的每个 `Some` 都只能由测试构造。
    「剩余额度算得对不对」在本阶段**不可观察**——故本设计不为它写运行期用例，
    只钉类型与签名（§6）。**这是「§250 的 MUST 考虑成本尚未实现」的同一件事的另一种说法。**
-3. **探索概率与升级阶梯的实际触发**：§7.1 / §7.2 定它们不在本层。本层只有阶梯的数据形状，**没有消费者**，
-   故 `next_step` 的照片只能是对纯函数的直接调用，钉不了「驱动真的在失败后升级了」。
+3. **探索概率与升级阶梯的实际触发**：§7.1 / §7.2 定它们不在本层。本层只有**档的枚举 `EscalationStep`
+   与纯函数 `next_step`**——**阶梯本身（`EscalationLadder`）本阶段不建**（§7.1：零产生方、零消费方、
+   不可构造），故 `next_step` 的照片只能是对纯函数的直接调用，钉不了「驱动真的在失败后升级了」。
 4. **排序质量**：「A 比 B 更合理」在本设计里是一个**没有判据**的命题（§84 未给算法、OPEN-008 未决），
    故没有任何用例能断言「排出来的顺序是对的」。能拍的只有机制：全序、确定、字段齐备。
 5. **§248 禁令的行为面**：第 1、2 条照片钉的是「类型上没有这个字段」与「表里没有这一列」，
@@ -1429,8 +1444,8 @@ continuum-model-registry → continuum-core, continuum-capability, continuum-per
     - **`max_attempts >= 2` 与退避参数不是本层的**：`docs/superpowers/p1-followups.md:62-64` 的原话是
       「**P3 的 Router** 必须为 RESOURCE 显式给出 `max_attempts >= 2` 与退避参数」——
       **本设计不接这句话里的「Router」二字**：按 §246，重试参数属 `ExecutionProfile.retry_policy`，
-      归**执行层**（它的产生方是节点配置，不是路由）；本层的 `EscalationLadder`（§7.1）是「换哪个模型」，
-      与「重试几次」是两个轴。**这是一处与本仓既有 followups 的措辞分歧，明写在此**，
+      归**执行层**（它的产生方是节点配置，不是路由）；本层的 `EscalationStep` / `next_step`（§7.1）
+      管的是「换哪个模型」，与「重试几次」是两个轴。**这是一处与本仓既有 followups 的措辞分歧，明写在此**，
       由协调者指派，别让它第二次挂空。
     - **今天 `FailureClass::Resource` 从 `ProviderError` 不可达**（该枚举无限流／配额变体），
       故 §251 的前提检查里 RESOURCE 那一格**无产生方**——这是「未实现的因子」，不是「本设计漏了」。
