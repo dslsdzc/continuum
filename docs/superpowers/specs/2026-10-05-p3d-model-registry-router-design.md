@@ -395,7 +395,7 @@ CREATE TABLE model_skill_score (       -- §248 §24：时间序列，不是常�
 
 ```rust
 pub fn p3d_model_migrations() -> Vec<Migration>;
-pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), PersistError>;
+pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), LifecycleError>;   // 见下方订正
 pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError>;
 pub fn save_skill_observation(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension,
                               obs: &SkillObservation) -> Result<(), PersistError>;
@@ -415,6 +415,37 @@ pub fn transition(tx: &Tx<'_>, id: &ModelId, to: LifecycleState)
 `load_skill_series` 的消费方是 §82 的行为指纹（「如果表现突然变化」，`docs/spec/02-positioning.md:736-764`）
 ——判「变化」至少要看两次观测，故它现在就必须有；只存当前值会让 §82 的判据无法成立。
 **它的产生方（周期性 probe）本阶段不存在**，这一点写在 §10 的「拍不到的照片」里，不靠一句将来时糊过去。
+
+### 返回类型的分工：`PersistError` 是「库不干了」，业务拒绝另立类型
+
+**判据一句**：**一个拒绝若表结构表达得出（主键、外键、唯一索引、非空、类型），就报 `PersistError`；
+表达不出的（要读另一张表、或跨行判断）才是业务拒绝，报那个操作自己的错误类型。**
+
+> **一处订正，来历留在原地**（本项目既有做法）。第一版稿子把 `save_profile` 写成
+> `Result<(), PersistError>`，而 **§4.1／§4.3 又要求它能返回 `Err(ProfileBeforeVerified { state })`**
+> ——**两处相抵，因为 `PersistError` 装不下 `ProfileBeforeVerified`**（那是 `LifecycleError` 的变体）。
+> **裁决（2026-10-05，协调者）**：**`save_profile` 返回 `Result<(), LifecycleError>`**，
+> 判据是本设计 §2.4 那条同一取向的语义分工——**`PersistError` 是「库不干了」，
+> `ProfileBeforeVerified` 是「这个状态不许存画像」**；后者要读 `model_registry` 的当前状态才判得出，
+> 是**业务拒绝**，不是持久化失败。两枚错误类型本来就分开（§2.4 明写 `ProfileError` 与
+> `LifecycleError` / `RoutingError` 分开）。**实现者已按 §4.1／§4.3 落地**，本节据此对齐，
+> 不是反过来改实现。（`LifecycleError` 自带 `Persist(#[from] PersistError)`，故库侧失败仍经它上抛，
+> `?` 不必手工转换。）
+
+**同类扫：本 crate 里每个写函数逐处核过，只有 `save_profile` 一处混用过。** 其余各处的分界如下，
+判据就是上面那一句：
+
+| 函数 | 返回 | 为什么不是业务拒绝 |
+|---|---|---|
+| `save_profile` | **`LifecycleError`** | 「画像只能在 `verified` 及之后存」要读**另一张表**（`model_registry`）的状态，表结构表达不出 → 业务拒绝 |
+| `save_skill_observation` | `PersistError` | 两条约束都在表结构里：`(model_id, dimension, score_version)` 是主键；`model_id` 是外键。故「同版本二次写入」与「模型没有画像」都由库自己拒 |
+| `register_model` | `PersistError` | 「id 不重复」主键表达得出（与 P3A 的 `save_tool` 同一处置） |
+| `transition` | **`LifecycleError`** | 「迁移对不在表里」与「登记项不存在」都要跨行判断，表结构表达不出 |
+| 各 `load_*` | `PersistError` | 只读，没有业务拒绝；「不存在」用 `Ok(None)` 表示，不是 `Err` |
+
+**这条分界的代价也写明**：调用方对 `save_profile` / `transition` 要按两枚错误分支，
+不能只 `map_err` 成一个——这正是两枚类型分开的意义，把它们合成一个「什么都收」的枚举，
+就等于把「库不干了」与「这个状态不许」重新混起来。
 
 ## 3.3 迁移编号
 
