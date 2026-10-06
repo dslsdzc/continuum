@@ -453,6 +453,14 @@ git commit -m "feat(model-registry): §247 的 ModelProfile 与两处不可表�
   「正常态确实会被路由」的那侧照样绿，只有这条会红。依据是已裁的 §4.2（`set-decisions` 第一节第 4 条）。
 - `a_degraded_model_still_passes_the_gate`：`Degraded` → `Ok`，并在候选的 `reason` 里可见（§4.2 末段：可见但不禁）。
   红的条件：把 `Degraded` 一并挡下即红（撞名的是 `ProviderHealth::Degraded`，两个轴上的两个东西）。
+  **订正注记（2026-10-06，原话照留）**：那句「并在候选的 `reason` 里可见」**在本 task 的时点上没有对象**——
+  `RoutingReason` 是 Task 11 的产物，Task 4 时它还不在。**已落地的断言落在 `state()` 上**
+  （`crates/continuum-model-registry/src/lifecycle.rs` 的单元测试，`:414-418`：只断言
+  `RoutableModel::try_new(Degraded)` 成功 ＋ `model.state()` 读出 `Degraded`，**没有任何关于 `reason` 的断言**）。
+  **代码无需改**；理由另见「state 的家是 `ExecutionCandidate.state`」那条裁定（`RoutingReason` 不带 state）。
+  **判据写进原地**：**计划里的用例描述可以写到「将来的形状」，但那时要把时点写上**——
+  否则读者会以为今天该有一条 `reason` 断言。（同址另记一条教训：本仓的用例**可能住在 `tests/` 或
+  `src/` 的 `#[cfg(test)]` 模块里**，只搜一处就断言「不存在」是错的。）
 - `the_transition_table_accepts_every_listed_pair`：§4.1 的合法对**逐条** `Ok`（正常阶梯六态线性、
   `verified→active`、`active→stale`、`stale→researched`、`active↔degraded`、`*→quarantined`、`*→disabled`、
   `quarantined→disabled`、`disabled→unprofiled`），每条的返回值与断言各写一次。
@@ -1154,6 +1162,12 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
     **这一条是「不发明降权判据」的照片**：设计写死只过滤 `Unavailable`，`Degraded` 该不该降权
     **规范未给判据**（§250 只说「考虑」、§84 没有给这一维的算法），故基线不为它改排序；
     它原样带进 `reason`（设计 §5.3、§11 第 24 条）。
+    **订正注记（2026-10-06，原话照留）**：**健康度不进 `reason`**——`RoutingReason` 没有这个字段，
+    它的家是 **`RoutingRequest.availability`**（健康度是**请求侧**的事实，不是候选的属性），
+    策略要读就读得到。理由与「state 的家是 `ExecutionCandidate.state`」那条相同：
+    **同一事实不在两处落点**。设计已就地订正（§5.3 的订正注记）。**已提交的测试里没有一条断言
+    「健康度在 `reason` 里」**（`router.rs:455` 那个 `fingerprint` 收的是 `reason().notes()`，与健康度无关），
+    **故这是纯计划文本的订正，代码无需改**。
   - `a_candidate_missing_from_availability_is_rejected`：候选集里的某个 `ModelId` 在
     `RoutingRequest::availability` 里**没有条目** → `Err(RoutingError::UnknownAvailability { id })`，
     **断言是哪一枚、id 是哪一个**。**不当作可用**——按未知放行是 fail-open 的形状（设计 §5.3）。
@@ -1212,7 +1226,10 @@ pub fn rank(request: &RoutingRequest, models: &[RoutableModel], policy: &dyn Ran
   `RankedExecutionCandidates`，即**可执行的**候选；一个供应商侧已不可用的模型不是执行候选，
   把它排进去，「拿它跑」那一步必然失败。**故这一条是「不可用即不是候选」，不是「可用性低就降权」。**
 - **`Healthy` 与 `Degraded` 都进候选集，两者之间没有判据**：`Degraded` 该不该降权、降到什么程度，
-  规范未给判据，故本设计不发明——健康度原样带进 `reason`，让策略自己决定（§11 第 24 条）。
+  规范未给判据，故本设计不发明——健康度原样**留在请求里**（`RoutingRequest.availability`），让策略自己决定
+  （§11 第 24 条）。**订正注记（2026-10-06，原话照留）**：原句写「健康度原样带进 `reason`」，
+  **那句与现行设计相抵**——`RoutingReason` 没有这个字段，健康度的家是 **`RoutingRequest.availability`**
+  （理由与 state 那条同：同一事实不在两处落点）。设计已就地订正（`:959-961`、`:1468-1469`）；代码无需改。
 - **候选在 `availability` 里没有条目**（含候选集里有、列表里无）→
   `Err(RoutingError::UnknownAvailability { id })`，**不当作可用**：按未知放行是 fail-open 的形状。
 
@@ -1282,8 +1299,27 @@ git commit -m "feat(model-registry): §250 的输出面与 rank 的全序"
   **与上一条两侧对钉**：只有上一条时，一个「什么都不读、永远返回同一个顺序」的策略照样全绿。
 - `same_family_candidates_rank_before_cross_family_ones`：§19 的家族偏好排在数值之前；`Auto` 时全部视为
   `SameFamily`。两侧都钉（给 `OpenAiPreferred` 时同族优先；给 `Auto` 时不产生跨族差别）。
-- `the_state_is_visible_in_the_reason`：`Degraded` 的候选仍在表里、`state()` 读出 `Degraded`，
-  `reason` 里看得到——**可见但不禁**（§4.2 末段，让策略可以据此降权）。
+- ~~`the_state_is_visible_in_the_reason`：`Degraded` 的候选仍在表里、`state()` 读出 `Degraded`，
+  `reason` 里看得到——**可见但不禁**（§4.2 末段，让策略可以据此降权）。~~
+  **这一条已失效，订正如下（2026-10-06，设计裁定）**：原文有两处问题，**原话照留如上**。
+  (1) **落点错**：设计已裁定「**state 的家是 `ExecutionCandidate.state`（§5.2 的顶层字段），
+  `RoutingReason` 不带 state**」——写进 `notes` 是**被明确否决**的方案之一（判据两条：
+  **同一事实不在两处落点**；且那会把**唯一机器可读的事实降级成要解析的散文**）。故用例名里的
+  「in the reason」正指着被否决的行为，而它断言 `notes()` 里含 `"state: Degraded"`——
+  **等于把被否决的形状拍成了正确的**。
+  (2) 它的另一半（「候选仍在表里」）**是对的，保留**。
+  **改写后的形态（实现者正按此改，计划与之对齐）**：
+  - **改名**为 `a_degraded_candidate_stays_in_the_table_and_its_state_is_readable`
+    （**名字里不再有 "in the reason"**）；
+  - **保留**「候选仍在表里」（**不禁**）与「`selected().state()` 读出 `Degraded`」（**可见**，
+    走 §5.2 明列的 `state()` 访问器）；
+  - **把 `notes()` 那条断言换成真正承重的那半边**：同一夹具分别在 `Active` 与 `Degraded` 下，
+    给出**相同的** compatibility / confidence / family 与**相同的 id 次序**——即
+    **state 可见但不移动排序**（§11 第 24 条、§4.2 末段）。
+  **为什么必须有这一半**：没有它，改名后的用例退化成「只有一个候选」，
+  而**一个按 state 排序的策略照样能过**——那正是「可见但不禁」这句话最容易失守的地方。
+  **判据（写进原地，供后来者）**：**用例名里出现的断言对象必须真被断言，且与类型的实际形状一致**——
+  **名字是一种绝对措辞，而类型改了它不会报错**；同理，名字里点到的字段若已移出该类型，改名要跟着改。
 - `the_baseline_does_not_read_the_budget`：两次请求只差 `BudgetView` → 排序不变。
   **用例名与注释写明这是「已写明未实现」而不是「忘了读」**：§250 的 MUST 考虑成本在本设计里是
   **结构性地不可省略**（`budget` 是必填参数，忽略它是一次看得见的选择），不是已实现——
