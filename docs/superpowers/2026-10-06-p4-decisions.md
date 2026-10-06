@@ -16,13 +16,18 @@
 
 **两条形状**（设计 §12.6.1 有完整代价）：
 
-- **形状甲（合一）**：一个类型 `Remaining` 住 `continuum-semantics`，`continuum-model-registry` 直接消费，
+- **形状甲（合一）**：一个类型 `Remaining` 住 **`continuum-budget`**，`continuum-model-registry` 直接消费，
   驱动不再做投影。代价含：**删掉 D 已落地并过审的 `BudgetView`**（`crates/continuum-model-registry/src/budget.rs:34-44`），
   连带改 D 的设计 §6.1、计划里的类型/构造/五个用例、`RoutingRequest` 的字段类型；
   且**资源层的排序输入面归语义层所有**——将来资源层要为自己的排序加一维就得改语义层。
-- **形状乙（不合一）**：`Remaining` 在 `continuum-semantics`，`BudgetView` 留在 `continuum-model-registry`，
+- **形状乙（不合一）**：`Remaining` 在 **`continuum-budget`**，`BudgetView` 留在 `continuum-model-registry`，
   **转换由驱动做**（恒等映射，逐维）。**D 与本层都不动、零跨层边。** 代价：同一组数字两个类型，
   那道转换是恒等的、**今天没有独立判据**——将来任一方加字段它就不再恒等，而没有断言会因此变红。
+  > **订正（2026-10-06，同一日事后）**：本文件初版把 `Remaining` 的 crate 写成 `continuum-semantics`——
+  > **那是照设计 §12.6.1 的原话抄的，而那句话与该设计自己的 §2.1（`:204`「`continuum-budget` ｜ 预算树、
+  > `Allocation`/`Reservation`/`Remaining`…」）与 §3.x 的迁移表（`:308` 预算表属 `continuum-budget`）**相抵**。
+  > **判据**：`Remaining` 是**记账对象**，与预算树、账本同类——**它属 `continuum-budget`**。
+  > **来历**：这条是 P4 的计划作者在写计划时查出来的（计划遗留第一节第 1 条）；**本文件的错由我承担**（抄了未经核对的原话）。
 
 **裁定：取乙。判据三条**：
 
