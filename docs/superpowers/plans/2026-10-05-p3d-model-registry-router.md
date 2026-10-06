@@ -740,11 +740,21 @@ git commit -m "feat(model-registry): 登记项与生命周期的落库读写"
 **Files:**
 - Modify: `crates/continuum-model-registry/src/persist.rs`
 - Modify: `crates/continuum-model-registry/{src/error.rs,src/lib.rs,Cargo.toml}`
+- Modify: `crates/continuum-model-registry/src/profile.rs`（订正三处把 `load_profile` 记成 Task 5 的错标，见下）
 - Modify: `crates/continuum-model-registry/tests/persist.rs`
 
 **Interfaces:**
 - Consumes: Task 3 的 `ModelProfile`、Task 6 的 `load_lifecycle`
 - Produces: `continuum_model_registry::{save_profile, load_profile}` 与 `LifecycleError::ProfileBeforeVerified`
+
+**连带面：`profile.rs` 里把 `load_profile` 记成 Task 5 产物的地方要一并订正。** 已知**三处**
+（`crates/continuum-model-registry/src/profile.rs` 的 `:379`、`:413`、`:418`；**行号以本 task 开工时重读的为准**）——
+`:379` 是「消费方随 `load_profile`（Task 5）」那一句。**`load_profile` 实际由本 task（Task 7）交付**，
+Task 5 只建表。
+**这一步不许靠上面这三个行号做完就收工**：Task 5 的实现者只报出两处，第三处（`:379`）是评审补出来的——
+**按短清单逐行改，正是这类错标的典型遗留形态**（改完还剩一句自称「Task 5」的残句，而它看起来像已订正过）。
+故落地时的判据是**在 `src/` 里 grep `Task 5` 与 `load_profile` 的共现行**，逐条确认，改完再 grep 一遍为零。
+**收件人：Task 7 的实现者。**
 
 - [ ] **Step 1: 写用例**
 
