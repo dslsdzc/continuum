@@ -98,7 +98,8 @@ dev：`tempfile`。
 - **交给规范维护者（本项目无此角色）**：设计 §16 里以「收件人：规范维护者」结尾的各条——**本计划一条都不发明**，
   逐条抄在 `## 遗留`。
 - **交给协调者**：本计划查出的**十条**设计问题（**三条相抵、四条没写清、两条判据缺口、一条设计已自陈并已给收件人**）——逐条见 `## 遗留` 第一节，
-  其中 **Task 5 与 Task 19 各有一条开工前置挂在其上**。
+  其中 **Task 17 有一条开工前置挂在其上**（`BudgetError` 的变体三处不一致）；**Task 5 的那条前置已随设计补上
+   §4.1.1（`ExplicitConstraint` ＋ `satisfies` ＋ 合取判据）而闭合**。
 
 ---
 
@@ -270,7 +271,8 @@ crates/continuum-canonical/
   src/lib.rs          导出面与 crate 文档
   src/surface.rs      Surface、normalize、Mention、MentionKind、detect
   src/temporal.rs     Now、TemporalBinding、resolve_temporal
-  src/candidate.rs    EntityId、Candidate、CandidateSet、CandidateSource、CandidateSources
+  src/candidate.rs    EntityId、Candidate、CandidateSource、CandidateSources
+  src/explicit.rs     ExplicitConstraint、ResolutionScope、EntityKind、CandidateFacts、CandidateSet、satisfies、qualifying
   src/resolver.rs     ResolutionResult、ResolutionConfidence、RequiredStrength、resolve
   src/risk.rs         ResolutionRisk
   src/binding.rs      ExplicitBinding、BindingSource
@@ -514,7 +516,9 @@ git commit -m "feat(canonical): Canonicalized 两支互斥、Temporal Resolver �
 - Modify: `crates/continuum-canonical/{src/lib.rs,Cargo.toml}`（导出、dev-dep `trybuild`）
 
 **Interfaces:**
-- Produces: `continuum_canonical::{EntityId, Candidate, CandidateSet, CandidateSource, CandidateSources}`
+- Produces: `continuum_canonical::{EntityId, Candidate, CandidateSource, CandidateSources}`
+  （**`CandidateSet` 不在本 task**：它要 `CandidateFacts`（§4.1.1 的判定事实），落在 Task 4；
+  本 task 的 `CandidateSource::retrieve` 按 §4.3 返回 `Vec<Candidate>`）
 
 - [ ] **Step 1: 写用例**
 
@@ -537,9 +541,6 @@ git commit -m "feat(canonical): Canonicalized 两支互斥、Temporal Resolver �
 - `the_candidate_records_exactly_the_three_fields_of_272`：字段清单逐项，机制 = `let Candidate { entity_id, evidence, retrieval_score } = c;`
   **不带 `..`**（任一侧加字段即**编译不过**）。字段名照 §272：`entity_id` / `evidence[]` / `retrieval_score?`。
   **明写**：这是**编译期**照片，运行期无照片（纯数据声明）。
-- `the_candidate_set_is_a_value_not_a_view`：`CandidateSet` 由装配方以值交出（§1.2.3 规则 3）——
-  断言 `CandidateSet` 的构造入口是 `From<Vec<Candidate>>` 一类**不碰库、不碰 trait 对象**的路径
-  （签名层面：构造函数的参数表里没有 `&Tx`、没有 `&dyn CandidateSource`）。
 - `a_score_is_optional_and_absent_is_not_zero`：`retrieval_score: Option<f64>`——**缺席与 `Some(0.0)` 可区分**，
   两条（`None` 一条、`Some(0.0)` 一条，断言读回各自是哪一枚）。红条件：把 `Option` 换成默认 `0.0`（**移除档**）。
 
@@ -581,19 +582,61 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
 
 ---
 
-### Task 4: Reference Resolver 的四态与两个数不同轴
+### Task 4: 显式约束与「满足」判据（§4.1.1）＋ Reference Resolver 的四态（§4.1）与两个数不同轴（§4.4）
 
 **Files:**
+- Create: `crates/continuum-canonical/src/explicit.rs`
 - Create: `crates/continuum-canonical/src/resolver.rs`
+- Create: `crates/continuum-canonical/tests/explicit.rs`
 - Create: `crates/continuum-canonical/tests/resolver.rs`
 - Create: `crates/continuum-canonical/tests/compile_fail/*.rs`（追加）
 - Modify: `crates/continuum-canonical/src/lib.rs`
 
 **Interfaces:**
-- Consumes: Task 3 的 `EntityId` / `Candidate` / `CandidateSet`
-- Produces: `continuum_canonical::{ResolutionResult, ResolutionConfidence, RequiredStrength}`、`resolver::resolve`
+- Consumes: Task 3 的 `EntityId` / `Candidate`
+- Produces: `continuum_canonical::{ExplicitConstraint, ResolutionScope, EntityKind, CandidateFacts, CandidateSet, satisfies, qualifying,
+  alias_scope_to_resolution_scope, resolution_scope_to_alias_scope, ResolutionResult, Resolved, ConfirmRequired, Ambiguous, Unknown,
+  UnknownReason, ResolutionConfidence, RequiredStrength}`、`resolver::resolve`
 
-- [ ] **Step 1: 写用例**
+- [ ] **Step 1: 写用例——约束面（§4.1.1，**本设计自定，`## 遗留` 照抄它的来历**）**
+
+- `the_three_explicit_constraints_each_have_a_positive_and_a_negative_case`（**逐枚 3×2＝6 条**）：
+  `Scope` / `EntityKind` / `BoundTo` 各一条满足 + 各一条不满足。
+  红条件：`satisfies` 里把某一枚写成恒真（**移除档**，那一枚的反面红）。
+- `the_constraint_set_is_a_conjunction`：`K` 有两枚、候选只满足其一 ⟹ **不合格**（设计 §4.1.1 写死「判据是合取」）。
+  红条件：改成析取（**取反档**，本用例红）。**这一条是断言 B 与 D 的定义基础**（「全部违反」＝合取下的空集）。
+- `scope_is_equality_not_hierarchy`（**设计点名的反面**）：一个 `project` 层可见的候选在 `Scope(explicit)` 下**不合格**。
+  红条件：把 `==` 写成「更广的 scope 包含更窄的」（**移除档**）——本用例钉的是「层级不会被顺手实现进去」。
+  **并写明**：§274 的九个值是一条**优先级层级**，而**「哪一枚比哪一枚更广」的序规范没给**
+  （§274 只给九个名字与一句「显式 scope 优先级最高」）；本层不发明那个序。
+  **那句「优先级最高」是一条决胜规则**（多个 binding 落在不同 scope 时取哪一个），**不是准入规则**——
+  把它当准入规则会把「`project` 层可见的候选」在 `explicit` 约束下判成不合格，**而规范没这么说**。
+- `entity_kind_has_exactly_four_variants`（**四枚各一条**）：`Tool` / `Skill` / `Relation` / `ConnectorService`；
+  机制 = 穷尽 `match` **不带 `..`**（加第五枚即**编译不过**）。
+- `a_connector_service_mention_resolves_to_the_connector_service_kind`（**正面一条**）：
+  `GitHub` 这类 mention 解出的候选，其 `CandidateFacts.kind` **恰是 `ConnectorService`**。
+- `a_connector_service_is_neither_a_tool_nor_a_skill`（**反面逐枚**）：
+  断言它**不是** `Tool`、**不是** `Skill`（逐枚两条，不是「不等于某个别的值」）。
+  **这三条依据写进注释**：`EntityKind` 是**四枚、不是 §198 的三枚**——§16 第 26 条本层认领了
+  「服务名作为 mention 的解析目标」并写明「与其它实体**同形**处理」，而 `GitHub` / `Email`
+  **不是 `Tool` / `Skill` / `Relation` 中任何一个**；只有三枚时调用方只能**硬塞**，
+  于是**静默错型、且没有任何断言会红**。**第四枚的出处**是 §124 的六项服务与 §125 的「按操作细分」。
+- `the_alias_scope_mapping_has_exactly_the_four_alias_scopes_as_its_domain`：
+  `alias_scope_to_resolution_scope` 的**定义域恰是 §278 的四枚**（`TURN`→`conversation`、`SESSION`→`session`、
+  `PROJECT`→`project`、`USER_PERSISTENT`→`user`），四枚**各一条**；定义域是封闭四值，
+  **没有第五枚可以喂进去**（由 `AliasScope` 的封闭性保证）。
+  反向 `resolution_scope_to_alias_scope` 在**没有 alias 对应的五枚**（`workspace` / `tool` / `plugin` /
+  `global` / `explicit`）上各一条 `None`/`Err`——**五枚逐枚，不抽代表**。
+  **并写明这张表是本设计的决定**（规范没有给出九值与四值的关系），以及**它的用途**：
+  一条以 alias scope 表述的约束**必须先经上表换成 §274 的值**，换不出来的**不能用 alias 表述**。
+- `candidate_facts_are_given_by_the_caller`：`CandidateFacts { scope, kind }` 由调用方**与候选一并给出**——
+  **本层查不到它们**（注册表不在本层）。签名层面：`qualifying` 的入参是 `&[(Candidate, CandidateFacts)]`，
+  **不收 `&Tx`、不收 `dyn` 来源**。
+- `the_272_candidate_shape_is_untouched`：`Candidate` 仍是 §272 的三字段（本 task **不往它里面加** `scope` / `kind`）
+  ——字段清单逐项（穷尽解构，不带 `..`，Task 3 已钉）。**并写明**：往那里加字段会改掉一张照录的形状，
+  故判定事实走**并列的 `CandidateFacts`**。
+
+**（Step 1 续）四态与两个数（§4.1 §4.4）**
 
 - `each_of_the_four_states_has_a_photo_and_the_state_is_asserted`：四态**各一条**，**每条断言是哪一枚**
   （不是 `is_ok`、不是 `!= Unknown`）：
@@ -601,31 +644,41 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
   `Ambiguous` ← 满足全部显式约束的候选多于一个；`Unknown` ← 零个。
   红条件：把 `ConfirmRequired` 与 `Ambiguous` 合并成一支（**移除档**——两支的判据不同源：
   一支是「占优但门槛未过」，一支是「多个合格」，合并会让门槛失掉唯一的可观察后果）。
-- `the_four_states_are_all_return_values_not_errors`：§4.1 的「四态一律 `Ok`」。
-  **本计划据此把 `resolve` 的返回类型取为 `-> ResolutionResult`（没有 `Result`）**——
-  依据：设计说「四态一律 `Ok`」，而**没有给出任何 `Err` 支**；一个没有 `Err` 的 `Result` 是死类型。
-  **这条取法已记 `## 遗留`（收件人：设计作者）**；若设计随后补出 `Err` 的判据，本 task 的签名照改。
-  照片：四条用例都直接对 `ResolutionResult` 断言，**没有一条写 `unwrap()`**（去掉 `Result` 后仍全绿即证）。
-- `resolution_result_carries_no_score`：字段清单**逐项**，机制 = 对四枚**逐枚穷尽解构且不带 `..`**
-  （`Resolved(id)` / `ConfirmRequired { candidate }` / `Ambiguous { candidates }` / `Unknown`）——
-  任一枚加字段即**编译不过**。红条件：给 `Resolved` 加一个 `confidence` 或 `retrieval_score` 字段（**移除档**：
-  设计 §4.4 第 1 条「已解出的结果携带不了分数」正是靠这个位置钉的）。**明写**：编译期照片，运行期无照片。
+- `unknown_reason_distinguishes_an_empty_set_from_all_rejected`（**两枚各一条，混成一枚即红**）：
+  `UnknownReason::NoCandidate`（候选集**为空**，断言 C）与 `AllCandidatesRejected`
+  （候选集**非空但全不合格**，断言 B）各一条。红条件：把两枚合成一枚（**移除档**）——
+  那时「全不合格」与「本来就没有」不可分，而这两件事的处置方向相反（前者要扩大检索、后者要问用户）。
+- `resolve_returns_the_result_type_with_no_err_arm`（§4.1 写死）：`resolve` 的返回类型**不是 `Result`**——
+  §206 的 `abstain` 已把「没有可靠解析」收进 `Unknown`，而**本层没有第二种失败**
+  （输入全是值、不做 I/O、不落库）。照片：四条用例都直接对 `ResolutionResult` 断言、
+  **没有一条写 `unwrap()`**（若某天给它套上 `Result`，四条全红）。
+- `every_arm_carries_exactly_its_declared_fields`：四支的**字段清单逐项**，机制 = 对四支
+  **逐支穷尽解构、不带 `..`**，解构的是四个载荷类型自己的字段：
+  `Resolved { entity, satisfied, candidate_count }` /
+  `ConfirmRequired { first, surviving, candidate_count }` /
+  `Ambiguous { surviving, candidate_count }` / `Unknown { reason, candidate_count }`。
+  任一支加字段、少字段、改名即**编译不过**。**明写**：编译期照片，运行期无照片（纯数据声明）。
+- `resolution_result_carries_no_score`（§4.4 第 1 条）：上一条的四份字段清单里**没有任何分数字段**
+  （`retrieval_score` 只出现在 `Candidate` 上）。红条件：给 `Resolved` 加 `confidence` 或 `retrieval_score`
+  （**移除档**——上一条的穷尽解构先红）。**`candidate_count` 不是分数**：它是**规模**（`usize`），
+  断言 A/D 拿它核「集合里有几个」；**这一句要写进注释**，免得它与「已解出的结果携带不了分数」读起来相抵。
 - `resolution_confidence_has_no_reader_that_yields_a_number`：§4.4 第 2 条——`ResolutionConfidence`
   **只有** `meets(&RequiredStrength) -> bool`，**没有** `as_probability` / `to_f64` / `From<…> for f64`。
   照片机制：trybuild **反例**（`c.to_f64()` 编译不过，`.stderr` 实跑）＋ **正控制**（`c.meets(&req)` 编译通过）。
   红条件：加 `impl From<ResolutionConfidence> for f64`（**取反档**）。
-- `resolution_confidence_never_appears_in_a_candidate_or_a_resolved`（**两侧**）：两侧字段清单各一条——
-  `Candidate`（Task 3 的穷尽解构）与 `ResolutionResult`（本 task 的穷尽解构）里都不含 `ResolutionConfidence`。
+- `resolution_confidence_never_appears_in_a_candidate_or_a_resolved`（**两侧**）：
+  `Candidate`（Task 3 的穷尽解构）与 `Resolved`（本 task 的穷尽解构）的字段清单里都不含它。
   红条件：把 confidence 塞进 `Candidate`（**取反档**）——那时 Task 3 的清单断言先红。
 - `the_two_numbers_are_not_on_the_same_axis`：§4.4 第 3 条。照片机制：**公开面清单逐条**——
-  `ResolutionConfidence` 的构造函数**不接受** `retrieval_score`（没有 `from_score` 一类），
-  且没有 `From<f64>`；trybuild 反例 `ResolutionConfidence::from_score(0.9)` 编译不过。
-  **并写明**：「`ResolutionConfidence` 的取值只能由门槛判定产出」这条**在类型上只到「不能被分数构造」**，
+  `ResolutionConfidence` 的构造函数**不接受** `retrieval_score`（没有 `from_score` 一类），且没有 `From<f64>`；
+  trybuild 反例 `ResolutionConfidence::from_score(0.9)` 编译不过。
+  **并写明**：「`ResolutionConfidence` 的取值只能由门槛判定产出」这条**在类型上只到「不能被分数构造」**；
   「它必须经过校准」（§275）本层**没有判据**、也没有照片——那需要一个校准过程，本层没有。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-canonical --test explicit
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-canonical --test resolver
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-canonical --test type_level
 ```
@@ -633,49 +686,64 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-canonical --test type_lev
 - [ ] **Step 3: 实现**
 
 ```rust
-/// §271 的四个名字，含义取 §206。**四态都是返回值，不是错误**（§206 的 abstain 是它们的公共性质）。
-pub enum ResolutionResult {
-    Resolved(EntityId),
-    ConfirmRequired { candidate: EntityId },
-    Ambiguous { candidates: Vec<EntityId> },
-    Unknown,
+/// 一条显式约束。**取值域是闭集，三枚**——每一枚都能追到规范里已有的一个概念，
+/// **不引入开放谓词语言**（那会变成一套本层发明的语法）。
+pub enum ExplicitConstraint {
+    Scope(ResolutionScope),      // §274 的九值（**只取九值**，「显式 scope 优先级最高」不归这一枚）
+    EntityKind(EntityKind),      // 见下
+    BoundTo(EntityId),           // §277 的 ExplicitBinding
 }
 
-/// §275 的「是否允许自动执行」用的强度。**没有 Reader 能把它变成一个数**——
-/// §275 明写它不定义实体为真的概率，§272 明写检索分数 MUST NOT 自动被当成真实概率。
+/// 候选的实体种类。**闭集四枚**——**不是 §198 的三枚**（第四枚 `ConnectorService` 出处 §124／§125）。
+pub enum EntityKind { Tool, Skill, Relation, ConnectorService }
+
+/// §274 的九个作用域（`explicit` / `session` / `conversation` / `project` / `workspace` /
+/// `tool` / `plugin` / `user` / `global`）——九值封闭。
+pub enum ResolutionScope { /* 九枚 */ }
+
+/// 候选的**判定事实**，由调用方与候选一并给出。**本层查不到它们**（注册表不在本层）。
+/// **§272 的 `Candidate` 三字段不动**——判定事实走这个并列类型。
+pub struct CandidateFacts { pub scope: ResolutionScope, pub kind: EntityKind }
+
+/// 判定：**合取**。`Scope` 是**等值过滤**（`f.scope == *s`），**不做层级**（层级的序规范没给）。
+pub fn satisfies(c: &Candidate, f: &CandidateFacts, k: &ExplicitConstraint) -> bool;
+
+/// 「合格」＝候选集里满足全部约束的那些。
+pub fn qualifying(cs: &[(Candidate, CandidateFacts)], k: &[ExplicitConstraint]) -> Vec<Candidate>;
+
+/// §4.1 的四态。**四支都是返回值，不是错误**；载荷类型各自私有字段、无公开构造函数。
+pub enum ResolutionResult { Resolved(Resolved), ConfirmRequired(ConfirmRequired), Ambiguous(Ambiguous), Unknown(Unknown) }
+pub struct Resolved { /* entity / satisfied / candidate_count */ }
+pub struct ConfirmRequired { /* first / surviving / candidate_count */ }
+pub struct Ambiguous { /* surviving / candidate_count */ }   // surviving：满足全部约束的候选**全体**，至少两个
+pub struct Unknown { /* reason / candidate_count */ }
+/// **两枚都必须是可区分的**：断言 B 与断言 C 各钉一枚。
+pub enum UnknownReason { NoCandidate, AllCandidatesRejected }
+
+/// §275 的「是否允许自动执行」用的强度。**没有 Reader 能把它变成一个数**。
 pub struct ResolutionConfidence(/* 私有 */);
-
-impl ResolutionConfidence {
-    /// **唯一**的消费者接口（风险门槛）。
-    pub fn meets(&self, required: &RequiredStrength) -> bool;
-}
+impl ResolutionConfidence { pub fn meets(&self, required: &RequiredStrength) -> bool; }
 
 /// §276 的门槛。**无 `Default`**、`resolve` 不收 `Option<RequiredStrength>`（Task 6 钉签名）。
 pub struct RequiredStrength(/* 私有 */);
 ```
+
+**`Resolved.satisfied` 与 `surviving` 的分工要写进注释**：`satisfied` 是**照录判定时用的那一组约束**
+（不是重新推的），`surviving` 是**判定输出**（合格的那一部分）；`candidate_count` 是**判定输入的规模**——
+三者分开是为了「不把判定输入混进判定输出」，同时让断言 A/D 不必自己再构造一次候选集
+（自造再自核正是本仓「表驱动用例覆盖错路径」的同一形状）。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-canonical
-git commit -m "feat(canonical): Reference Resolver 的四态与两个数的分轴"
+git commit -m "feat(canonical): 显式约束与满足判据、四态与两个数的分轴"
 ```
 
 ---
 
 ### Task 5: §4.2 的四条断言——「不存在正确候选时不强行绑定」的可断言形态
-
-> **开工前置（硬）**：设计 §4 全节**没有给出「显式约束集」的类型**，也没有给出「满足」的判据，
-> 而 §4.2 的断言 A/B/C/D（尤其照片 D-2 的夹具「至少一条非空约束 `K`」）与 §14 的测试表都以它立论
-> （见 `## 遗留` 第一节第 2 条）。**开工前先核设计是否已补上该类型与判据**：
->
-> ```bash
-> cd /home/DslsDZC/Continuum && grep -n "显式约束" docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md
-> ```
->
-> 若仍只有本计划已读到的那些提及（无类型、无判据）——**停下报协调者，不代设计造类型**
-> （与子项目 G 的「F 未落地则停下报，不代建」同一条纪律）。
 
 **Files:**
 - Create: `crates/continuum-canonical/src/resolver.rs`（续，四条断言的实现体）
@@ -683,43 +751,54 @@ git commit -m "feat(canonical): Reference Resolver 的四态与两个数的分�
 - Modify: `crates/continuum-canonical/src/lib.rs`
 
 **Interfaces:**
-- Consumes: Task 3 的 `CandidateSet`、Task 4 的 `ResolutionResult` / `RequiredStrength`
+- Consumes: Task 4 的 `ExplicitConstraint` / `CandidateFacts` / `ResolutionResult` / `RequiredStrength`、Task 3 的 `Candidate`
 - Produces: 无新公开类型（`resolve` 的判定路径补全）
 
 - [ ] **Step 1: 写用例**（四条断言，三条在 fail-open 侧，故三条都必须有照片）
 
-**每条夹具都含至少一条非空显式约束 `K`。约束集为空时每个候选都平凡地合格，用例会退化成
-「两个候选都在集合里」——**恒真**的用例（设计 §4.2 的订正段已写明这一点）。**
+**每条夹具都含至少一条非空显式约束 `K`**（§4.1.1 的 `ExplicitConstraint` 闭集保证它可构造）。
+约束集为空时每个候选都平凡地合格，用例会退化成「两个候选都在集合里」——**恒真**的用例。
 
-- `assertion_a_a_resolved_entity_is_a_member_of_the_candidate_set`（**fail-open 侧**）：
-  夹具 `K` 非空，候选 `{c₁ 满足 K, c₂ 违反 K}` → 断言 `Resolved(c₁)`，且断言的 id 与候选集里那一个是
-  **同一个 `EntityId` 值**（经 `as_str` 比）。红条件：解析器自造一个实体、或把检索分数最高的候选**名字拼出来**
-  （**取反档**）。**这条钉不住的情形**（设计已列）：集合里既有合格者又有不合格者、而解析器绑定了不合格的那个
-  ——故本用例**不能替代** D 的照片 1。
+- `assertion_a_a_resolved_entity_is_a_member_of_the_retrieved_set_or_the_injected_one`（**fail-open 侧**）：
+  A 的现行判据是 **`e ∈ 检索集 ∪ {由 `ExplicitBinding` 注入的那一枚}`**（§4.2 重述后的 A）——
+  **不是「工作集」**。夹具 `K` 非空，候选 `{c₁ 满足 K, c₂ 违反 K}` → 断言 `Resolved(c₁)`，
+  且断言的 id 与检索集里那一个是**同一个 `EntityId` 值**（经 `as_str` 比），
+  并用 `candidate_count` 核「判定用的规模与夹具给的检索集一致」。
+  红条件：解析器自造一个实体、或把检索分数最高的候选**名字拼出来**（**取反档**）。
+- `assertion_a_injection_guard`（**§4.2 点名的配套守卫，没有它 A 只是同义反复**）：
+  构造一个「解析器自造了一个**既不在检索集、也没有 `ExplicitBinding` 背书**的实体」的情形 ⇒ **A 变红**
+  （该实体不在「检索集 ∪ 注入的那一枚」里；观测形式：`Resolved.entity` 不在两个来源的并里，
+  或 `candidate_count` 大于「检索集 ＋ 至多一次注入」的应有大小）。
+  **红条件（这条用例本身的红）**：把 A 实现成「`e` ∈ 工作集」（**放宽档**）——那时注入之后**恒真**，
+  自造实体也不再触发，本用例红。
+  **来历写进注释**：A 的初稿写「`e` 是**输入候选集**里的成员」，而「输入候选集」两读都通——
+  读成「检索器交出的那一集」则 §4.6 的注入**破了 A**；读成「解析器实际工作的那一集」则**注入后 A 恒真**、
+  解析器可以自造任何实体而 A 永不响。故 A 拿的必须是**前者**。
 - `assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved`（**fail-open 侧**）：
   **逐候选 N 条**——构造 N 个候选，每个恰好违反一条**不同的**显式约束；N 次结果的**每一次**都断言
-  **不是 `Resolved`**，且**逐次断言**是 `Unknown`（该候选是唯一候选且不合格）还是 `ConfirmRequired`。
-  红条件：把「全部候选都不合格」也判成 `Resolved`（**放宽档**）。**不抽代表**——每个候选各一条断言。
-- `assertion_c_an_empty_candidate_set_is_unknown`（**fail-closed 侧，一条即可**）：
-  红条件：空集返回 `ConfirmRequired`（**取反档**）。
+  **不是 `Resolved`**，且**逐次断言**是 `Unknown { reason: AllCandidatesRejected }`（该候选是唯一候选且不合格）
+  还是 `ConfirmRequired`。红条件：把「全部候选都不合格」也判成 `Resolved`（**放宽档**）。
+  **不抽代表**——每个候选各一条断言。
+- `assertion_c_an_empty_candidate_set_is_unknown_with_no_candidate`（**fail-closed 侧，一条即可**）：
+  断言 `Unknown { reason: NoCandidate }`。红条件：空集返回 `ConfirmRequired`，或把 reason 给成
+  `AllCandidatesRejected`（**取反档**——两枚混用正是 `UnknownReason` 分两枚要防的）。
 - `assertion_d_1_the_qualified_candidate_is_selected_even_when_an_unqualified_one_is_present`（**fail-open 侧**）：
-  夹具 `{c₁ 满足 K, c₂ 违反 K}` → `Resolved(c₁)`。**钉住 A 不足以替代 D**（`c₂` 也在集合里，
+  夹具 `{c₁ 满足 K, c₂ 违反 K}` → `Resolved(c₁)`。**钉住 A 不足以替代 D**（`c₂` 也在检索集里，
   若绑定到它，A 仍成立）。红条件：把「合格」判成「在集合里」（**移除档**：删掉约束求值，
   此时会绑定到检索分数更高的 `c₂`）。
 - `assertion_d_2_multiple_qualified_candidates_give_ambiguous`（**fail-open 侧**）：
-  夹具**同一条非空约束 `K`**、候选 `{c₁ 满足 K, c₂ 满足 K, c₃ 违反 K}`；
-  断言结果是 `Ambiguous { candidates }` 而**不是** `Resolved(c₁)`，**且 `candidates` 恰是 `c₁` 与 `c₂`（按 id 升序）、
-  不含 `c₃`**。`c₃` **是对照组，不能省**。
-  **本计划对设计的加强，据实记此**：设计只要求「断言结果是 `Ambiguous`」，而**只断言这一点时 `c₃` 不承重**——
-  把「合格」判成**恒真**的实现会让 `{c₁,c₂,c₃}` 全合格，结果**仍是 `Ambiguous`**，用例照样绿。
-  加上「`candidates` 逐项相等且不含 `c₃`」，`c₃` 才真的承重。（见 `## 遗留` 第一节第 6 条。）
-  红条件：合格判成恒真（**移除档**，此时 `candidates` 里多出 `c₃`）；或把 `candidates` 的顺序交给
-  `HashSet` 迭代（**取反档**，逐项相等那条红——**这就是为什么断言逐项相等而不是集合相等**：
+  夹具**同一条非空约束 `K`**、候选 `{c₁ 满足 K, c₂ 满足 K, c₃ 违反 K}`；断言**两条**：
+  （1）结果是 `Ambiguous` 而**不是** `Resolved(c₁)`；
+  （2）**`Ambiguous.surviving` 恰是 `{c₁, c₂}`（逐项：长度为 2、两枚都在、`c₃` **不在**，按 id 升序）**。
+  **第（2）条是要紧的那一条**（本计划查出后由设计写死）：只断言「结果是 `Ambiguous`」时
+  **`c₃` 不承重**——把「合格」判成**恒真**的实现会让 `{c₁,c₂,c₃}` 全合格，结果仍是 `Ambiguous`，用例照样绿。
+  `c₃` 是对照组，靠第（2）条兑现；这也是 `Ambiguous` 必须带 `surviving` 的原因。
+  红条件：合格判成恒真（**移除档**，`surviving` 里多出 `c₃`）；或把 `surviving` 的顺序交给 `HashSet` 迭代
+  （**取反档**，逐项相等那条红——**这就是为什么断言逐项相等而不是集合相等**：
   集合相等会让「改成不排序」成为**等价变异体**，纪律 1(b) 已点名）。
 - `the_other_side_a_nonempty_set_with_exactly_one_qualified_candidate_is_resolved`（**守卫的另一侧**）：
   候选集非空且**唯一**合格 → `Resolved`。**不能省**——只钉「拒绑」那侧会让一个**永远返回 `Unknown`** 的解析器
   照样全绿（设计 §14 的同名行）。
-
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
@@ -728,9 +807,13 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-canonical --test resolver
 
 - [ ] **Step 3: 实现**
 
-判定顺序（**写死，且每一格的依据在设计里**）：`ExplicitBinding` 先把候选集缩到一个（Task 6）→
-按显式约束过滤 → 门槛判定（Task 6）→ 四态。**四条断言的判据逐条写进 `resolve` 的文档注释**，
-每条附一个用例名，**注释里的「不存在正确候选时不强行绑定」这句绝对措辞因此有照片**。
+判定顺序（**写死，且每一格的依据在设计里**）：**检索集** → `ExplicitBinding` 注入（**唯一允许的注入点**，
+Task 6）→ 按显式约束**合取**过滤（Task 4 的 `qualifying`）→ 门槛判定（Task 6）→ 四态。
+
+**工作集的定义要写进 `resolve` 的注释**：`工作集 = 检索集 ＋ binding 注入`（至多一次），
+而**断言 A 拿的是「检索集 ∪ 注入的那一枚」，不是工作集**——两者的差别正是
+`assertion_a_injection_guard` 钉的东西。**四条断言的判据逐条写进文档注释**，每条附一个用例名，
+**注释里的「不存在正确候选时不强行绑定」这句绝对措辞因此有照片**。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -742,7 +825,7 @@ git commit -m "feat(canonical): §4.2 的四条断言（A/B/C/D）与两侧守�
 
 ---
 
-### Task 6: 风险门槛（§276）与 `ExplicitBinding` 的最高优先序（§277）
+### Task 6: 风险门槛（§276）、`ExplicitBinding` 的最高优先序（§277）与集合外注入（§4.6）
 
 **Files:**
 - Create: `crates/continuum-canonical/src/{risk.rs,binding.rs}`
@@ -750,8 +833,8 @@ git commit -m "feat(canonical): §4.2 的四条断言（A/B/C/D）与两侧守�
 - Modify: `crates/continuum-canonical/src/lib.rs`
 
 **Interfaces:**
-- Consumes: Task 4 的 `RequiredStrength` / `ResolutionResult`、Task 3 的 `CandidateSet`
-- Produces: `continuum_canonical::{ResolutionRisk, ExplicitBinding, BindingSource}`、`binding::apply`
+- Consumes: Task 4 的 `RequiredStrength` / `ResolutionResult` / `CandidateSet` / `ExplicitConstraint`、Task 3 的 `Candidate`
+- Produces: `continuum_canonical::{ResolutionRisk, ExplicitBinding, BindingSource}`、`binding::apply`（注入点）
 
 - [ ] **Step 1: 写用例**
 
@@ -770,11 +853,19 @@ git commit -m "feat(canonical): §4.2 的四条断言（A/B/C/D）与两侧守�
 - `an_explicit_binding_shrinks_the_candidate_set_instead_of_weighting_it`（§277）：给一个与 `ExplicitBinding`
   冲突的**高分**候选（`retrieval_score` 更高），断言结果仍是 `Resolved(binding.entity)`。
   红条件：把 `ExplicitBinding` 实现成「给 `entity` 加权后再排序」（**取反档**——那时高分候选胜出）。
-- `a_binding_whose_entity_is_not_in_the_candidate_set_is_not_resolved`（**闭集不变量的第二侧**）：
-  §4.2 的断言 A 只说了「`Resolved(e)` 蕴含 `e` 在集合里」，**没说 `ExplicitBinding.entity` 不在集合里时给哪一态**
-  （设计未给，见 `## 遗留` 第一节第 7 条）。**本计划按 A 的闭集不变量取「不得 `Resolved`」**，
-  本用例**只断言「不是 `Resolved(binding.entity)`」**，不断言具体是哪一态。
-  红条件：把 binding 无条件当成解（**放宽档**）——§273 的「不得强行绑定」在这里最容易被绕掉。
+- `a_binding_whose_entity_is_not_in_the_retrieved_set_is_injected_and_resolved`（**§4.6 照片 (a)**）：
+  `entity` **不在检索给的候选集里** → 不新增分支，把它**作为一条候选注入工作集**（`evidence` 标 `user_explicit`），
+  再照常过滤；断言结果 `Resolved(那个 entity)` **且 `Resolved.candidate_count` 比检索集多 1**
+  （证明它确实被加入了）。红条件：把「不在检索集」判成 `Unknown`（**取反档**）——
+  那会让检索结果**否决用户**，而 §277 的「SHOULD 在当前 scope 拥有最高优先级」正是要防这一格。
+- `a_binding_does_not_exempt_the_entity_from_the_explicit_constraints`（**§4.6 照片 (b)，另一侧**）：
+  同一个 `entity` 不在检索集里**且**违反一条 `Scope` 约束 → 断言 `Unknown { reason: AllCandidatesRejected }`
+  （**binding 不是「绕过约束」的口子**：它只提高**检索**这一侧，不豁免 `ExplicitConstraint`）。
+  红条件：让注入的候选跳过约束过滤（**放宽档**）。
+  **这一对的两侧都必须有**：只钉 (a) 会让「注入即放行」的实现全绿；只钉 (b) 会让注入路径整个不存在也全绿。
+  **并把「这是一次扩张」写进注释**：§277 的字面前提是「用户**选择候选**」（候选已由检索给出），
+  而这里处理的是「用户**直接点名**一个检索没给出的实体」——**§277 只覆盖前一半**，
+  后一半是本设计补的（收件人：规范维护者，`## 遗留` 照抄）。
 - `an_explicit_binding_is_recorded_with_its_scope_and_source`：`ExplicitBinding { mention, entity, scope, source }`
   四个字段逐项（穷尽解构），`source = USER`（§277 的结构照录）。
 
@@ -793,6 +884,11 @@ pub struct ResolutionRisk { pub effect: Opaque, pub cost: Opaque, pub reversibil
 
 /// §277：`ExplicitBinding { mention, entity, scope, source = USER }`。
 /// **「最高优先级」落在约束解析的取值顺序上**：先把候选集缩到 `entity` 这一个，**不是给它加权**。
+///
+/// **`entity` 不在检索集里时的处置**（§4.6）：**不新增分支**，把它作为一条候选**注入工作集**
+/// （`evidence` 标 `user_explicit`），再照常过滤。**这是 `resolve` 里唯一允许的注入点**——
+/// 断言 A 的注入守卫（Task 5）钉的就是「除它之外没有第二个来源」。
+/// **这是一次扩张、不是 §277 的原文**：§277 的前提是「用户选择候选」，而这里是「用户直接点名」。
 pub struct ExplicitBinding { /* … */ }
 ```
 
@@ -1596,6 +1692,13 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
 - Consumes: `continuum_semantics::IntentId`（预算树的 owner 取它）；`continuum_persist::{Tx, Migration, Db, Value}`
 - Produces: `continuum_budget::{DimensionKind, Dimensions, Allocation, Reservation, Remaining, BudgetOwner, LedgerKind, BudgetError, reserve, settle, SettleOutcome, allocate_child, remaining, dangling_reservations, p4_budget_migrations}`
 
+> **开工前置（核一处设计相抵）**：`BudgetError` 的变体在设计的**三处**说法不同（§12.2 的散文写
+> `Insufficient { dimension }`、§12.2 的枚举只列 `UnknownOwner` ＋ `NegativeActual`、§12.4 的枚举
+> 只列 `UnknownOwner` 并写「只收一种」）。**本计划按三处的并集取三枚**
+> （`UnknownOwner` / `Insufficient` / `NegativeActual`），逐枚注明出处，见 `## 遗留` 第一节第 5 条；
+> 开工前先核设计是否已把它定死，未定则**照本计划的并集落地并回报**（不擅自删任何一枚——
+> 「`reserve` 返回具体哪一维不足」是 §12.2 正文与 §14 表格都写着的判据，删了它那五条照片没有承载）。
+
 - [ ] **Step 1: 现场核对迁移号 120 为空号，登记 members 与 `ALLOWED`**
 
 `ALLOWED` 加（**本 task 实际有的两条边**）：
@@ -1609,11 +1712,27 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
 
 - [ ] **Step 2: 写用例**
 
-- `the_three_roles_are_three_types`（§12.1 的「两个角色两个类型」的第三枚）：
+- `the_three_roles_are_three_types`（§12.1 的「三角色三类型」）：
   照片机制 = **trybuild 反例**：`let _: Allocation = remaining;` / `let _: Remaining = allocation;` 编译不过
-  （`.stderr` 各份实跑取值）；**正控制**：三者各自的访问器可用。
+  （`.stderr` 各份实跑取值）；**正控制**：三者各自的读法可用。
   三个 newtype 各包一个 `Dimensions`，**类型不共用**——故「把余量填进上限的位置」在类型上不可写。
   **明写**：编译期照片，运行期无照片（纯数据声明）。
+- `each_role_has_exactly_one_constructor_and_no_second_public_path`（**§12.1 :1540-1544 点名给
+  `plan-p4` 的那一条**）：三个角色**逐个**断言，各一条 trybuild 反例 ——
+  在 crate 外**构造** `Allocation` / `Reservation` / `Remaining`（各用元组构造形式 `Allocation(dims)`）
+  ⇒ **编译不过**，且 `.stderr` 钉住的是**它该有的那个错**（字段私有；
+  **形态照 P3A 对 `AuthorizedTool` 的样例**，判据是「失败必须落在私有性上」，不是拼错名字之类的别的错）。
+  **三个角色各一份反例，共三份、三份 `.stderr` 各不相同**（错误码一律以实跑为准、不许凭记忆写）。
+  **正控制三条**（**缺了它们，「三个角色根本不存在」也照样绿**）：设计指定的那个入口各一条——
+  分配方给 `Allocation`、`reserve` 给 `Reservation`、`remaining()` 给 `Remaining`，三条都编译通过。
+  **六条合起来才算钉住**（三反例 ＋ 三正控制）：只钉反例，「三个角色的入口被删光」照样绿；
+  只钉正控制，「crate 外随手能造一个」照样绿。
+  **并写明这条断言的作用域与时点**：「除设计指定的那个入口外无第二个公开**构造路径**」是**在本 task 结束时**
+  由这六份样例钉住的；**三个角色私有、无公开构造函数**这一句在 P4 落地前只是**设计写死的承诺**
+  （代码层面当时只能核「设计承诺了」），本 task 是它第一次有代码层的照片。
+  **「构造」与「读」要分清**（写进注释）：本断言**只管构造**——三个角色的**读法**（`dims()`、逐维读者）
+  是公开的，它们**不构成**第二条构造路径（读不出可写的角色值）。
+  这条区分的判据是**类型**：`dims()` 返回 `&Dimensions`（不是角色），故拿它拼不出一个 `Allocation`。
 - `dimension_none_is_not_some_zero`：五个量纲**各一条**——`None`（该量纲不构成约束）与 `Some(0)`（额度为零）
   可区分，**含 `None → None`**。红条件：把 `Option<i64>` 换成默认 `0`（**移除档**）；或让某一条夹具里两者恰好同值
   （**那时它是等价变异体**，纪律 1(b) 已点名——故五个夹具的取值必须让 `None` 与 `Some(0)` 输出不同）。
@@ -1635,8 +1754,21 @@ git commit -m "feat(semantics): Constraint Validator 的两条拦下路径与三
   **原句未述「分配是上限还是转移」**，本设计取「**分配是上限、不转移**」
   （否则 I2 恒真、那条约束不成立）。**若是裁「分配即转移」，I2 换成**
   `Σ_{执行中的子节点} reserved(child, d) ≤ allocation(n, d) − settled(n, d)`（§12.2，收件人：协调者）。
-- `settle_within_refunds_the_unused_amount`：`Within { refunded }` 一条，断言 `refunded` 逐维是差额。
-- `settle_over_reports_the_dimension_and_the_amount`：`Over { dimension, by }` 一条，断言 `dimension` 与 `by`。
+- `settle_within_refunds_the_unused_amount`：`Ok(SettleOutcome::Within { refunded })` 一条，断言 `refunded` 逐维是差额。
+- `settle_over_reports_the_dimension_and_the_amount`：`Ok(SettleOutcome::Over { dimension, by })` 一条，
+  断言 `dimension` 与 `by`（**不是笼统的「超了」**）。
+- `a_negative_actual_is_rejected_and_the_ledger_is_untouched`（**§12.2 照片 (a)，失败路径两件事都断言**）：
+  `actual` 某一维为负 ⇒ `Err(BudgetError::NegativeActual { dimension, value })`，
+  `dimension` 是**那一维**、`value` 是**那个负数**；**并断言账本未变**——
+  `reserve` 仍活跃（`dangling_reservations` 里还在）、`settled` 逐维未动、`budget_ledger` 行数不变。
+  红条件：按 `0` 截断（**移除档**——那时返回 `Ok` 且账面被悄悄改小；
+  **本仓口径：截断是静默的**，它把产生方的一个 bug 吞掉）。
+  **判据写进注释**：负数是 **fail-open 的入口**——`settled` 会因此变小、`available` 反而变大，
+  而 **I1 只约束 `available`、不约束 `actual` 的符号**，故一个负的 `actual` 能把已经花掉的额度
+  「还回来」且没有任何断言会拦它。
+- `a_zero_actual_settles_within_and_refunds_everything`（**反例，另一侧**）：
+  `actual` 各维为 `0` ⇒ `Ok(Within { .. })` 且额度**全额**退回。
+  **不能省**——只钉拒绝那侧会让「`0` 也被拒」漂过去（`0` 不是负数，§12.2 拒的是**负**值）。
 - `an_over_settlement_writes_no_second_ledger_row`：**否定式照片**——一次 `Over` 结算后 `budget_ledger`
   **只多一条 `settle` 行**。**依据**：运行期实际超支的裁决**不在本层**（ENG-005 §三.2 判给
   `FailureClass::Constraint` ＋ 该节点的 `EscalationPolicy::Decision`，两者都是**执行层的词汇**，
@@ -1676,18 +1808,40 @@ pub struct Dimensions { pub money: Option<i64>, pub wall_time: Option<i64>, pub 
                         pub gpu_time: Option<i64>, pub network_transfer: Option<i64> }
 
 /// 三个角色三个类型（照 D §6.3 的同一判据：上限与余量不能共用一个类型）。
-/// **三个内部字段都是 `pub`**：Task 19 的解构要在**另一个 crate 的测试里**取出 `Dimensions`
-/// （`let Remaining(dims) = …;`），字段私有则那条断言写不出来。
-/// **这不削弱那条守卫**——类型仍不共用，`let _: Allocation = remaining;` 照样编译不过。
-pub struct Allocation(pub Dimensions);   // 声明式约束，分配方写
-pub struct Reservation(pub Dimensions);  // 一次在飞的预扣，reserve 写
-pub struct Remaining(pub Dimensions);    // 计算值：allocation − settled − reserved（逐维），remaining() 现算
+/// **三者的内部字段一律私有、无公开构造函数**（§12.1）：只能经**分配方**、`reserve`、`remaining()` 得到。
+/// 故「把余量填进上限的位置」在类型上不可写（`let _: Allocation = remaining;` 编译不过），
+/// 且 crate 外**造不出**任何一枚（本 task 的六份 trybuild 样例钉的就是这两件事）。
+/// **`pub` 的是 `Dimensions` 的五个字段**（它不是角色，没有可伪造的语义，且 Task 19 要在另一个
+/// crate 里穷尽解构它）——**公开 `Dimensions` 的字段不削弱上面那条保证**（§12.1 已判过）。
+pub struct Allocation(Dimensions);   // 声明式约束，分配方写
+pub struct Reservation(Dimensions);  // 一次在飞的预扣，reserve 写
+pub struct Remaining(Dimensions);    // 计算值：allocation − settled − reserved（逐维），remaining() 现算
+
+impl Remaining {
+    /// 五维的**公开读法**（Task 19 的穷尽解构与 §12.6 的恒等投影都要它）：
+    /// 返回 `&Dimensions`，**不是**把三个角色之间的类型边打通——
+    /// `Dimensions` 不是角色，读它不产生「余量当上限用」的可写位置。
+    pub fn dims(&self) -> &Dimensions;
+    /// §12.6 的投影逐维读法（`BudgetView { money: r.money(), … }`）。
+    pub fn money(&self) -> Option<i64>;   // wall_time / token / gpu_time / network_transfer 同形，各一枚
+}
 
 /// I1：available ≥ 0，不满足则拒（fail-closed）。**返回具体哪一维不足**。
 pub fn reserve(owner: BudgetOwner, dims: Dimensions) -> Result<Reservation, BudgetError>;
 
 /// 结算。**`Over` 不写第二行账**——运行期超支的裁决不在本层。
-pub fn settle(r: Reservation, actual: Dimensions) -> SettleOutcome;
+/// **`actual` 的某一维为负 ⇒ `Err(NegativeActual { dimension, value })`——拒收，不截断**（§12.2）。
+pub fn settle(r: Reservation, actual: Dimensions) -> Result<SettleOutcome, BudgetError>;
+
+/// §12.2 的错误面。**本计划按设计三处的并集取三枚**（见本 task 的开工前置与 `## 遗留` 第一节第 5 条）。
+pub enum BudgetError {
+    /// 树上没有该 owner 的分配记录（`budget_node` 里查不到它）。**fail-closed**：不给 `Within`。
+    UnknownOwner { owner: BudgetOwner },
+    /// `reserve` 时某一维的可用额不足（§12.2 正文与 §14 的逐维五条照片靠它）。
+    Insufficient { dimension: DimensionKind },
+    /// `actual` 的某一维为负。**拒收，不按 0 截断**。
+    NegativeActual { dimension: DimensionKind, value: i64 },
+}
 
 /// §12.2 的「有一条 `reserve` 而没有对应的 `settle` 或 `release`」——可检出。
 /// **本函数是设计 §12.3 第 2 处的输入**（恢复钩子按预扣结算它）。
@@ -1744,6 +1898,11 @@ git commit -m "feat(budget): 预算树、三个角色的类型与 I1/I2/I3"
 **Budget Validator（§110）**：
 
 - `within_and_exceeds_each_have_a_photo`：`Within` 一条、`Exceeds` 一条。
+- `an_unknown_owner_is_not_within`（**§12.4 第 3 条，fail-closed 侧**）：
+  树上查不到该 owner 的分配记录 ⇒ `Err(BudgetError::UnknownOwner { owner })`，**不是 `Within`**。
+  红条件：查不到就返回 `Within`（**放宽档**——那等于对一棵不存在的子树放行）。
+  **并写明**：**超支不是 `Err`**，是 `BudgetVerdict::Exceeds`——§110 的流程要把「预计超支」
+  当**一个可处置的结论**往下走（找替代方案 → 找不到则 Decision），做成 `Err` 会让调用方把它当失败而中止。
 - `exceeds_reports_the_specific_dimension`：**逐维五条**，断言 `dimension` 是那一维、`by` 是那个数。
 - `the_verdict_compares_against_remaining_not_allocation`（**本组件的要害**）：
   构造一个「**按 `allocation` 判会放行、按 `remaining` 判超支**」的用例——该 owner 已有一个兄弟节点占用了额度，
@@ -1831,7 +1990,7 @@ git commit -m "feat(budget): 无读数按预扣、Budget Validator 与探索预�
 
 **Interfaces:**
 - Consumes: `continuum_budget::{Remaining, DimensionKind}`、`continuum_model_registry::BudgetView`
-- Produces: 无生产类型（测试内的 `project` / `unproject`）
+- Produces: 无生产类型（**测试内的 `project` 一个**；**没有 `unproject`**，理由见 Step 3）
 
 - [ ] **Step 1: 登记 dev 边并写用例**
 
@@ -1844,31 +2003,56 @@ Task 20 会把它升成普通依赖，理由是注册迁移与钩子）。`ALLOW
   **两个方向都写**：
 
   ```rust
-  // 无 `..`：任一侧加字段、或改一个维度名，即**编译不过**。
+  // 第一行：BudgetView 侧穷尽解构（无 `..`）。任一侧加字段、或改一个维度名，即**编译不过**。
   let BudgetView { money, wall_time, token, gpu_time, network_transfer } = project(&r);
-  // `Remaining` 是**包着 `Dimensions` 的 newtype**（§12.1 的三角色三类型）——
-  // 故按名解构它的五个字段**写不出来**，要分两步解构、**两步都不带 `..`**：
-  let Remaining(dims) = unproject(&v);
-  let Dimensions { money, wall_time, token, gpu_time, network_transfer } = dims;
-  // 再逐维断一次往返值相等（见下一条用例）。
+  // 第二行：Remaining 侧——**分两步**解构（三个角色的字段私有，§12.1 的 `let Remaining(dims) = r;`
+  // 只在 **crate 内**成立；跨 crate 的读法是 `dims()`），两步都不带 `..`：
+  let Dimensions { money: rm, wall_time: rw, token: rt, gpu_time: rg, network_transfer: rn } = r.dims();
+  // 逐维比，不比较整个结构体 —— 故**不需要 PartialEq**（见判据 (e)）。五维各一行。
+  assert_eq!(money, *rm);
+  assert_eq!(wall_time, *rw);
+  assert_eq!(token, *rt);
+  assert_eq!(gpu_time, *rg);
+  assert_eq!(network_transfer, *rn);
   ```
 
-  **三条判据写进注释**：
+  **判据逐条写进注释**：
   （a）**`..` 一个都不许写**——带 `..` 的模式是**穷尽性豁免**，任一侧加字段它就照过，
   那时这条断言与手抄名单**没有区别**；
   （b）**不选 serde**：那条路要给 `BudgetView` 加 `#[derive(Serialize)]`，而它的模块文档
   （`crates/continuum-model-registry/src/budget.rs:36-37`）明写「没有当场消费方的派生在这里一律不加」
   ——**为一条测试去改被断言类型的公开形状，是把断言的成本转嫁给它**；
-  而穷尽解构**不需要任何派生**，且把红的时点从**跑测试**提前到**编译**。
-  （c）**「两侧字段名逐项相等」不是「数量相等」**——数量相等会让「`money` 换成 `cost`」漂过去。
-  （d）**设计 §12.6.1 的代码块里那两行解构，第二行按名解构的是 `Remaining` 的五个字段，
-  而 §12.1 说三个角色是「各包一个 `Dimensions` 的 newtype」——两者不能同真**（按名解构一个
-  newtype 的字段写不出来）。**本计划按 §12.1 的结构办**，解构分两步、**两步都不带 `..`**
-  （先 `Remaining(dims)`，再 `Dimensions { … }`）；这也要求 `Dimensions` 的五个字段是 `pub`
-  （Task 17 已写明其理由）。**已记 `## 遗留` 第一节第 10 条。**
+  而穷尽解构**不需要任何派生**，且把红的时点从**跑测试**提前到**编译**；
+  （c）**「两侧字段名逐项相等」不是「数量相等」**——数量相等会让「`money` 换成 `cost`」漂过去；
+  （d）**为什么要两步**：§12.1 写死「三个角色各自私有、无公开构造函数」，而 §12.6.1 的
+  `let Remaining { money, … } = …` 是**按名解构一个 newtype 的字段**——**两者不能同真**
+  （按名解构 newtype 的字段写不出来）。**本计划按 §12.1 办**：`Remaining` 侧经 `dims()` 读法取
+  `&Dimensions` 再穷尽解构它。**跨 crate 的 `let Remaining(dims) = r;` 同样不成立**（字段私有），
+  故 §12.1 那两行也只在本 crate 内是照片；**这一处已记 `## 遗留` 第一节第 3、4 条**；
+  （e）**逐维比而不比整个结构体**（§12.6.1 已写死）：`assert_eq!(project(&unproject(&view)), view)`
+  需要 `BudgetView: PartialEq`，**而本类型不加任何派生**——两处不能同真；逐维比对**不需要派生**，
+  顺带把五个绑定都用上（否则 `unused_variables` 会报）。
   **红的时点**：任一侧加一个字段、或改一个维度名 ⇒ **编译不过**（记录实测的 `error[E0027]` 一类，
   **不许凭记忆写**）。**等价变异体警告**：把两个 `Option<i64>` 字段**互换**（如 `money` 与 `wall_time` 对调）
   在穷尽解构下**编译得过**——那正是下一条用例的作用，**故它不可省**。
+
+  **「谁保证」逐格写清**（§12.6.1 已补这张表——**不能由「编译器」三个字替一个约定背书**）：
+
+  | 保证 | 由谁 | 强度 |
+  |---|---|---|
+  | 全绑 ＋ `..` | 「编译器」**——但见下一行** | 名义上编译不过 |
+  | **部分绑 ＋ `..`**（删掉一个绑定再加 `..`） | **不由编译器保证**（该 lint 只管「全绑了还写 `..`」） | **仅由站点注释 ＋ 复审守** |
+  | 任一侧加字段（在两行都不带 `..` 的前提下） | **编译器**：模式不再穷尽 | 编译不过 |
+
+  **本计划对第一行的订正要说准**：设计写「编译器（需 crate 级
+  `#![deny(clippy::rest_pat_in_fully_bound_structs)]`）」，而**本仓的验证命令是 `cargo test` 与
+  `cargo build`，不含 clippy**——`clippy::` 那条 tool lint 在 `cargo test` 下**不生效**，
+  故第一格**实际也回落到「约定」**，与第二格同强。**本计划据此办两件事**：
+  （i）把 `#![deny(clippy::rest_pat_in_fully_bound_structs)]` 写在 `tests/budget_projection.rs` 的文件头
+  （**成本一行**；若将来把 clippy 纳入门禁，它立刻生效），并在注释里写明它**今天不生效**这件事实；
+  （ii）**不建**那条「读这两行源码、断言不含 `..`」的自定义检查——设计 §16 第 34 条把它留给实现者，
+  **本计划取「不建」**：它会引入一处读源码的测试，且本仓已有一处人工复核点（Task 21 Step 3 的源码面复核），
+  把这两行加进那张清单比再造一个自指的断言便宜。**逐条见 `## 遗留` 第五节第 34 条。**
 - `the_projection_is_value_preserving_dimension_by_dimension`：
   **五个量纲各一条**，逐维断言投影后的值与 `remaining` 相等，**含 `None` 那一侧**（`None → None`，
   **不是 `Some(0)`**）。
@@ -1876,7 +2060,7 @@ Task 20 会把它升成普通依赖，理由是注册迁移与钩子）。`ALLOW
   （`budget.rs:38-44` 无 `#[derive]`），`assert_eq!(project(&unproject(&view)), view)` **编译不过**。
   故往返断言**逐维比较五个 `Option<i64>`**（每维一次 `assert_eq!`，比较的是字段值不是结构体）。
   **这一处是设计 §12.6.1 的代码块与本仓既有代码的相抵**（设计写了那个 `assert_eq!`），
-  **本计划按模块文档办**，已记 `## 遗留` 第一节第 5 条。
+  **本计划按模块文档办**——这一条**已由设计闭合**（§12.6.1 改为逐维比，见 `## 遗留` 第一节的已闭清单）。
   红条件：把 `Remaining` 的 `money` 投影到 `BudgetView` 的 `wall_time`（**取反档**——逐维值断言红）。
 - `none_is_not_some_zero_on_both_sides`（**两侧各一条，合起来才算钉住**）：
   （a）本层 `Remaining` 的 `None` 表示「该维不构成约束」——`None` 读回仍是 `None`；
@@ -1901,8 +2085,15 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test budget_pro
 /// **测试内的**恒等投影——生产投影由驱动的接线 task 写（裁定 §12.6.1），本 plan 不预先发明它。
 /// 本函数的用途只有一个：让「两侧字段集逐项相同」这件事**可断言**，从而让漂移变成编译错误。
 fn project(r: &Remaining) -> BudgetView;
-fn unproject(v: &BudgetView) -> Remaining;
 ```
+
+**没有 `unproject`，而这是设计的一处必然后果**：§12.1 写死三个角色**各自私有、无公开构造函数**，
+故**在另一个 crate 的测试里造不出一个 `Remaining`**——「反向映射」在类型上不可写。
+于是「两个方向都写」这句话的**可落地形态**是：`BudgetView` 侧穷尽解构一次（`project` 的返回值），
+`Dimensions` 侧穷尽解构一次（经 `r.dims()`，`r` 由设计指定的入口得到），**两处都不带 `..`**。
+**这不是把设计要求做小了**：两处解构各自都是编译器强制的穷尽性检查，
+而「反向造一个 `Remaining`」正是 Task 17 那三份反例要挡掉的东西——
+**若这里能写出 `unproject`，那三份反例就有一条会通过**。这一句要写进注释。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -2036,6 +2227,11 @@ grep -rn "continuum_capability\|continuum_policy\|continuum_model_registry\|cont
 grep -rn "SystemTime::now\|Instant::now" crates/continuum-canonical/src crates/continuum-semantics/src crates/continuum-budget/src
 ```
 
+**另加一条人工复核（不是 grep）**：打开 `crates/continuum-runtime/tests/budget_projection.rs`，
+**逐行确认那两处解构一个字都不含 `..`**（§16 第 34 条与设计 §12.6.1 的「谁保证」表：
+「部分绑 ＋ `..`」那一格**没有机器判据**，本计划明写不建那条读源码的检查）。
+**复核结论写进报告，写清是哪两行、当时是什么内容。**
+
 **五条的预期与作用域**（**零命中不是充分证据**——grep 按**行**匹配，跨行折行会漏；
 **故做法是 grep 出候选行后对 `src/` 逐处通读**，结论以通读为准、grep 只用来定位）：
 （a）`continuum_core` **零 `use`**——注意「不 `use`」讲的是依赖边为零，**不是整篇不出现**
@@ -2084,70 +2280,81 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
 ## 遗留
 
 **凡设计未给判据的，下标「规范未给判据」；凡本计划自己定了的，下标「本计划自定」。**
-设计 §16 的 33 条**本计划一条都不发明**——收件人照原文，逐条落在下节第五节。
+设计 §16 的 **34** 条**本计划一条都不发明**——收件人照原文，逐条落在下节第五节
+（第 34 条的收件人是**实现者**，本计划已就它作出取舍，见第五节）。
 
-### 一、本计划查出的十条设计问题（**发现即报，本计划一处都不替设计补写**）
+### 一、设计问题：**已由设计闭合的七条** ＋ **仍开着的六条**（发现即报，本计划一处都不替设计补写）
 
-1. **`Remaining` 的 crate 归属相抵**（**两处相抵**）：§2.1 的组件表、§2.2 的依赖边表与 §12.1 都把
-   `Remaining` 放在 **`continuum-budget`**；而 §12.6.1 与裁定文件
-   （`docs/superpowers/2026-10-06-p4-decisions.md:24`、`:19-21`）的字面写「**`Remaining` 在 `continuum-semantics`**」
-   （形状甲的描述里更是写作 `continuum_semantics::Remaining`）。**两处不能同真。**
-   **本计划的取舍**：按 §2.1／§2.2／§12.1（**结构专节＋依赖边表**）落在 **`continuum-budget`**（Task 17／19）。
-   **理由**：预算树与账本整块在 `continuum-budget`，`Remaining` 是它们的现算读法，
-   而 §11.5 第 3 条明写「`continuum-budget` 的 `ALLOWED` 条目里有 `continuum-semantics`（它要 `IntentId`）」
-   ——**若 `Remaining` 真在 semantics，则 `Remaining → BudgetView` 的投影两侧就都在语义层之外**，
-   §12.6 的「本层产出 `Remaining`」也随之落空。
+**已闭合的七条（留格是为了让「一处说法被订正」可查；闭合处逐条点名，免得后来者按旧报告去找）**：
+
+- **§4 没有「显式约束集」的类型与「满足」判据** —— **已闭**：设计新增 **§4.1.1**
+  （`ExplicitConstraint` 三枚 `Scope`/`EntityKind`/`BoundTo`、`ResolutionScope` 九值、`EntityKind` 四枚、
+  `CandidateFacts`、`satisfies`、`qualifying`、**合取**判据），并在 §4.1.1 开头写明「本节先前没有给出它们」、
+  出处记为本计划作者。**Task 5 的开工前置因此撤销**（`## 遗留` 原文的「未补则停下报」不再适用）。
+- **`ResolutionResult` 被点名却从未给出字段清单** —— **已闭**：设计 §4.1 补出四支的**载荷类型**
+  （`Resolved` / `ConfirmRequired` / `Ambiguous` / `Unknown`）与各自字段（含 `candidate_count`）、
+  以及 `UnknownReason` 的两枚。
+- **§4.1 说四态「一律 `Ok`」而全节无 `Err` 支** —— **已闭**：设计 §4.1 写死「返回 `ResolutionResult`，无 `Err` 支」，
+  并注明与本计划取了同一结论、理由一致。
+- **§12.6.1 的 `assert_eq!(project(&unproject(&view)), view)` 与 `BudgetView` 无 `PartialEq` 相抵** —— **已闭**：
+  设计 §12.6.1 改为**逐个绑定逐维比**（五行 `assert_eq!`），并写明「不需要任何派生」。
+- **§4.2 照片 D-2 里 `c₃` 不承重** —— **已闭**：设计 §4.2 与 §14 都写成**两条断言**
+  （结果是 `Ambiguous` ＋ `surviving` 恰是 `{c₁,c₂}` 且不含 `c₃`），并写明「第二条才让 `c₃` 承重」、
+  出处记为本计划作者。Task 5 已照此写。
+- **`ExplicitBinding` 指向候选集外时给哪一态未给** —— **已闭**：设计 §4.6 写死「**不新增分支，把该实体注入工作集**」
+  并给了两侧照片；断言 A 随之重述为「检索集 ∪ 注入的那一枚」，并补了**注入守卫**照片。Task 5／6 已照此写。
+- **§12.4 的 `check` 没有 `Err` 判据** —— **已闭**：设计 §12.4 补出三条（超支不是 `Err`；
+  量纲不是 `Err`；`UnknownOwner` fail-closed）。Task 18 已照此补了 `an_unknown_owner_is_not_within`。
+
+**仍开着的六条**：
+
+1. **`Remaining` 的 crate 归属相抵**（**两处相抵，仍未闭合**）：§2.1 的组件表、§2.2 的依赖边表与 §12.1 都把
+   `Remaining` 放在 **`continuum-budget`**；而 §12.6.1、裁定文件
+   （`docs/superpowers/2026-10-06-p4-decisions.md:24`、`:19-21`）与**设计 :1843**（「它同时要
+   `continuum_semantics::Remaining` 与 `continuum_model_registry::BudgetView`」）的字面写「在 `continuum-semantics`」。
+   **两处不能同真。** **本计划的取舍**：按 §2.1／§2.2／§12.1（**结构专节 ＋ 依赖边表**）落在
+   **`continuum-budget`**（Task 17／19）。**理由**：预算树与账本整块在 `continuum-budget`
+   （§2.1 的组件表那一行就写着「`Allocation` / `Reservation` / `Remaining`」），
+   而 §12.6.1 的 :1843 只说「再加 `continuum-semantics` 是合法方向」——它讲的是**边**不是**归属**。
    **翻转条件**：若协调者按字面裁定在 `continuum-semantics`，则 Task 17／19 的文件位置与两处 `ALLOWED` 条目一并改，
    **而 §2.1／§2.2 也要改**（否则同一处还有第二遍相抵）。**收件人：设计作者 ＋ 协调者。**
-2. **设计 §4 没有给出「显式约束集」的类型，也没有给出「满足」的判据**（**判据缺口**）：
-   §4.2 的四条断言（A/B/C/D）、§4.2 的订正段（「夹具必须含至少一条非空显式约束 `K`」）、§14 的测试表
-   与 §4.6 的 `ExplicitBinding` 都建立在它之上，而 §4 全节只给了 `Candidate` / `CandidateSources` /
-   `ResolutionRisk` / `ExplicitBinding` 四个类型。**§201 给的是阶段名（`Explicit Constraints`），不是形状。**
-   **Task 5 的开工前置挂在这一条上**（已写在 Task 5 的抬头）：未补则**停下报协调者，不代设计造类型**。
-   **收件人：设计作者。**
-3. **`ResolutionResult` 被点名但从未给出字段清单**（**没写清**）：§4.4 第 1 条要求「`ResolutionResult` 的字段清单逐项」
-   有照片，§14 的测试表也复述了同一句，而设计只给了**四个态名**（§4.1）。
-   **本计划按其判据取最小形状**（四枚；`ConfirmRequired` 带一个候选、`Ambiguous` 带一组候选、`Unknown` 不带），
-   理由写在 Task 4 的 Interfaces 里。**收件人：设计作者。**
-4. **§4.1 说四态「一律 `Ok`」，而全节没有给出任何 `Err` 支**（**没写清**）：
-   **本计划据此把 `resolve` 的返回类型取为 `-> ResolutionResult`**（一个没有 `Err` 的 `Result` 是死类型）。
-   **收件人：设计作者**（若补出 `Err` 的判据，Task 4 的签名与四条用例照改）。
-5. **§12.6.1 的代码块与本仓既有代码相抵**（**两处相抵**）：设计写
-   `assert_eq!(project(&unproject(&view)), view);`，而 `BudgetView` **不派生 `PartialEq`**
-   （`crates/continuum-model-registry/src/budget.rs:38-44` 无 `#[derive]`），
-   **该语句编译不过**；而同一节的正文又明写「**不选 serde**：……为一条测试去改被断言类型的公开形状，
-   是把断言的成本转嫁给它」——**按同一条判据，为一条测试去加 `PartialEq` 也是转嫁**。
-   **本计划按模块文档办**（Task 19）：往返断言**逐维**比较五个 `Option<i64>`，**不要求任何派生**。
-   **收件人：设计作者 ＋ 复审者**（要改的是那段代码块，不是那条判据）。
-6. **§4.2 的照片 D-2 里 `c₃` 不承重**（**没写清**）：设计说「有 `c₃` 在，「合格」才是被证明的，而不是被假定的」，
-   但**只断言「结果是 `Ambiguous`」时 `c₃` 不承重**——把「合格」判成**恒真**的实现会让 `{c₁,c₂,c₃}` 全合格，
-   结果仍是 `Ambiguous`，用例照样绿。
-   **本计划把断言加强**为「`Ambiguous { candidates }` **恰是 `c₁` 与 `c₂`（逐项、按 id 升序）、不含 `c₃`**」（Task 5）。
-   **收件人：设计作者 ＋ 复审者**（设计正文若要照改，改的是照片的断言，不是夹具）。
-7. **`ExplicitBinding` 指向候选集外的实体时给哪一态，设计未给**（**判据缺口**）：
-   §4.6 要求 `ExplicitBinding` 先把候选集缩到 `entity` 这一个，而 §4.2 的断言 A 要求
-   `Resolved(e)` 蕴含 `e` 是**输入候选集**的成员——两者在「binding 的实体不在候选集里」这一刻相抵。
-   **本计划只断言「不是 `Resolved`」**（Task 6），**不发明**它该落哪一态。**收件人：设计作者。**
-8. **§12.4 的 `check` 没有 `Err` 判据**（**没写清**）：`check(estimate, owner, ...) -> Result<BudgetVerdict, BudgetError>`，
-   而设计点名的 `BudgetError::Insufficient { dimension }` 的产生方是 `reserve`。
-   **本计划取「`check` 的 `Err` 只用于库错误（`PersistError` 经 `#[from]` 升格）」**（Task 18）。
-   **收件人：设计作者。**
-9. **§12.2 的 `I2` 与 ENG-005 原句的措辞差别**（**设计已自陈**）：原文说「兄弟的**活跃预留**之和 ≤ 父的剩余」，
-   本设计判「兄弟的**分配额**之和 ≤ 父的可用额」（更强的一条）。
+2. **§12.2 的 `I2` 与 ENG-005 原句的措辞差别**（**设计已自陈并已给收件人**）：原文说「兄弟的**活跃预留**之和
+   ≤ 父的剩余」，本设计判「兄弟的**分配额**之和 ≤ 父的可用额」（更强的一条）。
    **本计划照 §12.2 取「分配是上限、不转移」**，**不代裁**——若协调者判「分配即转移」，
    `I2` 换成 `Σ_{执行中的子节点} reserved(child, d) ≤ allocation(n, d) − settled(n, d)`（§12.2 已给）。
    **收件人：协调者。**
-10. **§12.1 的三角色三类型与 §12.6.1 的按名解构相抵**（**两处相抵**）：
-    §12.1 说「**类型不共用**（三个 newtype 各包一个 `Dimensions`）」，而 §12.6.1 的代码块写
-    `let Remaining { money, wall_time, token, gpu_time, network_transfer } = unproject(&v);`
-    ——**按名解构一个 newtype 的字段写不出来**（它只有第 0 个字段），两处不能同真。
-    **本计划按 §12.1 办**（`Remaining` 是包着 `Dimensions` 的 newtype），因为「类型不共用」正是
-    「把余量填进上限的位置在类型上不可写」那条守卫的载体，而那条守卫是本层对
-    D §11 第 12 条（`ExecutionProfile.cost_budget` 的角色之问）的答复。
-    **落点**：Task 19 的解构**分两步、两步都不带 `..`**（先 `Remaining(dims)`、再 `Dimensions { … }`），
-    且 `Dimensions` 的五个字段必须是 `pub`（Task 17 已写明理由：另一个 crate 的测试要解构它们）。
-    **收件人：设计作者 ＋ 复审者**（要改的是 §12.6.1 那段代码块；若改成「`Remaining` 就是
-    `Dimensions` 的一个别名」则 §12.1 的三类型守卫整个消失，本计划不同意那条改法）。
+3. **§12.1 的「三个 newtype 各自私有、无公开构造函数」与 §12.6.1 的按名解构相抵**（**部分闭合**）：
+   §12.1 已把解构写死为**两步**（并补了「`pub` 字段会不会削弱保证」之判，结论是不会），
+   **而 §12.6.1 的代码块 :1821 仍是单步按名解构** `let Remaining { money, … } = unproject(&v);`
+   ——那一行**在 crate 外写不出来**（`Remaining` 是元组 newtype 且字段私有）。
+   **本计划按 §12.1 办**：Task 19 经 **`dims()` 读法**取 `&Dimensions` 再穷尽解构它（**两步都不带 `..`**）。
+   **收件人：设计作者 ＋ 复审者**（要改的是 §12.6.1 的 :1819-1821 三行）。
+4. **`let Remaining(dims) = r;` 的作用域没写明**（**没写清**）：§12.1 的 :1549 那行在**本 crate 内**成立
+   （私有字段可解构），**跨 crate 不成立**，而 §12.6.1 的两条断言是**住在驱动里**的（设计 :1843-1845 自己写的）。
+   两处合起来看，§12.1 的那行示范会被读成「跨 crate 可用」。**本计划的落点**：三个角色各给一个**公开读法**
+   （`dims()` 与五个逐维读者），跨 crate 的穷尽解构走它；**这是本计划自定的一处 API 形状**
+   （设计只给了 `r.money()` 一类逐维读者，没给 `dims()`），记在第四节。
+   **收件人：设计作者**（§12.1 的那行要不要注明作用域）。
+5. **`BudgetError` 的变体在三处不一致，且 `reserve` 的「哪一维不足」没有变体承载**（**没写清 ＋ 判据缺口**）：
+   §12.2 的**正文** :1569 写 `reserve(...) -> Result<Reservation, BudgetError::Insufficient { dimension }>`、
+   §14 的表格 :2124 也要求「`reserve` 返回**具体哪一维**（逐维五条）」；而 §12.2 的**枚举** :1588-1593
+   只列 `UnknownOwner` ＋ `NegativeActual`（**没有 `Insufficient`**），§12.4 的**枚举** :1669-1672
+   只列 `UnknownOwner` 并写「`BudgetError` 只收**一种**」。**三处不能同真。**
+   **本计划的取舍**：按三处的**并集**取三枚（`UnknownOwner` / `Insufficient` / `NegativeActual`），
+   逐枚注明出处；**不删 `Insufficient`**——「返回具体哪一维」是 §12.2 正文与 §14 表格都写着的判据，
+   删了它那五条照片没有承载。已写在 Task 17 的开工前置里。
+   **翻转条件**：若裁定「`reserve` 的失败不区分维度」，则 §12.2 正文与 §14 表格要一并改，
+   而那会掉两条判据（ENG-005「没有预留，§110 就没有判据」那一行的可观察后果）。
+   **收件人：设计作者 ＋ 复审者。**
+6. **§16 第 34 条说「编译器保证」的那一格，在本仓的验证命令下不成立**（**新增，本计划查出**）：
+   设计 §12.6.1 的「谁保证」表第 1 行写「全绑 ＋ `..` —— **编译器**（需 crate 级
+   `#![deny(clippy::rest_pat_in_fully_bound_structs)]`）｜编译不过」。
+   而 **本仓跑的是 `cargo test` ＋ `cargo build`，不含 clippy**（Global Constraints 的验收命令即此），
+   且 `clippy::` 那条 tool lint 在 `cargo test` 下**不生效**——故那一格**实际也回落到「约定」**，
+   与第 2 行同强。**本计划据此办两件事**（Task 19 已写）：把 `#![deny(clippy::rest_pat_in_fully_bound_structs)]`
+   写在测试文件头并在注释里写明它**今天不生效**；**不建**那条读源码的自定义检查（理由见第五节第 34 条）。
+   **收件人：设计作者 ＋ 复审者**（若要把这一格变成真保证，缺的是「把 clippy 纳入门禁」这一步，
+   那是仓库级决定，不在本计划范围）。
 
 ### 二、对既有之物的三处请求（**本计划一处都不实施**，逐条见跨计划前置第三节）
 
@@ -2183,20 +2390,35 @@ git commit -m "docs(semantics): P4 语义层的收尾与复核"
 - **`PlanChange` 分类的阈值入参**（Task 14）：§230 的「成本显著扩大」未给阈值（§16 第 15 条），
   故若无一个显式阈值入参，本层只能判「两者不相等即 MATERIAL」——**那句话在规范里没有依据**。
   本计划取「阈值以入参进入、本层不发明数值」。**代价**：多一个入参；**收益**：不发明判据。
-- **`ResolutionResult` 的最小形状**（Task 4，理由见第一节第 3 条）。
-- **`resolve` 的返回类型不含 `Result`**（Task 4，理由见第一节第 4 条）。
+- **`ResolutionResult` 的载荷形状与 `resolve` 不含 `Result`**：**不再是本计划自定** ——
+  设计 §4.1 已把两者写死（四支载荷类型、`candidate_count`、`UnknownReason` 两枚、无 `Err` 支），
+  Task 4 照它写。留这一条是为了让「这两处曾由计划先取、随后被设计采纳」可查。
+- **三个角色的公开读法 `dims()`**（Task 17）：设计给了逐维读者（`r.money()` 一类）而**没给 `dims()`**，
+  而跨 crate 的穷尽解构要一个能拿到 `&Dimensions` 的读法（三个角色字段私有，见第一节第 3、4 条）。
+  **代价**：多一个公开读者；**收益**：不必把角色的字段开成 `pub`（那会与 §12.1 的私有承诺相抵）。
+- **`#![deny(clippy::rest_pat_in_fully_bound_structs)]` 写进测试文件头**（Task 19）：
+  本仓无 clippy 门禁，故它**今天不生效**；写它是为了让「将来纳入 clippy 时立刻生效」这件事**不依赖记忆**。
+  **不建**那条读源码的检查，理由见第五节第 34 条。
 - **形状乙的两条断言落在 `crates/continuum-runtime/tests/`**（Task 19），**生产投影函数本计划不建**
   （裁定判给驱动，而驱动的那一步今天不存在）。**代价**：投影的**生产**实现仍无人写，
   本 task 只交付裁定要的那条断言（「有断言的恒等转换与没有断言的恒等转换是两回事」）。
   **收件人：接线的那个 task。**
 
-### 五、设计 §16 的 33 条：本计划一条都不发明，收件人照原文
+### 五、设计 §16 的 **34** 条：本计划一条都不发明，收件人照原文（**第 34 条例外：它的收件人是实现者，本计划已取用**）
 
-设计 §16 的 33 条**逐条以「收件人」结尾**，本计划**不重述其内容**（重述就是第二份转录，正是本项目出错最多之处）。
+设计 §16 的 34 条**逐条以「收件人」结尾**，本计划**不重述其内容**
+（重述就是第二份转录，正是本项目出错最多之处）。
+
+**第 34 条是唯一一条收件人写着「实现者」的**，本计划的取用写在 Task 19 与第一节第 6 条：
+它要的那条自定义检查（在测试里读那两行源码、断言不含 `..`）**本计划不建**，
+理由是它会引入一处**读源码的测试**、而本仓已有一处人工复核点（Task 21 Step 3 的源码面复核）——
+把「那两行不得带 `..`」加进那张清单，比再造一个自指的断言便宜。
+**代价写明**：于是「部分绑 ＋ `..`」那一格**仍只由站点注释与复审守**，没有机器判据；
+若复审判定必须机器化，缺的就是那条读源码的检查（它的落点已被设计点名：读哪个文件的哪两行）。
 **逐条照收件人归类**（**为让「核过」可查**，与 G 的 §13.2 末行同一做法）：
 
 - **收件人：规范维护者**（本项目无此角色）——第 **1、3、4、6、7、8、10、11、12、14、15、16、17、19、20、21、32、33** 条。
-  **本计划一条都不发明**；其中第 12 条的 `class` 四值序与第 32 条已由 Task 12 的照片与本计划第一节第 6／9 条覆盖到可断言的部分。
+  **本计划一条都不发明**；其中第 12 条的 `class` 四值序与第 32 条已由 Task 12 的照片与本计划第一节的已闭清单（`c₃` 承重）与第 2 条（`I2`）覆盖到可断言的部分。
 - **收件人：执行层（P1）**——第 **2**（`Node.constraints` 的词汇表与注记）、**24**（`contract_version` 与 `ContractId`）、
   **25**（`cost_budget` 收成 `Allocation`）条。**第 24／25 条即本文第二节那三处请求。**
 - **收件人：执行器（执行层，未建）＋ 协调者**——第 **13** 条（ContractDiff 今天没有消费者）。
