@@ -572,6 +572,21 @@ pub enum LifecycleState {
 /// 这与 P3A §2.3「`full_access` 不是禁止作为默认，而是没有
 /// 这个成员」是同一种做法。
 pub enum RoutableState { Discovered, Researched, Probed, Verified, Active, Degraded }
+```
+
+**`LifecycleState` 的落库编码：`lifecycle_state` 列，十个字面量逐枚列全**（照 §249 的名字小写、多词 `_` 连接。
+§2.4 只说「落库一律小写 `_` 连接」，这里把十枚写出来，免得建列的那个 task 再裁一次）：
+
+```
+discovered   unprofiled   researched  probed      verified
+active       stale        degraded    quarantined disabled
+```
+
+（这十个串与 §4.1 那张迁移表里写的**逐字相同**；`RoutableState` 是**内存里的收窄类型，不落库**，
+故它不需要编码。`FamilyRelation` / `EscalationStep` / `RoutingReason` / 四枚错误类型同理——
+它们都不进任何列，**没有落库编码，也就没有字面量可给**。）
+
+```rust
 
 impl TryFrom<LifecycleState> for RoutableState {
     type Error = RoutingError;   // NotRoutable { state: LifecycleState }
@@ -660,8 +675,34 @@ impl RoutableModel {
 | `ModelProfile` | **已有类型**（§2） | 经 `RoutableModel` 传入，见 §4.2 |
 | `CostPolicy` | **不定义形状**，落在排序策略接口之后（§5.3） | 规范只给名字。见 §11 第 5 条 |
 | `LatencyPolicy` | 同上 | 同上 |
-| `FamilyPreference` | **本设计定义类型**：§19 的五项照录（`Auto` / `OpenAiPreferred` / `ClaudePreferred` / `LocalPreferred` / `Custom`，`docs/spec/01-concepts.md:933-960`），落库小写 `_` 连接（本阶段它不落库，只作输入） | §19 给的是**封闭清单**，可照录。`Custom` 在 §19 里不带载荷，本设计也不给它加。§19 的「明显收益足够高时才跨 family」**没有阈值**，见 §11 第 10 条 |
+| `FamilyPreference` | **本设计定义类型**：§19 的五项照录（`Auto` / `OpenAiPreferred` / `ClaudePreferred` / `LocalPreferred` / `Custom`，`docs/spec/01-concepts.md:933-960`），**落库编码的五个字面量见下文** | §19 给的是**封闭清单**，可照录。`Custom` 在 §19 里不带载荷，本设计也不给它加。§19 的「明显收益足够高时才跨 family」**没有阈值**，见 §11 第 10 条 |
 | `FailureHistory` | **不定义形状**，落在排序策略接口之后 | 规范只给名字，且**它的产生方也没有指定** |
+
+#### `FamilyPreference` 的五个落库字面量（本轮签字回写）
+
+**编码仍按本仓惯例挂在类型上**（`FamilyPreference::as_str` / `parse`，小写、多词以 `_` 连接），
+五个字面量逐枚列全——**不列全，建列的那个 task 就要再裁一次**：
+
+| §19 的写法（`docs/spec/01-concepts.md:938-942`） | 落库字面量 |
+|---|---|
+| `Auto` | `auto` |
+| `OpenAI preferred` | **`openai_preferred`** |
+| `Claude preferred` | `claude_preferred` |
+| `Local preferred` | `local_preferred` |
+| `Custom` | `custom` |
+
+**`Custom` 不带载荷，故它的编码就是一个光字面量。** §19 只给了这五个词，没有说 `Custom` 要带什么
+（自定义哪个家族、怎么描述），故本设计**不替它加字段**——加了就是发明一个规范没有的形状。
+
+**来历（这一段必须留）**：这个字面量**两份文档原先都没定过**——
+设计只写了「落库小写 `_` 连接」，计划也没给具体串。它是 **Task 10 的实现者按 §19 的短语口径取的**
+（`OpenAI` 在 §19 里是**一个词**，故按短语切词得 `openai_preferred`，而不是按驼峰切分的 `open_ai_preferred`；
+判据是 §19 的原文写法 `OpenAI preferred`），**评审核过 §19 原文后由协调者签字确认**（2026-10-05）。
+**这是「实现先取、文档后追认」的一处**，故来历写在设计里而不是只在提交信息里——
+否则后来者看到设计没写、实现有串，会以为是实现擅自发明。
+
+**其余四枚同形**：`auto` / `claude_preferred` / `local_preferred` / `custom` 都按同一口径切词，
+与 `openai_preferred` 一起构成本类型编码的全部取值。
 
 ### 请求与策略的分界（六个输入各落在哪一边）
 
