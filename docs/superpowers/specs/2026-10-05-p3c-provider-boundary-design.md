@@ -119,8 +119,15 @@ list_tools / describe_tool / invoke / cancel
 
 **五、`ExecutionProfile` 里模型/工具相关字段仍是 `Option<String>`。** `crates/continuum-graph/src/execution.rs:18-20`
 的注释预告「前四者 P3 接入 `ModelProvider` 与 `ToolProvider` 时收紧为强类型 id」。本子项目**不做这次收紧**：
-它要动的是一张已落库的表与一个已冻结的 `struct`，而**没有消费方要求它**（无 G、无 F），
-按「不预先发明」不动。记在 §12 第 9 条，收件人是子项目 G 或 F。
+**没有消费方要求它**（无 G、无 F），按「不预先发明」不动。记在 §12 第 9 条，收件人是子项目 G 或 F。
+
+**订正（2026-10-06）**：本段初稿写「它要动的是一张**已落库的表**与一个已冻结的 `struct`」——
+**前半句是假的**。实读：`execution_profile` 表（`crates/continuum-graph/src/persist.rs:53-62`）的列是
+`graph_id` / `node_id` / `attempt` / `backend` / `timeout_ms` / `retry_policy` / `cost_budget`——
+**没有 `model` / `provider` / `tool` 三列**；且 `ExecutionProfile` 今天**零生产构造点**（除 `Default`
+与测试外无人构造它，那张表也**没有任何写入方**：全仓无 `save_execution_profile`）。故收紧这三个字段
+**不是「改一张已落库的表」**，而是：改一个内存 `struct` 的字段类型，**外加**（若它们要落库）一条
+**新迁移加列**。**代价因此比初稿写的小**（现状是没有列、也没有写入方，不是在改既有列）。
 
 ---
 
@@ -137,11 +144,26 @@ list_tools / describe_tool / invoke / cancel
 **发现**由调用方按 id 查，**两条 trait 的暴露面不同，理由是强制点 (1) 只覆盖工具**（§7.2）：
 
 - **模型侧不设强制点**（三个强制点见共享面 §四，**没有一个管模型**），故 `model_for(&ModelId)` 直接交出
-  `Arc<dyn ModelProvider>`，另开 `model_providers()`，供调用方（子项目 G）枚举全部模型适配器。
+  `Arc<dyn ModelProvider>`。**不提供「枚举全部模型适配器」的入口**（`model_providers()` 已裁删，见下）。
 - **工具侧设强制点 (1)**，故注册表**不交出** `Arc<dyn ToolProvider>`：不提供 `tool_for`、也不提供
   `tool_providers()` 枚举。工具侧只开两类入口——**只读的** `list_tools()` / `describe_tool(&ToolId)`
   （它们不是副作用，可自由暴露），以及**唯一的调用入口** `invoke_tool(&AuthorizedTool, input)`
   （§7.2）。适配器在注册表内部持有，出不了这个 crate。
+
+**「枚举全部模型适配器」的入口裁掉（2026-10-06）。** 本节初稿开过一个 `model_providers()` 并写「供
+子项目 G 枚举」——**那句是假的**，就地订正：它**零消费方**，且**形状对不上**——它返回
+`Vec<Arc<dyn ModelProvider>>`、**不带 id**，而 G 是**按 id 解析**的（`model_for`），两者无从对齐；
+G 的候选 id 来自 **D 的 Model Registry 表**（模型清单的权威），不是来自本注册表。三条备选与判据：
+
+- **删（选定）**：零消费方的公开方法正是本项目说的「建好但没人用」；而本注册表**只按 id 解析**
+  就够（`model_for`），「有哪些模型」这件事的权威在 D 的表，不在这里。
+- 保留 → **必须点出一个真消费方并说清它怎么用**；今天没有，故保留即制造一条无人使用的公开面。
+- 改形状为 `Vec<(Vec<ModelId>, Arc<dyn ModelProvider>)>` → 能对齐 id，但**仍零消费方**，
+  且它与登记时传入的 id 集合**是同一份数据的第二个视图**（登记集合才是那个产生点）。
+
+**代价**：将来若有人真需要「跨全部适配器聚合」（如汇总健康、或做适配器级探活），他得重新提出这个入口；
+到那时他有真消费方、也能自己挑形状——**这是便宜的方向**（本项目的「不预先发明」正是这个取向）。
+`model_for(&ModelId)` **保留**（G 用它）。§11 的对应用例行随之删除。
 
 **只读入口的权威是「已登记的适配器」，不是登记表本身。** `list_tools()` 是**已登记适配器**各自
 `list_tools()` 的并集；`describe_tool(&ToolId)` 先按登记路由到适配器，再转出它的描述。
@@ -437,16 +459,18 @@ G 是**模型调用路径**（`ModelProvider::invoke` / `stream`）；两条**�
 与「调用方是子项目 G，不是 F（已裁）」一节），并把 F 那处措辞的**来历留在原地**。
 **来历**：本节曾把它记成「D 待订正的接缝」——该账已由 D 还清，§12 第 20 条据此关闭。
 
-1. **枚举**：`ProviderRegistry::model_providers()` 拿到全部模型适配器。
-2. **取描述**：对每个适配器 `list_models()`，或对已知 id 用 `describe_model(&ModelId)`；得到
-   `ModelDescriptor`（含 `provider: String`、`context_window`、`capabilities`）。
-   **这一步的产物（可用性）随后作为值交给 D 的 Router；Router 不碰 provider。**
+1. **取描述**：`list_models()`，或对已知 id 用 `describe_model(&ModelId)`；得到 `ModelDescriptor`
+   （含 `provider: String`、`context_window`、`capabilities`）。
+2. **取可用性**：`health()` → `ProviderHealth`。**「当前可用性」就是它**（D 的设计 §1.2 明写其输入取
+   §315 的 `ProviderHealth`），**不是**第 1 步的 `ModelDescriptor`——**这两步的产物是两样东西，
+   实现者不得拿第 1 步的产物当可用性**（本节初稿把两者混称成一步，已拆开，2026-10-06）。
+   取到的可用性作为**值**交给 D 的 Router；Router 不碰 provider。
 3. **路由**（D 的逻辑：候选排序、confidence / alternatives / reason、§248 禁止 `overall_score`）——**不在本层，也不在本 crate**。
 4. **解析**：`ProviderRegistry::model_for(&ModelId)` → `Arc<dyn ModelProvider>`；
-   未登记 → `RegistryError::NotFound`。
+   未登记 → `RegistryError::NotFound`。**id 来自 D 的 Model Registry 表**（模型清单的权威），
+   **不是**从本注册表枚举来的（`model_providers()` 已裁删，§3.1）。
 5. **调用**：`invoke(InvokeRequest)` 或 `stream(InvokeRequest)`。
 6. **消费流**：读 `ModelStream.chunks`；要中止则 `cancel(&stream.call)`（§5.3）。
-7. **健康**：`health()`。
 
 **调用方可以假定：**
 
@@ -455,7 +479,7 @@ G 是**模型调用路径**（`ModelProvider::invoke` / `stream`）；两条**�
   **这是签名决定的，不是约定**：一个「探活本身可能失败」的接口没有意义。
 - 第 4 步命中之后，第 5 步的调用**不需要再出示任何凭据**——`ModelProvider` 不在强制点上
   （三个强制点分别管工具、副作用、凭据，共享面 §四）。
-- 第 2 步的 `ModelDescriptor.provider` 是**描述**，第 4 步的登记是**路由**；两者可能不一致（§3.3 代价一）。
+- 第 1 步的 `ModelDescriptor.provider` 是**描述**，第 4 步的登记是**路由**；两者可能不一致（§3.3 代价一）。
 
 **调用方不得假定：**
 
@@ -779,7 +803,7 @@ P3A 遗留第 8 条把这件事交给 C（`docs/superpowers/p3a-followups.md` �
 
 | 验什么 | 怎么验（本阶段可做） |
 |---|---|
-| 模型侧登记后按 id 发现 | 用 `FakeModel`：登记 → `model_for` 命中同一适配器 |
+| 模型侧登记后按 id 解析 | 用 `FakeModel`：登记 → `model_for` 命中同一适配器。**本注册表不提供「枚举全部模型适配器」的入口**（`model_providers()` 已裁删，§3.1） |
 | 模型侧：登记 id 与 `list_models` 不一致（§3.3 代价一） | 把 `FakeModel` 登记到它 `list_models` 不含的 id → `model_for` 命中、`describe_model` 报 `UnknownModel` |
 | 工具侧：公开面清单里没有返回裸适配器的入口 | 判据是**公开面清单** + 两份 **trybuild 编译失败样例**（`tool_for`、`tool_providers`）。**样例只能钉写下来的那几个拼法**——它证明不了「任何名字的入口都不存在」这一全称否定（§11 末段） |
 | 工具侧：授权证明进不到该进的地方 | trybuild 编译失败样例两条：**外部 crate 构造不出 `AuthorizedToolInvocation`**（构造入口 `pub(crate)`；**持一枚真的 `AuthorizedTool` 也构造不出**，§7.5 裁决 C2）；**裸输入传不进 `invoke_tool`**（它只收 `AuthorizedTool` + 输入） |
@@ -791,7 +815,6 @@ P3A 遗留第 8 条把这件事交给 C（`docs/superpowers/p3a-followups.md` �
 | 模型侧未登记 id | `RegistryError::NotFound`，且断言**是哪一个变体** |
 | 工具侧未登记 id | `invoke_tool` 返回 `ToolCallError::Unregistered`（**不是** `Provider(..)`），且断言**是哪一个变体** |
 | 重复登记同一 id | `RegistryError::Duplicate`，且断言**是哪一个变体** |
-| 模型侧枚举 | `model_providers()` 返回全部已登记模型适配器 |
 | 中立性（核心不依赖 provider） | 既有用例 `core_and_persist_do_not_depend_on_provider` |
 | 中立性（`ALLOWED` 逐对精确） | 既有用例 `every_crate_depends_only_on_its_allowed_set`（provider 的条目按 §10——**该条目的唯一产生点是 §10**） |
 | `cancel` 对非流式不可达 | **结构事实**，照片是类型签名（§5.3、§9），不写运行用例 |
@@ -847,7 +870,9 @@ P3A 对 crate 内第二个 `Capability` 产生点的既有判据同形：构造�
 8. **`describe_tool` 无「无此工具」这一种 `Err`**（§2.2 四、§5.2）：本阶段不加变体（不可达）。
    F 接上后「工具表里有、适配器不认」会变成可达。**收件人：F / C 的实现计划**。
 9. **`ExecutionProfile` 的 `model` / `provider` / `tool` 仍是 `Option<String>`**（§2.2 五）：
-   P1 预告 P3 收紧为强类型 id，本子项目**不做**（无消费方，且要动已落库的表）。
+   P1 预告 P3 收紧为强类型 id，本子项目**不做**（无消费方）。**订正**：本条曾写「且要动已落库的表」——
+   **实读为假**：`execution_profile` 表没有这三列，`ExecutionProfile` 也零生产构造点（§2.2 五的订正段）。
+   故收紧的代价是「改 struct + 必要时加一条加列的迁移」，比原说法小。
    **收件人：子项目 G（谁先发 `invoke` 谁收紧）或 F**。
 10. **`docs/02-工程.md` §4.3 缺 §316 ToolProvider 节点——已闭（2026-10-05）**（§10）：裁决 §二 已补该行、
     订正 `Provider Adapter` 的箭头，并在 §9.1 写明箭头读法。**来历**：本条曾与共享面 §八 为 B 记的
@@ -910,3 +935,13 @@ P3A 对 crate 内第二个 `Capability` 产生点的既有判据同形：构造�
     路径（B），裁决亦明写 B 不经 §316。**若将来模型/工具适配器确需持有凭据**，那是一个新位置，
     并会引入 `continuum-provider → continuum-secrets` 的边；本阶段不做。**收件人：控制器（若提出）
     + 子项目 B / G。**
+24. **模型侧的绕行路径：`model_for` 交出裸适配器，故 `invoke` 可绕过 D 的闸门与 G**（2026-10-06，
+    由 G 的设计 §2.3/§2.4/§2.5 引出）：本子项目的 `model_for(&ModelId)` 返回
+    `Arc<dyn ModelProvider>`，故**持有注册表者可对一个任意 `ModelId` 直发 `invoke`**，不经排序、
+    不过 §249 的闸门。**这与工具侧不同**：工具侧在裁决 §一第 2 条之后有了 trait 级的门禁
+    （§7.5），而**模型侧没有这一步可做**——§315 的 `invoke` 没有任何规范上的「必须先获准」要求，
+    往它的请求面加一个授权位就是**在规范没给判据处发明位置**。**§249 的 `MUST NOT` 主语是
+    `Router`**（`docs/spec/05-normative.md:876-884`），故「G 直发一个未画像的模型」不被它的字面覆盖；
+    G 已把这条如实记为规范级缺口并续指规范维护者（G §2.5）。**本子项目同意该判断**，不改 `model_for`
+    （模型侧不设强制点是 C 的既有决定，§3.1），也不动 §315。**收件人：规范维护者**（§249 的射程是否
+    扩到模型调用）**+ 控制器**（若要在 C 侧收紧，那要先有一条规范要求）。
