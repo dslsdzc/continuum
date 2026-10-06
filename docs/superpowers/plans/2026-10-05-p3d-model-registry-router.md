@@ -1426,7 +1426,7 @@ timeout 900 cargo build --workspace --all-targets
 
 预期：全绿、0 warning。
 
-- [ ] **Step 2: 复核「本层是判断而不是执行」**
+- [ ] **Step 3: 复核「本层是判断而不是执行」**
 
 ```bash
 grep -rn "invoke\|stream\|ModelProvider\|continuum_provider\|continuum-provider" crates/continuum-model-registry
@@ -1442,7 +1442,7 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 （本 crate 只有 `profile / lifecycle / persist / router / budget / escalation / error` 七个文件，通读代价很小），
 **结论以通读为准、grep 只用来定位**。同一通病见 Task 7 的连带面判据。
 
-- [ ] **Step 3: 逐条核对完成判据**
+- [ ] **Step 4: 逐条核对完成判据**
 
 | 判据 | 证据 |
 |---|---|
@@ -1455,12 +1455,12 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 
 **若某条找不到对应证据，不得标注为覆盖**，据实报告缺口。
 
-- [ ] **Step 4: 残余落到有版本的文档**
+- [ ] **Step 5: 残余落到有版本的文档**
 
 `## 遗留` 一节在本计划内（`docs/superpowers/plans/` 是有版本的位置）。**本计划不新建、也不修改第二份文档**：
 若要并进 `docs/superpowers/p3bcdf-followups.md`，由**协调者**做。
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 6: 提交**
 
 ```bash
 git add <本 task 改动的显式路径>
@@ -1586,6 +1586,25 @@ BudgetView 的 `None`       **消费端无守卫**：`None`（该量纲当前不
                           （设计 §6.1），消费方是子项目 **G**——**在那一侧，「`None` 该当成不约束还是当成零」
                           必须是一次显式的选择并有照片**，否则 §333 的「不构成约束」会在传递中被悄悄读成「零额度」。
                           **收件人：驱动侧的投影实现（本项目尚无该 task）与子项目 G。**
+list_registered 与         **已补**：Task 14 Step 1（2026-10-06）。D 原交付的持久化函数**没有一个能列出**
+子项目 G 的候选集          `model_registry` 的行（`load_lifecycle` / `load_profile` / `load_skill_vector` /
+                          `load_skill_series` **全都要求先给 id**），而 G 的候选集**必须先从那张表出发**
+                          （它要先知道「哪些模型存在」）。**判据**：不补则只剩两条路，且两条都是本项目
+                          一直在收的形状——G 从配置拿 id（「哪些模型存在」出现**第二个来源**），
+                          或 G **裸查 D 的表**（同一张表**第二个读写点**）。
+                          **G 的设计 §13 已把这条记为对 D 的请求**；D 侧落成
+                          `list_registered(tx) -> Result<Vec<(ModelId, LifecycleState)>, PersistError>`
+                          ＋ 一条「登记两行、两行都在」的照片，**收件人是 D 的实现者**。
+                          **接续**：G 拿它建候选集之后的其余义务仍在 G 侧（取 `ProviderHealth` 快照、
+                          调 `rank`、发 `invoke` / `stream`），本计划只交付这一个读函数。**收件人：子项目 G。**
+ExecutionProfile 的         **D 的计划里没有据此写下的错话**（已逐处核过）：全篇提到 `ExecutionProfile` 的两处
+实读订正                    是 `cost_budget`（§246 的**真**字段，设计 §6.3 判给「D 落地时」而 D 明写不做）
+                            与 `retry_policy`（§246 的重试参数），**两处都没有声称该表有 `model` / `provider` /
+                            `tool` 三列**。记 G 的实读订正供后来者：**`execution_profile` 表根本没有那三列**
+                            （C 的设计里「要动一张已落库的表」那句因此是错的），且 **`ExecutionProfile`
+                            今天零生产构造点**——故 §11 第 12 条那一步（收紧 `cost_budget`）即便做了
+                            **也没有可观察的行为面**，这与它「缓到语义层」的处置互相印证。
+                            **收件人：子项目 G ＋ 后续动 `ExecutionProfile` 的那一方。**
 Degraded 的降权判据      §250 的八项 MUST 考虑里，可用性**只写死了「过滤 Unavailable」这一档**
                       （设计 §5.3）：`Healthy` 与 `Degraded` 之间**没有判据**——§250 只说「考虑」、
                       §84 没给这一维的算法。本设计不发明，`Degraded` 原样带进 `reason`。
