@@ -206,11 +206,23 @@ pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState
 /// 调用方（子项目 G）凭本函数建候选集，**不从配置拿 id、也不裸查 `model_registry`**：
 /// 那两条路分别会造出「哪些模型存在」的第二个来源，与同一张表的第二个读写点。
 ///
-/// # 不过滤状态
+/// # 不过滤状态（十态**逐项**有照片）
 ///
-/// 十态**全部**列出，包括四个不可路由的异常态：闸门在 [`crate::RoutableModel::try_new`]，
-/// 不在这里。此处滤掉会让「哪些模型存在」与「哪些能路由」两件事**混成一件**，
-/// 而 G 的候选集要的是前者（后者由 `rank` 的入参形状表达）。
+/// **十态一个都不滤**，四个不可路由的异常态（`unprofiled` / `stale` / `quarantined` / `disabled`）
+/// 与其余六态一视同仁地列出：闸门在 [`crate::RoutableModel::try_new`]，不在这里。此处滤掉会让
+/// 「哪些模型存在」与「哪些能路由」两件事**混成一件**，而 G 的候选集要的是前者
+/// （后者由 `rank` 的入参形状表达）。
+///
+/// **这句话的照片是逐项的**（本仓纪律：**枚举断言须逐项有照片，「一臂代表四类」不是覆盖**）：
+/// `tests/persist.rs` 的 `list_registered_lists_every_registered_model` 把**十态各登记一行**，
+/// 断言十行都在、且各自的 `LifecycleState` 就是那一枚。故一个**按状态过滤**的实现
+/// （例如在 SQL 里加 `WHERE lifecycle_state NOT IN ('stale','quarantined','disabled')`，
+/// 或只滤掉其中任意一态）**必在这条用例的同一处断言上变红**：被滤掉的那一态在期望值里、
+/// 却不在返回的清单里。**初版这里写的是「十态全部列出」，而当时的夹具只有两态**
+/// （`researched` / `unprofiled`）——**句子的射程大于照片的射程**，一个按状态过滤的变异体
+/// 编得过、也不红（Task 14 评审指出）。**故写枚举断言的判据是**：凡出现「全部／四个／十态」
+/// 这类词，**先数一遍夹具里真有哪几项**；数出来与句子里写的对不上，要么补到逐项，要么把句子
+/// 改成那个数——**别让句子比照片宽**。
 ///
 /// # 表外取值一律具体 `Err`
 ///
@@ -218,9 +230,9 @@ pub fn load_lifecycle(tx: &Tx<'_>, id: &ModelId) -> Result<Option<LifecycleState
 /// 同一条纪律）：表外串**不取默认值**——把串猜成另一枚状态会成为第二份表示，且会掩盖
 /// 「有人往库里写了别的东西」。非文本的列值另报 [`PersistError::ColumnType`]（同 [`load_lifecycle`]）。
 ///
-/// 照片：`tests/persist.rs` 的 `list_registered_lists_every_registered_model`——登记两行、
-/// **两行都在**、按 id 升序、各自的 `LifecycleState` 是登记后的那个值；漏行 / 漏状态 /
-/// 夹带未登记的 id 三种坏法各有一枚变异体在那条用例上变红。
+/// 照片：`tests/persist.rs` 的 `list_registered_lists_every_registered_model`——**十态各一行**、
+/// **十行都在**、按 id 升序、每行的 `LifecycleState` 是登记后的那个值；漏行 / 漏状态 /
+/// 夹带未登记的 id / **按状态过滤**四种坏法各有一枚变异体在那条用例上变红。
 pub fn list_registered(tx: &Tx<'_>) -> Result<Vec<(ModelId, LifecycleState)>, PersistError> {
     let rows = tx.query(
         "SELECT id, lifecycle_state FROM model_registry ORDER BY id ASC",

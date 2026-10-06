@@ -1486,6 +1486,10 @@ git commit -m "feat(model-registry): 具名基线策略"
   即它挂在 **`type_level_guarantees_hold`** 那条驱动用例下（该驱动是 Task 3 建的）。
   **故本 task 不必改 `tests/type_level.rs`**（通配自动收），**也不要在 `tests/escalation.rs` 里再写一遍**——
   同一个不可表达性两份样例，就是「同一件事两个落点」。**列在哪个清单里，不等于它落在哪个文件里**。
+  **复评订正（2026-10-07）**：「不必改 `tests/type_level.rs`」**只对那句通配的代码成立**；
+  该文件里还有**两份手写清单**（`LISTED_SAMPLES` 常量与文件头的按码点名清单），**加样例时必须各加一行**。
+  这一处原先没人守（漏更新不红），Task 14 复评后补了守卫 `the_sample_list_matches_the_directory`
+  ——**加了 `.rs` 忘了改清单会有一条用例红，消息里直接写要加什么**。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1558,16 +1562,32 @@ pub fn list_registered(tx: &Tx<'_>) -> Result<Vec<(ModelId, LifecycleState)>, Pe
 **照片一条**：`list_registered_lists_every_registered_model`——**登记两行，两行都在**，按 id 升序，
 且各自的 `LifecycleState` 是登记后的那个值。**红的条件**：漏行、漏状态、或把未登记的 id 也列进来即红。
 
+**复评订正（2026-10-07）：夹具由两行改成十行（十态各一行），上句的「登记两行」已作废。**
+**评审判定**：本步的正文要求是「**不过滤状态**」，而它是一句**枚举断言**，夹具却只放了
+`researched` / `unprofiled` 两态——**「一臂代表四类」不是覆盖**：一个在 SQL 里加
+`WHERE lifecycle_state NOT IN ('stale','quarantined','disabled')` 的变异体**编得过、且什么都不红**（评审实测）。
+**按本仓纪律（枚举断言须逐项有照片）改成十态各一行**，故「红的条件」现为**四种**：
+漏行 / 漏状态 / 夹带未登记的 id / **按状态过滤**（滤掉四态里的任意一态都在同一处断言上红）。
+`persist.rs` 的函数文档里同步写下这条判据：**凡出现「全部／四个／十态」这类词，先数一遍夹具里真有哪几项**。
+
 **收件人：D 的实现者**（本 task 的实施者）。G 的设计 §13 已把这条记为**对 D 的请求**，接续见 `## 遗留` 的同名条。
 
 **落地订正（2026-10-06，Task 14 实施时）**：上面代码块里那句**「本函数是「哪些模型存在」的唯一来源」
-按范围收窄了**——它是一句无范围限定的绝对句，而 `persist.rs` 里**读 `model_registry` 的另有其人**
-（`load_lifecycle` / `transition_in_tx` / `register_model`，三者都要求调用方**先给出 id**）。
+按范围收窄了**——它是一句无范围限定的绝对句，而 `persist.rs` 里**碰 `model_registry` 的另有其人**
+（`load_lifecycle` / `register_model` / `transition_in_tx`，三者都要求调用方**先给出 id**）。
 「唯一」为真的范围是**「列出已登记的模型」这个问题**，**不是「读 `model_registry` 这张表」**，
-按后者那句是假的。落地时写成「在『列出已登记的模型』这个问题上，本函数是全仓唯一的入口」，
+按后者那句是假的。**落地的原话是**（`crates/continuum-model-registry/src/persist.rs` 的
+`list_registered` 文档首段，逐字）：
+
+> **本函数是「列出已登记的模型」这个问题的入口**：碰 `model_registry` 的其余三处**都要求
+> 调用方先给出 id**……故没有别的函数能回答「哪些模型存在」。
+
 并在函数文档里写下**为什么这句话没有照片**（它是关于「crate 里有哪些函数、入参里有没有 id」的话，
 不产生可观察的行为，造不出会因它不再成立而变红的用例；可查的证据是逐个点名的三处读法）。
 **代码块是示意、正文措辞才是约束**，故此处按正文的判据（「唯一来源」要钉得住）收窄，而不是照抄代码块。
+（**复评订正（2026-10-07）**：本段初版把落地句转述成「在『列出已登记的模型』这个问题上，本函数是
+**全仓唯一的入口**」——**那是转述、不是原话**，与落地文本不是同一句。**同一主张、不同句子**，
+读的人按这行去源码里搜会搜不到，故照原话改正。）
 
 - [ ] **Step 2: 全量验证**
 
@@ -1595,7 +1615,8 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 **grep 连候选行都看不见**（Task 14 实测：第一条的两处命中都不含它，它是靠另一条
 `grep "Provider"` 与逐处通读才现出来的）。折行与大小写是同一件事的两面：**词根不是名字的全集**。
 **故零命中不是充分证据**——本轮判据的实际做法是：grep 出候选行后，**对 `src/` 的调用面逐处通读**
-（本 crate 只有 `profile / lifecycle / persist / router / budget / escalation / error` 七个文件，通读代价很小），
+（本 crate 只有 `lib.rs / profile / lifecycle / persist / router / budget / escalation / error`
+**八个**文件，通读代价很小），
 **结论以通读为准、grep 只用来定位**。同一通病见 Task 7 的连带面判据。
 
 **Task 14 的实测（2026-10-06，逐处通读后）**：第一条**不零命中**——两处，`src/lib.rs:11`（设计 §1.2 点名要求
@@ -1603,9 +1624,14 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 作 **crate 名**出现在「不叫 `RegistryError`」的理由里）；第二条**不止 `Cost` / `Latency`**——
 十处命中里含 `CapabilityKind::parse` 的**散文引用**两处与 `Cargo.toml:17` **注释本身**一处，
 真正的 `use` 只有 `continuum_capability::{Cost, Latency}` 四处。
-**逐处读法**：七个 `src/` 文件的调用面只有三类——`continuum-core` 的两个 id 类型与 `ProviderHealth`
+**逐处读法**：**八个** `src/` 文件（`lib.rs` ＋ 上句那七个）的调用面只有三类——
+`continuum-core` 的两个 id 类型与 `ProviderHealth`
 （可用性**快照值**，只做值比较）、`continuum-persist` 的库原语、`continuum-capability` 的两个**类型**；
 **没有一处**出现 `ModelProvider` 的调用面、适配器类型、能力凭据类型或任何执行动作。
+**复评订正（2026-10-07）**：上句初版与**本计划 Step 3 原稿**都把文件数写成「七个」并漏了 `lib.rs`
+——**而 `lib.rs` 恰恰是第一条 grep 的两处命中之一**（`:11` 那句免责声明）。数目与清单已改正；
+**这个错的形状值得记**：一份**手写的文件清单**漏掉一个文件，与上面那条「枚举断言须逐项有照片」
+是同一个病灶（清单不是数出来的，是凭印象列的）。
 **故「本层是判断而不是执行」据通读成立**；上面两条预期的偏差全部落在**注释与散文**里，
 **是否改那两处措辞属设计 §1.2，本计划不自行改**（记此，免得后来者照「预期零命中」去改一句正确的话）。
 

@@ -512,21 +512,33 @@ fn an_unknown_model_has_no_lifecycle() {
     tx.commit().unwrap();
 }
 
-/// §21 的登记表**全量**读出：登记两行、**两行都在**，按 id 升序，各自的 `LifecycleState`
+/// §21 的登记表**全量**读出：**十态各一行、十行都在**，按 id 升序，每行的 `LifecycleState`
 /// 是登记后的那个值（不是初值 `discovered`）。
 ///
-/// # 三处都做了「可分辨」的准备，否则三种坏法不会红
+/// # 为什么是**十行（十态各一行）**而不是两三行
 ///
-/// - **漏行**：两行都登记，故「少列一行」与「列全」结果不同（只有一行时两者同形）；
-/// - **漏状态 / 状态取错来源**：两行**分别迁到不同状态**（`researched` / `unprofiled`），
-///   且**都不等于初值 `discovered`**——若状态恒取初值、或两行取了同一个状态，都变红；
-/// - **夹带未登记的 id**：库里另有一个**只用于对照**的未登记 id，清单里不该出现它。
+/// 被钉的那句话是「**不过滤状态**」，而它是一句**枚举断言**（`list_registered` 的文档：
+/// 「十态一个都不滤，四个不可路由的异常态与其余六态一视同仁」）。本仓纪律是
+/// **枚举断言须逐项有照片**——**「一臂代表四类」不是覆盖**：夹具里只放 `unprofiled`
+/// 与 `researched` 时，一个在 SQL 里加 `WHERE lifecycle_state NOT IN ('stale','quarantined','disabled')`
+/// 的变异体**编得过、且什么都不红**（Task 14 评审实测的正是这一格）。
+/// 故这里**十态逐项各登记一行**，被滤掉的任何一态都会落在期望值里而缺席于返回值。
+///
+/// # 四处都做了「可分辨」的准备，否则四种坏法不会红
+///
+/// - **漏行**：十行都登记，故「少列一行」与「列全」结果不同；
+/// - **漏状态 / 状态取错来源**：十行的状态**两两不同**，且除 `model-01` 外**都不等于初值**
+///   （`model-01` 就是 `discovered`——它代表「登记初值」这一态，故它留在初值是**有意的**：
+///   「状态恒取初值」这条坏法由**另外九行**变红）；
+/// - **按状态过滤**：四个不可路由态（`unprofiled` / `stale` / `quarantined` / `disabled`）
+///   各有自己的一行——滤掉其中**任意一态**（或四态全滤）都在末尾那条断言上红；
+/// - **夹带未登记的 id**：库里另有一个**只用于对照**的未登记 id，清单里不得出现它。
 ///
 /// # 顺序那一半靠「登记序与 id 序相反」才可分辨
 ///
-/// 先登记 `model-b`、后登记 `model-a`，而 id 升序是 `model-a` 在前：若把 `ORDER BY id ASC`
-/// 删掉（SQLite 会按 rowid／插入序给行），返回的是 `[model-b, model-a]`，与期望值不同。
-/// 两行若按同一序登记，这两版**等价**，那条断言就没有区分力。
+/// 下面按 `model-10 → model-01` 的**逆序**登记，而 id 升序以 `model-01` 打头：若把
+/// `ORDER BY id ASC` 删掉（SQLite 按 rowid／插入序给行），返回的次序与期望值整段相反。
+/// 若按同一序登记，这两版**等价**，那条断言就没有区分力。
 ///
 /// # 空表也要覆盖
 ///
@@ -542,44 +554,99 @@ fn list_registered_lists_every_registered_model() {
         "还没有登记项时应给出空清单，不是 `Err`、也不是一项空的"
     );
 
-    // 登记序与 id 序**相反**（见文档头）；两行各自迁离初值，且迁到**不同**的状态。
-    register_model(&tx, &id("model-b")).unwrap();
-    assert_eq!(
-        transition_in_tx(&tx, &id("model-b"), LifecycleState::Unprofiled).unwrap(),
-        LifecycleState::Discovered,
-        "先把 `model-b` 迁离初值：状态那一半才有区分力"
-    );
-    register_model(&tx, &id("model-a")).unwrap();
-    // §4.1 的表里没有 `discovered → researched` 这条边，故经 `unprofiled` 走两步。
-    assert_eq!(
-        transition_in_tx(&tx, &id("model-a"), LifecycleState::Unprofiled).unwrap(),
-        LifecycleState::Discovered,
-        "同上；两行取**不同**状态，故「两行都报同一枚状态」这类坏法也红"
-    );
-    assert_eq!(
-        transition_in_tx(&tx, &id("model-a"), LifecycleState::Researched).unwrap(),
-        LifecycleState::Unprofiled,
-        "第二步：`model-a` 落在 `researched`，与 `model-b` 的 `unprofiled` 不同"
-    );
+    // 十态各一行的**走链路径**：每条都是 §4.1 迁移表里的合法前缀（空路径 = 登记初值
+    // `discovered`）。`model-10` 先登记（登记序与 id 序**相反**，见文档头）。
+    let ladder: [(&str, &[LifecycleState]); 10] = [
+        ("model-01", &[]),
+        ("model-02", &[LifecycleState::Unprofiled]),
+        ("model-03", &[LifecycleState::Unprofiled, LifecycleState::Researched]),
+        (
+            "model-04",
+            &[
+                LifecycleState::Unprofiled,
+                LifecycleState::Researched,
+                LifecycleState::Probed,
+            ],
+        ),
+        (
+            "model-05",
+            &[
+                LifecycleState::Unprofiled,
+                LifecycleState::Researched,
+                LifecycleState::Probed,
+                LifecycleState::Verified,
+            ],
+        ),
+        (
+            "model-06",
+            &[
+                LifecycleState::Unprofiled,
+                LifecycleState::Researched,
+                LifecycleState::Probed,
+                LifecycleState::Verified,
+                LifecycleState::Active,
+            ],
+        ),
+        (
+            "model-07",
+            &[
+                LifecycleState::Unprofiled,
+                LifecycleState::Researched,
+                LifecycleState::Probed,
+                LifecycleState::Verified,
+                LifecycleState::Active,
+                LifecycleState::Stale,
+            ],
+        ),
+        (
+            "model-08",
+            &[
+                LifecycleState::Unprofiled,
+                LifecycleState::Researched,
+                LifecycleState::Probed,
+                LifecycleState::Verified,
+                LifecycleState::Active,
+                LifecycleState::Degraded,
+            ],
+        ),
+        ("model-09", &[LifecycleState::Quarantined]),
+        ("model-10", &[LifecycleState::Disabled]),
+    ];
+    for (model, path) in ladder.iter().rev() {
+        register_model(&tx, &id(model)).unwrap();
+        for to in path.iter() {
+            transition_in_tx(&tx, &id(model), *to).unwrap();
+        }
+    }
 
-    // 对照臂：表里只有上两行，`model-absent` 未登记——清单里不得出现它。
+    // 对照臂：表里只有上面十行，`model-absent` 未登记——清单里不得出现它。
     assert_eq!(
         load_lifecycle(&tx, &id("model-absent")).unwrap(),
         None,
         "对照臂：`model-absent` 未登记"
     );
 
+    // 期望值是**手写的十项**（不从 `ladder` 推）：走链的终点与这里写的是两份，
+    // 任一处写错都对不上——若从 `ladder` 推，期望值会跟着错的路径一起错。
     assert_eq!(
         list_registered(&tx).unwrap(),
         vec![
-            (id("model-a"), LifecycleState::Researched),
-            (id("model-b"), LifecycleState::Unprofiled),
+            (id("model-01"), LifecycleState::Discovered),
+            (id("model-02"), LifecycleState::Unprofiled),
+            (id("model-03"), LifecycleState::Researched),
+            (id("model-04"), LifecycleState::Probed),
+            (id("model-05"), LifecycleState::Verified),
+            (id("model-06"), LifecycleState::Active),
+            (id("model-07"), LifecycleState::Stale),
+            (id("model-08"), LifecycleState::Degraded),
+            (id("model-09"), LifecycleState::Quarantined),
+            (id("model-10"), LifecycleState::Disabled),
         ],
-        "两行都在、按 id 升序，且状态是登记后的那个值（不是初值、不是同一个值）"
+        "十行都在、按 id 升序，且每行的状态是登记后的那个值（含四个不可路由态，一个都不许被滤掉）"
     );
     assert_eq!(
         count_registry(&tx),
-        2,
+        10,
         "对照臂：清单长度应与表里的行数一致"
     );
 
