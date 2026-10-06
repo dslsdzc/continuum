@@ -13,8 +13,11 @@
 授权证明的 `tool_id()`。代价是一条层内边 `continuum-provider → continuum-capability`（「接口 → 能力类型」，不是「接口 → 实现」）。
 
 **Tech Stack:** Rust 1.95.0 / edition 2024；`continuum-core`（`ModelId` / `ToolId` / `ToolDescriptor` / `ToolResult` / `ProviderError`）；
-`continuum-capability`（`AuthorizedTool` / `authorize` / `ToolId`）；`async-trait`；`serde_json`；`thiserror`；`std::sync::Arc` + `std::collections::HashMap`；
+`continuum-capability`（`AuthorizedTool` / `authorize` / `ToolId`）；`async-trait`；`serde_json`；**`thiserror`
+（本 crate 今天没有它，Task 1 加——外部 crate，不进 `ALLOWED`、不产生依赖边）**；
+`std::sync::Arc` + `std::collections::HashMap`；
 dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（已在 dev-dependencies）。
+**外部 crate 与「不新增依赖边」那条性质无关**——`ALLOWED` 只逐对断言 workspace 成员之间的边（设计 §10 末段）。
 
 **设计依据：** `docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md`（下称「设计」）。
 前提是共享面 `docs/superpowers/specs/2026-10-05-p3-bcdf-ownership-and-interfaces.md`；裁决在
@@ -33,10 +36,15 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
   ```rust
       ("continuum-provider", &["continuum-capability", "continuum-core", "continuum-persist"]),
   ```
-  `crates/continuum-provider/Cargo.toml` 与 `crates/continuum-runtime/tests/dependency_direction.rs:29` 的
-  这一条**必须精确一致**——断言是逐对 `assert_eq!`，且 `every_crate_depends_only_on_its_allowed_set`
+  `crates/continuum-provider/Cargo.toml` 与 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 里
+  **`("continuum-provider", …)` 那一个条目**（**按条目名找，不按行号**——B/D 在 C 之前各自往同一个数组里
+  加过自己的条目，行号会漂）**必须精确一致**——断言是逐对 `assert_eq!`，且 `every_crate_depends_only_on_its_allowed_set`
   跑的是 `cargo tree --edges all`，故 **dev-dependency 也进表**。
   **只加 `Cargo.toml` 不加 `ALLOWED`（或反之）会红**（`p3bcdf-followups.md` §四.1 的硬提醒 1）。
+  **这句话管的是内部 crate 的边**：`ALLOWED` **只逐对断言 workspace 成员之间的边**，
+  **外部 crate（`thiserror` / `tempfile` / `trybuild` / `tokio` / `serde_json` / `futures-core` / `async-trait`）
+  按需加进 `Cargo.toml`，不进这张表、也不构成这条约束意义上的「依赖边」**（设计 §10 末段）。
+  **本计划里凡写「不新增依赖边」的地方，一律按「不新增内部 crate 的边」读**——外部 crate 是另一回事。
 - **多写者单文件，各自登记自己那几条**（`p3bcdf-followups.md` §七 第 7 条）：
   `dependency_direction.rs` 的 `ALLOWED`、`main.rs` 的注册、workspace `members` 是**单一文件、多写者**，
   四份计划都要碰。故**不设集中登记 task**，**每份计划各自登记自己那几条**（照 P3A 的 Tasks 3/4/5 做法），
@@ -46,7 +54,8 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
   C 一行都不碰 `runtime_migrations()` / `expected_migrations()` / `tests/startup.rs`。
 - **本计划不改 `continuum-runtime` 的源码。** 对 `continuum-runtime` 的改动**只有一处**：
   `crates/continuum-runtime/tests/dependency_direction.rs` 里 `continuum-provider` 的那个条目。
-  `:121` 那句已成假的注释（「core / events / provider 在 runtime 内至今无任何引用」）**由 F 订正**
+  `dependency_direction.rs` 里那句已成假的注释（**「core / events / provider 在 runtime 内至今无任何引用」
+  ——按这句话的内容找，不按行号**：B 在 C 之前已经往同一个文件里加过自己的条目，行号会漂）**由 F 订正**
   ——F 首次真引用 `continuum-core` 与 `continuum-provider`，它的设计 §10.1 明写那句必须就地改并把来历留原地；
   本计划不动。
 - **`continuum-provider` 不引用任何适配器实现类型**（设计 §4.1）。注册表只用
@@ -112,7 +121,8 @@ dev-only：`continuum-persist`（`Tx`）、`tempfile`、`trybuild`；`tokio`（�
 本计划已核对过的既有面（**照录**，实现时仍以源码为准）：
 `crates/continuum-provider/src/{lib.rs,tool.rs,model.rs}`、`crates/continuum-core/src/{tool.rs,error.rs}`、
 `crates/continuum-provider/tests/fake_provider.rs`、`crates/continuum-capability/src/registry.rs`、
-`crates/continuum-capability/tests/authorize.rs` 的 `db()`、`crates/continuum-runtime/tests/dependency_direction.rs:29`。
+`crates/continuum-capability/tests/authorize.rs` 的 `db()`（**函数名，不是行号**）、
+`crates/continuum-runtime/tests/dependency_direction.rs` 里 `ALLOWED` 的 `("continuum-provider", …)` 条目（**条目名**）。
 
 ## 跨计划前置（本节依赖谁已交付什么、把什么交给谁）
 
@@ -157,7 +167,8 @@ B、D 与 C 之间没有编译期依赖（B 走 §124，不经 §316；D 只用 
 
 ```
 crates/continuum-provider/
-  Cargo.toml                     normal + continuum-capability（Task 3）；dev + continuum-persist / tempfile（Task 4）/ trybuild（Task 6）
+  Cargo.toml                     Task 1：normal + thiserror（外部 crate，不进 ALLOWED）；Task 3：normal + continuum-capability
+                                 （内部边）；Task 4：dev + continuum-persist / tempfile；Task 6：dev + trybuild
   src/lib.rs                     再导出注册表、两个错误类型与新请求类型；模块文档补一句「注册表在、实现仍不在」
   src/registry.rs        （新）   ProviderRegistry、RegistryError、ToolCallError、invoke_tool（唯一受门禁入口）
   src/tool.rs                     §316 trait + 新请求类型 AuthorizedToolInvocation<'_>（构造入口 pub(crate)）；invoke 的请求参数换掉
@@ -198,13 +209,27 @@ Cargo.lock                                               随依赖变化（见 G
 - Create: `crates/continuum-provider/tests/registry_models.rs`
 
 **Interfaces:**
-- Consumes: 既有的 `continuum_core::model::ModelId`、`continuum_provider::model::ModelProvider`、`continuum_core::ProviderError`
+- Consumes: 既有的 `continuum_core::model::ModelId`、**`continuum_core::tool::ToolId`**
+  （`ToolCallError::Unregistered { id }` 要用它）、`continuum_provider::model::ModelProvider`、
+  `continuum_core::ProviderError`
 - Produces: `continuum_provider::{ProviderRegistry, RegistryError, ToolCallError}`，
   `ProviderRegistry::{new, register_model, model_for}`
 
-> **本 task 不新增任何依赖边**（`HashMap` / `Arc` 来自 `std`）。`Cargo.toml` 与 `ALLOWED` **一字不动**——
-> 这一条要写进 task 报告，因为「注册表加进来之后 provider 没有多出任何指向**实现**的边」正是设计 §4.1
-> 要断言的关键性质，而它的照片就是**这一步之后 `every_crate_depends_only_on_its_allowed_set` 仍绿**。
+> **本 task 不新增任何**内部 crate 的**依赖边**（`HashMap` / `Arc` 来自 `std`）；
+> **外部 crate 按需加，不进 `ALLOWED`**——那张表**只逐对断言 workspace 成员之间的边**（设计 §10 末段：
+> 「外部 crate 不进这张表：`tokio` / `tempfile` / `serde_json` / `futures-core` 都不是 workspace 成员」）。
+> **`Cargo.toml` 会加一行 `thiserror = { workspace = true }`**（本 crate 的 `RegistryError` / `ToolCallError`
+> 派生 `thiserror::Error`，而本 crate 今天没有这个依赖）——它**不产生依赖边**，故本节要断言的关键性质不受影响。
+>
+> 要断言的关键性质是**「注册表加进来之后，`continuum-provider` 没有多出任何指向适配器实现的边」**
+> （设计 §4.1），而它的照片就是**这一步之后 `every_crate_depends_only_on_its_allowed_set` 与
+> `core_and_persist_do_not_depend_on_provider` 仍绿**。
+>
+> **订正（2026-10-06，Task 1 交回后）**：本段原话写的是「**`Cargo.toml` 与 `ALLOWED` 一字不动**」
+> ——**那句过宽、而且与本 task 自己的代码块相抵**（代码块用了 `#[derive(thiserror::Error)]`，
+> 而 `continuum-provider` 的 `[dependencies]` 里当时没有 `thiserror`，照抄编译不过）。
+> 错误的**来历**：写那句话时的本意是「**不新增任何指向内部实现的依赖边**」，而 `ALLOWED` 只列内部 crate，
+> **外部 crate 与那条性质无关**；把两者混成一句就变成了假命题。**原话照留在此，勿按它回退。**
 >
 > **`model_providers()` 已裁删（2026-10-06，设计在进行中删的它）。** 本 task **不实现、也不写它的用例**。
 > **来历与理由三条**（设计 §3.1 的裁决段）：(a) 它**零消费方**；(b) 它返回
@@ -213,9 +238,33 @@ Cargo.lock                                               随依赖变化（见 G
 > 代价据实记：将来若真需要「跨全部适配器聚合」（汇总健康、适配器级探活），提出者得**重新提出这个入口**
 > ——那时他有真消费方、也能自己挑形状，是便宜的方向。**`model_for` 保留**（G 用它）。
 
-- [ ] **Step 1: 写用例**
+> **执行序订正（2026-10-06，Task 1 实跑）**：本 task 原把「写用例」列为 Step 1、「把夹具提到
+> `tests/common/mod.rs`」列为 Step 3，**而 Step 1 的用例要从 Step 3 才建的文件里取夹具**——
+> 照原序执行，Step 2 得到的红会是「`file not found for module common`」，**不是**本 task 想要的那种红。
+> 故三步按下面的次序做：**先把夹具提出来（Step 1）→ 再写用例（Step 2）→ 再跑出预期的红（Step 3）**。
 
-`tests/registry_models.rs`（夹具从 `tests/common/mod.rs` 取，见 Step 3）：
+- [ ] **Step 1: 把夹具提到 `tests/common/mod.rs`**
+
+`FakeModel` 与 `OnceStream` 从 `tests/fake_provider.rs` **原样搬进** `tests/common/mod.rs`（`pub`），
+`FakeConnector` 留在 `fake_provider.rs` 原地（它只被那一个目标用）。两个目标各写 `mod common;`。
+**搬完之后 `fake_provider.rs` 的导入清单要跟着收**（搬走 `FakeModel` / `OnceStream` 后
+`futures_core::Stream`、`ModelStream`、`StreamChunk`、`Pin`、`Context`、`Poll` 都成了未用导入，
+实测会产生 warning，而「0 warning」是硬约束）——**本步做完先 `cargo build -p continuum-provider --all-targets`
+核一次 0 warning**。
+
+**该模块开头要有 `#![allow(dead_code)]`，并写明理由**：同一个 `common` 被多个测试目标 include，
+**没有任何一个目标用得到全部夹具**，而本仓要求 0 warning。
+
+> **订正（2026-10-06，Task 1 实跑）**：本段原写「去掉它会得到 `dead_code` 警告」——
+> **在本 task 的时点上那句为假**：把该行删掉，`cargo test -p continuum-provider` 出 **0 warning、EXIT=0**，
+> 因为 `FakeModel` 与 `OnceStream` 都还有人引用（后者经 `FakeModel::stream`）。
+> 该行因此是**为后续 task 预留的**：Task 2 把 `FakeTool` 搬进来之后，`fake_provider.rs` 那个目标
+> 大概就会用不到 `FakeTool`——**那时由 Task 2 自己实跑一次再拍**，不要照抄这句。
+> **这条教训是通用的：同一句绝对措辞在不同 task 的时点上可以一真一假，写它的时候要指明时点。**
+
+- [ ] **Step 2: 写用例**
+
+`tests/registry_models.rs`（夹具从 `tests/common/mod.rs` 取，已由 Step 1 建好）：
 
 - `a_registered_model_is_found_by_id`：登记 `fake-1 → FakeModel`，`model_for("fake-1")` 给出的
   `Arc` 与登记时那一个是**同一个**（`Arc::ptr_eq`，不靠行为推断）。
@@ -232,22 +281,17 @@ Cargo.lock                                               随依赖变化（见 G
   而对同一 `Arc` 调 `describe_model("m")` 得 `Err(ProviderError::UnknownModel(_))`。
   这条用例钉的是「登记是路由的权威、适配器的 `list_*` 是描述的权威」这两件事**可以不一致**。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 3: 运行，确认失败**
 
 ```bash
 timeout 300 cargo test -p continuum-provider --test registry_models
 ```
 
-预期：`E0433`（`continuum_provider::ProviderRegistry` 不存在）。
-
-- [ ] **Step 3: 把夹具提到 `tests/common/mod.rs`**
-
-`FakeModel` 与 `OnceStream` 从 `tests/fake_provider.rs` **原样搬进** `tests/common/mod.rs`（`pub`），
-`FakeConnector` 留在 `fake_provider.rs` 原地（它只被那一个目标用）。两个目标各写 `mod common;`。
-
-**该模块开头要有 `#![allow(dead_code)]`，并写明理由**：同一个 `common` 被多个测试目标 include，
-**没有任何一个目标用得到全部夹具**，而本仓要求 0 warning。这条注释不是装饰——去掉它会得到
-`dead_code` 警告，而「0 warning」是硬约束。
+预期：**`E0432`**（`unresolved imports`：`continuum_provider::ProviderRegistry` 不存在）
+——**这个码取自实跑**（`.superpowers/sdd-p3c-impl/task-1-report.md` 第 2 节，日志 `.tmp/step2-red.log`）。
+**订正（2026-10-06）**：本节原写 `E0433`，是照「类型不存在」推测的；实跑的写法是
+`use continuum_provider::{ProviderRegistry, ..};`，那是 **`E0432`（unresolved imports）**，
+全限定路径才会给 `E0433`。**凡计划里写错误码的地方一律以实跑为准**（本计划其余处的码同此例）。
 
 - [ ] **Step 4: 实现**
 
@@ -281,8 +325,9 @@ pub enum RegistryError {
 /// **为什么需要第二个错误类型**：`invoke_tool` 的失败有两个不同来源——「这个 id 没有适配器」
 /// （路由，配置缺陷）与「适配器调用失败」（可能瞬时）；一个 `Result` 只能带一个错误类型，
 /// 把两者压进 `ProviderError` 就是把「配置错了」报成「provider 挂了」——而那件事在本仓
-/// 已经发生过一次（`crates/continuum-provider/tests/fake_provider.rs:106` 把「无此工具」
-/// 报成 `Unavailable`，设计 §5.2 记的正是这一处）。
+/// 已经发生过一次（`crates/continuum-provider/tests/fake_provider.rs` 的 **`FakeTool::describe_tool`**
+/// 把「无此工具」报成 `Unavailable`，设计 §5.2 记的正是这一处）。**引条目名不引行号**：
+/// 那个文件在本计划里会被搬动（Task 1/2），行号会漂。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ToolCallError {
     /// 这个 id 没有登记的适配器。（工具 id 只有授权证明一个来源，故本变体只由路由产生。）
@@ -355,7 +400,9 @@ git commit -m "feat(provider): ProviderRegistry 骨架与模型侧登记发现"
 - Consumes: Task 1 的 `ProviderRegistry` / `ToolCallError`；既有的 `continuum_core::tool::{ToolId, ToolDescriptor}`
 - Produces: `ProviderRegistry::{register_tool, list_tools, describe_tool}`
 
-> 本 task 仍**不新增依赖边**。`invoke_tool` 与 `AuthorizedTool` 在 Task 3 / Task 4。
+> 本 task 仍**不新增任何内部 crate 的依赖边**，也**不新增外部 crate**（要用的
+> `continuum_core::tool::{ToolId, ToolDescriptor}` 与 `ProviderError` 都在既有依赖里；
+> `std::sync::Arc` / `std::collections::HashMap` 来自 `std`）。`invoke_tool` 与 `AuthorizedTool` 在 Task 3 / Task 4。
 > **不提供 `tool_for`、也不提供 `tool_providers()`**——它们的缺席是 Task 6 的编译失败样例钉的
 > （本 task 只把它写进模块文档与 `lib.rs` 的注释，**不写「已钉住」**）。
 
@@ -456,7 +503,8 @@ git commit -m "feat(provider): 工具侧登记与只读入口"
 > **完成判据是 `cargo test --workspace` 通过**，不是「改完定义就收工」——删除的引用者全在编译期暴露。
 > 规划时实测 `grep -rnw ToolInvocation crates/`（**`-w` 是词边界，见下**）恰五个行号：
 > `crates/continuum-core/src/tool.rs:26`（定义）、`crates/continuum-provider/src/tool.rs:5,12`
-> （trait 的导入与签名）、`crates/continuum-provider/tests/fake_provider.rs:7,109`（夹具）。
+> （trait 的导入与签名）、`crates/continuum-provider/tests/fake_provider.rs:7,109`（夹具的导入行与
+> `FakeTool::invoke` 的签名）。**这三处都按条目名找，行号只是规划时那一份字节上的实测值。**
 > **但本 task 执行时夹具已经不在那个文件了**：Task 1 把 `FakeModel`、Task 2 把 `FakeTool` 搬进了
 > `crates/continuum-provider/tests/common/mod.rs`，故第三处要改的是**那里**（行号以当时文件为准，
 > 本计划不预先写死）。
@@ -564,7 +612,8 @@ pub trait ToolProvider: Send + Sync {
 （理由注释：`invoke` 的请求参数要能命名 `AuthorizedTool`，层内边，设计 §4.1 订正段）。
 **dev 边一律不加**——本 task 没有运行用例，用不到 `Tx`。
 
-`dependency_direction.rs:29` 改为 `("continuum-provider", &["continuum-capability", "continuum-core"])`，
+`dependency_direction.rs` 的 `ALLOWED` 里**`("continuum-provider", …)` 那一个条目**（按条目名找，不按行号）
+改为 `("continuum-provider", &["continuum-capability", "continuum-core"])`，
 并更新其上方注释（照 P3A 各 task 更新注释的写法，写明「Task 3 起加上 capability；persist 是 Task 4
 的 dev 边，届时增量加」）。**这是本 task 的终值**，Global Constraints 里的三元素是**全计划终态**，
 两者不矛盾：中间态必须与当时的 `Cargo.toml` 精确一致，否则逐对断言红。
@@ -854,7 +903,8 @@ git commit -m "test(provider): 不可表达性的编译失败样例"
 `tests/common/mod.rs` 的 `FakeTool` 从单元结构体改为带一个失败通道字段，三个构造入口：
 `FakeTool::echo()`（今天的行为）、`FakeTool::failing_at_tool_level()`（`Ok(ToolResult { is_error: true })`）、
 `FakeTool::failing_at_provider_level()`（`Err(ProviderError::Transport(..))`）。
-`tests/fake_provider.rs:162` 的 `let t = FakeTool;` 改为 `FakeTool::echo()`。
+`tests/fake_provider.rs` 里**那个 `let t = FakeTool;`**（`fake_provider.rs` 的第二个 `#[tokio::test]` 之前的
+那个用例体内；**按那一行代码找，不按行号**）改为 `FakeTool::echo()`。
 
 **为什么不写成三个结构体**：设计 §11 的这一行写的是「用 `FakeTool`」，而一个单元结构体产不出两条失败通道；
 三态化是让那一行字面成立的最小改动。**这是本计划对夹具形状的读数，不是设计给的判据**，见 `## 遗留`。
@@ -910,7 +960,8 @@ git commit -m "test(provider): is_error 与 Err 的分流（夹具约定）"
 > **这一条挡的是设计 §4.1 末段 / §4.2 形态 4 的那条全绿路径**：把一份具体适配器**写进
 > `continuum-provider` 自己内部**（如 `src/deepseek.rs`）——它不引用任何外部 crate 的实现类型，
 > 故 §4.2 形态 2 的机制不触发；`ALLOWED` 一字不改；`core_and_persist_do_not_depend_on_provider` 照绿；
-> `src/lib.rs:1` 那句「不含实现」只是文档，今天没有任何用例钉它。**结果：中立 crate 里躺着一份实现，
+> `src/lib.rs` 开头那句「本 crate 只定义 trait，不含实现」（**按这句话找，不按行号**）只是文档，
+> 今天没有任何用例钉它。**结果：中立 crate 里躺着一份实现，
 > 而一片全绿。这条路径今天没有别的东西挡。**
 
 - [ ] **Step 1: 写用例**
@@ -1077,7 +1128,8 @@ ProviderError →         §5.1 那张表是**文档不是代码**（无消费�
 P1 的 Resource 义务     要求「P3 的 Router 必须为 RESOURCE 显式给出 max_attempts >= 2 与退避参数」，
                        而 D 说重试不属本层、F 的工具路径不调 decide_retry、C 把它折进上一条推走。
                        **须点一个所有方**（设计 §12 第 18 条）。收件人：控制器。
-实现被写进中立 crate     §4.2 形态 4 的那条路径**没有行为照片**；守卫是 lib.rs:1 的定位声明
+实现被写进中立 crate     §4.2 形态 4 的那条路径**没有行为照片**；守卫是 `src/lib.rs` 开头那句「不含实现」的
+  内部                   定位声明
   内部                   + Task 8 的模块面断言 + 评审。Task 8 之后那三个字面拼法（**含空白变体**，
                        归一化之后是同一个拼法）会被红掉；**全限定路径 / 别名 / include! 三种仍全绿**
                        （设计 §4.1 末段；裁决 C7 已把空白变体从逃逸清单里划掉）。
