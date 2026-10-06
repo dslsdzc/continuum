@@ -497,8 +497,9 @@ git commit -m "refactor(runtime): TaskError 与 sandbox_select 移进 lib，提�
 > `crates/continuum-runtime/src/main.rs` 的 **blob sha 是
 > `adcf3b9ffbab2884ed4a282f9d1a910624a1c571`**，那句假话在 **`:62`**；`git log -- <该文件>`
 > 在 `dfefb54` 之后再无提交。**故它是一条真待办，不是指向已完成事项的过期指针。**
-> **下一轮扫查若得出「零命中」，先核 blob sha**——对不上就说明读的不是这棵树（本机的 cwd 会在
-> 主检出与各 worktree 之间翻，分支也会换），**别照着一次读数把这条删掉**。
+> **下一轮扫查若得出「零命中」，先核 blob sha**——对不上就说明**读错了树／分支，或根本没读输出**
+> （本机的 cwd 会在主检出与各 worktree 之间翻、分支也会换；命令把命中行打了出来而结论写成「零命中」
+> 也真实发生过一次）。**别照着一次读数把这条删掉——以本行的 blob sha 为准。**
 
 **Files:**
 - Modify: `crates/continuum-runtime/src/cli.rs`
