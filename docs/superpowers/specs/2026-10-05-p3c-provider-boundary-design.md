@@ -72,17 +72,31 @@ list_models / describe_model / invoke / stream / cancel / usage / health
 `Message`(37)、`InvokeRequest`(43)、`Usage`(50)、`InvokeResponse`(56)、`StreamChunk`(63)、
 `CallId`(69)、`ProviderHealth`(81)、`ModelStream`(93)。
 
-**§316 ToolProvider**，四项方法，`crates/continuum-provider/src/tool.rs:9-13`：
+**§316 ToolProvider**，四项方法，`crates/continuum-provider/src/tool.rs:73-82`
+（2026-10-07 读数，实现树 `.worktrees/p3cf`；**订正**：初稿引 `:9-13`，那是 `AuthorizedToolInvocation`
+加进该文件**之前**的位置——该类型现定义在 `:38`，`invoke` 在 `:77`）：
 
 ```
 list_tools / describe_tool / invoke / cancel
 ```
 
-接口类型在 `crates/continuum-core/src/tool.rs`：`ToolId`(6)、`ToolDescriptor`(18)、`ToolInvocation`(25)、
-`ToolResult`(31)。**其中 `ToolInvocation`(25) 将被删除**——裁决 §五（2026-10-05）已拍板；
-它的替代者是 §7.5 的 `AuthorizedToolInvocation<'_>`（见 §7.5 的落地清单、§12 第 22 条）。
+接口类型在 `crates/continuum-core/src/tool.rs`：`ToolId`(7)、`ToolDescriptor`(19)、`ToolResult`(26)
+（2026-10-07 读数，实现树 `.worktrees/p3cf`）。**订正**：本清单初稿写 `ToolId`(6)、`ToolDescriptor`(18)、
+`ToolInvocation`(25)、`ToolResult`(31)——**那是实现前的位置，且含一个已删的类型**。
+`ToolInvocation` **已按裁决 §五（2026-10-05）删除**（它在实现里已不存在），替代者是 §7.5 的
+`AuthorizedToolInvocation<'_>`（见 §7.5 的落地清单、§12 第 22 条）。
 `ToolId` **同时**是 §252 的 `Tool.id`，P3A 判为同一个类型并复用
 （`crates/continuum-capability/src/lib.rs:40-43`）；本子项目**不另建第二个**。
+
+**代码位置引用的判据（本段即其原地，全文所有 `文件:行` 一并适用）**：**代码行号引用在两棵树上可以真假
+相反**——在 **main**（实现前）里 `grep` 一个已搬走的路径会「**确认**」旧位置，而那个文件里**真有**那些行；
+只有在**实现树**里它才失效。**故一切代码位置引用，判据是对「实现所在的那棵树」，并标注「在哪棵树上、
+哪一天读数」。** 本文对实现树的读数一律写作「2026-10-07 读数，实现树 `.worktrees/p3cf`」。
+
+**这条判据的另一面（它正是本次能查出问题的原因）**：**「引用另一个文件的行号」这件事，在同一个仓库的
+两条分支上会得到相反结论**——**故跨分支工作时，引用要带「树」与「日期」两个坐标**，否则双方都能
+「核验通过」而结论相反。**来历**：本条由 2026-10-07 的一次实查得出——设计引的 `tests/fake_provider.rs`
+（夹具已搬迁）与 `dependency_direction.rs` 的四组行号，在 main 上「核验通过」、在实现树上**全部失效**。
 
 错误类型 `ProviderError` 在 `crates/continuum-core/src/error.rs:3-15`，五个变体：
 `Unavailable` / `UnknownModel` / `Cancelled` / `Transport` / `Protocol`。**它不在共享面 §二冻结的类型清单里**
@@ -99,7 +113,16 @@ list_tools / describe_tool / invoke / cancel
 除本 crate 外零命中）；`ModelProvider` / `ToolProvider` 这两个名字在别的 crate 里**只出现在注释里**
 （`crates/continuum-graph/src/execution.rs:17` 预告 P3 会收紧 `ExecutionProfile` 的六个 `Option<String>` 字段；
 `crates/continuum-capability` 的注释说明 `ToolId` 复用）。今天唯一实现这两个 trait 的东西是测试夹具
-`crates/continuum-provider/tests/fake_provider.rs:29,89`（`FakeModel` / `FakeTool`），**只在测试里**。
+**`FakeModel` / `FakeTool`**，**只在测试里**——它们在 `crates/continuum-provider/tests/common/mod.rs`
+（`FakeModel` 在该文件 `:43`、`FakeTool` 在 `:135`；**均为 2026-10-07 读数**）。
+
+**订正（2026-10-07）**：本句初稿把路径写成 `crates/continuum-provider/tests/fake_provider.rs:29,89`——
+**那个位置今天已经没有它们了**。**来历**：C 的 Task 2 把夹具搬进了 `tests/common/mod.rs`，
+而**引用它的地方有三处漏跟**——C 的 `src/registry.rs`、**本设计**、以及计划里的同类引用。
+**判据（本段即其原地，本文其余各处路径引用一并适用）**：**路径引用会随文件移动而失效，而失效的路径
+不会报错**——**它只是指向一个不再有那样东西的文件**。故**凡在文档或代码里引另一个文件的行号，
+搬迁之后必须回头扫引用点**（本仓今天在「夹具搬迁」「样例搬迁」「副本同步」三处都栽过同类）。
+本文其余各处对 `tests/common/mod.rs` 的行号**一律标明是当天读数**。
 
 **二、发现：调用方没有任何按 id 找到适配器的入口。**
 `InvokeRequest.model: ModelId`（子项目 G）与工具侧由 `AuthorizedTool::tool_id()` 给出的 `ToolId`（F 侧）都是「调用方按 id 找服务」
@@ -114,7 +137,7 @@ list_tools / describe_tool / invoke / cancel
 
 **四、`describe_tool` 没有「无此工具」这一种 `Err`。** `ProviderError` 有 `UnknownModel` 而**没有
 `UnknownTool`**（`crates/continuum-core/src/error.rs:4-15`）。既有夹具因此把「这个 provider 没有这个工具」
-报成 `Unavailable`（`crates/continuum-provider/tests/fake_provider.rs:106`），而 `Unavailable` 的另一层
+报成 `Unavailable`（`crates/continuum-provider/tests/common/mod.rs:178`，2026-10-07 读数；来历见 §2.2 一），而 `Unavailable` 的另一层
 意思是「provider 挂了」——两者被同一变体承载。本子项目的处置见 §5.2。
 
 **五、`ExecutionProfile` 里模型/工具相关字段仍是 `Option<String>`。** `crates/continuum-graph/src/execution.rs:18-20`
@@ -226,7 +249,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 
 **这一条本阶段就有照片，不需要真实适配器**（此前写成「必须先有真实适配器」，**是错的，已订正**）：
 既有夹具 `FakeModel` 的 `describe_model` 对 `list_models` 不含的 id 返 `UnknownModel`
-（`crates/continuum-provider/tests/fake_provider.rs:43-48`），而登记是**按 id 显式**的——把 `FakeModel`
+（`crates/continuum-provider/tests/common/mod.rs:57-61`，2026-10-07 读数），而登记是**按 id 显式**的——把 `FakeModel`
 登记到一个它 `list_models` 不含的 id（如 `"m"`），`model_for("m")` 即命中、`describe_model("m")` 即
 `Err(UnknownModel)`。§11 补一条用例钉它。
 
@@ -297,7 +320,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 
 §315/§316 与 §10.3 要求核心不得持有实现细节、只能经接口调用；`docs/02-工程.md:238` 原文是
 「**Provider Adapter** 与 **ToolProvider** 是中立边界，核心不能持有其实现细节，只能通过 §315 / §316
-定义的接口调用」。P3A 的 `ALLOWED` 纪律（`crates/continuum-runtime/tests/dependency_direction.rs:25-139`）
+定义的接口调用」。P3A 的 `ALLOWED` 纪律（`crates/continuum-runtime/tests/dependency_direction.rs:25-190`（2026-10-07 读数，实现树））
 是这条要求的现成载体，本子项目**不另建机制**，只把落点写清：
 
 | 角色 | crate | 允许依赖 | 依据 |
@@ -321,7 +344,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 `Arc<dyn ToolProvider>` / `ModelId` / `ToolId` / `AuthorizedTool`——**无一是实现类型**。
 若注册表引用了任何具体适配器类型，编译期就会要求一条新边，而那条边必须先写进 `ALLOWED`
 才能通过 `every_crate_depends_only_on_its_allowed_set`
-（`crates/continuum-runtime/tests/dependency_direction.rs:204`）。故中立性仍是**结构性**的，
+（`crates/continuum-runtime/tests/dependency_direction.rs:255`（2026-10-07 读数，实现树））。故中立性仍是**结构性**的，
 只是多出的一条边是「接口 → 能力类型」，不是「接口 → 实现」。
 
 **但这条「结构性」只到 crate 粒度为止——残留据实记**：它挡的是**跨 crate** 引用实现。
@@ -380,7 +403,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 
 1. **核心 crate 反向依赖 provider。** `continuum-core/Cargo.toml` 或 `continuum-persist/Cargo.toml` 加了
    `continuum-provider` → `core_and_persist_do_not_depend_on_provider`
-   （`crates/continuum-runtime/tests/dependency_direction.rs:245`）红，且 `ALLOWED` 的逐对断言同时红。
+   （`crates/continuum-runtime/tests/dependency_direction.rs:296`（2026-10-07 读数，实现树））红，且 `ALLOWED` 的逐对断言同时红。
 2. **中立 crate 引用了适配器实现。** `continuum-provider` 里出现某个具体适配器类型名 → 它没有那条依赖边，
    **编译不过**；若有人把边补进 `Cargo.toml`，则 `ALLOWED` 的逐对断言红（表里没有那条边）。
 3. **调用方持有实现。** 调用方（子项目 G，或 F）把适配器类型写进自己的类型签名里 → 它的 crate 必须依赖
@@ -395,7 +418,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 ## 4.3 一条遗漏：`ALLOWED` 对未来的适配器 crate 该怎么登记
 
 现状是 `ALLOWED` 里每一对都逐对 `assert_eq!`，且 `workspace_crates()` 派生出的成员必须**逐个**出现在
-`ALLOWED` 的主体里（`crates/continuum-runtime/tests/dependency_direction.rs:209-221`），否则一条用例红
+`ALLOWED` 的主体里（`crates/continuum-runtime/tests/dependency_direction.rs:260-272`（2026-10-07 读数，实现树）），否则一条用例红
 「workspace 成员 X 未列入 ALLOWED」。故未来加一个 `continuum-adapter-*` 时，**加 crate 与加 `ALLOWED` 条目
 是同一件事**，漏了会红。这是「依赖边只登记实际用到的」这条横切约束（共享面 §四.4）在 C 上的落点。
 本子项目**不预建**任何适配器 crate。
@@ -422,7 +445,7 @@ trait object；一张「provider 表」最终还是要在进程内再建一次 `
 | `ProviderError` | 建议 `FailureClass` | 说明 |
 |---|---|---|
 | `Transport` | `Transient` | 适配器若明知是永久错，应改报 `Protocol` |
-| `Unavailable` | `Transient` | **但本仓既有夹具已把一处永久性配置缺陷（「无此工具」）报成 `Unavailable`**（`crates/continuum-provider/tests/fake_provider.rs:106`）——这正是本表**不能**升格为函数的理由之一 |
+| `Unavailable` | `Transient` | **但本仓既有夹具已把一处永久性配置缺陷（「无此工具」）报成 `Unavailable`**（`crates/continuum-provider/tests/common/mod.rs:178`，2026-10-07 读数；来历见 §2.2 一）——这正是本表**不能**升格为函数的理由之一 |
 | `Protocol` | `Permanent` | 契约不符，重试无益 |
 | `UnknownModel` | `Permanent` | 配置缺陷 |
 | `Cancelled` | **不进入分类** | 是调用方自己发的取消，不是失败（§5.3） |
@@ -451,7 +474,7 @@ D 的设计**不消费 `ProviderError`**——它把可用性作为**值**接收
 §2.2 第四条记了 `UnknownModel` 有、`UnknownTool` 无。**决定：本阶段不加这个变体。** 理由是本项目的
 「不预先发明」：按 §3.1 的显式登记，`describe_tool` 只会被「注册表说这个适配器拥有这个 id」之后调用，
 故「无此工具」这一情形在正常路径上**不可达**；为一个不可达的取值加一个变体，等于造一个无产生方的值。
-既有夹具把未知工具报成 `Unavailable`（`crates/continuum-provider/tests/fake_provider.rs:106`）是**夹具的选择**，
+既有夹具把未知工具报成 `Unavailable`（`crates/continuum-provider/tests/common/mod.rs:178`，2026-10-07 读数；来历见 §2.2 一）是**夹具的选择**，
 本子项目不改它，但在 §12 第 8 条记明：F 接上之后，「工具表里有、适配器不认」这一情形会**变成可达**，
 届时再决定是加变体还是定一条 `Protocol` 的用法。**这条不留给读者推断**，故写在此处与 §12。
 
@@ -468,12 +491,12 @@ D 的设计**不消费 `ProviderError`**——它把可用性作为**值**接收
 故：**丢弃一个流不是取消**，调用方要停必须显式调 `cancel(&stream.call)`。
 
 **`cancel` 的语义定为幂等、尽力而为**：对已完成或未知的 `CallId` 调用返回 `Ok(())`（既有夹具即此形，
-`crates/continuum-provider/tests/fake_provider.rs:73`）。理由：取消与完成**天然竞态**，把「取消了恰好已完成的调用」
+`crates/continuum-provider/tests/common/mod.rs:87`，2026-10-07 读数）。理由：取消与完成**天然竞态**，把「取消了恰好已完成的调用」
 判成错误会让正常路径必须处理一个不该是错的错。**否掉的替代**：为未知 `CallId` 加一个 `Err` 变体——
 它把竞态变成错误，且要改 `ProviderError` 的取值域。
 
 **非流式不可取消**（即非流式调用不可取消）**——定案，且不改任何冻结类型。** 事实：`InvokeResponse`（`crates/continuum-core/src/model.rs:56-61`）
-与 `ToolResult`（`crates/continuum-core/src/tool.rs:31-35`）都不带 `CallId`，只有
+与 `ToolResult`（`crates/continuum-core/src/tool.rs:26-29`（2026-10-07 读数，实现树））都不带 `CallId`，只有
 `ModelStream`（`crates/continuum-core/src/model.rs:93-96`）带。**结构上的原因是**：`invoke()` 的返回值
 **只有在调用完成之后才存在**——调用方拿到它的那一刻，已经没有东西可取消了。故「给 `InvokeResponse` /
 `ToolResult` 加一个 `call: CallId` 字段」**修不好这件事**：那是一个完成态的物证，不是一张未完成调用的句柄。
@@ -573,7 +596,7 @@ P3A 的两处守卫失败（`AuthorizedTool` 与 `mint`）都指向同一个取�
 - **三种结果，不是两种**（**其中第一条是 C 加在适配器上的约定，不是规范条文**，见下）：
   工具**跑起来了但自身失败** → `Ok(ToolResult { is_error: true, .. })`；
   provider **没跑成**（传输、协议、不可用）→ `Err(ToolCallError::Provider(e))`；
-  **没有适配器** → `Err(ToolCallError::Unregistered { .. })`。`crates/continuum-core/src/tool.rs:31-35`
+  **没有适配器** → `Err(ToolCallError::Unregistered { .. })`。`crates/continuum-core/src/tool.rs:26-29`（2026-10-07 读数，实现树）
   的 `ToolResult.is_error` 是第一个通道，故断言与审计要按它分辨，不能把 `is_error = true` 当成 `Err`，
   也不能把 `Unregistered` 当成本次调用失败去重试（它是配置缺陷，§5.1）。
   **「工具级失败走 `Ok(is_error: true)`、provider 级失败走 `Err`」在 §316 里没有出处**，
@@ -722,11 +745,19 @@ trait 上**失去生产调用方**——`input` 移入 `AuthorizedToolInvocation
 留着它就是**同一个概念两个类型**（「两套类型各有一批引用者」正是本项目反复出错的形状）。
 **删与 §7.5 是同一批改动**，不另起一波。
 
-**落地清单（本裁决的一部分，五处，缺一不可）：**
+**落地清单（本裁决的一部分，五处，缺一不可）——⚠ 这已经是「历史清单」，不是待办**：
+**`ToolInvocation` 在实现里已经删掉**（2026-10-07 读数，实现树 `.worktrees/p3cf`：`crates/continuum-core`
+的 `tool.rs` 里已无该定义，全仓只剩注释提到这个名字）。**下表记的是「删除当时要改的五处」**，
+留作该次改动的**范围凭证**；**照着它去「改」会找不到东西**。**订正（2026-10-07）**：本清单初稿的
+标题没写它是历史，读者会当成待办——**现就地标明**。
 
-1. `crates/continuum-core/src/tool.rs` 里 `ToolInvocation` 的定义（`crates/continuum-core/src/tool.rs:25`）；
-2. `continuum-provider` 的 trait（`crates/continuum-provider/src/tool.rs`）改用新请求类型；
-3. `continuum-provider` 的测试夹具 `crates/continuum-provider/tests/fake_provider.rs`（今天唯一的引用者）；
+1. `crates/continuum-core/src/tool.rs` 里 `ToolInvocation` 的定义（**当时**在 `:25`；**今已删**）；
+2. `continuum-provider` 的 trait（`crates/continuum-provider/src/tool.rs`）改用新请求类型
+   （**已完成**：`invoke` 现在收 `AuthorizedToolInvocation<'_>`，`src/tool.rs:77`，2026-10-07 读数）；
+3. `continuum-provider` 的测试夹具——**搬迁后的位置是 `crates/continuum-provider/tests/common/mod.rs`**
+   （`FakeTool` 的 `invoke` 实现在该文件 `:193` / `:312` 一带，2026-10-07 读数）。
+   **订正（2026-10-07）**：本行初稿写 `tests/fake_provider.rs`（「今天唯一的引用者」）——**夹具在 Task 2
+   已搬走**，见 §2.2 一的判据段；
 4. 共享面 `docs/superpowers/specs/2026-10-05-p3-bcdf-ownership-and-interfaces.md` 的类型清单
    （§二 §316 段）——**由控制器改**；
 5. `docs/02-工程.md` §10.3 的接口清单——**由控制器改**。
@@ -740,7 +771,7 @@ trait 上**失去生产调用方**——`input` 移入 `AuthorizedToolInvocation
 P3A 遗留第 8 条把这件事交给 C（`docs/superpowers/p3a-followups.md` 第三节第 8 行），理由是这个形状
 「同一个工具在两个层各有一份描述」。两者是：
 
-- `continuum_core::tool::ToolDescriptor`（`crates/continuum-core/src/tool.rs:18-23`）：
+- `continuum_core::tool::ToolDescriptor`（`crates/continuum-core/src/tool.rs:19-23`（2026-10-07 读数，实现树））：
   `id` + `description` + `input_schema`。§316 的**接口类型**，是**适配器对外声明的调用形状**。
 - `continuum_capability::tool::Tool`（P3A)：`id` + `version` + `input_schema` + `output_schema` +
   `required_capabilities` + `effect_class` + `deterministic`。§252 的**登记项**，是**Registry 的治理记录**。
@@ -784,7 +815,8 @@ P3A 遗留第 8 条把这件事交给 C（`docs/superpowers/p3a-followups.md` �
 **能拍到的照片（本阶段就能有）：**
 
 - 注册 / 发现 / 重复 / 未命中：用**既有**的 `FakeModel` / `FakeTool`
-  （`crates/continuum-provider/tests/fake_provider.rs:29,89`）即可。
+  （**搬迁后**：`crates/continuum-provider/tests/common/mod.rs:43` / `:135`，2026-10-07 读数；
+  来历与判据见 §2.2 一）即可。
 - **§3.3 代价一（登记 id 与 `list_*` 不一致）也拍得到**：把 `FakeModel` 登记到它 `list_models`
   不含的 id，`model_for` 命中、`describe_model` 即 `Err(UnknownModel)`（§3.3 给出了构造）。
   此前写成「必须先有真实适配器」，**已订正**。
@@ -980,11 +1012,14 @@ P3A 对 crate 内第二个 `Capability` 产生点的既有判据同形：构造�
     等**换写法**仍全绿——**这张清单对开放集合枚举，不是穷尽的**（`macro_rules!` 的 `$trait` 元变量即第四例，
     §4.1 末段记了为什么不做成穷尽清单）。要钉上界得让守卫**解析 trait 路径**（需 `syn` 之类的新 dev 依赖），本阶段不做。
     **收件人：C 的实现计划**（先落「折叠空白 + 三个字面拼法」那版；要上界时再评估 `syn` 的代价）。
-22. **`ToolInvocation` 删掉——已裁（2026-10-05）**（§7.5）：裁决见 set-decisions §五、
-    `p3bcdf-followups.md` §二之二。**判据**：它失去生产调用方、留着即**同一概念两个类型**。
-    **与 §7.5 同批做，不另起一波**；五处落地清单（core 定义 / provider trait / `tests/fake_provider.rs`
-    / 共享面类型清单 / §10.3 接口清单）写在 §7.5，其中后两处**由控制器改**。**来历**：本条曾是「须拍板」，
-    用户已裁「删」。**收件人：C 的实现计划（前三处）+ 控制器（后两处）。**
+22. **`ToolInvocation` 删掉——已裁（2026-10-05）、且已在实现里删掉——本条与 §7.5 的清单现均为历史**（§7.5）：
+    裁决见 set-decisions §五、`p3bcdf-followups.md` §二之二。**判据**：它失去生产调用方、
+    留着即**同一概念两个类型**。**订正（2026-10-07）**：本条初稿把它写成待办（「与 §7.5 同批做」、
+    收件人写实现计划与控制器）——**该改动已经落地**（2026-10-07 读数，实现树 `.worktrees/p3cf`：
+    `crates/continuum-core` 已无该定义；`src/tool.rs` 的 `invoke` 已收 `AuthorizedToolInvocation`）。
+    **§7.5 的五处清单同此**：它记的是**删除当时要改的五处**，是那次改动的**范围凭证**，
+    **照它去改会找不到东西**（§7.5 清单上方已就地标明）。**来历**：本条曾是「须拍板」，
+    用户裁「删」，随后实现完成——**本条的正文没跟上这两步**。**收件人：无（已闭）。**
 23. **凭据要不要也交给适配器，是一个尚未提出的第二个位置**（§7.5）：裁决 §一第 2 条给 §316 的请求面
     加的是**授权证明**（`AuthorizedTool`），不是密钥材料——凭据是 `continuum-secrets` 的词汇、走连接器
     路径（B），裁决亦明写 B 不经 §316。**若将来模型/工具适配器确需持有凭据**，那是一个新位置，
