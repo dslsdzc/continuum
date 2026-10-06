@@ -111,13 +111,12 @@ async fn an_unregistered_tool_is_not_called_at_all() {
         .await
         .expect_err("没有适配器服务这个 id");
 
+    // 这一条同时排掉 `Provider`（两变体互斥）：不另写 `!matches!(Provider(_))`，它会被本条
+    // 严格蕴含、只在通过后可达，**不可能独立变红**（守卫判据见 `two_registries.rs` 文件头，
+    // 评审 2026-10-06）。
     assert!(
         matches!(&err, ToolCallError::Unregistered { id } if id.as_str() == "t1"),
         "未命中应是 Unregistered {{ id: t1 }}，实际 {err:?}"
-    );
-    assert!(
-        !matches!(err, ToolCallError::Provider(_)),
-        "配置缺陷不得报成 provider 失败，实际 {err:?}"
     );
     assert_eq!(recorder.touches(), 0, "路由未命中时一个适配器都不该被碰");
     assert_eq!(recorder.seen_tool_id(), None, "更不该有适配器收到过授权");
