@@ -14,8 +14,13 @@
 //! Task 3 补 §4 的进程内注册表 [`NodeRegistry`] / [`NodeRegistryError`]（[`registry`] 模块），
 //! 并以 `tests/registry.rs` 的两条**源码文本守卫**钉住「这个模块里不出现某三个名字」——
 //! 守卫的判据与证明力边界写在那份测试的文件头。
-//! `src/placement.rs`、`src/error.rs` 两个模块与它们的导出面由后续
-//! task 各自登记自己那几行。
+//! Task 4 补 §5.4 (b) 的表 [`PlacementRules`] × [`TransferRule`]（[`placement`] 模块）
+//! 与它的构造期错误 [`RulesError`]（[`error`] 模块），并以 `tests/rules.rs` 钉住
+//! 「覆盖全档／缺档即拒／重复即拒」三条判据。**本 task 是 `continuum-artifact`
+//! 这条边的第一个使用点**：Task 1 只在 `ALLOWED` 里登记了声明，
+//! `dependency_direction.rs` 的双向断言从本 task 起才对得上号。
+//! `place` 本身（硬闸门、`spec_floor`、排序）与 `PlacementError`
+//! 由 Task 5／Task 6 各自登记自己那几行。
 //!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-model-registry` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
@@ -30,8 +35,12 @@
 //! `trybuild` 是**外部 crate**，不进那张 `ALLOWED` 表——该表只断言 workspace 成员之间的边
 //! （设计 §7.3）；它在 `Cargo.toml` 的 `[dev-dependencies]` 里，由 Task 2 登记。
 
+pub mod error;
 pub mod node;
+pub mod placement;
 pub mod registry;
 
+pub use error::RulesError;
 pub use node::{ComputeNode, ComputeNodeId, NodeClass, NodeTrust};
+pub use placement::{PlacementRules, TransferRule};
 pub use registry::{NodeRegistry, NodeRegistryError};
