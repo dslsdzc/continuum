@@ -61,15 +61,18 @@ pub enum ToolCallError {
 /// 适配器是**代码**（`Arc<dyn …>`），不是数据——故它不进库，也不是一张表。
 ///
 /// **暴露面两侧不对称，理由是强制点 (1) 只覆盖工具**（设计 §3.1）：模型侧 `model_for` 直接
-/// 交出裸 `Arc<dyn ModelProvider>`，另开 `model_providers()` 供枚举；工具侧只开只读入口与
-/// 唯一的调用入口 `invoke_tool`，**不交出适配器**。
+/// 交出裸 `Arc<dyn ModelProvider>`；工具侧只开只读入口与唯一的调用入口 `invoke_tool`，
+/// **不交出适配器**。
+///
+/// **本注册表没有「枚举有哪些模型」的入口，这是有意的**（设计 §3.1 的裁决，2026-10-06）：
+/// ① 它零消费方；② 枚举出来的 `Arc<dyn ModelProvider>` **不带 id**，而模型调用路径是**按 id 解析**
+/// 的（`model_for`），两者无从对齐；③ 「有哪些模型」的权威在子项目 D 的 Model Registry 表，
+/// 不在本注册表——**本注册表只按 id 解析就够了**。
 #[derive(Default)]
 pub struct ProviderRegistry {
     /// `ModelId → 适配器`。这是**路由的唯一权威**：发现只看它，不去问适配器的 `list_models()`
     /// （设计 §3.3 代价一）。
     models: HashMap<ModelId, Arc<dyn ModelProvider>>,
-    /// 登记顺序的模型适配器列表，供 `model_providers()` 枚举——**每次登记调用**贡献一项。
-    model_adapters: Vec<Arc<dyn ModelProvider>>,
 }
 
 impl ProviderRegistry {
@@ -80,8 +83,8 @@ impl ProviderRegistry {
     /// 把**一组 id** 登记给同一个适配器（设计 §3.1：id 由登记方显式给出，注册表不去问适配器）。
     ///
     /// **先全查后全插（原子）**：组内任一 id 已占用即返回 [`RegistryError::Duplicate`]，
-    /// **一个都不登记**，适配器列表也不加项。半登记的注册表会让「谁服务这个 id」这件事在两次
-    /// 启动之间漂移，而漂移没有任何用例看得见。**设计未规定这一点**，本计划取原子并给出照片
+    /// **一个都不登记**。半登记的注册表会让「谁服务这个 id」这件事在两次启动之间漂移，
+    /// 而漂移没有任何用例看得见。**设计未规定这一点**，本计划取原子并给出照片
     /// （`registering_a_group_of_ids_is_all_or_nothing`）。
     pub fn register_model(
         &mut self,
@@ -98,7 +101,6 @@ impl ProviderRegistry {
         for id in ids {
             self.models.insert(id, Arc::clone(&provider));
         }
-        self.model_adapters.push(provider);
         Ok(())
     }
 
@@ -108,12 +110,5 @@ impl ProviderRegistry {
             .get(id)
             .map(Arc::clone)
             .ok_or_else(|| RegistryError::NotFound { id: id.clone() })
-    }
-
-    /// 全部模型适配器，**按登记顺序**，每次登记调用贡献一项（设计 §3.1「另各持一份登记顺序的
-    /// 适配器列表（供枚举）」）。返回 `Vec<Arc<…>>` 的克隆而非切片：调用方（子项目 G）
-    /// 要在 `await` 期间持有它们。
-    pub fn model_providers(&self) -> Vec<Arc<dyn ModelProvider>> {
-        self.model_adapters.clone()
     }
 }

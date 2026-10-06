@@ -103,41 +103,6 @@ fn registering_a_group_of_ids_is_all_or_nothing() {
 
     let kept = registry.model_for(&model("b")).expect("b 仍是先登记的那个");
     assert!(Arc::ptr_eq(&kept, &occupant), "b 不该被这次被拒的登记改写");
-
-    assert_eq!(
-        registry.model_providers().len(),
-        1,
-        "被拒的登记不许往适配器列表里加项"
-    );
-}
-
-#[test]
-fn model_providers_returns_every_registered_adapter_in_registration_order() {
-    let mut registry = ProviderRegistry::new();
-    let first = fake();
-    let second = fake();
-    // 第一次登记给一组两个 id：枚举项按**登记调用**计，不按 id 计。
-    registry
-        .register_model(vec![model("m-a1"), model("m-a2")], Arc::clone(&first))
-        .expect("第一次登记应成功");
-    registry
-        .register_model(vec![model("m-b1")], Arc::clone(&second))
-        .expect("第二次登记应成功");
-
-    let adapters = registry.model_providers();
-    assert_eq!(
-        adapters.len(),
-        2,
-        "两次登记调用应给出两项（与 id 个数无关）"
-    );
-    assert!(
-        Arc::ptr_eq(&adapters[0], &first),
-        "第 0 项应是先登记的那个适配器"
-    );
-    assert!(
-        Arc::ptr_eq(&adapters[1], &second),
-        "第 1 项应是后登记的那个适配器"
-    );
 }
 
 #[tokio::test]
