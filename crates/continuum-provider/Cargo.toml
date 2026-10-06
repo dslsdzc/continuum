@@ -8,6 +8,10 @@ rust-version.workspace = true
 continuum-core = { path = "../continuum-core" }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
+# Task 1 起的使用点：`registry.rs` 的 `RegistryError` / `ToolCallError` 派生
+# `thiserror::Error`。**外部 crate 不进 `ALLOWED`**——那张表只逐对断言 workspace 成员
+# 之间的边（设计 §10），故本行不产生依赖边。
+thiserror = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
