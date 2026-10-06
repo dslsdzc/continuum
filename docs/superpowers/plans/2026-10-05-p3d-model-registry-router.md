@@ -1590,16 +1590,31 @@ grep -rn "continuum_capability::\|Capability\|AuthorizedTool" crates/continuum-m
 
 **这两条是「按词根取候选、再人工读」的判据，不是「命中数即结论」的判据**：grep 按**行**匹配，
 故**跨行折行会漏**（`ModelProvider::` 与 `invoke` 被折到两行时，第一条的零命中是假的）。
+**还有一种比折行更常见的漏法：词根的大小写／拼写与名字不同**——第一条的词根是小写 `stream`，
+而本 crate 里那个名字是 **`ModelStream`**（大写 `S`，`src/lib.rs:11`），
+**grep 连候选行都看不见**（Task 14 实测：第一条的两处命中都不含它，它是靠另一条
+`grep "Provider"` 与逐处通读才现出来的）。折行与大小写是同一件事的两面：**词根不是名字的全集**。
 **故零命中不是充分证据**——本轮判据的实际做法是：grep 出候选行后，**对 `src/` 的调用面逐处通读**
 （本 crate 只有 `profile / lifecycle / persist / router / budget / escalation / error` 七个文件，通读代价很小），
 **结论以通读为准、grep 只用来定位**。同一通病见 Task 7 的连带面判据。
+
+**Task 14 的实测（2026-10-06，逐处通读后）**：第一条**不零命中**——两处，`src/lib.rs:11`（设计 §1.2 点名要求
+写的免责句，本身就是「除本句外不出现这两个名字」那句话）与 `src/error.rs:56`（`continuum-provider`
+作 **crate 名**出现在「不叫 `RegistryError`」的理由里）；第二条**不止 `Cost` / `Latency`**——
+十处命中里含 `CapabilityKind::parse` 的**散文引用**两处与 `Cargo.toml:17` **注释本身**一处，
+真正的 `use` 只有 `continuum_capability::{Cost, Latency}` 四处。
+**逐处读法**：七个 `src/` 文件的调用面只有三类——`continuum-core` 的两个 id 类型与 `ProviderHealth`
+（可用性**快照值**，只做值比较）、`continuum-persist` 的库原语、`continuum-capability` 的两个**类型**；
+**没有一处**出现 `ModelProvider` 的调用面、适配器类型、能力凭据类型或任何执行动作。
+**故「本层是判断而不是执行」据通读成立**；上面两条预期的偏差全部落在**注释与散文**里，
+**是否改那两处措辞属设计 §1.2，本计划不自行改**（记此，免得后来者照「预期零命中」去改一句正确的话）。
 
 - [ ] **Step 4: 逐条核对完成判据**
 
 | 判据 | 证据 |
 |---|---|
 | §4.4「Router 输出带 confidence 的候选排序」 | Task 11 的五个访问器用例（`confidence()` 在其列） |
-| §4.4「不依赖单一总分」 | Task 3 的 `overall_score` trybuild + Task 5 的列清单 + Task 11 的 `CandidateScore` 无总分子段 |
+| §4.4「不依赖单一总分」 | Task 3 的 `overall_score` trybuild（E0599，画像上读不到总分）+ Task 5 的列清单（库侧无该列）+ **Task 14 补的** `candidate_score_has_no_total_score`（E0609，`CandidateScore` 上无总分子段） |
 | §4.4「未完成画像的模型不会进入自动路由」 | Task 4 的十态闸门 + Task 7 的 `ProfileBeforeVerified`（两件事的合取） |
 | §249 三态 + `stale` 不入自动路由 | Task 4 的 `only_the_six_routable_states_pass_the_gate` 与 `a_stale_model_is_not_routable_while_an_active_one_is` |
 | §250「当前可用性」 | Task 11 的三条照片（`Unavailable` 被排除、`Healthy`/`Degraded` 都在且排序不变、缺条目得 `UnknownAvailability`） |
@@ -1749,8 +1764,15 @@ list_registered 与         **已补**：Task 14 Step 1（2026-10-06）。D 原�
                           ＋ 一条「登记两行、两行都在」的照片，**收件人是 D 的实现者**。
                           **接续**：G 拿它建候选集之后的其余义务仍在 G 侧（取 `ProviderHealth` 快照、
                           调 `rank`、发 `invoke` / `stream`），本计划只交付这一个读函数。**收件人：子项目 G。**
-CandidateScore 的         **Task 14 复核发现的缺口（2026-10-06）**：Step 4 的完成判据「§4.4 不依赖单一总分」
-「无总分子段」无照片      列了三条证据，其中第三条「Task 11 的 `CandidateScore` 无总分子段」**没有照片**——
+CandidateScore 的         **已闭（协调者裁定，2026-10-06；由 Task 14 实施）**：补了第十份 `tests/compile_fail/` 样例
+「无总分子段」的照片      `candidate_score_has_no_total_score.rs` ＋ 同名 `.stderr`——读 `score.overall` 得
+（已闭）                  `E0609（no field on «&CandidateScore»）`，`.stderr` **实跑生成并读回**（不是手写），
+                          其 `note` 还印出「现有字段是 `compatibility` / `confidence` / `reason`」三枚。
+                          **同步更新 `tests/type_level.rs` 那份按码分组的点名清单**（九份 → 十份，
+                          新增 E0609 一组），并**数过「清单项数 == 目录里 `.rs` 份数」= 10**。
+                          下面为原报告（照留，作这条缺口的来历）：
+                          **Task 14 复核发现的缺口（2026-10-06）**：Step 4 的完成判据「§4.4 不依赖单一总分」
+                          列了三条证据，其中第三条「Task 11 的 `CandidateScore` 无总分子段」**没有照片**——
                           **判据**：全仓没有一处用例或编译失败样例断言 `CandidateScore` **没有** `overall` 之类的
                           总分子段——`grep -rn CandidateScore crates/continuum-model-registry` 的命中里，
                           类型声明（`src/router.rs:338`）、两个构造点（`src/router.rs:703`、`tests/router.rs:494`）
@@ -1764,6 +1786,9 @@ CandidateScore 的         **Task 14 复核发现的缺口（2026-10-06）**：S
                           `CandidateScore` 这一侧**，不是整条判据没有证据。
                           **本 task 不自行补这份样例**（Step 4 的处置是「据实报告缺口」，不就地扩审）。
                           **收件人：协调者（决定是否补）＋ 复审者。**
+                          **订正（同日）**：协调者裁「补」，三条理由是——它把一条「未覆盖」变成「已覆盖」
+                          而 §4.4 是**完成判据**；有现成同形模板（成本约十行）；§248 是**规范级的禁令**，
+                          它没有类型面照片是可惜的。**上句描述的处置止于裁定之前**，照留作来历。
 ExecutionProfile 的         **D 的计划里没有据此写下的错话**（已逐处核过）：全篇提到 `ExecutionProfile` 的两处
 实读订正                    是 `cost_budget`（§246 的**真**字段，设计 §6.3 判给「D 落地时」而 D 明写不做）
                             与 `retry_policy`（§246 的重试参数），**两处都没有声称该表有 `model` / `provider` /

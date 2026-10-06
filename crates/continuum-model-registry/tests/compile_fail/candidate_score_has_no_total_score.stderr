@@ -1,0 +1,7 @@
+error[E0609]: no field `overall` on type `&CandidateScore`
+  --> tests/compile_fail/candidate_score_has_no_total_score.rs:18:11
+   |
+18 |     score.overall
+   |           ^^^^^^^ unknown field
+   |
+   = note: available fields are: `compatibility`, `confidence`, `reason`

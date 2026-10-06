@@ -5,7 +5,7 @@
 //! 的编译失败用例。每个 `compile_fail/*.rs` 配一份同名 `.stderr`，把失败钉在
 //! 预期的报错上——否则「因为拼错函数名而编译失败」也会让用例变绿。
 //!
-//! **一份样例只钉一条通道，不合并**——本目录现有**九份**，下面**逐份点名**（便于对数：
+//! **一份样例只钉一条通道，不合并**——本目录现有**十份**，下面**逐份点名**（便于对数：
 //! 这份清单的项数必须等于目录里 `.rs` 的份数）：
 //!
 //! - **E0451 字段私有**（**四份**）：`model_profile_cannot_be_built`（`ModelProfile` 字面量）、
@@ -13,8 +13,12 @@
 //!   `routable_model_fields_are_private`（`RoutableModel` 字面量）、
 //!   `ranked_candidates_cannot_be_built`（排序输出的字面量）；
 //! - **E0624 非 `pub`**（一份）：`model_profile_has_no_constructor`（`ModelProfile::try_new`）；
-//! - **E0599 没有这个方法 / 变体**（**两份**）：`overall_score_cannot_be_read`（总分）、
-//!   `tier_one_low_is_not_a_step`（Task 13：`EscalationStep::Tier1Low` 写不出来）；
+//! - **E0599 没有这个方法 / 变体**（**两份**）：`overall_score_cannot_be_read`（**画像上**读不到
+//!   总分——`ModelProfile::overall_score` 这个方法不存在）、`tier_one_low_is_not_a_step`
+//!   （Task 13：`EscalationStep::Tier1Low` 写不出来）；
+//! - **E0609 没有这个字段**（一份）：`candidate_score_has_no_total_score`（Task 14：**`CandidateScore`
+//!   上**没有总分子段——`overall` 这个字段不存在）。§248 的「不依赖单一总分」在**两个类型**上各有一条
+//!   禁令，故**两份样例各钉一侧**：E0599 那份钉画像（方法），本份钉路由的输出接口面（字段）；
 //! - **E0277 trait 未实现**（一份）：`a_requirement_cannot_be_built_by_conversion`（`From<Vec<_>>`）；
 //! - **E0063 缺字段**（一份）：`a_routing_request_without_a_budget`（`RoutingRequest.budget`）。
 //!
@@ -22,8 +26,13 @@
 //! 且实测（rustc 1.95）同一函数体里 rustc **只报第一条错**，合并会让没被报出来的那条**没有照片**。
 //!
 //! **本目录由下面 `type_level_guarantees_hold` 里的 `tests/compile_fail/*.rs` 通配收走**：
-//! 新增一份样例**不需要改本文件**，但**要重跑本用例**来接收它生成的 `.stderr`
-//! ——首次运行会落 `wip/*.stderr`，把它搬进 `tests/compile_fail/` 才算接受。
+//! 新增一份样例**不需要改本文件的代码**（通配自动收），但**要重跑本用例**来接收它生成的
+//! `.stderr`——首次运行会落 `wip/*.stderr`，把它搬进 `tests/compile_fail/` 才算接受。
+//!
+//! **「通配自动收」不等于「清单自动更新」**：上面那份**按码分组的点名清单是手写的**，
+//! 加样例的人必须**同时把它加上**、并自己数一遍**清单项数 == 目录里 `.rs` 的份数**
+//! （Task 14 加第十份时正是这么办的）。**漏更新不会让任何用例变红**——那份清单没有任何
+//! 机械守卫，故它是一处**已知的、靠人记得**的同步点，写在此处免得被读成「通配收走即完备」。
 
 #[test]
 fn type_level_guarantees_hold() {
