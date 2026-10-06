@@ -766,6 +766,9 @@ Task 5 只建表。
   画像（**画像有十二个字段，而 `model_profile` 只有十一列**——第十二个 `skill_vector` 落在
   `model_skill_score`，本用例不走它），经 `load_profile` 读回，**逐字段**比对（含 `tools` 的元素是 `ToolId`、
   两个 `Option<Cost/Latency>` 的 `Some` / `None` 两侧）。红的条件：某列漏写或与邻列写串即红。
+  **`skill_vector` 不在比对之列，且这不是遗漏**：`save_profile` 不写观测（唯一写者是
+  `save_skill_observation`），故 `save∘load` 在那个字段上不是恒等——该不对称写在 `save_profile`
+  的函数文档里（见 Step 3）。本用例比的是**十一列**对应的那些字段。
   **本用例的入参画像怎么来，是这一步第一件要解决的事**：`save_profile` 收一枚 `ModelProfile`，
   而它 crate 外造不出、`load_profile` 又要求库里先有行——**故「先写后读」不能自举**。
   本 task 的处置（Task 7 实现者已按此落地）：**先用裸 SQL 播下一行**（`INSERT INTO model_registry` ＋
@@ -799,6 +802,12 @@ cargo test -p continuum-model-registry --test persist
 /// 画像的写入点。**读登记项的当前状态**，不在允许集内即 `Err(ProfileBeforeVerified { state })`。
 /// **返回 `LifecycleError` 而不是 `PersistError`**：闸门的那枚变体装不进后者（见 `## 遗留`
 /// 的「save_profile 的返回类型」一条）——设计 §3.2 与 §4.1/§4.3 两处相抵，此处取后者的判据。
+///
+/// **它写十一列，不写观测**（`skill_vector` 不在 `model_profile` 表里；观测的唯一写者是
+/// `save_skill_observation`）。故 **`save∘load` 在 `skill_vector` 这个字段上不是恒等**——
+/// 这条不对称要写在函数文档里，**免得有人拿它做往返断言**：`save_profile` 之后 `load_profile`
+/// 读回的向量来自技能表，与传进去的那一枚没有关系（除非调用方自己先写过观测）。
+/// 与它对称的另一半在 `load_profile` 的文档里（**读**十二个字段、**组合** `load_skill_vector`）。
 pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), LifecycleError>;
 pub fn load_profile(tx: &Tx<'_>, id: &ModelId) -> Result<Option<ModelProfile>, PersistError>;
 ```
@@ -879,6 +888,10 @@ pub fn load_skill_vector(tx: &Tx<'_>, id: &ModelId) -> Result<Option<SkillVector
 pub fn load_skill_series(tx: &Tx<'_>, id: &ModelId, dim: SkillDimension)
     -> Result<Vec<SkillObservation>, PersistError>;
 ```
+
+`load_skill_series` 的消费方是 §82 的行为指纹（「如果表现突然变化」）——判「变化」至少要看两次观测，
+故它现在就必须有；只存当前值会让 §82 的判据无法成立。**它的产生方（周期性 probe）本阶段不存在**，
+这一点按设计 §10 第 1 条写明，**不靠一句将来时糊过去**。
 
 **本 task 还交付一步（协调者裁决，2026-10-06，见 `## 遗留` 的同名条）**：交付 `load_skill_vector` 的同时，
 **让 `load_profile` 调它来填画像的 `skill_vector`**——`load_profile` 现在读回的画像十二个字段齐全。
@@ -1049,9 +1062,9 @@ git commit -m "feat(model-registry): §250 的请求面与非空需求"
 夹具链因此是：**裸 SQL 播两行 → `load_profile` → `RoutableModel::try_new`**。
 **夹具的这一步不写出来，本 task 的所有用例都无从下笔**——它不是测试技巧，是设计 §2.1 那条保证的直接后果。
 
-**另有一处本计划已知、尚未闭合的缺口，先在这里点名，免得实现者卡在半路**：`load_profile` 读回的
-`skill_vector` **恒为空向量**（`model_skill_score` 由 `load_skill_vector` 单独装载），故这样造出的候选
-**没有任何「有观测」的维度**——它直接影响 Task 12 的兼容度用例。**本 task 不自行给出路**：见 `## 遗留` 的同名条。
+**关于画像里的 `skill_vector`（原稿在此点名的缺口，已由协调者裁定，2026-10-06）**：`load_profile`
+现在会调 `load_skill_vector` 把观测填进画像（唯一装载者是后者，`load_profile` 只是组合，见 `## 遗留` 的同名条），
+故**夹具在播下画像之后还要按用例需要播 0 / 1 / N 维观测**（`save_skill_observation`，Task 8）。
 **夹具还必须为每个候选给出一条 `availability` 条目**（`Healthy` 或缺省的那一档）：`rank` 对
 「列表里没有条目」的候选返回 `UnknownAvailability`，故漏给会以 `Err` 的形式而不是断言的形式失败，
 报错位置还会指向被测函数。**这条不是可选项**，用 `unavailable` / `degraded` 两个具名参数让需要它的用例显式覆盖。
@@ -1196,9 +1209,11 @@ git commit -m "feat(model-registry): §250 的输出面与 rank 的全序"
 - Produces: `continuum_model_registry::BaselineRankingPolicy`
 
 **夹具**：沿用 Task 11 的 `tests/router.rs` 夹具（含「**第一枚画像由裸 SQL 播下**」那一步）。
-**但本 task 多一项前置**：下面的兼容度用例要读**某维有没有观测**，而 Task 11 的夹具经 `load_profile`
-拿到的画像 `skill_vector` **恒为空向量**——**在 `## 遗留` 那条缺口闭合之前，这一组用例写不出来**。
-实现者开工前先读那一条；**不许自行挑一条出路改掉设计的形状**（三条候选出路都在那条遗留里，收件人是设计作者＋协调者）。
+本 task 多一项前置，**已由协调者裁掉（2026-10-06，取 A，见 `## 遗留` 的同名条）**：`load_profile`
+现在会调 `load_skill_vector` 把观测填进画像，故**夹具只要在播下画像之后再播几行观测**
+（`save_skill_observation`，Task 8），经 `load_profile` 造出的候选就带上了「某维有观测」——
+**下面那两条兼容度用例现在写得出来了**，不必等任何裁决。夹具要多做的一步是：
+**按用例需要，为候选播 0 / 1 / N 维观测**（`the_baseline_counts_…` 要 1 维、`adding_an_observation_changes_the_order` 要两侧对比）。
 
 - [ ] **Step 1: 写用例**
 
