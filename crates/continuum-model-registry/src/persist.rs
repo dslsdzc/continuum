@@ -260,7 +260,10 @@ pub fn transition_in_tx(
 /// 画像有十二个字段，而 `model_profile` 只有**十一列**——`skill_vector` 落
 /// `model_skill_score` 那张键控时间序列表（同一维度多个版本，一个列装不下）。
 /// 故本函数**不按十二列写 SQL**，`skill_vector` 由 [`save_skill_observation`] 写
-/// （观测的**唯一**写者；读侧见 [`load_profile`] 与 [`load_skill_vector`]）。
+/// （观测的**唯一**写者）。读侧有两个函数：填 `skill_vector` 的是 [`load_skill_vector`]
+/// （[`load_profile`] 组合它），按维度取整条历史序列的是 [`load_skill_series`]。
+/// （订正来历：此处初版只列了「[`load_profile`] 与 [`load_skill_vector`]」，漏了
+/// [`load_skill_series`]——而 `model_skill_score` 的读函数有两个。）
 pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), LifecycleError> {
     if let Some(state) = load_lifecycle(tx, profile.id())? {
         if !PROFILE_ALLOWED_STATES.contains(&state) {
@@ -300,10 +303,17 @@ pub fn save_profile(tx: &Tx<'_>, profile: &ModelProfile) -> Result<(), Lifecycle
 /// `model_skill_score` 那张键控时间序列表（见 [`save_profile`] 末节）。本函数读的是
 /// **十二个字段**：十一列之外，另调 [`load_skill_vector`] 拿该画像的向量填第十二个。
 ///
-/// **「组合」不等于「第二个装载者」**：查 `model_skill_score` 的只有 [`load_skill_vector`]
-/// 一个，本函数只是把它的结果放进画像（协调者裁决，2026-10-06；见计划 `## 遗留` 的
-/// 「`load_profile` 的 `skill_vector` 与 rank 的输入面」条）。**本函数不自己写一遍那张表的
-/// 查询**——那就是把同一数据的唯一装载者拆成两个。
+/// **「组合」不等于「第二个装载者」**：**填这个字段（`skill_vector`）的唯一来源**是
+/// [`load_skill_vector`]，本函数只是把它的结果放进画像（协调者裁决，2026-10-06；见计划
+/// `## 遗留` 的「`load_profile` 的 `skill_vector` 与 rank 的输入面」条）。**本函数不自己写一遍
+/// 那张表的查询**——那就是给同一个字段接上第二个来源。
+///
+/// **限定语是「这个字段」，不是「这张表」**：`model_skill_score` 另有一个读函数
+/// [`load_skill_series`]（按维度返回整条版本序列），它当然也查那张表，那是另一件事。
+/// （订正来历：此处初版与 [`load_skill_vector`] 的标题初版都写成「`model_skill_score` 表的
+/// **唯一装载者**／查这张表的只有它一个」——**那是关于整张表的话，是假命题**，且与本文件
+/// [`SKILL_COLUMNS`] 处「两个读函数共用」一句自相矛盾。协调者给的裁决口径本身下得过头，
+/// 这里按「字段的唯一来源」收窄；错的原口径记在此处，不假装从未写过。）
 ///
 /// # 连带面：本函数因此继承了那个装载者的失败面
 ///
@@ -451,12 +461,20 @@ pub fn save_skill_observation(
 
 /// 该画像的**技能向量**：九维各取**当前**的那一次观测（设计 §2.2、§248）。
 ///
-/// # 它是 `model_skill_score` 表的**唯一装载者**
+/// # 它是画像的 `skill_vector` **这个字段的唯一来源**
 ///
-/// 这张表的读取一律经本函数——[`load_profile`] **组合**它来填画像的第十二个字段，
-/// **不自己再查一遍这张表**（那是同一数据的第二个装载者，等同一次重复产生点；
+/// [`load_profile`] **组合**本函数来填画像的第十二个字段，**不自己再查一遍
+/// `model_skill_score`**（那是给同一个字段接上第二个来源，等同一次重复产生点；
 /// 协调者裁决 2026-10-06，见计划 `## 遗留` 的同名条）。故本函数的存在性判据、解码与
-/// 「取哪一条」的规则都只写一遍。
+/// 「取哪一条」的规则只写一遍。
+///
+/// **限定语是「这个字段」，不是「这张表」**：`model_skill_score` 的读函数**不止本函数**——
+/// [`load_skill_series`] 按 `(模型, 维度)` 返回整条版本序列，是另一个读路径，
+/// 两者共用 [`SKILL_COLUMNS`] 的解码形状。
+/// （订正来历：此处初版标题写「它是 `model_skill_score` 表的**唯一装载者**」、
+/// 正文写「这张表的读取**一律**经本函数」——**两句都是关于整张表的假命题**，
+/// 而本文件 [`load_skill_series`] 自己就查同一张表。口径由协调者给出时下得过头，
+/// 原话记在此处，不假装从未写过。）
 ///
 /// # 画像不存在 → `Ok(None)`；画像在、尚无观测 → `Ok(Some(空向量))`
 ///
