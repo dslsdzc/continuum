@@ -19,9 +19,13 @@
 （用 `Artifact` 与 `PrivacyClass` 两个**既有类型**）；`thiserror`（错误类型派生）；dev：`trybuild`。
 
 **设计依据（唯一事实来源）：** `docs/superpowers/specs/2026-10-06-p3e-compute-placement-design.md`，
-**定稿 `d30167b`（1148 行）**；本计划写于 HEAD `2ebbeda`。
+**定稿 `d30167b`（1148 行）**；**并已按 `3a7ddad` 的五条订正逐条复核**——那五条正是本计划
+第一轮报出的设计缺陷（见 `## 遗留` 第一节，**已闭**），本计划与订正后的设计**逐条一致**。
+本计划写于 HEAD `3a7ddad`。
 **实施前须复核**：若设计在其后还有修订，先核对本计划引用的**节号与裁决**
-（本计划**按内容引、不按行号引**，故行号位移不影响它；受影响的只会是节号本身）。**协调者裁定**：
+（本计划的**正文**（Task 1–7）引设计时**按内容引**——用例名、节题——故行号位移不影响它，
+受影响的只会是节号本身；**例外是 `## 遗留` 第一节**：那里引的设计行号是**原报告的一部分**，
+按 `d30167b` 的读数留档，见该节的说明）。**协调者裁定**：
 `docs/superpowers/2026-10-06-p3e-decisions.md`——**注意它在 `docs/superpowers/` 下，不在 `specs/` 下**
 （设计 §1.3 的订正块记过同一处误判）。本计划不改设计、不改规范、不改 C／D／F 的任何接口，
 **对 `continuum-model-registry` 零依赖**。
@@ -169,7 +173,9 @@
     工具链固定 rustc 1.95.0 / cargo 1.95.0，edition 2024。
     **代码注释、错误信息、测试断言信息用中文**；标识符用英文。
 19. **不要用 `git add -A`，不要 `git commit --amend`**，只 `git add <显式路径>`。
-    **新增依赖会让 `Cargo.lock` 变化，须一并按显式路径提交锁文件**（Task 1、Task 2 各一次）。
+    **新增依赖会让 `Cargo.lock` 变化，须一并按显式路径提交锁文件**。
+    本计划有**三次**清单改动、**三次**都要提交 `Cargo.lock`：`Cargo.toml`（workspace，Task 1）、
+    `crates/continuum-node/Cargo.toml` 的 `trybuild`（Task 2）、同一个文件的 `serde_json`（Task 5）。
     **不修改用户目录的权限位**；不在仓库中写入任何凭据。
 20. **范围与设计一致，不多做不少做。** 明确不做的，逐条列出免得被读成漏项：
     不建 `get(&ComputeNodeId)` / `deregister` / `len` / `is_empty`（零消费方）；
@@ -199,14 +205,24 @@
   producer_node / input_artifacts / metadata / provenance / privacy_class / version`。
   **夹具要写全字段字面量**（少一个字段即 `E0063`），`metadata` / `provenance` 用
   `serde_json::json!({})`。`Artifact` **不派生 `Default`**。
+  **`continuum-artifact` 的 re-export 里没有 `Value`**（`src/lib.rs` 只导出
+  `Artifact` / `ArtifactId` / `ArtifactType` / `PrivacyClass` / `BlobStore` / `ContentHash` /
+  `ArtifactError` / `ArtifactStore` / `load_artifact` / `save_artifact` / 迁移函数；
+  `Value` 只是 `artifact.rs:5` 的一条 `use`）——**故写这十个字段的夹具必须自己依赖 `serde_json`**，
+  见下条的清单要点与 Task 5 的 Step 1。
 - `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 是
   `&[(&str, &[&str])]`，**逐对双向断言**（`:276-281`）——**声明的边与表必须精确相等**。
 
 **新增 crate 的清单要点**（`crates/continuum-node/Cargo.toml`）：
 `version` / `edition` / `rust-version` 三项用 `workspace = true`（照 `crates/continuum-artifact/Cargo.toml`）；
 `[dependencies]` 只有 `continuum-artifact = { path = "../continuum-artifact" }` 与
-`thiserror = { workspace = true }`；`[dev-dependencies]` 只有 `trybuild = { workspace = true }`。
-**不加 `serde` / `serde_json` / `tempfile` / `continuum-persist`**（本 crate 不序列化、不落库）。
+`thiserror = { workspace = true }`；`[dev-dependencies]` 是 **`trybuild`（Task 2 登记）**
+与 **`serde_json`（Task 5 登记）** 两条，**各由第一个用它的 task 登记**。
+**`serde_json` 这条为什么必需**：`tests/placement.rs` 要构造 `Artifact` 的全字段字面量，
+而 `metadata` / `provenance` 是 `serde_json::Value`，**`continuum-artifact` 不 re-export 它**
+（见上一条）——**这是一条 dev 边，只出现在测试目标里**，库本体一个 `Value` 都不用。
+它**不进 `ALLOWED`**（那张表只逐对断言 workspace 成员之间的边）。
+**不加 `serde` / `tempfile` / `continuum-persist`**（本 crate 不派生序列化、不建临时库、不落库）。
 
 ---
 
@@ -214,7 +230,8 @@
 
 ```
 crates/continuum-node/                 ← 新建 crate（§7.1）
-  Cargo.toml                           依赖只有 continuum-artifact + thiserror；dev 只有 trybuild
+  Cargo.toml                           依赖只有 continuum-artifact + thiserror；
+                                       dev：trybuild（Task 2 登记）＋ serde_json（Task 5 登记）
   src/lib.rs                           导出面与 crate 文档（每个 task 各登记自己那几行）
   src/node.rs                          ComputeNodeId、NodeClass、NodeTrust、ComputeNode
   src/registry.rs                      NodeRegistry、NodeRegistryError
@@ -231,7 +248,7 @@ crates/continuum-node/                 ← 新建 crate（§7.1）
 既有 crate 里本计划要改的文件（**只有两个，都是多写者单文件，各登记自己那一行**）：
   Cargo.toml（workspace）                                 members 加 "crates/continuum-node"
   crates/continuum-runtime/tests/dependency_direction.rs   ALLOWED 加 continuum-node 一条
-  Cargo.lock                                              新包（Task 1、Task 2 各提交一次）
+  Cargo.lock                                              新包与两次 dev 依赖（Task 1、2、5 各提交一次）
 ```
 
 **本计划不碰的文件**：`crates/continuum-artifact/**`（只读它的公开面）、
@@ -263,7 +280,9 @@ crates/continuum-node/                 ← 新建 crate（§7.1）
 
 - [ ] **Step 1: 先拍「workspace 成员未列入 `ALLOWED`」这一侧的红**
 
-建 `crates/continuum-node/Cargo.toml`（按「关于本计划的代码块」的清单要点）与
+建 `crates/continuum-node/Cargo.toml`（按「关于本计划的代码块」的清单要点，**但本 task 的
+`[dev-dependencies]` 是空的**：`trybuild` 由 Task 2 登记、`serde_json` 由 Task 5 登记——
+「边由用它的那个 task 登记」，**不提前铺开**）与
 `crates/continuum-node/src/lib.rs`（**只放 crate 文档注释，不放任何 `pub mod`**），
 在 workspace `Cargo.toml` 的 `members` 里加 `"crates/continuum-node",`，
 **先不动** `dependency_direction.rs`。跑：
@@ -325,7 +344,8 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
 
 **Files:**
 - Create: `crates/continuum-node/src/node.rs`
-- Modify: `crates/continuum-node/src/lib.rs`（加 `pub mod node;` 与三条 `pub use`）
+- Modify: `crates/continuum-node/src/lib.rs`（加 `pub mod node;` 与**四条** `pub use`：
+  `ComputeNodeId` / `NodeClass` / `NodeTrust` / `ComputeNode`，与本节 Produces 一栏的四个名字对齐。）
 - Create: `crates/continuum-node/tests/node.rs`
 - Create: `crates/continuum-node/tests/type_level.rs`
 - Create: `crates/continuum-node/tests/compile_fail/compute_node_fields_are_private.rs`
@@ -514,7 +534,10 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
   `continuum_artifact`、`Artifact`、`PrivacyClass`。**断言信息里列出命中的行号**
   （否则红的时候读不出是哪一处）；路径用
   `Path::new(env!("CARGO_MANIFEST_DIR")).join("src/registry.rs")`。
-  **文件头写清它的证明力边界**（裁定义务 5）：匹配的是**字面拼法**，别名、全限定路径、
+  **以下所有说明一律写在 `tests/registry.rs` 的文件头，一个字都不许写进 `src/registry.rs`**
+  ——守卫匹配的是**那个文件的全文**，**把「本文件不出现 `Artifact`」这句话写进去，
+  守卫会命中自己的注释而变红**（本仓的一个已知坑；2026-10-06 第一轮评审查出本行初稿没说清落点）。
+  **文件头要写清它的证明力边界**（裁定义务 5）：匹配的是**字面拼法**，别名、全限定路径、
   `include!` 都逃逸——**它是下界，不是封闭判定**；**封闭的那一层是 `ALLOWED` 的逐对断言**
   （Task 1；本 crate 整体只允许 `continuum-artifact` 一条边）。
   同时写清**为什么 `Artifact` 这个词不能出现**：§4 的注册表按《工程》§4.3 与 §9.2 是**入度为零**的
@@ -549,7 +572,14 @@ pub enum NodeRegistryError {
 }
 ```
 
-**三条写进实现**：形状沿用本仓已有的两个注册表（`ProviderRegistry` 与
+**三条写进实现**：
+**错误类型的派生（三处错误枚举同此，Task 4／Task 5 各写一遍不合并）**：
+`#[derive(Debug, thiserror::Error)]`，每个变体配 `#[error("…")]` 的中文错误信息
+（与 D 的 `error.rs` 同形）。**`Debug` 是必需的、不是装饰**：`place` 返回
+`Result<&ComputeNode, PlacementError>`，测试里 `unwrap()` / `unwrap_err()` 的签名带
+`T: Debug` / `E: Debug`；**不派生 `PartialEq`**——用例一律用 `matches!` 或 `match` 断言是哪一枚
+（`PartialEq` 会把「两枚错误相等」变成一条本层没有判据的命题）。
+形状沿用本仓已有的两个注册表（`ProviderRegistry` 与
 `continuum-operator` 的 `registry.rs:11` 的 `Duplicate { id, version }`）——**沿用的是形状
 （具名变体、不静默），不是字段数**（本设计的键只有 `ComputeNodeId` 一个，故变体只有一个字段）；
 **不建** `get` / `deregister` / `len` / `is_empty`（**零消费方**，C 当年为 `model_providers()`
@@ -593,7 +623,13 @@ git commit -m "feat(node): 进程内 Compute Node 注册表与模块面守卫"
   夹具的取值**两枚都要用上**（例如 `Public` 与 `Private` 给 `TrustedPersonalOnly`，其余三档给
   `AnyNode`）——**理由**：`TransferRule` 只有两枚，若五档写同一个值，
   「`rule_for` 把两档写反」这类变异**不可观察**（等价变异体）。
-  **红的条件（档位：取反）**：把 `rule_for` 的查表改成返回一个常量 → 五条里至少四条红。
+  **红的条件（档位：取反）**：把 `rule_for` 的查表改成返回一个**常量** → **五条里红的那几条
+  等于「与该常量不同的档数」**：常量取 `AnyNode` 时红 **2** 条（那两档 `TrustedPersonalOnly`）、
+  取 `TrustedPersonalOnly` 时红 **3** 条——**总之不会五条全红，最少红 2 条**
+  （本行初稿写「至少四条红」是**报多了**：夹具是 2 档对 3 档，任何单一常量最多对上 3 档
+  ——2026-10-06 第一轮评审查出，已按实改）。
+  **这不削弱「枚举断言须逐项有照片」**：五条各钉一档，常量变异体只能对上其中一侧，
+  故它**必然**至少在两档上红——**这正是逐档写五条的作用**（换成「只断一档」就抓不到了）。
   **一处射程要写明（不许写成「写反即红」）**：`TransferRule` 只有两枚而档有五枚，
   故「把两档的值互换」**只在被换的两档取值不同时**才可观察——
   互换两个**同值**档（例如两条都是 `AnyNode`）是**等价变异体**，那不是用例不够，
@@ -653,6 +689,11 @@ pub enum RulesError {
 
 **四条写进实现**：
 
+- **`RulesError` 的派生**（与 Task 3 的 `NodeRegistryError` 同口径，**各写一遍不合并**）：
+  `#[derive(Debug, thiserror::Error)]` ＋ 每个变体配中文 `#[error("…")]`。
+  **`Debug` 是必需的**：`PlacementRules::try_new` 返回 `Result<Self, RulesError>`，
+  而测试里 `unwrap_err()` 的签名带 `E: Debug`。**不派生 `PartialEq`**——用例一律 `matches!`／
+  `if let` 断言是哪一枚、并**断言 `level` 是哪一档**。
 - **覆盖率判据的来源逐字是 `PrivacyClass::ALL`**（`artifact.rs:100`），
   **不是**本设计手写的一张五档清单：一张手抄清单在规范加档时**不会失败**，而 `ALL` 会
   （设计 §5.4）——**即使今天两者不可区分，实现的取法也照此写**，并在注释里写明这一点。
@@ -683,10 +724,13 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
 - Modify: `crates/continuum-node/src/error.rs`（加 `PlacementError`）
 - Modify: `crates/continuum-node/src/lib.rs`
 - Create: `crates/continuum-node/tests/placement.rs`
+- Modify: `crates/continuum-node/Cargo.toml`（`[dev-dependencies]` 加 `serde_json`）
+- Modify: `Cargo.lock`
 
 **Interfaces:**
 - Consumes: Task 2 的 `ComputeNode` / `ComputeNodeId` / `NodeClass` / `NodeTrust`；
-  Task 4 的 `PlacementRules` / `TransferRule`；**既有的** `continuum_artifact::Artifact`
+  Task 4 的 `PlacementRules` / `TransferRule`；**既有的** `continuum_artifact::Artifact`；
+  **外部 crate** `serde_json`（**只在测试目标里**，用来写 `metadata` / `provenance` 两个 `Value`）
 - Produces: `continuum_node::{PlacementRequest, PlacementPolicy, BaselinePlacementPolicy, place, PlacementError}`
 
 > **本 task 只落 `place` 的步骤 1–3（判重 → 过闸门 → 判空），第 5 步「取头」取的是过滤后的第一枚、
@@ -694,18 +738,30 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
 > 「过闸门后恰好剩一枚」或「Ordering 无关」**——凡是需要多枚可比节点的断言一律留到 Task 6。
 > 这是刻意的拆分（各自的判据分开写清），**不是** `place` 的最终形态。
 
-- [ ] **Step 1: 写用例**
+- [ ] **Step 1: 登记 dev 依赖，再写用例**
+
+**先登记 `serde_json`**（本 task 是它的第一个使用点）：在 `crates/continuum-node/Cargo.toml` 的
+`[dev-dependencies]` 加 `serde_json = { workspace = true }`。**判据**：`Artifact.metadata` /
+`provenance` 的类型是 `serde_json::Value`，而 `continuum-artifact` **不 re-export 它**
+（`artifact.rs:5` 只有一条 `use`）——**不登记则本 task 的夹具编不过**（`E0433`）。
+它是**外部 crate**，**不进 `ALLOWED`**（那张表只逐对断言 workspace 成员之间的边）；
+**但它会让 `Cargo.lock` 变化**（本包的依赖列表变了），故 Step 6 要按显式路径提交它。
+**实测记一笔**：这一跑照绿（`dependency_direction` 不受影响），不据口径断言。
 
 `tests/placement.rs` 的夹具先立好（后面几条共用）：
 
 - `fn artifact(level: PrivacyClass) -> Artifact`：**全字段字面量**（十个字段，见「关于本计划的代码块」），
   `metadata` / `provenance` 取 `serde_json::json!({})`，`producer_node: None`，`size: 0`。
   **`pub privacy_class: level` 是唯一随参数变动的字段**。
-- `fn cloud() -> ComputeNode`：`class = Temporary`、`trust = OutsidePersonalTrustDomain`；
-  `fn desktop() -> ComputeNode`：`class = Personal`、`trust = TrustedPersonal`。
-  **两个 id 取升序里较小的那个给云节点**——这样即使 `place` 不排序，返回的也是云节点，
-  **「闸门真的过滤了」与「它只是恰好排在前面」两件事才分得开**
-  （Task 5 的 §4.4 正面用例因此是承重的：过滤若失效，返回的必是云节点）。
+- `fn cloud(id: &str) -> ComputeNode`：`class = Temporary`、`trust = OutsidePersonalTrustDomain`；
+  `fn desktop(id: &str) -> ComputeNode`：`class = Personal`、`trust = TrustedPersonal`。
+  **两个工厂都收 `id` 参数，不写死**——判据是本节后面**三处用例对 id 的要求彼此不同**：
+  §4.4 的正面用例要**云节点取小 id**（下面逐条写明理由），判重用例要**两枚同 id**（`desktop("a")`
+  与 `cloud("a")`），四种组合那条要**四枚 id 各不相同**。写死一个 id 会让这三处里至少两处编不过
+  或断言恒真。（2026-10-06 第一轮评审查出本行初稿只给了 `fn cloud()`，未参数化。）
+  **§4.4 正面用例的 id 取法**：**云节点取两枚里较小的那个 id**（`cloud("a")` ＋ `desktop("b")`）
+  ——这样即使 `place` 不排序，返回的也是云节点，**「闸门真的过滤了」与「它只是恰好排在前面」
+  两件事才分得开**（该用例因此是承重的：过滤若失效，返回的必是云节点）。
 - `fn rules_all_any() -> PlacementRules`：五档全 `AnyNode`。
 - `fn rules_with(level: PrivacyClass, rule: TransferRule) -> PlacementRules`：其余四档 `AnyNode`。
 - 一份测试侧的 `struct RecordingPolicy`：`rules()` 交出给定的表，`compare` 返回 `Ordering::Equal`
@@ -713,8 +769,12 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
 
 用例（**逐条**）：
 
+> **下文的简写**：写 `cloud` / `desktop` 的地方一律读作 `cloud("a")` / `desktop("b")`
+> （除少数用例**明写了别的 id**——判重用例两枚同 id、四种组合四枚不同 id）。
+> 「云节点取小 id」这条取法**只对 §4.4 正面用例是承重的**，其余用例不依赖它。
+
 - `a_local_only_artifact_lands_only_on_a_trusted_personal_node`（**判据 §4.4 的正面**）：
-  `nodes = [cloud, desktop]`（云节点在前，见上面的 id 取法）、`artifacts = [artifact(LocalOnly)]`、
+  `nodes = [cloud("a"), desktop("b")]`（云节点在前且 id 更小，见上面的 id 取法）、`artifacts = [artifact(LocalOnly)]`、
   `rules_all_any()` → `Ok(n)`，**逐项断言 `n.class() == Personal` 与 `n.trust() == TrustedPersonal`**。
   **红的条件（档位：移除）**：把过闸门那一步整段删掉 → 返回云节点，两条断言同时红。
 - `a_local_only_artifact_with_no_trusted_personal_node_is_unplaceable`（**判据 §4.4 的否定面**）：
@@ -727,8 +787,18 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
   **并断言 `n.id()` 是那枚云节点**、`n.class() != Personal`。
   **这一格是必需的**：没有它，一个「把所有制品都当 `LocalOnly` 一律拒掉」的实现
   能通过本表其余每一行——那正是 fail-closed 的反面（闸门静默拒绝一切）。
-  **红的条件（档位：收紧）**：让闸门对所有等级都返回 `Err`（或把 `spec_floor` 对四档也改成
-  `TrustedPersonalOnly`）→ 这一条与下一条的四个 `AnyNode` 档全红。
+  **红的条件（档位：收紧）**：让闸门对所有等级都返回 `Err`——或**只把 `spec_floor` 对那四档**
+  也改成 `TrustedPersonalOnly`。**这一条会红**，而**同一条变异体还会红这些，逐条点名**
+  （本行初稿写「这一条与**下一条**」，**那是错的**——见下一条的说明）：
+  `the_gate_cannot_be_widened_by_any_caller_table` 的**四档臂**（它期望那两个 `Ok`）、
+  以及 **Task 6 里凡用 `Public` 制品的那几条**（`the_same_node_set_in_any_order_yields_the_same_node`、
+  `the_id_breaks_ties_when_the_policy_says_equal`、`swapping_the_policy_changes_the_result`
+  ——它们的夹具都是「`Public` 制品 ＋ 全 `AnyNode` 表」）。
+  **不会红的**：`a_caller_supplied_rule_can_tighten_the_gate`（它**本来就期望 `Err`**）、
+  `four_class_trust_combinations_and_only_one_passes`（全走 `LocalOnly`）、
+  `an_empty_artifact_set_filters_nothing` 与 `an_empty_artifact_set_returns_the_tiebreak_winner`
+  （制品集为空 ⇒ 闸门不看 `spec_floor`）、`duplicate_node_ids_are_a_named_error` 与
+  `an_empty_node_set_is_unplaceable`（期望的 `Err` 与该变异体同解）。
 - `a_caller_supplied_rule_can_tighten_the_gate`（**放行侧的收紧面；裁定义务 1 的落点**）：
   `Secret` ＋ `rules_with(Secret, TrustedPersonalOnly)` ＋ `nodes = [cloud]` → **`Err(NoPlaceableNode)`**。
   **这一条钉的是「调用方的表真的被读」**：一个**完全不读 `policy.rules()`、只算
@@ -769,7 +839,7 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
   `Err(NoPlaceableNode)`。**红的条件（档位：移除）**：删掉判空那一步 → 该条以 **panic** 失败
   （对空切片取头）。**那不是干净的红，但确实是红**，照实记（本项目已有「本判据的红形态就是 panic」
   的先例，G 的截止用例同形）。
-- `duplicate_node_ids_are_a_named_error`：`nodes = [desktop(id "a"), cloud(id "a")]` →
+- `duplicate_node_ids_are_a_named_error`：`nodes = [desktop("a"), cloud("a")]` →
   `Err(PlacementError::DuplicateNode { id })`，**并断言 `id == ComputeNodeId::new("a")`**。
   **夹具里两枚同 id、两枚不同 class**：这样「判重」与「过滤」两件事分得开
   （若两枚完全一样，`Err` 也可能来自别处）。
@@ -866,6 +936,12 @@ pub enum PlacementError {
 
 **四条写进实现**：
 
+- **`PlacementError` 的派生**（与 Task 3／Task 4 同口径，**各写一遍不合并**）：
+  `#[derive(Debug, thiserror::Error)]` ＋ 两枚变体各配中文 `#[error("…")]`。
+  **这一处比另两处更硬**：本 task 的**每一条**失败路径用例都要 `let err = place(…).unwrap_err();`
+  ——`Result::unwrap_err` 的签名是 `impl<T: Debug, E> …`，故 `E: Debug` 是**硬约束**；
+  `NoPlaceableNode` 那一枚**不带字段**，`#[error]` 直接给它一句中文。
+  **不派生 `PartialEq`**（用例一律 `matches!`）。
 - **`spec_floor` 的 `match` 穷尽、无通配臂**（纪律 9 的通道 (a)）：把「加档时本函数编译不过」
   写进文档注释。**它的照片不存在**（编译期性质），据实记，**不得为拍它去改 `PrivacyClass`**。
 - **`spec_floor` 不读策略、`strictest` 的 `TrustedPersonalOnly` 一侧吸收一切**：
@@ -916,8 +992,9 @@ TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast 2>&1 | tee
 
 ```bash
 cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
-git add crates/continuum-node/src/placement.rs crates/continuum-node/src/error.rs \
-        crates/continuum-node/src/lib.rs crates/continuum-node/tests/placement.rs
+git add crates/continuum-node/Cargo.toml Cargo.lock crates/continuum-node/src/placement.rs \
+        crates/continuum-node/src/error.rs crates/continuum-node/src/lib.rs \
+        crates/continuum-node/tests/placement.rs
 git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 ```
 
@@ -936,16 +1013,23 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 - [ ] **Step 1: 写用例**
 
 在 `tests/placement.rs` 里再加一份测试侧的 `struct ByCapabilityCount { rules: PlacementRules }`：
-`compare` 按 `capabilities().len()` **升序**（标签少者在前）。
+`compare` 按 `capabilities().len()` **降序**（标签多者在前）。
+
+> **方向与夹具必须同向读一遍再落笔**（本行是第一轮评审的 C2，改法是照复审给的修法）：
+> 升序 + 「`"c"` 标签最多」= **赢家是 `"a"`**，与同一段断言的 `"c"` 相抵。
+> 现取**降序**（标签多者在前），故下面的夹具里**标签最多的那一枚（`"c"`）胜出**。
 
 - `the_same_node_set_in_any_order_yields_the_same_node`（**确定性**）：
   三枚**都过闸门**的节点（`Public` 的制品 ＋ `rules_all_any()`），id 取 `"a"` / `"b"` / `"c"`，
-  `capabilities` 的标签数分别取 0 / 1 / 3（即 `"c"` 最多）。
+  `capabilities` 的标签数分别取 **0 / 1 / 3**（即 `"c"` 最多）。
   用 `ByCapabilityCount` 策略，把同一组节点按**三种不同顺序**放进 `nodes`，各调一次 `place`，
-  **断言三次返回的是同一枚**（`"c"`，策略的序所指定的那一枚）。
+  **断言三次返回的是同一枚**（`"c"`，**策略的序**所指定的那一枚）。
   **红的条件（档位：移除）**：删掉步骤 4 的 `sort_by` 那一行 → 三次返回三枚不同的节点，红。
   **夹具的承重点**：策略的序（标签多者在前）与 id 序**相反**（`"c"` 的 id 最大而排第一）——
   否则「读不读策略」「排不排序」两件事不可观察（等价变异体）。
+  **另一处要一起核**：这条的期望值 `"c"` 与本节首行的 `compare` 方向是**一对**——
+  把方向改成升序（或把夹具的标签数配反）**必须同时改这一处**，否则照写必红
+  （同 `swapping_the_policy_changes_the_result` 的「两次不同」也会一并失去意义）。
 - `the_id_breaks_ties_when_the_policy_says_equal`（**兜底档**）：
   `BaselinePlacementPolicy`（`compare` 恒 `Equal`），nodes 按 `"c"` / `"a"` / `"b"` 的顺序给，
   → `Ok(n)` 且 **`n.id() == ComputeNodeId::new("a")`**（id 升序的最小者）。
@@ -954,12 +1038,20 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
   **第二种（档位：取反）**：把兜底档反过来（`b.id().cmp(a.id())`）→ 返回 `"c"`，红。
   **夹具的承重点**：输入的第一个元素**不是** id 最小的那一个（否则两种实现不可区分）。
 - `an_empty_artifact_set_returns_the_tiebreak_winner`（**§9「无制品」那一行的后一半**）：
-  `artifacts = []` ＋ 三枚节点 ＋ `BaselinePlacementPolicy` → 返回 id 最小的那一枚。
+  `artifacts = []` ＋ 三枚节点（**按 `"c"` / `"a"` / `"b"` 的顺序给**）＋ `BaselinePlacementPolicy`
+  → 返回 id 最小的那一枚 `"a"`。
   **与 Task 5 的同名用例的分工写明**：那一条钉「不过滤」（单枚节点，Ordering 无关），
-  这一条钉「返回的是兜底档选中的那一枚」（多枚节点）。**两条不是同一个变异体的照片。**
+  这一条钉「返回的是兜底档选中的那一枚」（多枚节点）。
+  **红的条件（档位：移除）**：删掉 `.then_with(|| a.id().cmp(b.id()))` → 稳定排序保留输入序
+  （输入第一个是 `"c"`）→ 返回 `"c"`，红。（2026-10-06 第一轮评审查出本行初稿没给红的条件。）
+  **它与上一条是同一条实现（兜底档）的两处观测点**：一条**经**闸门的过滤路径（制品非空）、
+  一条**不经**（制品集为空）。**若实现下来发现两处的变异完全等价（同一行代码、同一组入参），
+  据实合并成一条并记在报告里**——不为了凑两处而留两条等价用例
+  （照 G 的计划 Task 11 对「三处观测点」的同一处置）。
 - `swapping_the_policy_changes_the_result`（**策略可替换**）：
-  同一组节点、同一组制品，跑两次：一次 `BaselinePlacementPolicy`（返回 id 最小者 `"a"`），
-  一次 `ByCapabilityCount`（返回标签最多的 `"c"`）；**断言两次不同**且各是各的那一枚。
+  同一组节点（**沿用上一条的夹具**：`"a"` 0 个标签、`"b"` 1 个、`"c"` 3 个）、同一组制品，跑两次：
+  一次 `BaselinePlacementPolicy`（全 `Equal`，由兜底档给出 id 最小者 `"a"`），
+  一次 `ByCapabilityCount`（**降序**，标签多者在前 → `"c"`）；**断言两次不同**且各是各的那一枚。
   **它钉的是「排序真的读策略」，不钉「哪个策略对」**（设计 §9 那一行的口径逐字如此）。
   **红的条件（档位：移除）**：把 `place` 里的 `policy.compare(a, b)` 换成 `Ordering::Equal`
   （即不读策略）→ 两次都返回 `"a"`，红。
@@ -1016,10 +1108,14 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-node --depth 1 --edges al
 预期：全绿、0 warning；`cargo tree` 的**直接边恰好是** `continuum-artifact`（＋ `thiserror`，
 以及测试目标下的 `trybuild`）——**实测对照，不据口径断言**。
 
+> **下面三条 `git diff` 的对照点取「开工时的 HEAD」**（本计划定稿时是 `3a7ddad`）。
+> 开工时若仓库已前进，**把哈希换成实际起点**——判据是「**除本计划的改动之外，这些文件无别的改动**」，
+> 不是那串哈希本身。
+
 - [ ] **Step 2: 复核「只登记了自己那一条」（裁定义务 2、4）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff 2ebbeda -- Cargo.toml crates/continuum-runtime/tests/dependency_direction.rs
+cd /home/DslsDZC/Continuum && git diff 3a7ddad -- Cargo.toml crates/continuum-runtime/tests/dependency_direction.rs
 TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency_direction
 ```
 
@@ -1030,8 +1126,8 @@ TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency
 - [ ] **Step 3: 复核「不落库、不取迁移号」（纪律 11）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff 2ebbeda --stat -- crates/continuum-runtime/src/main.rs crates/continuum-runtime/src/lib.rs
-git diff 2ebbeda --stat -- crates/continuum-artifact crates/continuum-graph crates/continuum-model-registry
+cd /home/DslsDZC/Continuum && git diff 3a7ddad --stat -- crates/continuum-runtime/src/main.rs crates/continuum-runtime/src/lib.rs
+git diff 3a7ddad --stat -- crates/continuum-artifact crates/continuum-graph crates/continuum-model-registry
 ```
 
 预期：**两条都无输出**（E 不改 `runtime_migrations()`、不改任何别的 crate 的源码）。
@@ -1076,24 +1172,46 @@ grep -rn "continuum_model_registry\|continuum-model-registry\|RankedExecutionCan
 `## 遗留` 在本计划内（`docs/superpowers/plans/` 是有版本的位置）。
 **本计划不新建、也不修改第二份文档**；协调者裁定文件的「计划作者报回的设计缺陷」栏由**协调者**登记。
 
-- [ ] **Step 7: 提交**
+- [ ] **Step 7: 提交（只有当本 task 真的改了文件时才做）**
+
+**本 task 通常一处都不改**（它跑验证与复核）。**若没有文件改动，跳过本步、不造空提交**；
+若复核发现了缺口并改了文件，**按实际改动的显式路径逐个 `git add`**——形如：
 
 ```bash
-cd /home/DslsDZC/Continuum && git add <本 task 改动的显式路径>
-git commit -m "docs(node): P3 子项目 E 的收尾与复核"
+cd /home/DslsDZC/Continuum && git add crates/continuum-node/src/placement.rs \
+        crates/continuum-node/tests/placement.rs
+git commit -m "fix(node): 收尾复核发现的缺口"
 ```
+
+**不许 `git add -A`、不许 `--amend`**（纪律 19）；**报告里写明这次改动属于哪一条判据**
+（Task 7 Step 5 的那张表）。
 
 ---
 
 ## 遗留
 
-### 一、本计划查出的设计缺陷（**不修设计，报协调者**）
+### 一、本计划查出的五条设计缺陷——**已闭（2026-10-06，设计 `3a7ddad` 逐条订正完毕）**
 
-**处置说明**：按本仓纪律「计划作者报回、协调者裁定」，本计划**一处都不改设计**，
+> **先读这一行：本节不是待办，五条都不要再登记。收件人：无（已闭）。** 设计已在 `3a7ddad`
+> 按本计划的报告逐条订正，协调者的裁定文件同批记入（**不是**「待协调者登记进 `p3e-decisions.md`
+> 的『待补』栏」——那一栏记的是「本计划报回过什么」，不是「还有五条待办」）。
+> **下面每条的「原报告」一字未改**（来历照留，照本仓「订正把原话与来历留在原地」的惯例），
+> **每条的末尾加一行「订正后的口径」**，写清设计现在是什么样、本计划随没随之改。
+> **凡读到「设计还需改 X」的句子，一律以那一行为准。**
+>
+> **本节引的设计行号（`:796`／`:978`／`:983`／`:520`／`:586`／`:705`／`:692`）一律是 `d30167b` 时的读数**
+> ——它们是**原报告的一部分**，作来历留档，**不随设计修订重取**（`3a7ddad` 已把它们整体位移）。
+> **计划正文（Task 1–7）引设计时一律按内容引**（用例名、节题），不按行号引——
+> 上面那句「按内容引」的射程**只到正文**，不含本节（2026-10-06 第一轮评审查出本计划头部那句
+> 没限定射程，已改）。
+>
+> **为什么整段留着**：这五条里有三条是「同一类错在两处各自漂移」的实例（数目与正文相抵、
+> 行号式互引静默失真、来历想当然），它们**在实施期仍会以别的形状出现**；
+> 删掉报告就等于删掉这三条判据的来历。
+
+**原处置说明（照留）**：按本仓纪律「计划作者报回、协调者裁定」，本计划**一处都不改设计**，
 只在 `## 遗留` 记明证据与落点。**五条里没有一条阻塞实现计划**——它们全是文档层的一致性问题
-（两处数目／标签、一组交叉引用的行号、一处来历、一处文件清单），
-故本计划照实现，收件人是**协调者**（登记进 `docs/superpowers/2026-10-06-p3e-decisions.md`
-第二节末的「计划作者报回的设计缺陷（待补）」栏）与**设计者**。
+（两处数目／标签、一组交叉引用的行号、一处来历、一处文件清单），故本计划照实现。
 
 1. **§7.1 的 crate 文件清单漏两份文件**（**阻塞：不阻塞，但计划必须补上**）。
    清单写的是 `tests/{node,registry,placement,rules}.rs`，而 §9 自己要求一份
@@ -1102,10 +1220,17 @@ git commit -m "docs(node): P3 子项目 E 的收尾与复核"
    **证据**：设计 `:796`（`tests/{node,registry,placement,rules}.rs`）与 `:978`（trybuild 那一行）。
    **本计划的处置**：`crates/continuum-node/tests/type_level.rs` ＋ `tests/compile_fail/`
    已写进文件结构与 Task 2（见 Task 2 的 Files）。**这一条是「手写文件清单是重灾区」的又一例。**
+   > **订正后的口径（`3a7ddad`）**：设计 §7.1 的清单已逐行展开（`tests/node.rs` / `registry.rs` /
+   > `placement.rs` / `rules.rs` / `type_level.rs` / `compile_fail/*.rs`），并加了一段「补漏」说明，
+   > **同时点名了 `trybuild` 这条 dev 依赖**。**本计划无需改动**（Task 2 的 Files 已与它一致）。
+   > **另注**：设计补的是 `trybuild`。**`serde_json` 这条 dev 依赖是设计两处清单都没有的**，
+   > 由本计划补（见本节第 6 条），**它不是设计缺陷的残留**——设计从来没要求过那份夹具怎么写。
 2. **§9 表那一行的数目与它自己的正文相抵**：`:983` 写「**五种** `class` × `trust` 组合」，
    而同一行的正文写「**二值 × 二值**逐项」——2 × 2 = **4**（`NodeClass` 两枚 × `NodeTrust` 两枚）。
    **证据**：`NodeClass` 两枚（设计 §3.2）、`NodeTrust` 两枚（§3.3）。**本计划按 4 组写夹具**
    （Task 5 的 `four_class_trust_combinations_and_only_one_passes`）。
+   > **订正后的口径（`3a7ddad`）**：该格已改为「**四种** `class` × `trust` 组合
+   > （`NodeClass` 两枚 × `NodeTrust` 两枚）」，并在格内留了订正说明。**本计划无需改动。**
 3. **§9 的两处行号交叉引用在 I1／C4 补行之后没有重取**
    （**这是本设计自己反复处理的那一类错**）。
    - `:520`（§5.3）与 `:586`（§5.4 的 I2 段）都写「照片在 §9 **第 3 行**（最宽策略下的反例）」，
@@ -1114,6 +1239,10 @@ git commit -m "docs(node): P3 子项目 E 的收尾与复核"
    - **对照**：`:692`（§5.8）的「（§9 第 1、2 行）」**仍是对的**。
    **根因**：「放行侧」与「调用方收紧」两格是**插在表首附近**的，其后各行的序号整体后移。
    **本计划不受影响**：它引的每一格都**按内容引**（用例名），不按序号引。
+   > **订正后的口径（`3a7ddad`）**：设计把这三处（**并同类扫到 §5.8 的第四处**）**一律改为按用例名引**
+   > ——「§9 的『闸门不可被策略放宽』那一格」「§9 的『确定性』那一格」等，
+   > 并在 §5.9 加了一段说明（判据是「**换引用方式，不是把数字改成新的数字**」：
+   > 用例名稳定，插行不改变它）。**本计划无需改动**（它从一开始就按内容引）。
 4. **§1.2 与 §5.4 的订正块里，那条「根因」不成立**（**来历错，改正本身是对的**）。
    两处都写错号「指向的是同文件里 `ArtifactType` 的那一套（`as_str` 在 `:47`、`parse` 在 `:68`）」。
    **实测**：`crates/continuum-artifact/src/artifact.rs:112` 是
@@ -1122,17 +1251,40 @@ git commit -m "docs(node): P3 子项目 E 的收尾与复核"
    两个号都落在 **`PrivacyClass` 自己的 impl 内**，与 `ArtifactType` 的两个函数号（`:47`／`:68`）无关。
    **为什么值得报**：本设计自己在 §1.2 的订正块里写过「**一个不成立的来历比没有来历更坏**——
    后来者会信它」；同一条判据在这里同样适用。**改后的号（`:119`／`:137`）是对的**，本计划据此写。
+   > **订正后的口径（`3a7ddad`）**：设计在 §5.4 加了一段「**再订正**」，**把那条假根因原话留在原地**，
+   > 并附一张对照表（`:112` 是 `as_str` 文档注释里的一行、`:129` 是 `parse` 的文档注释首行，
+   > 都在同一个 `impl PrivacyClass` 内），结论与本节**逐字一致**：
+   > 真正的错法是「**取了同一个 `impl` 内的文档注释行，而不是函数本体的行**」。
+   > §1.2 那一行也已改为指向 §5.4 的订正块。**本计划无需改动。**
 5. **§9 那一行的标签与它的正文相抵**：`:978` 的标签写「`ComputeNode` **不可外部构造**」，
    同行的正文写「crate 外**写不出字段字面量**」，而 §3.5 明写 `ComputeNode::new` 是 **`pub`**——
    故**构造点是存在的**，「构造不出来」为假。**本计划按正文写**（Task 2 的 trybuild 样例只钉字段私有，
    预期 `E0451`），**并按正文取用例名与文件头措辞**。
+   > **订正后的口径（`3a7ddad`）**：该格标签已收到正文的口径——
+   > 「**字段私有 ⇒ 写不出字段字面量（预期 `E0451`）**」，并说明为何值得改
+   > （「不可构造」的标签会让人以为本 crate 外部拿不到 `ComputeNode`，与 §3.5 的访问器、
+   > §4 的注册表都相反）。**本计划无需改动。**
+
+6. **（本计划自报的第二轮缺陷，2026-10-06 计划评审查出；一并记在此处便于对账）
+   Task 5 的夹具要用 `serde_json`，而本计划的 `Cargo.toml` 配方明令不加它、Files 也没列它。**
+   **证据**：`Artifact.metadata` / `provenance` 是 `serde_json::Value`
+   （`crates/continuum-artifact/src/artifact.rs:177-178`），而 `continuum-artifact` 的
+   `src/lib.rs` **不 re-export `Value`**（`artifact.rs:5` 只有一条 `use`）——
+   **照原样写必编不过**（`E0433`）。**这一条不是设计的缺陷**：设计从未规定夹具怎么写，
+   它只是本计划自己在「不加 `serde_json`」那句话里写死了一个错的口径。
+   **处置（已改）**：`crates/continuum-node/Cargo.toml` 的 `[dev-dependencies]` 加
+   `serde_json = { workspace = true }`，**由 Task 5 登记**（它是第一个使用点），
+   Task 5 的 Files 与提交路径已加 `crates/continuum-node/Cargo.toml` 与 `Cargo.lock`，
+   「关于本计划的代码块」的清单要点与 Global Constraints 第 19 条已同步改正。
+   **它是外部 crate，不进 `ALLOWED`**；**库本体一个 `Value` 都不用**。
 
 **另有一处不是缺陷、但需后来者对账**：`crates/continuum-model-registry/src/router.rs` 在**工作树**里
-有未提交改动（`M`）。设计 §6.3 要求「计划接手前须重取」——**本计划已重取**，五个号逐条属实
-（`RankedExecutionCandidates` `:394`、`selected` `:403`、`ExecutionCandidate` `:345`、
-`RoutingReason` `:276`、`rank` `:512`，另 `RankingPolicy` `:424`）。
-**但 E 对 D 零依赖**，故这些号**在本计划里一处都不承重**；将来若取设计 §6 的读法 (b)，
-**接手的人须再取一次**（工作树的行号随时会动）。
+有未提交改动（`M`）。设计 §6.3 要求「计划接手前须重取」——**本计划在 2026-10-06 重取过一次**，
+六个号在**那一次**的读数下逐条属实（`RankedExecutionCandidates` `:394`、`selected` `:403`、
+`ExecutionCandidate` `:345`、`RoutingReason` `:276`、`RankingPolicy` `:424`、`rank` `:512`）。
+**但那是那一次的读数，不是本计划给出的常量**（Global Constraints 第 3 条：
+**一律「以当时工作树为准」**）。**E 对 D 零依赖**，故这些号**在本计划正文里一处都不承重**；
+将来若取设计 §6 的读法 (b)，**接手的人须在**那时**的工作树上再取一次**。
 
 ### 二、设计 §10 的 17 条：本计划一条都不接，收件人与阻塞范围照原文
 
