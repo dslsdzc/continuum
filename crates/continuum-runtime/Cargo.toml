@@ -36,3 +36,13 @@ thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# Task 2 起的使用点：`tests/common/mod.rs` 的假模型适配器要**实现** `ModelProvider`，
+# 而它是 `#[async_trait]` 的 trait——实现侧必须同法标注。
+# **F 的 Task 2 也会加它**：两处是同一条边的两个使用者，谁先落地谁登记，不是重复登记。
+# **外部 crate 不进 `ALLOWED`**——那张表只逐对断言 workspace 成员之间的边
+# （设计 §10），与 provider Cargo.toml 的 `thiserror` / `trybuild` 两条同理。
+async-trait = { workspace = true }
+# Task 2 起的使用点：`OnceStream` 要 `Stream` trait 与 `Pin`。
+# **不用 `futures-util`**——`stream::iter` 在它里面，本仓不引它；判据见
+# `crates/continuum-provider/tests/common/mod.rs:31-32` 的同一句话（同一取舍的第二份副本）。
+futures-core = { workspace = true }

@@ -220,6 +220,7 @@ dependencies = [
 name = "continuum-runtime"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "continuum-artifact",
  "continuum-capability",
  "continuum-core",
@@ -233,6 +234,7 @@ dependencies = [
  "continuum-sandbox",
  "continuum-secrets",
  "continuum-workspace",
+ "futures-core",
  "serde_json",
  "tempfile",
  "thiserror",
