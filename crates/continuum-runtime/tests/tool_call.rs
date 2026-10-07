@@ -58,6 +58,12 @@ enum Outcome {
     EchoAfterDelay(u64),
     /// **适配器自己**没跑成：`Err(ProviderError::Transport(..))`。
     ProviderFailure,
+    /// **工具跑起来了、结果自报失败**：`Ok(ToolResult { is_error: true, .. })`。
+    ///
+    /// 与 [`Outcome::ProviderFailure`] 走的是**两条通道**（C 设计 §7.1 的三分法）：
+    /// 那一个是 `Err`（适配器没跑成），本变体是 `Ok` 里带着 `is_error: true`（跑成了，
+    /// 结果是错误）。设计 §8 要求两者的 `TaskError` 变体**不得合并**。
+    ReportsFailure,
 }
 
 /// 夹具适配器**收到的一次请求**。
@@ -112,9 +118,12 @@ impl ToolProvider for RecordingTool {
     }
 
     /// **夹具按 C 的约定交出结果**（工具级失败走 `Ok(is_error: true)`、provider 级失败走
-    /// `Err`）：这是对约定的服从，不是「适配器都这么干」。本文件今天只用得到 provider 级
-    /// 那一条与正常那一条——`is_error: true` 那一支的处置在 Task 6（见 `run_tool_call`
-    /// 的文档「今天没做完的那一格」）。
+    /// `Err`）：这是对约定的服从，不是「适配器都这么干」。三个 `Outcome` 各代表其中一条
+    /// 通道，今天三条都至少有一条用例在用。
+    ///
+    /// （本段先前写「本文件今天只用得到 provider 级那一条与正常那一条——`is_error: true`
+    /// 那一支的处置在 Task 6」：**那句当时是真的**，Task 6 落地 `ToolReportedError` 之后
+    /// 不再成立。来历留此，免得后来者以为 `ReportsFailure` 是新加的形状。）
     async fn invoke(
         &self,
         call: AuthorizedToolInvocation<'_>,
@@ -140,6 +149,10 @@ impl ToolProvider for RecordingTool {
             Outcome::ProviderFailure => {
                 Err(ProviderError::Transport("适配器自己没跑成".to_owned()))
             }
+            Outcome::ReportsFailure => Ok(ToolResult {
+                output: call.input().clone(),
+                is_error: true,
+            }),
         }
     }
 
@@ -640,6 +653,106 @@ fn each_effect_row_records_its_own_verdict() {
     );
 }
 
+/// **`authorization` 记的是这条效应自己那次裁决**（设计 §7.2 与 §14 第 6 条的一处刻意分岔）。
+///
+/// 命令路径填**集成那次裁决**（上下文里的 `effect_type` 缺省，整个命令只裁一次）；工具调用
+/// **没有集成裁决这一回事**，故填 [`mint_declared_effects`] 成对返回的后一项——两条路径共用
+/// 同一个编码函数（`authorization_field`），差别只在传进去的 `Decision` 是哪一个。
+///
+/// # 这一读怎么把两者分开
+///
+/// 库里放一条**只对 `charge` 成立**的 `RequireApproval`（第 2 级，`require_approval_for`），
+/// 再放一条恒真的第 5 级 `Allow`（`allow_everything`）：
+///
+/// - **集成那次裁决**的上下文 `effect_type` 缺省 ⇒ 那条按类型限定的规则**不匹配** ⇒ 第 5 级
+///   那条 `Allow` 夺冠 ⇒ `allow`；
+/// - **这条效应自己那次裁决**带上 `effect_type=charge` ⇒ 它匹配、且与内建的第 2 级 `Allow`
+///   同层更严 ⇒ `require_approval`。
+///
+/// 两者在 `authorization` 上给出**不同的串**，故这一条读能分辨它们。
+///
+/// # 第二跑钉的是 `approve=` 那一段（**两侧都要钉**）
+///
+/// 第一跑只覆盖 `--approve` 已给出：它杀得掉「`approve=` 写成常量 `false`」，**杀不掉**
+/// 「写成常量 `true`」（那一枚在第一跑上是**等价变异体**）。第二跑取 `--approve` 未给出
+/// 的放行调用（`deploy` 那条只有第 5 级 `Allow` 匹配 ⇒ 裁决 `allow`、照样铸造），
+/// 于是两跑合起来把这一段的两个取值都钉住。
+/// **第二跑对「自己那次 vs 集成那次」无区分力**（无 `--approve` 时两次裁决都是 `allow`）
+/// ——它只钉 `approve=` 那一段，别把它读成第二个证据。
+///
+/// # 两跑各用一个夹具（不是同一个）
+///
+/// 强制点 (1) 比的是**出示集与登记项的声明表**：一个登记项若同时声明 `charge` 与 `deploy`，
+/// 只声明 `--effect charge:c1` 的那一跑会以 [`CapabilityError::MissingCapability`]
+/// （缺 `Environment(Deploy)`）被拒——它走不到第 5 步，也就没有 `authorization` 可读
+/// （实测：初稿正是用一个夹具，红在 `.expect("charge 那条铸得出")` 上）。
+/// 故每一跑用只声明**它自己那一枚**的登记项。
+///
+/// # 与 [`each_effect_row_records_its_own_verdict`] 的重叠（据实写明）
+///
+/// 就「填的是自己那次裁决、不是集成那次」这一点，两处**是同一枚变异体的照片**（把填进去的
+/// `Decision` 换成 `arbitrate(&policies, &policy_context(args.approve))`，两处一起红）。
+/// 本条**独有的内容**是第二跑那一半——`approve=` 写成常量 `true` 的变异体只有它拍得到。
+///
+/// **变异体**（三枚，都编得过、都实测过）：① 第二个实参换成集成那次裁决 ⇒ 第一跑红
+/// （`each_effect_row_records_its_own_verdict` 同时红）；② 第一个实参写成常量 `false`
+/// ⇒ 第一跑红（那一处也同时红）；③ 写成常量 `true` ⇒ **只有第二跑红**，其余用例全绿
+/// ——这一枚就是第二跑存在的理由。
+#[test]
+fn the_authorization_field_records_this_effect_own_decision() {
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    // 第一跑：只声明 charge，`--approve` 已给出，那条按类型限定的规则命中它自己那次裁决。
+    let charge_fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    charge_fixture.allow_everything();
+    charge_fixture.require_approval_for(EffectType::Charge);
+
+    let mut args = allowed_charge_call(&charge_fixture);
+    args.approve = true;
+    charge_fixture
+        .run(&registry, &args)
+        .expect("charge 那条铸得出");
+
+    assert_eq!(
+        charge_fixture
+            .effect_authorization("2:i1:charge:c1")
+            .as_deref(),
+        Some("approve=true;policy=require_approval"),
+        "填的是这条效应自己那次裁决（上下文带 effect_type=charge）——\n\
+         填成集成那次裁决（effect_type 缺省 ⇒ 那条规则不匹配 ⇒ allow）的实现红在这一行"
+    );
+
+    // 第二跑：只声明 deploy、`--approve` 未给出，钉 `approve=` 那一段的另一侧。
+    let deploy_fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Deploy)],
+        Some(EffectType::Deploy),
+    );
+    deploy_fixture.allow_everything();
+
+    let mut args = deploy_fixture.args();
+    args.effects = vec![spec(EffectType::Deploy, "d1")];
+    args.intent = Some(IntentId::new("i1"));
+    assert!(!args.approve, "第二跑走的是「无 --approve」那一格");
+    deploy_fixture
+        .run(&registry, &args)
+        .expect("deploy 那条在恒真 Allow 下铸得出");
+
+    assert_eq!(
+        deploy_fixture
+            .effect_authorization("2:i1:deploy:d1")
+            .as_deref(),
+        Some("approve=false;policy=allow"),
+        "`approve=` 那一段记的是 --approve 给没给：写成常量 true 的实现红在这一行\n\
+         （常量 false 在上一跑就红了，故两个取值都被钉住）"
+    );
+}
+
 /// **终态那次的 `updated_at` 是「推进那一刻」，不是步骤 4 取的那个 `now`。**
 ///
 /// 这是 F Task 3 修复轮 1 把 `finish_declared_effects` 两条路径合并之后，**工具路径唯一被改动的
@@ -709,6 +822,71 @@ fn a_provider_failure_is_carried_through() {
         Some(EffectState::Failed),
         "那一跳失败时各效应记 FAILED（与命令路径「机制没拿到」的处置一致）"
     );
+}
+
+/// P-11：**工具自报失败**（`Ok(ToolResult { is_error: true, .. })`）⇒ 各效应记 `FAILED`、
+/// 报 [`TaskError::ToolReportedError`]，且 `tool` 就是 `--tool` 给的那个 id。
+///
+/// # 它与 P-10 是两件事（设计 §8）
+///
+/// 适配器**没跑成**（`Err(ProviderError)`）报 [`TaskError::ToolCall`]（P-10 的照片）；
+/// 跑成了但**结果是错误**报本变体。C 设计 §7.1 的三分法把两者放在**不同的通道**上
+/// （`Err` vs `Ok(is_error: true)`），故不得合并成一个变体。
+///
+/// # 两条断言各挡一枚变异体，且各红在自己那一行（两枚都实测过）
+///
+/// 断言次序是刻意的（**终态排在变体之前**）：
+///
+/// - **终态断言**（读回 `effect.state`）挡的是「把 `is_error` 当成功」——变异体把那一支的
+///   终态改成恒 `Committed`（**编得过**）。实测：红在本用例**读回 `effect.state` 的那条
+///   断言**上，其余 20 条用例全绿（本文件不写裸行号：所数的语料含本文件自己）。
+///   **它不吞错误**——那一支照样返回 `ToolReportedError`，故**变体断言单独挡不住它**，
+///   红的是「先执行到」的那一条。
+/// - **变体断言**挡的是「把它当 `ToolCallError` 包装」（设计 §8 点名的错误实现）。实测：
+///   那一支照样记 `FAILED`（第一条断言过），红在第二条断言上，其余 20 条全绿。
+///
+/// **两条缺一不可**（这里是构造性论据，不是实测）：只有终态断言时，一个「记 `FAILED`
+/// 但把错误吞掉、返回 `Ok(())`」的实现全绿；只有变体断言时，一个「记 `COMMITTED` 但返回
+/// 本变体」的实现全绿。第二枚变异体（包装成 `ToolCall`）正是设计 §8 那条「不得合并」的照片。
+///
+/// # 拍不到的那半边（据实写明，**不是**「已覆盖」）
+///
+/// 设计 §9 给 P-11 的断言还有「`output` 仍打到 stdout」。**这半边本用例拍不到**：
+/// (a) `println!` 的输出被 libtest 捕获、(b) `run_tool_call` 不把那个值交出来——故没有
+/// 任何一个从 `run_tool_call` 出来的可观察量承载它。**不为此造夹具**（把 stdout 换成
+/// 可注入的 writer 是设计里没有的位置），据实记入计划的 `## 遗留`。
+///
+/// **说准原因**：不是「库级用例走不到那一跳」——那句是设计原稿的旧说法，**已于
+/// 2026-10-07 作废**（设计 §9 的 P-11 行有订正）；打印在 lib 的 `run_tool_call` 里，
+/// 故**本用例确实执行到那一句**，拍不到只因上面 (a)(b) 两条。
+#[test]
+fn a_tool_that_reports_its_own_failure_marks_the_effects_failed() {
+    let fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::ReportsFailure));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    let outcome = fixture.run(&registry, &allowed_charge_call(&fixture));
+
+    assert_eq!(
+        fixture.effect_state("2:i1:charge:c1"),
+        Some(EffectState::Failed),
+        "自报失败 ⇒ 各效应记 FAILED——把 is_error 当成功写 COMMITTED 的实现红在这一行"
+    );
+
+    match outcome {
+        Err(TaskError::ToolReportedError { tool }) => {
+            assert_eq!(tool, ToolId::new("t1"), "报的应是 --tool 给的那个 id");
+        }
+        other => panic!(
+            "应报 ToolReportedError{{t1}}，实际 {other:?}\n\
+             （把它当 ToolCallError 包装的实现红在这里：is_error 不是 provider 失败）"
+        ),
+    }
 }
 
 /// P-1：**铸不出能力 ⇒ 那一跳不发生，而且库上什么都没落下**（设计 §3.4 的「拒时零调用」）。

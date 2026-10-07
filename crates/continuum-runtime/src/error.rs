@@ -13,8 +13,15 @@
 //! 设计 §8 的失败面表），它们是**包装**而不是新造的判断：内层的错误类型各有唯一的产生方
 //! （`continuum-capability` 的强制点 (1)、`continuum-provider` 的唯一调用入口），
 //! 本层只把它们带出去。两个 `#[from]` 目标都在 `Cargo.toml` 的既有依赖里。
+//!
+//! **F 的 Task 6 加了第三个变体**（[`TaskError::ToolReportedError`]）：它属于设计 §8
+//! 「新变体」判据里的**另一类**——不是包装，而是**本路径独有的失败**（工具自报失败），
+//! 没有内层错误可带。除它之外本 task 不加任何变体：尤其不为「没有适配器」另立一个
+//! （那是 [`ToolCallError::Unregistered`]，包装而不另起词汇），也不加「裁决为 `Deny`」
+//! 这类重复 [`crate::tool_call::mints`] 既有判断的变体。
 
 use continuum_capability::CapabilityError;
+use continuum_core::tool::ToolId;
 use continuum_persist::PersistError;
 use continuum_provider::ToolCallError;
 use continuum_sandbox::SandboxError;
@@ -120,4 +127,21 @@ pub enum TaskError {
     /// 「没有适配器」之类的词汇（同一件事两个变体正是本设计在讲的同一类毛病）。
     #[error("工具调用失败：{0}")]
     ToolCall(#[from] ToolCallError),
+    /// 工具跑起来了、但**自报失败**（`ToolResult.is_error`）。
+    ///
+    /// 与 [`TaskError::ToolCall`] 是两件事：那一个是「provider 没跑成」（传输 / 协议 /
+    /// 没有适配器），本变体是「跑成了，结果是错误」。按 C 设计 §7.1 的三分法，两者
+    /// 走**不同的通道**（`Ok(is_error: true)` vs `Err`），故不得合并。
+    ///
+    /// `tool` 是 `--tool` 给的那个 id——本变体是**本路径独有**的失败（设计 §8 的
+    /// 「新变体」判据），它不包装任何内层错误：适配器已经跑成功了，没有内层错误可带。
+    ///
+    /// **只有工具调用路径会产生它**：命令路径跑的是子进程，退出码非 0 由
+    /// [`TaskError::CommandFailed`] 承载，没有「工具自报失败」这一回事。
+    ///
+    /// 照片：`tests/tool_call.rs` 的
+    /// `a_tool_that_reports_its_own_failure_marks_the_effects_failed`（终态记 `FAILED`
+    /// 与变体两件事各一枚变异体，见那条用例的文档）。
+    #[error("工具 {} 自报失败", tool.as_str())]
+    ToolReportedError { tool: ToolId },
 }

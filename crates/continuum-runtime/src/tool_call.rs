@@ -348,15 +348,28 @@ pub fn mint_declared_effects(
 ///    时的处置一致），再把 [`TaskError::ToolCall`] 报出去。
 /// 7. **终态与 stdout**：按 `ToolResult.is_error` 写 `COMMITTED` / `FAILED`；**无论
 ///    `is_error` 为何，先把 `output` 以 JSON 一行打到 stdout**（设计 §3.3：工具调用
-///    **没有子进程**，stdout 是调用方仅有的通道）。
+///    **没有子进程**，stdout 是调用方仅有的通道）。`is_error == true` 时打完再返回
+///    [`TaskError::ToolReportedError`]（Task 6；那一支的细节见本函数下面那一节）。
 ///
-/// # 今天没做完的那一格（据实写明，不是「没写」）
+/// # `is_error == true` 那一支（Task 6 落地）
 ///
-/// `is_error == true` 那一支**只写终态、只打印**，**不返回 `Err`**——它对应的
-/// [`TaskError`] 变体（`ToolReportedError`）按计划在 **Task 6** 落地。故今天一条
-/// 自报失败的调用以退出码 0 结束，而它的 `effect` 行是 `FAILED`。**这不是漏接线**：
-/// 计划把那一支整个留给 Task 6，本 task 不立那个词汇（先立一个只在一处可达的变体，
-/// 正是本项目一贯拒的形状）。
+/// 工具跑起来了、但**自报失败**时：各效应记 `FAILED`（与 `Err` 那一支同一条终态判定）、
+/// `output` 照样先打印、然后返回 [`TaskError::ToolReportedError`]（带 `--tool` 的那个 id）。
+/// **它不包成 [`TaskError::ToolCall`]**——C 设计 §7.1 的三分法把「适配器没跑成」（`Err`）
+/// 与「跑成了、结果是错误」（`Ok(is_error: true)`）放在两条通道上，合并即抹掉这个区别。
+///
+/// **本段先前写的是「这一支只写终态、只打印，不返回 `Err`——变体在 Task 6 落地」**：
+/// 那句在 Task 6 之前是真的，现在已被上面这段取代。来历留此，免得后来者照旧句以为
+/// 自报失败的调用今天仍以退出码 0 结束（它今天以 `Err` 结束）。
+///
+/// # 打印与终态落库的先后
+///
+/// **先打印 `output`，再落终态，再返回变体**（计划 Task 6 第 3 步的次序）。两件事都得
+/// 赶在 `result` 被消费之前做完，而打印只对 `Ok` 那一支有意义、终态落库两支都有：
+/// 故打印写在终态那个 `match` 的 `Ok` 臂里，**两个 `Ok` 分支共用同一句**，`Err` 那一支
+/// 直接取 `Failed`。**落库不能挪到 `result?` 之后**——`?` 在 `Err` 那一支就早退了，
+/// `FAILED` 会不落（P-10 的终态断言即红）。打印在前的后果只有一处：终态那次写库失败时，
+/// 调用方仍拿得到工具的输出。
 ///
 /// # 运行时：当前线程，不 `enable_all`
 ///
@@ -434,21 +447,44 @@ pub fn run_tool_call(
     // 调用上。**这不是假想**：修复轮 1 ③ 的第一次合并正是无条件求值，被 P-9 / P-17 两条零效应
     // 用例当场抓到（`panicked at …: 有 --effect 必有 --intent`）。`finish_declared_effects` 自己
     // 也有一次早退，但**早退救不了实参求值**。
+    //
+    // **打印排在终态落库之前**（计划 Task 6 第 3 步的次序）。两件都得赶在 `result` 被消费
+    // 之前做完，但约束不同：打印取的是 `Ok` 里那个 `ToolResult`（`Err` 那一支没有可打的
+    // 东西），而终态落库**不能**挪到 `result?` 之后——`?` 会在 `Err` 那一支早退，`FAILED`
+    // 就不落了（P-10 的终态断言即红）。故打印写在这一支里、由两个 `Ok` 分支共用**同一句**。
+    //
+    // 打印在前的可观察后果只有一处，而那正是设计 §3.3 的理由所在：终态那次写库若失败，
+    // 调用方**仍拿得到**工具的输出（工具调用没有子进程，stdout 是它仅有的那条通道）。
     let terminal = match &result {
-        Ok(tool_result) if tool_result.is_error => EffectState::Failed,
-        Ok(_) => EffectState::Committed,
+        Ok(tool_result) => {
+            // `Value` 的 JSON 是一行紧凑文本（`Display` 即 `serde_json::to_string`）；
+            // 无论 `is_error` 为何都打印——这是调用方仅有的那条通道（设计 §3.3）。
+            println!("{}", tool_result.output);
+            if tool_result.is_error {
+                EffectState::Failed
+            } else {
+                EffectState::Committed
+            }
+        }
         Err(_) => EffectState::Failed,
     };
     if !args.effects.is_empty() {
         finish_declared_effects(db, declared_intent(args), &args.effects, terminal)?;
     }
 
-    let tool_result = result?;
-
-    // `Value` 的 JSON 是一行紧凑文本（`Display` 即 `serde_json::to_string`）；
-    // 无论 `is_error` 为何都打印——这是调用方仅有的那条通道（设计 §3.3）。
-    println!("{}", tool_result.output);
-    Ok(())
+    // 自报失败：终态落库之后报 [`TaskError::ToolReportedError`]，带的 `tool` 是 `--tool`
+    // 给的那个 id。
+    //
+    // **`is_error` 不是 provider 失败**（C 设计 §7.1 的三分法：`Err` 与
+    // `Ok(is_error: true)` 是两条通道），故这里**不能**包成 [`TaskError::ToolCall`]，
+    // 也不另造一个重复既有判断的变体——报本路径独有的那一枚。
+    match result {
+        Ok(tool_result) if tool_result.is_error => Err(TaskError::ToolReportedError {
+            tool: args.tool.clone(),
+        }),
+        Ok(_) => Ok(()),
+        Err(error) => Err(TaskError::ToolCall(error)),
+    }
 }
 
 /// 步骤 6/7 用的终态写入（**命令路径第 6 步与工具调用路径第 7 步共用**）。
