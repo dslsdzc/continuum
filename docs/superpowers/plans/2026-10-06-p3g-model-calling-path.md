@@ -527,7 +527,13 @@ git commit -m "test(runtime): 假模型适配器夹具（C 侧那份的第二份
   ——**G 不在这一层做任何二次裁剪**（设计 §4.4 第 2 条：只过滤 `Unavailable` 是 `rank` 的事，
   `Degraded` 与 `Healthy` 之间没有判据）。
   **两侧对钉**：改配 `Degraded` → 快照里是 `Degraded`（**不是被丢掉、也不是被升格成 `Healthy`**）。
-  **红的条件（档位：放宽）**：在快照里就把 `Unavailable` 滤掉（丢掉该候选）→ 这条与上一条同时红。
+  **红的条件（档位：收紧）**：在快照里就把 `Unavailable` 滤掉（丢掉该候选）→ 这条与上一条同时红。
+  > **订正（2026-10-07，G Task 6 评审发现两处标签不自洽，协调者裁定）**：本行初稿标的是**「放宽」**。
+  > **它与上一条（`the_snapshot_is_as_long_as_the_candidate_set`，标「收紧」）做的是同一类事**——
+  > 两条的变异体都是「**加一条过滤、丢条目**」（一个是「只对 `Healthy` 的候选给条目」，
+  > 一个是「把 `Unavailable` 滤掉」），**却一个标收紧一个标放宽**。
+  > 按本仓口径（**加过滤 ＝ 收紧；去掉一个过滤的效果 ＝ 放宽**——后者的实例见 E 那边标「放宽」的
+  > 「滤掉之后若为空就退回未过滤的集合」），**两枚都是「收紧」**。**故本行改为「收紧」。**
 
 **一条刻意不写的用例**：探活**并发与否**。设计 §3.3 明写「是否并发探活**不影响可观察结果**」
 （`rank` 只按 id 查条目，对次序无判据），故它是实现选择、**没有照片**——本计划不规定，
@@ -772,8 +778,15 @@ git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照�
     （`only_the_six_routable_states_pass_the_gate`）；G 只钉**与 §3.2 相异的那一格**（`stale`），
     **不重跑十态**（唯一入口原则，设计 §11 末的刻意不重复 (a)）。
   - `a_model_with_no_adapter_is_not_a_candidate`：登记 + 画像 + 过闸门，但注册表里没有它 → 不进。
-    **红的条件（档位：放宽）**：把 `Err(RegistryError::NotFound { .. })` 那一臂改成 `?`（让它向上传播）→
-    用例断言的是「`Ok` 且候选集里没有它、其余仍在」→ 红。
+    **红的条件（订正 2026-10-07，G Task 6 评审实测）**：
+    - **本行初稿给的那一枚编不过**——「把 `Err(RegistryError::NotFound { .. })` 那一臂改成 `?`」
+      报 **`error[E0277]`**：**`From<RegistryError>` 没有为 `ModelCallError` 实现**，故 `?` 用不了。
+    - **改用「收紧」档**（计划原写「放宽」也是错的）：让那一臂**对「无适配器」直接返回一个 `Err`**
+      ⇒ 用例断言的是「`Ok` 且候选集里没有它、其余仍在」→ 红。**实测红。**
+    - **而「放宽」那一档是写得出来的，只是当时是等价变异体**：评审写的 `T64-relax`
+      （**借用上一枚候选的句柄**）**编得过、全量门下 112 ok / 0 FAILED**——成因是
+      `list_registered` 的 **`ORDER BY id ASC`** 让夹具里无适配器的 `m-lonely` 排在前面。
+      **故「写不出来」与「写出来是等价的」是两条结论，不要混。**
 - 「无适配器即不是候选」**两侧对钉**（设计 §3.2 的丢弃规则）：
   - 向一：只在 D 的表里、注册表里没有 → **不进候选集**；**若它是唯一候选 → 整批返回
     `Err(ModelCallError::Routing(RoutingError::NoEligibleCandidate))`**（断言是哪一枚）。
@@ -784,14 +797,29 @@ git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照�
   假适配器的 `list_models()` 返回一个**不在 D 的表里**的 id；断言**候选集的 id 集合 ⊆
   `list_registered(tx)` 的 id 集合**，且**候选集 id 两两不同**（用计数断言，不用「看起来没有」）。
   **这一条同时是 `DuplicateModelCandidate` 在 G 路径上不可达的照片**（`id` 是 `model_registry` 的主键列）。
-  **红的条件（档位：放宽）**：把候选集的 id 来源从 `list_registered` 换成适配器的 `list_models()` →
-  那个多出来的 id 出现在候选集里，红。
+  **红的条件（订正 2026-10-07，G Task 6 评审实测；本行初稿给的那一枚编不过）**：
+  - **本行初稿**：「把候选集的 id 来源从 `list_registered` 换成适配器的 `list_models()`」
+    ⇒ **编不过**：`error[E0728]: await is only allowed inside async functions and blocks`
+    （`ModelProvider::list_models` 是 **async**，而 `plan_candidates` 是**同步**的）。
+  - **本条的两条结构断言里，「两两不同」那一半写得出来**：评审写的 `T66-distinctness`
+    （**把 `list_registered` 的结果复制一份**）**在全量门下红 7 条**，**含本条**。
+    **「`⊆` 那一半没有可写的变异体」才是真的**——实读：`ModelProfile::try_new` 是 `pub(crate)`、
+    `model_profile.id REFERENCES model_registry(id)`、`PRAGMA foreign_keys=ON`、注册表无枚举入口，
+    **故表外的 id 进不来**（**这是推理，不是穷举**，评审已据实这样标注）。
+  - **另据实记一条覆盖缺口（评审 I1）**：**本条在「候选集恒空」的实现下整条绿**——
+    三条断言在空集上**全空真**，`.expect` 拿到的是 `Ok(vec![])`。**修复轮已给它加非空锚。**
 - `an_empty_candidate_set_is_no_eligible_candidate`：**两个来路各一条**——
   (a) 一个适配器都没登记（或一个模型都没登记）；(b) 全部被闸门挡下。
   **各断言是哪一枚 `Err`**（`ModelCallError::Routing(RoutingError::NoEligibleCandidate)`），
   **且断言 `rank` 一次都没被调用**（用一个会 panic 的 `RankingPolicy` 作证：它若被调到，用例以 panic 失败）。
-  **后一半是本条唯一的承重部分**：只断 `Err` 的话，一个「装作没候选、其实调了 rank」的实现会全绿。
-  **红的条件（档位：移除）**：把空判定的短路删掉（照常调 `rank`）→ 那条 panic 策略被调到，红。
+  **后一半（「`rank` 一次都没被调用」）在本 task 造不出来（订正 2026-10-07，G Task 6 评审实测）**：
+  **`plan_candidates` 的参数表里没有 `&dyn RankingPolicy`**（实读 `src/model_call.rs` 的签名）——
+  **这是类型上做不到，不是有规则在挡**。**故本行初稿称它是「本条唯一的承重部分」是派错了地方。**
+  > **协调者裁定（2026-10-07）：这一半落到 Task 11**（标题正是「**可达性与射程边界**」，
+  > 且它硬依赖 Task 7，是本计划里唯一能端到端看到 `rank` 被不被调的地方）。
+  > **Task 7 不做**：`select` 永远收不到空 `Vec`——空集在 `plan_candidates` 就短路了。
+  > **全计划里这一句只在本处出现过一次**，没有第二落点——**这正是它被派错却没被发现的原因。**
+  **红的那一半本 task 仍留**：**红的条件（档位：移除）**：把空判定的短路删掉（照常往下走）→ 红。
 - `a_storage_failure_is_reported_as_storage_and_leaves_nothing_behind`：**失败路径**——
   在**一个不带 `p3d_model_migrations()` 的库**上跑 `plan_candidates`（`list_registered` 必然抛真实的库错误，
   造法照 `crates/continuum-workspace/src/gate.rs:2514-2536` 的三行：`Db::open_with(&path, Vec::new())`）。
@@ -1233,6 +1261,21 @@ git commit -m "test(runtime): 不调 usage / list_models / describe_model 的否
 
 - [ ] **Step 1: 写用例**
 
+- **`rank_is_never_called_when_no_candidate_survives`**（**订正 2026-10-07 新增，协调者裁定**）：
+  **「`rank` 一次都没被调用」的照片落在这里**——它原在 Task 6 的
+  `an_empty_candidate_set_is_no_eligible_candidate` 一条里，**而那里造不出来**
+  （`plan_candidates` 的参数表没有 `&dyn RankingPolicy`；**类型上做不到，不是有规则在挡**）。
+  本 task 是本计划里**唯一能端到端看到 `rank` 被不被调**的地方（硬依赖 Task 7），
+  **且标题正是「可达性与射程边界」**。
+  **构造**：用**一个会 panic 的 `RankingPolicy` 作证**——让它成为走到 `select` 时的实参，
+  再让候选集**一个都不剩**（两个来路各一条：一个适配器都没登记；或全部被闸门挡下），
+  于是流程在 `plan_candidates` 就短路、**根本走不到 `select`**。**它若被调到，用例以 panic 失败。**
+  **红的条件（档位：移除）**：把 `plan_candidates` 的空判定短路删掉（让它照常返回空集、
+  一路走到 `select`）→ 那条 panic 策略被调到，红。
+  **这一条为什么必须存在**：只断 `Err` 的话，**一个「装作没候选、其实调了 rank」的实现会全绿**。
+  **它与 Task 6 那一侧的分工写明**：Task 6 只留「报哪一枚 `Err`」，
+  **而 Task 6 那条用例本身还有一个覆盖缺口**（评审 I1：**三条断言在空集上全空真**，
+  一个「候选集恒空」的实现让它整条绿）——**那一侧由修复轮加非空锚**，与本条不是同一件事。
 - `the_path_writes_nothing_to_the_database`（设计 §9，**否定式照片**）：
   跑通**一条成功路径与一条失败路径**，断言 `events` / `audit_log` / `node_attempt` /
   `model_registry` / `model_profile` 五张表的行数**逐表不变**。
