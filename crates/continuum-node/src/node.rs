@@ -150,7 +150,7 @@ impl ComputeNode {
     ///
     /// - **「E 内部零读取」在 Task 6 之后仍然成立**（`src/` 四个模块里没有一处读它），
     ///   但它的**观察对象多了一个**：`tests/placement.rs` 里那份按标签数排序的策略
-    ///   （`ByCapabilityCount`）真的读 `capabilities()`——**这是本方法第一次有生产形状的消费者**
+    ///   （`ByCapabilityCount`）真的读 `capabilities()`——**这是本方法第一个真的读它的消费者**
     ///   （设计 §5.5 的「策略可替换」那一格就是它的照片）。
     /// - **`tests/node.rs` 里读它的那条断言仍然只是「搬运」那一面的照片**
     ///   （`the_six_accessors_return_what_new_was_given` 的 `capabilities` 那一行）：
