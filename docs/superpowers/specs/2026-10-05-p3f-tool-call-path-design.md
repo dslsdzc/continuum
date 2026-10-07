@@ -278,8 +278,12 @@ lib 内的一处，不需要跨 crate 传递事务。
 **订正（2026-10-07）**：本句原写「**库级用例到不了那一跳（打印在 `tool_cmd` 的 bin 层）**、且
 `println!` 被测试框架捕获」。**「打印在 bin 层」是笔误**——**实测打印在 lib**：走的是
 `continuum_runtime::tool_call::run_tool_call` 的**终态一步**
-（`println!("{}", tool_result.output)`；2026-10-07 读数：`crates/continuum-runtime/src/tool_call.rs:450`；
-bin 的 `tool_cmd.rs` 里**没有任何** `println!`，它连 `ToolResult` 都拿不到）。**故「库级用例到不了
+（`println!("{}", tool_result.output)`；**定位按结构、不按行号**：**`crates/continuum-runtime/src/tool_call.rs`
+里整个 `src/` 唯一的那一处 `println!`**，判据是 `grep -rn 'println!' crates/continuum-runtime/src/`
+在该文件上**恰好命中一次**，且它就落在 `run_tool_call` 的终态一步；
+bin 的 `tool_cmd.rs` 里**没有任何** `println!`（实测 0 命中），它连 `ToolResult` 都拿不到）。
+**（订正 2026-10-07 晚：本句原写死 `tool_call.rs:450`；F Task 6 在该行上方加了 12 行后它成了 `:462`
+——行号引用会随**别人的下一次编辑**静默变假，故改为结构性定位。）** **故「库级用例到不了
 那一跳」这一半不成立**：库级用例的夹具适配器一登记，调用就走到终态那一步、那一句**会**被执行。
 **改后的理由（结论不变，仍是「拍不到」）**：拍不到靠**两条**，都与「打印在哪一层」无关——
 (a) `println!` 的输出**被 libtest 捕获**，用例里没有可断言的句柄；(b) `run_tool_call` 的返回类型是
