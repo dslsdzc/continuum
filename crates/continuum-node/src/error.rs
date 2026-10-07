@@ -1,12 +1,16 @@
 //! 本 crate 的错误类型。
 //!
-//! **本模块按类型分段落，不合并同族的错误**：本文件今天只有
-//! [`RulesError`]（Task 4），放置本身的错误（`PlacementError`）由 Task 5 追加入本模块。
-//! 两者的派生口径相同（`Debug` ＋ `thiserror::Error`，**不派生 `PartialEq`**）但各写一遍
-//! ——合并成一张大枚举会让「哪条路径能产生哪种错」在类型上消失，
-//! 而 `place` 的判据面（设计 §5.4 通道 (b) 之后）只应看到 `RulesError`。
+//! **本模块按类型分段落，不合并同族的错误**：[`RulesError`]（Task 4，
+//! [`PlacementRules::try_new`](crate::PlacementRules::try_new) 拒绝一张表的原因）与
+//! [`PlacementError`]（Task 5，[`place`](crate::place) 的失败路径）各写一遍。
+//! 两者的派生口径相同（`Debug` ＋ `thiserror::Error`，**不派生 `PartialEq`**）但**不合并**：
+//! 合并成一张大枚举会让「哪条路径能产生哪种错」在类型上消失——
+//! `RulesError` 的产生点是**构造期**（表还进不了 `place`），`PlacementError` 的产生点是**运行期**，
+//! 两者的操作数、消费方与判据面都不同。
 
 use continuum_artifact::PrivacyClass;
+
+use crate::node::ComputeNodeId;
 
 /// [`PlacementRules::try_new`](crate::PlacementRules::try_new) 拒绝一张表的原因。
 ///
@@ -39,4 +43,49 @@ pub enum RulesError {
     /// [`RulesError::MissingLevel`] 拒——**没有第三种**。
     #[error("放置表里 {level:?} 重复出现；每一档只允许一条")]
     DuplicateLevel { level: PrivacyClass },
+}
+
+/// [`place`](crate::place) 的失败路径。**只有它真的会产出的两枚**（设计 §5.8）。
+///
+/// **只派生 `Debug` 与 `thiserror::Error`，不派生 `PartialEq`**——与 [`RulesError`] 同口径：
+/// 用例一律 `matches!`／`match` 取出载荷再断言。
+///
+/// **`Debug` 在这里比在 [`RulesError`] 那里更硬**：本类型是 `place` 的 `Err` 侧，
+/// 而**每一条失败路径的用例**都写 `let err = place(…).unwrap_err();`——
+/// `Result::unwrap_err` 的签名是 `impl<T: Debug, E> Result<T, E>` 上的方法，
+/// 故 `E: Debug` 是**硬约束**，不是断言红时读值方便而已。
+/// （`T` 那一侧的 `Debug` 由 [`ComputeNode`](crate::ComputeNode) 提供。）
+///
+/// **三处「看起来该收但没有产生方」的不收，逐条**（设计 §5.8）：
+///
+/// - **不收「未归类的隐私等级」**：它在 [`PlacementRules::try_new`](crate::PlacementRules::try_new)
+///   就被拒成 [`RulesError::MissingLevel`]，而
+///   [`PlacementPolicy::rules`](crate::PlacementPolicy::rules) 交出的是一枚**已构造的**
+///   [`PlacementRules`](crate::PlacementRules)，故「缺档」这条路径**到不了 `place`**。
+/// - **不收 `Persist(...)`**：[`place`](crate::place) 是纯函数、签名里没有 `Tx`（设计 §5.2），
+///   产不出读库失败。
+/// - **不收「无候选模型」**：本设计的请求面里没有候选模型（§5.2 按裁定删去了那一格），
+///   故这一类失败在本层**没有操作数**。
+///
+/// [`NoPlaceableNode`](PlacementError::NoPlaceableNode) **不区分「因为隐私被滤掉」与
+/// 「本来就没节点」**：区分它需要把「哪几个节点因哪一条被滤掉」记成一个输出，
+/// 而 §243／§291 **没有要求放置输出一个理由**（设计 §5.8）。
+#[derive(Debug, thiserror::Error)]
+pub enum PlacementError {
+    /// 闸门过滤之后一个节点都不剩（**含 `nodes` 为空的情形**）。
+    ///
+    /// 两件事**刻意合并**成一枚：判据 §4.4 的照片因此必须写成**一对**
+    /// （`a_local_only_artifact_lands_only_on_a_trusted_personal_node` 与
+    /// `a_local_only_artifact_with_no_trusted_personal_node_is_unplaceable`）——
+    /// 单看任一条分不清是两种失败里的哪一种。
+    #[error("闸门过滤之后没有可放置的节点")]
+    NoPlaceableNode,
+
+    /// `nodes` 里同一个 [`ComputeNodeId`] 出现了两次。
+    ///
+    /// **它是「确定」这条断言的守门人**（设计 §5.9）：两条同 id 的节点无从定序，
+    /// `ComputeNodeId` 兜底档也就兜不住。故判它的一步落在 [`place`](crate::place) 的**最前面**，
+    /// 不是结尾的卫生检查。
+    #[error("节点集里 id {id:?} 出现了两次；两条同 id 的节点无从定序")]
+    DuplicateNode { id: ComputeNodeId },
 }

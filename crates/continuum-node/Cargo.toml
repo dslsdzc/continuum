@@ -12,10 +12,18 @@ continuum-artifact = { path = "../continuum-artifact" }
 # 本 crate 的使用点：`error.rs` 的 `PlacementError` / `RulesError` 派生 `thiserror::Error`。
 thiserror = { workspace = true }
 
-# `serde_json` 由 Task 5 登记——「边由用它的那个 task 登记」，不提前铺开（设计 §7.1 的清单要点）。
 [dev-dependencies]
 # Task 2 起的使用点：`tests/type_level.rs` 用编译失败样例钉住「crate 外写不出 `ComputeNode`
 # 的字段字面量」（设计 §3.5、§9）。与 continuum-model-registry 的用法同形。
 # **它是外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表只断言 workspace
 # 成员之间的边（设计 §7.3）。
 trybuild = { workspace = true }
+# Task 5 起的使用点：`tests/placement.rs` 的 `artifact()` 夹具要写
+# `Artifact.metadata` / `provenance` 两个 `serde_json::Value` 字段。
+#
+# **它是本 crate 的第一个 dev 依赖使用点**（登记＝「边由用它的那个 task 登记」，设计 §7.1）。
+# **不进 `dependency_direction.rs` 的 `ALLOWED`**：那张表逐对断言的是 **workspace 成员之间**的边
+# （设计 §7.3），`serde_json` 是外部 crate。
+# **但它会让 `Cargo.lock` 变化**（`continuum-node` 的依赖列表多一项），故提交时要按显式路径带上它。
+# **只在测试目标里用**：`src/` 里没有一行读它（设计 §5.2 给本 crate 定的边只有 `continuum-artifact` 一条）。
+serde_json = { workspace = true }

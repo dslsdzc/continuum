@@ -19,8 +19,13 @@
 //! 「覆盖全档／缺档即拒／重复即拒」三条判据。**本 task 是 `continuum-artifact`
 //! 这条边的第一个使用点**：Task 1 只在 `ALLOWED` 里登记了声明，
 //! `dependency_direction.rs` 的双向断言从本 task 起才对得上号。
-//! `place` 本身（硬闸门、`spec_floor`、排序）与 `PlacementError`
-//! 由 Task 5／Task 6 各自登记自己那几行。
+//! Task 5 补 §5.2–§5.3 的请求面与硬闸门 [`PlacementRequest`] / [`PlacementPolicy`] /
+//! [`BaselinePlacementPolicy`] / [`place`] 与运行期错误 [`PlacementError`]，
+//! 并以 `tests/placement.rs` 钉住「判据 §4.4 的正反面、放行侧、闸门不可被策略放宽、
+//! 四种 class × trust 组合、两条失败路径、空集两例、请求面反侧照片」。
+//! **`place` 今天只落步骤 1–3**（判重 → 过闸门 → 判空）；
+//! **步骤 4（排序）与兜底档由 Task 6 落**，故 `place` 今天**不读**
+//! [`PlacementPolicy::compare`]——那是刻意的拆分，不是终态。
 //!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-model-registry` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
@@ -40,7 +45,10 @@ pub mod node;
 pub mod placement;
 pub mod registry;
 
-pub use error::RulesError;
+pub use error::{PlacementError, RulesError};
 pub use node::{ComputeNode, ComputeNodeId, NodeClass, NodeTrust};
-pub use placement::{PlacementRules, TransferRule};
+pub use placement::{
+    place, BaselinePlacementPolicy, PlacementPolicy, PlacementRequest, PlacementRules,
+    TransferRule,
+};
 pub use registry::{NodeRegistry, NodeRegistryError};
