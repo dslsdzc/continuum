@@ -1122,17 +1122,28 @@ git commit -m "feat(runtime): 工具自报失败与 authorization 字段的分�
 - `an_unparsable_input_fails_at_parsing_time`（P-12 的端到端那一半）：`--input '{'` → 退出码非零、
   **stderr 的第一行**含 `--input`；**库未被创建**（`--db` 指向的路径不存在）。
   > **订正（2026-10-07，F Task 7 实测；原稿写的是「stderr 含 `--input`」，那句不成判据）**：
-  > `main` 在解析失败时**先打一行 `参数错误：<CliError>`、紧接着打整份 `cli::USAGE`**，而
-  > **`USAGE` 里逐字列出了** `--base` / `--sandbox` / `--input` / `--intent` / `--effect`
-  > （`crates/continuum-runtime/src/cli.rs` 的 `USAGE`）。故「stderr 含 `--input`」这句
-  > **对「解析器压根没校验 `--input`」的实现照样成立**——`USAGE` 替它把话说圆了。
-  > **实测（M3：吞掉 `--input` 的校验）**：**第一行**变成「工具调用失败…」，
-  > 而**整份 stderr 仍含 `--input`**。故判据取 **stderr 的第一行**。
+  > `main` 打 `cli::USAGE` **只在一个地方**——`cli::parse` 的 `Err` 臂（`crates/continuum-runtime/src/main.rs`
+  > 的 `参数错误：<CliError>` 那一行之后；其余各臂都只打一行），而 `USAGE` 里**逐字列出**了
+  > `--base` / `--sandbox` / `--input` / `--intent` / `--effect`（`src/cli.rs` 的 `USAGE`）。
+  > 故「stderr 含 `--input`」这句**对某类实现会白白成立**——**用法文本替被测实现把话说圆了**。
+  > **但要说清是哪一类实现，因为这里有两枚形态不同的变异体（本注初稿把它缝成了一句，那半句对第一枚是假的）**：
+  > - **M3（吞掉 `--input` 的校验，解析照旧成功）** ⇒ 走到 `tool_cmd`，stderr **只有一行**
+  >   「工具调用失败: …」（`main.rs` 的工具臂），**`--input` 出现 0 次、库文件已建出**。
+  >   **故原判据「stderr 含 `--input`」在 M3 下本来就会红**——这一类**不需要**加强。
+  > - **M3b（摘掉整个 `--input` 臂，解析失败于「未知选项：--input」）** ⇒ stderr **22 行**
+  >   （错误行 ＋ 整份 `USAGE`），**`--input` 出现 4 次**，而**库未被创建**。
+  >   **原判据在这一枚下绿、「库未被创建」也绿**——**真正承重的是本条加的那半句「含 `JSON`」**。
+  > **两枚各有一条加强在承重**，故本用例的两条加强各有对象、不是多余的；
+  > **要改的只是上面那句旁证**（它已被抄进三处：实现者报告、`p3f-minors.md` 的 D-7-1、
+  > 以及本计划先前那次提交——**三处都已订正**）。
   > **同一条订正适用于下面 `the_option_group_is_rejected_in_both_directions` 与
   > `the_task_only_options_are_unknown_here` 里的「出错行点名某选项」**——它们也是按第一行取的。
   > **由此得一条可搬用的判据**：**「输出里含有 X」不是判据，「输出的哪一段含有 X」才是**——
   > **凡有「先打错误、再打用法/帮助」的界面，帮助文本会把被测实现的话说圆**，
   > 故断言必须**限定到「只有真做了那件事才会出现」的那一段**。
+  > **而下面这条同样是判据**（这一次是我自己栽的）：**转述别人的实测句之前要自己量一遍**——
+  > 上面那半句假话，是我**照抄实现者的旁证**写进计划并提交的，**没有先跑一次**。
+  > **一句旁证写错了，它会被抄到所有下游**（本例三处）；**改的代价远大于量一次的代价。**
 - `the_option_group_is_rejected_in_both_directions`（P-13）：两向各一条端到端用例。
 - `the_task_only_options_are_unknown_here`（P-14）：`--base` / `--exec` / `--apply` / `--sandbox`
   **四条各一条**。
