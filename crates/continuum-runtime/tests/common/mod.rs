@@ -22,6 +22,17 @@
 //! 每个目标各编译一份，而**各目标只用得上其中一部分**。本仓要求 0 warning，故整模块关掉
 //! `dead_code`：否则「本目标用不到、模块里又没有别人引用」的夹具会在那一份编译里报出来。
 //!
+//! **据实记（修复轮 1 实测，2026-10-07）**：把下面那行 `#![allow(dead_code)]` 删掉、
+//! 跑 `cargo test -p continuum-runtime --test model_call --no-run`，`model_call` 那一份
+//! **恰好报 4 条**（`variant \`Fail\` is never constructed` 两条、
+//! `variants \`Fail\`, \`Never\`, and \`ReplyAfter\` are never constructed` 一条、
+//! `multiple methods are never used` 一条）；**allow 在位时一条都不报**
+//! （日志 `.tmp/t2-fix1-deadcode-without-allow.log`）。
+//!
+//! **这条实测的射程要写准**：它证明的是「**删掉 allow 之后**编译器会把这批零消费方列出来」，
+//! **不是「编译器总会替你列出零消费方」**——allow 在位时它一声不吭。
+//! 两者别混（订正的来历见报告 §5.2）。
+//!
 //! # 可配面里哪些今天还没有照片，各由谁消费
 //!
 //! `FakeModel` 的可配面是**一次做齐**的（计划 Task 2 Step 4：「逐项都要有，后续 task 依赖它们」），
@@ -70,8 +81,12 @@ impl Stream for OnceStream {
 
 /// 「要么交出这一个值、要么交出一枚错误」的可配面。
 ///
-/// `T` 要 `Clone`：夹具会被同一个用例调多次，每次都得交出一份**新的**值
-/// （`ProviderError` 是 `Clone` 的，故错误一侧不必额外处理）。
+/// **本类型不带 `T: Clone` 约束**（两枚变体都不需要它）——「`T` 得能克隆」是**用它的那几处
+/// 实现**提出来的：夹具会被同一个用例调多次，每次都得交出一份**新的**值，
+/// 故 `list_models` / `describe_model` / `usage` / `cancel` 的 `impl` 在函数体里调 `.clone()`
+/// （`ProviderError` 自己是 `Clone` 的，故错误一侧不必额外处理）。
+/// **订正（修复轮 1，2026-10-07）**：原句写的是「`T` 要 `Clone`」，读起来像类型上的约束；
+/// 约束实际落在那些 `impl` 里，类型本身没有。
 ///
 /// `ModelStream` **不在**其中：它装着装箱的 `Stream`，不 `Clone`，
 /// 故 `stream` 另有一枚形态 [`StreamOutcome`]。
@@ -284,9 +299,17 @@ impl FakeModel {
 
     /// `invoke` 收到过的请求，按收到的次序。
     ///
-    /// 它让「**适配器收到的是哪个模型的请求**」这件事可观测——`InvokeResponse` 里
-    /// **没有任何回执字段**指回输入，故那条断言只能由适配器自己抄下来、用例从观测端读回去
+    /// 它让「**适配器收到的是哪个模型的请求**」这件事可观测——**本夹具的 `InvokeResponse`
+    /// 不回显入参**（C 那份 `FakeModel` 的 `invoke` 交回的是 `InvokeResponse { model:
+    /// request.model, .. }`，实读 `crates/continuum-provider/tests/common/mod.rs:66`），
+    /// 故那条断言只能由适配器自己抄下来、用例从观测端读回去
     /// （与 C 的 `RecordingTool` 为「收到的授权是哪一枚」立记录的理由相同）。
+    ///
+    /// **订正（修复轮 1，2026-10-07）**：本行初稿写的是「`InvokeResponse` 里**没有任何回执字段**
+    /// 指回输入」，**那句话是假的**——`InvokeResponse` 有 `pub model: ModelId`
+    /// （`crates/continuum-core/src/model.rs:57-61`），C 那份夹具正是拿它当回执用的。
+    /// **错的只是这句来由；做法（独立可配、默认常数、不回显）不变**，Task 8 / 9 也真要用这条记录。
+    /// 错误说法的来历照留，免得后来者照着它再推一次。
     pub fn invoke_requests(&self) -> Vec<InvokeRequest> {
         self.invoke_requests.lock().unwrap().clone()
     }
