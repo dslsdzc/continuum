@@ -21,11 +21,14 @@
 //! 指的是后者，前者必须有一条合法登记项，否则它先以 `UnknownTool` 拒掉、走不到那一跳。
 
 use async_trait::async_trait;
-use continuum_capability::{CapabilityKind, Tool, ToolProfile, Trust, save_tool};
+use continuum_capability::{
+    CapabilityError, CapabilityKind, FsAction, GitAction, GithubAction, Tool, ToolProfile, Trust,
+    save_tool,
+};
 use continuum_core::ProviderError;
 use continuum_core::tool::{ToolId, ToolResult};
 use continuum_effect::{EffectState, EffectType, find_by_idempotency_key};
-use continuum_persist::{Db, Migration};
+use continuum_persist::{Db, Migration, PersistError};
 use continuum_policy::{Condition, Decision, Level, Policy, Scope, save_policy};
 use continuum_provider::ProviderRegistry;
 use continuum_provider::ToolCallError;
@@ -158,19 +161,36 @@ impl Fixture {
     ///
     /// `required` 是工具的**声明表**（强制点 (1) 比对的对象），`effect_class` 必须被它覆盖
     /// （`save_tool` 的登记期不变量）。多个 id 各写一条，用于「授权哪个工具」那条用例。
-    fn with_tools(ids: &[&str], required: Vec<CapabilityKind>, effect_class: Option<EffectType>) -> Self {
+    fn with_tools(
+        ids: &[&str],
+        required: Vec<CapabilityKind>,
+        effect_class: Option<EffectType>,
+    ) -> Self {
+        let rows: Vec<(&str, Vec<CapabilityKind>, Option<EffectType>)> = ids
+            .iter()
+            .map(|id| (*id, required.clone(), effect_class))
+            .collect();
+        Self::with_registrations(&rows)
+    }
+
+    /// 同上，但**每条登记项自带 id 与声明表**（`with_tools` 是「一张声明表给多个 id」的那一格）。
+    ///
+    /// 用在「六条登记项各声明一枚不同的 kind」那种用例上：那些行的声明表各不相同，
+    /// 用 `with_tools` 表达不出来。
+    fn with_registrations(rows: &[(&str, Vec<CapabilityKind>, Option<EffectType>)]) -> Self {
+        assert!(!rows.is_empty(), "夹具至少要有一条登记项");
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("continuum.db");
         let db = open_db(&db_path);
         let tx = db.begin().unwrap();
-        for id in ids {
+        for (id, required, effect_class) in rows {
             let tool = Tool::new(
                 ToolId::new(*id),
                 "1.0".to_owned(),
                 json!({"type": "object"}),
                 json!({"type": "object"}),
                 required.clone(),
-                effect_class,
+                *effect_class,
                 true,
             );
             save_tool(&tx, &ToolProfile::new(tool, None, None, Trust)).unwrap();
@@ -179,7 +199,7 @@ impl Fixture {
         Self {
             _dir: dir,
             db_path,
-            tool: ToolId::new(ids[0]),
+            tool: ToolId::new(rows[0].0),
         }
     }
 
@@ -271,6 +291,37 @@ impl Fixture {
         tx.commit().unwrap();
         times
     }
+
+    /// `effect` 表的**总行数**。
+    ///
+    /// 「一条都不许落下」这类断言只能读数行数：本文件其余访问器都按幂等键取某一条，
+    /// 那样读不出「别的行也没被写」。
+    fn effect_rows(&self) -> i64 {
+        self.count("SELECT COUNT(*) FROM effect")
+    }
+
+    /// `audit_log` 表的**总行数**。
+    fn audit_rows(&self) -> i64 {
+        self.count("SELECT COUNT(*) FROM audit_log")
+    }
+
+    /// `audit_log` 里 `kind` 列恰为 `"capability grants"` 的行数。
+    ///
+    /// 判据是**手写的字面量**，不是把 `AuditKind::CapabilityGrants` 转一圈——那样只证明
+    /// 枚举等于自己、钉不住落库编码（`crates/continuum-capability/tests/authorize.rs`
+    /// 的同名断言用同一条判据）。
+    fn capability_grants_rows(&self) -> i64 {
+        self.count("SELECT COUNT(*) FROM audit_log WHERE kind = 'capability grants'")
+    }
+
+    /// 一条 `SELECT COUNT(*)`。
+    fn count(&self, sql: &str) -> i64 {
+        let db = open_db(&self.db_path);
+        let tx = db.begin().unwrap();
+        let rows = tx.query(sql, &[]).unwrap();
+        tx.commit().unwrap();
+        int_of(&rows[0][0])
+    }
 }
 
 /// 本文件要用的迁移集合：`tool` / `policy` / `effect` 三张表 + 内建（`audit_log`）。
@@ -289,6 +340,40 @@ fn open_db(path: &Path) -> Db {
     let db = Db::open_with(path, migrations()).expect("打开数据库失败");
     db.migrate().expect("应用迁移失败");
     db
+}
+
+/// 绕过 [`save_tool`] 直接写一行：模拟**被写坏的表外取值**（照
+/// `crates/continuum-capability/tests/authorize.rs` 的同名函数）。
+///
+/// 只写坏 `required_capabilities` 一列——`load_tool` 解码它时必然失败，于是强制点 (1)
+/// 读登记项那一次往返报错。用裸 SQL 是因为 `save_tool` 会先过登记期不变量与编码，
+/// 那两条正是本用例要**绕过**的东西（要造的是「表里已经躺着一条坏的」）。
+fn insert_bad_capabilities(db_path: &Path, id: &str, raw: &str) {
+    // 列取值用 `continuum_persist::Value`（**写路径的那个编码类型**），不 import 它：
+    // 本文件的 `Value` 是 `serde_json::Value`（请求侧的输入），两者同名不同物。
+    let db = open_db(db_path);
+    let tx = db.begin().unwrap();
+    tx.execute(
+        "INSERT INTO tool
+           (id, version, input_schema, output_schema, required_capabilities,
+            effect_class, deterministic, cost, latency, trust)
+         VALUES (?1, '1', '{}', '{}', ?2, NULL, 0, NULL, NULL, '')",
+        &[
+            continuum_persist::Value::text(id),
+            continuum_persist::Value::text(raw),
+        ],
+    )
+    .unwrap();
+    tx.commit().unwrap();
+}
+
+/// 一列整数（本文件的 `SELECT COUNT(*)` 与 `crates/continuum-capability/tests/authorize.rs`
+/// 的 `int_of` 同形：列的类型不符即 panic，不猜）。
+fn int_of(v: &continuum_persist::Value) -> i64 {
+    match v {
+        continuum_persist::Value::Int(i) => *i,
+        other => panic!("列应为整数，实际 {other:?}"),
+    }
 }
 
 /// 一个只登记了 `ids` 的注册表。
@@ -577,4 +662,361 @@ fn a_provider_failure_is_carried_through() {
         Some(EffectState::Failed),
         "那一跳失败时各效应记 FAILED（与命令路径「机制没拿到」的处置一致）"
     );
+}
+
+/// P-1：**铸不出能力 ⇒ 那一跳不发生，而且库上什么都没落下**（设计 §3.4 的「拒时零调用」）。
+///
+/// 空策略表 + 无 `--approve` ⇒ 逐条效应那次裁决落进「无规则匹配默认 `Deny`」（设计 §5.3），
+/// `mints` 该格不铸造 ⇒ [`TaskError::EffectNotAuthorized`]（**复用既有变体**，本 task 不新立
+/// 词汇）。这是**第 3 步**的拒绝，排在强制点 (1)（第 4 步）**之前**。
+///
+/// # 为什么声明两条效应、且目标是 `c2` 在前
+///
+/// 「报**声明次序第一条**铸不出的」这句话要有照片就不能只声明一条：只声明一条时，
+/// 「报第一条」「报最后一条」「报目标字典序最小者」三种实现给出同一个答案。目标取 `c2` / `c1`
+/// 这个次序是**刻意的**——声明次序第一条（`c2`）既不是最后一条、也不是目标字典序最小者，
+/// 故这一条断言同时拦住后两种实现。对调次序那一半在 **lib 单元用例**
+/// `tool_call::tests::the_shared_minting_function_reports_the_first_unmintable_in_declaration_order`
+/// （那里两个方向各跑一次）。
+///
+/// # 断言次序是刻意的（它决定谁被谁挡住）
+///
+/// 共享的可观察面（零调用 / 零效应行 / 零审计）排在变体断言**之前**：变体一不成立即 panic，
+/// 排在它后面的断言同轮观测不到。前两条各有变异体在本测试体内独立拍到——零调用 ←
+/// 把强制点 (2) 的判定换成恒铸造（`mints` 恒 `true`）；零效应行 ← 把 `authorize` 那一跳挪到
+/// `tx.commit()` 之后。**本条对「挪后 / 换成放行」那两枚 `authorize` 变异体都是绿的**：
+/// 它在第 3 步就返回了，走不到强制点 (1)——这正是它与 P-3 / P-4 / P-5 / P-8 的区别。
+#[test]
+fn an_unmintable_effect_refuses_the_call_and_the_tool_is_never_invoked() {
+    let fixture = Fixture::with_registrations(&[(
+        "t1",
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    )]);
+    // **故意不放任何策略**：这就是「空策略表 ⇒ Deny」的那一半。
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    let mut args = fixture.args();
+    args.effects = vec![
+        spec(EffectType::Charge, "c2"),
+        spec(EffectType::Charge, "c1"),
+    ];
+    args.intent = Some(IntentId::new("i1"));
+    assert!(!args.approve, "本条走的是「无 --approve」那一格");
+
+    let outcome = fixture.run(&registry, &args);
+
+    assert_eq!(
+        adapter.calls(),
+        0,
+        "铸不出能力时那一跳不发生：夹具一次都不该被调到"
+    );
+    assert_eq!(
+        fixture.effect_rows(),
+        0,
+        "第 3 步拒在前：一条效应行都不许落下（`tx` 未提交，随作用域回滚）"
+    );
+    assert_eq!(
+        fixture.audit_rows(),
+        0,
+        "零效应行 ⇒ 零审计行（`record_planned` 与两次 `advance` 各写一条）"
+    );
+    assert_eq!(
+        fixture.capability_grants_rows(),
+        0,
+        "没走到强制点 (1) 的成功路径，`capability grants` 一条都不许有"
+    );
+
+    match outcome {
+        Err(TaskError::EffectNotAuthorized {
+            effect,
+            target,
+            decision,
+        }) => {
+            assert_eq!(effect, "charge", "报的是那条效应的类型");
+            assert_eq!(
+                target, "c2",
+                "报的是**声明次序第一条**（c2），不是最后一条（c1）、也不是目标字典序最小者"
+            );
+            assert_eq!(
+                decision, "禁止",
+                "空策略表 + 无 --approve ⇒ 无匹配默认 Deny"
+            );
+        }
+        other => panic!("应报 EffectNotAuthorized{{charge,c2}}，实际 {other:?}"),
+    }
+}
+
+/// P-3：**库里没有这个 id ⇒ `UnknownTool`**，且那一跳不发生、库上什么都没落下。
+///
+/// 登记项是**另一条**（`other`）：「表里有行、但没有被点名的这个 id」与「表是空的」是两件事，
+/// 本条钉的是前者（`load_tool` 对不存在的 id 返回 `Ok(None)`，`authorize` 不把它读成
+/// 「这个工具不需要任何能力」）。
+///
+/// **夹具适配器服务被点名的那个 id**：零调用这条断言才有判别力——若注册表也不认它，
+/// 零调用会以一个**无关的理由**成立（那会走到步骤 6 的 `Unregistered`），把强制点 (1)
+/// 这一格掩盖掉。
+///
+/// 调用带一条 `--effect`：不带的活，「零效应行」会因为循环为空而恒成立，那条断言就没有
+/// 判别力了（也就没照片）。
+#[test]
+fn an_unknown_tool_is_rejected() {
+    let fixture = Fixture::with_registrations(&[("other", Vec::new(), None)]);
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["nope"], Arc::clone(&adapter));
+
+    let mut args = allowed_charge_call(&fixture);
+    args.tool = ToolId::new("nope");
+
+    let outcome = fixture.run(&registry, &args);
+
+    assert_eq!(adapter.calls(), 0, "被拒的调用不许走到那一跳");
+    assert_eq!(
+        fixture.effect_rows(),
+        0,
+        "强制点 (1) 拒在第 5 步之前：效应行一条都不许落下"
+    );
+    assert_eq!(fixture.audit_rows(), 0, "零效应行 ⇒ 零审计行");
+    assert_eq!(
+        fixture.capability_grants_rows(),
+        0,
+        "`UnknownTool` 不得留下授权审计"
+    );
+
+    match outcome {
+        Err(TaskError::Capability(CapabilityError::UnknownTool { id })) => {
+            assert_eq!(id, ToolId::new("nope"), "报的应是 --tool 给的那个 id");
+        }
+        other => panic!("应报 Capability(UnknownTool{{nope}})，实际 {other:?}"),
+    }
+}
+
+/// P-4：**出示了工具没声明的能力 ⇒ `UndeclaredCapability`**（超范围同样不许）。
+///
+/// 登记项声明 `Payment(Charge)`，调用声明的是 `--effect deploy:d1`——铸出的
+/// `Environment(Deploy)` 那枚不在声明表里。第 4 步按「**先查出示集、再查声明集**」的次序拒
+/// （次序的由来与它的照片见 `continuum_capability::authorize` 的文档与
+/// `crates/continuum-capability/tests/authorize.rs`
+/// 的 `the_presented_set_is_checked_before_the_declared_set`）；本条钉的是这条次序在
+/// **本路径**上真的走到了，以及拒得早、拒得干净。
+#[test]
+fn a_presented_capability_the_tool_did_not_declare_is_rejected() {
+    let fixture = Fixture::with_registrations(&[(
+        "t1",
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    )]);
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    let mut args = fixture.args();
+    args.effects = vec![spec(EffectType::Deploy, "d1")];
+    args.intent = Some(IntentId::new("i1"));
+
+    let outcome = fixture.run(&registry, &args);
+
+    assert_eq!(adapter.calls(), 0, "被拒的调用不许走到那一跳");
+    assert_eq!(
+        fixture.effect_rows(),
+        0,
+        "拒在第 5 步之前：效应行一条都不许落下"
+    );
+    assert_eq!(fixture.audit_rows(), 0, "零效应行 ⇒ 零审计行");
+    assert_eq!(
+        fixture.capability_grants_rows(),
+        0,
+        "`UndeclaredCapability` 不得留下授权审计"
+    );
+
+    match outcome {
+        Err(TaskError::Capability(CapabilityError::UndeclaredCapability { kind })) => {
+            assert_eq!(
+                kind,
+                CapabilityKind::for_effect(EffectType::Deploy),
+                "报的应是出示集里那一枚（`--effect deploy:d1` 铸出的），不是声明表里那枚"
+            );
+        }
+        other => {
+            panic!("应报 Capability(UndeclaredCapability{{environment_deploy}})，实际 {other:?}")
+        }
+    }
+}
+
+/// P-5：**缺了声明的能力 ⇒ `MissingCapability`**（两向里的另一向）。
+///
+/// 登记项声明 `Payment(Charge) + Environment(Deploy)`，调用只声明 `--effect charge:c1`
+/// ⇒ 声明表里那枚 `Environment(Deploy)` 出示集里没有。报的是**声明表里第一枚缺的**。
+///
+/// `effect_class` 取 `Some(Charge)`：`save_tool` 的登记期不变量要求
+/// `required_capabilities` 含 `for_effect(Charge)`＝`Payment(Charge)`，本条满足它
+/// （多声明一枚 `Environment(Deploy)` 不违反该不变量：它是 `Some(t) ⇒ …` 的蕴含，不是双条件）。
+#[test]
+fn a_required_capability_that_is_missing_is_rejected() {
+    let fixture = Fixture::with_registrations(&[(
+        "t1",
+        vec![
+            CapabilityKind::for_effect(EffectType::Charge),
+            CapabilityKind::for_effect(EffectType::Deploy),
+        ],
+        Some(EffectType::Charge),
+    )]);
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    let outcome = fixture.run(&registry, &allowed_charge_call(&fixture));
+
+    assert_eq!(adapter.calls(), 0, "被拒的调用不许走到那一跳");
+    assert_eq!(
+        fixture.effect_rows(),
+        0,
+        "拒在第 5 步之前：效应行一条都不许落下"
+    );
+    assert_eq!(fixture.audit_rows(), 0, "零效应行 ⇒ 零审计行");
+    assert_eq!(
+        fixture.capability_grants_rows(),
+        0,
+        "`MissingCapability` 不得留下授权审计"
+    );
+
+    match outcome {
+        Err(TaskError::Capability(CapabilityError::MissingCapability { kind })) => {
+            assert_eq!(
+                kind,
+                CapabilityKind::for_effect(EffectType::Deploy),
+                "报的应是缺的那一枚（deploy），不是已出示的那一枚（charge）"
+            );
+        }
+        other => panic!("应报 Capability(MissingCapability{{environment_deploy}})，实际 {other:?}"),
+    }
+}
+
+/// P-8：**登记项本身读不出来 ⇒ 原样带出 `Persist`**，不吞成 `UnknownTool`、也不吞成
+/// 「不需要任何能力」。
+///
+/// 照 `crates/continuum-capability/tests/authorize.rs` 的 `insert_bad_capabilities` 绕过
+/// `save_tool` 直接写一行、把 `required_capabilities` 列写坏。吞掉它的后果正是本用例要拦的：
+/// 一次**没查过声明表**的授权仍然返回 `Ok`。
+///
+/// 调用带一条 `--effect`（同 P-3 的理由：循环为空时「零效应行」恒成立、没有判别力）。
+#[test]
+fn a_corrupt_registration_is_reported_as_a_persist_failure() {
+    let fixture = Fixture::with_registrations(&[("t1", Vec::new(), None)]);
+    insert_bad_capabilities(&fixture.db_path, "broken", r#"["git_push","not_a_kind"]"#);
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["broken"], Arc::clone(&adapter));
+
+    let mut args = allowed_charge_call(&fixture);
+    args.tool = ToolId::new("broken");
+
+    let outcome = fixture.run(&registry, &args);
+
+    assert_eq!(adapter.calls(), 0, "被拒的调用不许走到那一跳");
+    assert_eq!(
+        fixture.effect_rows(),
+        0,
+        "拒在第 5 步之前：效应行一条都不许落下"
+    );
+    assert_eq!(fixture.audit_rows(), 0, "零效应行 ⇒ 零审计行");
+    assert_eq!(
+        fixture.capability_grants_rows(),
+        0,
+        "读登记项失败不得留下授权审计"
+    );
+
+    match outcome {
+        Err(TaskError::Capability(CapabilityError::Persist(PersistError::Database(m)))) => {
+            assert!(m.contains("not_a_kind"), "错误信息应指出表外取值，实际 {m}");
+        }
+        other => panic!("应报 Capability(Persist(Database(_)))，实际 {other:?}"),
+    }
+}
+
+/// **设计 §5.3 的绝对措辞逐项一条**：不在 `PolicyContext.effect_type` 事实集合里的那六个
+/// kind，**本路径一律得到 `MissingCapability`**。
+///
+/// 六条登记项各声明其中一枚（`required_capabilities` 取单枚），**不声明任何 `--effect`**
+/// （出示集为空），故每条都应报 [`CapabilityError::MissingCapability`]，且 kind 与该条自己
+/// 声明的那一枚**逐项相同**。六项逐个跑、逐个断言，**不抽代表**：六个 `CapabilityKind` 是
+/// 不同的值，实现里那两处手写分支（`CapabilityKind::for_effect` 的正向与 `effect` 的反向）
+/// 能各自漂移。
+///
+/// # 六条的 `effect_class` **必须**取 `None`
+///
+/// 这六个 kind **不是任何 `EffectType` 的 `for_effect` 像**（那张对照表是单射、不是满射：
+/// `capability.rs` 的 `effect()` 对它们逐个返回 `None`）⇒ 无论 `Some(t)` 取哪个 `t`，
+/// `required_capabilities` 都不含 `for_effect(t)` ⇒ `save_tool` 的登记期不变量在**登记期**
+/// 就把这六行拒掉，本条会红在夹具的 `.unwrap()` 上而不是本路径的 `MissingCapability` 上。
+///
+/// # 「调不动」这条也有照片
+///
+/// 夹具适配器服务全部六个 id，断言**总调用次数为 0**——§5.3 的后果不只是「报哪种错」，
+/// 还有「这些工具今天一条都跑不起来」。这条断言排在前：它一旦不成立（出示集被换成
+/// 「按登记项的声明逐枚铸」那种实现），panic 会挡住后面六条逐项断言。
+#[test]
+fn every_kind_without_a_policy_fact_is_missing_capability() {
+    let rows: [(&str, CapabilityKind); 6] = [
+        ("t-fs-read", CapabilityKind::Filesystem(FsAction::Read)),
+        ("t-fs-write", CapabilityKind::Filesystem(FsAction::Write)),
+        ("t-git-read", CapabilityKind::Git(GitAction::Read)),
+        (
+            "t-git-worktree-write",
+            CapabilityKind::Git(GitAction::WorktreeWrite),
+        ),
+        (
+            "t-git-commit-local",
+            CapabilityKind::Git(GitAction::CommitLocal),
+        ),
+        (
+            "t-github-create-pr",
+            CapabilityKind::Github(GithubAction::CreatePr),
+        ),
+    ];
+    let fixture = Fixture::with_registrations(
+        &rows
+            .iter()
+            .map(|(id, kind)| (*id, vec![*kind], None))
+            .collect::<Vec<_>>(),
+    );
+    let ids: Vec<&str> = rows.iter().map(|(id, _)| *id).collect();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&ids, Arc::clone(&adapter));
+
+    let mut outcomes = Vec::with_capacity(rows.len());
+    for (id, _kind) in &rows {
+        let mut args = fixture.args();
+        args.tool = ToolId::new(*id);
+        assert!(
+            args.effects.is_empty() && args.intent.is_none(),
+            "本条不声明任何 --effect：出示集为空正是「声明不出这种能力」的形态"
+        );
+        outcomes.push(fixture.run(&registry, &args));
+    }
+
+    assert_eq!(
+        adapter.calls(),
+        0,
+        "六条登记项一条都调不动：它们的 kind 铸不出来，出示集恒为空"
+    );
+
+    for ((id, kind), outcome) in rows.iter().zip(outcomes) {
+        match outcome {
+            Err(TaskError::Capability(CapabilityError::MissingCapability { kind: missing })) => {
+                assert_eq!(
+                    missing,
+                    *kind,
+                    "工具 {id} 报的必须是它自己声明的那一枚 {}",
+                    kind.as_str()
+                );
+            }
+            other => panic!(
+                "工具 {id} 应报 Capability(MissingCapability{{{}}})，实际 {other:?}",
+                kind.as_str()
+            ),
+        }
+    }
 }
