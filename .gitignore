@@ -1,3 +1,8 @@
 /target
 .worktrees/
 .superpowers/
+# 三棵树共用的 TMPDIR（测试临时库、变异副本、日志、overlayfs 目录）与 Serena 的工作目录。
+# 两者本就不是产物：`.tmp/` 实测 6.4 GB 级、`.serena/` 是工具状态。
+# 在此之前它们未被忽略，全靠「禁止 `git add -A`」这条纪律挡着——而纪律靠人记，这一行靠 git 记。
+.tmp/
+.serena/
