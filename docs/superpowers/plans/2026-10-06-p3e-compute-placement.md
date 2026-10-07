@@ -1252,6 +1252,19 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 **Files:**
 - Modify: `crates/continuum-node/src/placement.rs`（加步骤 4 的排序；`compare` 的兜底档）
 - Modify: `crates/continuum-node/tests/placement.rs`
+- Modify: `crates/continuum-node/src/lib.rs` / `src/node.rs` / `tests/node.rs`
+  （**订正 2026-10-07 补入，来历留此**：本栏原只列前两个文件。实现时发现**四处陈述被本轮的
+  改动证伪**，最要紧的是 `lib.rs` 的「**`place` 今天只落步骤 1–3……不读 `compare`**」——
+  本轮正是去读 `compare`，故那句话**定义性地**变假；另三处同源（`node.rs` 的
+  「消费方是 Task 6」「本 task 落地时 E 内部零读取」、`tests/node.rs` 的
+  「`Ord` 今天没有照片」）。**而计划里没有任何 task 认领它们**：Task 7 的 Files 是
+  「仅在复核发现缺口时」。**故按「失真的陈述不许留在仓里」就地订正，并把它们认领到本 task。**
+  **实测边界**：四处**全部落在注释/文档**（`//!` 与 `///`），**无一行代码**——
+  这是本条的判据，改到代码就超出「订正失真陈述」的范围了。
+  **由此得一条可搬用的判据**：**一个 task 的 Files 清单只列了「它要改的实现与它的测试」，
+  而「被这次改动证伪的陈述」天然散在邻居文件里**——**清单若不认领它们，就只剩两个坏结局**：
+  要么失真陈述留在仓里，要么实现者越界而没人授权。**每份 Files 清单都该带一句
+  「本轮改动证伪的陈述随本轮订正」**，并**在实做时点名具体是哪几个文件**。）
 
 **Interfaces:**
 - Consumes: Task 5 的 `place` / `PlacementPolicy` / `BaselinePlacementPolicy`
