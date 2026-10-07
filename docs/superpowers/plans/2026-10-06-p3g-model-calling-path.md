@@ -1014,6 +1014,13 @@ git commit -m "feat(runtime): 调 rank 并成对带出适配器句柄"
 - Modify: `Cargo.toml`（workspace：`tokio` 的 features 加 `"time"`）
 - Modify: `crates/continuum-runtime/tests/model_call.rs`
 - Modify: `crates/continuum-runtime/tests/model_call_face.rs`（Task 5 的占位，此处补实体）
+  > **本 task 顺带要订正的三处（2026-10-08，G Task 5 评审列出，在此托管）**：
+  > 1. **该文件里对**本计划**的行号引用全部漂移了**——它们在 `2c35f8e` 时实测全对，
+  >    而**协调者的 `608327e` 往本计划插进一段订正后，五处引用一起漂**。
+  >    **判据**：**一个文件引用另一个文件的行号时，后者的编辑者不会知道**——
+  >    故要么按内容引，要么**在下一次改动那个文件时重取一遍**（本行就是「下一次」）。
+  > 2. 该文件 `:88` 引「计划 `:405-409`」，而它要引的那句（D 的 Task 9）**实测在 `:410-411`**。
+  > 3. 该文件文件头 `:7` 写「本文件的**三条**用例」，**实际只有 2 条 `#[test]`**（第三条是编译期形态、不是 `#[test]`）。
 
 **Interfaces:**
 - Consumes: Task 7 的 `CallPlan`；Task 1 的 `into_call_error`；
