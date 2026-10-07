@@ -46,6 +46,13 @@ use std::sync::{Arc, Mutex};
 enum Outcome {
     /// 回显输入，`is_error: false`。
     Echo,
+    /// **先睡若干毫秒**再回显输入，`is_error: false`。
+    ///
+    /// 只服务一条用例：证明**终态那次的 `updated_at` 是「推进那一刻」，不是步骤 4 取的那个
+    /// `now`**（工具调用可以跑任意久，故两者之间的间隔是这条性质唯一的可观察形式）。用
+    /// `std::thread::sleep` 而不是异步定时器：本用例跑在**当前线程**运行时上、且不开
+    /// `enable_all`（没有 `time` feature 的反应堆），阻塞睡正是这里能用的那一种。
+    EchoAfterDelay(u64),
     /// **适配器自己**没跑成：`Err(ProviderError::Transport(..))`。
     ProviderFailure,
 }
@@ -120,6 +127,13 @@ impl ToolProvider for RecordingTool {
                 output: call.input().clone(),
                 is_error: false,
             }),
+            Outcome::EchoAfterDelay(millis) => {
+                std::thread::sleep(std::time::Duration::from_millis(millis));
+                Ok(ToolResult {
+                    output: call.input().clone(),
+                    is_error: false,
+                })
+            }
             Outcome::ProviderFailure => {
                 Err(ProviderError::Transport("适配器自己没跑成".to_owned()))
             }
@@ -245,6 +259,17 @@ impl Fixture {
             .map(|e| e.authorization);
         tx.commit().unwrap();
         field
+    }
+
+    /// 库里某条效应的 `(planned_at, updated_at)`。
+    fn effect_times(&self, key: &str) -> Option<(i64, i64)> {
+        let db = open_db(&self.db_path);
+        let tx = db.begin().unwrap();
+        let times = find_by_idempotency_key(&tx, key)
+            .unwrap()
+            .map(|e| (e.planned_at, e.updated_at));
+        tx.commit().unwrap();
+        times
     }
 }
 
@@ -480,6 +505,44 @@ fn each_effect_row_records_its_own_verdict() {
         Some("approve=true;policy=require_approval"),
         "charge 那次裁决是它自己那条同层更严的 RequireApproval——\n\
          把 Decision 写成常量的实现红在这一行"
+    );
+}
+
+/// **终态那次的 `updated_at` 是「推进那一刻」，不是步骤 4 取的那个 `now`。**
+///
+/// 这是 F Task 3 修复轮 1 把 `finish_declared_effects` 两条路径合并之后，**工具路径唯一被改动的
+/// 可观察数据**：合并前终态的 `updated_at` 与 `planned_at` 同值（都取步骤 4 那个 `now`），
+/// 合并后它**晚于** `planned_at`。**判它是修正**：`updated_at` 的含义是「这条记录在那一刻被推到
+/// 新状态」，而一次工具调用可以跑任意久——旧写法把终态时间戳钉回调用**开始之前**，
+/// 与命令路径（第 6 步在命令跑完之后取时钟）的语义也不一致。
+///
+/// **怎么拍**：让夹具适配器**先睡 50 ms 再返回**，于是「步骤 4 取 `now`」与「终态推进取
+/// `now_millis()`」之间有一个确定大于 1 ms 的间隔；断言 `updated_at > planned_at`。
+/// 1 ms 的分辨率下，只要中间真的重新取过时钟，这条断言必过；复用旧 `now` 时两者**恰好相等**
+/// ——**变异体**：把终态推回成「复用步骤 4 那个 `now`」（即合并前的语义）⇒ **只本条红**
+/// （其余用例都不看时间戳）。
+#[test]
+fn the_terminal_timestamp_is_taken_when_the_call_finishes() {
+    let fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::EchoAfterDelay(50)));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    fixture
+        .run(&registry, &allowed_charge_call(&fixture))
+        .expect("放行的调用应当成功");
+
+    let (planned_at, updated_at) = fixture
+        .effect_times("2:i1:charge:c1")
+        .expect("本次调用应当写过这条效应行");
+    assert!(
+        updated_at > planned_at,
+        "终态的 updated_at 必须晚于 planned_at：那一跳花了 50 ms，\
+         复用计划时那个 now 会把它钉回调用开始之前（left={updated_at}，right={planned_at}）"
     );
 }
 
