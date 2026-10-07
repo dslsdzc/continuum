@@ -322,6 +322,45 @@ impl Fixture {
         tx.commit().unwrap();
         int_of(&rows[0][0])
     }
+
+    /// `effect` 表里各行的 `idempotency_key`，按字典序。
+    ///
+    /// P-2 的第一半读它：`effect` 表**没有 intent 列**（设计 §2.2），意图只经幂等键的第一段
+    /// 进入落库，故「`--intent` 给的那个值可观察」这件事只有这一列读得出。
+    fn effect_keys(&self) -> Vec<String> {
+        self.column_text("SELECT idempotency_key FROM effect ORDER BY idempotency_key")
+    }
+
+    /// `audit_log` 的 `kind` **列**，按 `seq` 升序。
+    ///
+    /// 读**列**而不是把 `AuditKind` 转一圈：后者只证明枚举等于自己、钉不住落库编码
+    /// （与 [`Fixture::capability_grants_rows`] 同一条判据）。比较一律用手写的字面量。
+    fn audit_kinds(&self) -> Vec<String> {
+        self.column_text("SELECT kind FROM audit_log ORDER BY seq")
+    }
+
+    /// `audit_log` 里 `kind` 恰为 `capability grants` 的各行 `payload`，按 `seq` 升序，
+    /// 已解析成 JSON（P-18 要读 `capabilities[].scope`）。
+    ///
+    /// 该列存的是 JSON 对象的文本（`Tx::append_audit` 的编码），故这里解析回来而不是
+    /// 断言原文——原文的键序由 `serde_json` 的 map 决定，与 payload 的内容无关。
+    fn capability_grants_payloads(&self) -> Vec<Value> {
+        self.column_text(
+            "SELECT payload FROM audit_log WHERE kind = 'capability grants' ORDER BY seq",
+        )
+        .iter()
+        .map(|text| serde_json::from_str(text).expect("payload 列是 JSON 对象的文本"))
+        .collect()
+    }
+
+    /// 一条只取一列文本的查询（与 [`Fixture::count`] 同形，只是列的类型换成文本）。
+    fn column_text(&self, sql: &str) -> Vec<String> {
+        let db = open_db(&self.db_path);
+        let tx = db.begin().unwrap();
+        let rows = tx.query(sql, &[]).unwrap();
+        tx.commit().unwrap();
+        rows.iter().map(|row| text_of(&row[0])).collect()
+    }
 }
 
 /// 本文件要用的迁移集合：`tool` / `policy` / `effect` 三张表 + 内建（`audit_log`）。
@@ -373,6 +412,14 @@ fn int_of(v: &continuum_persist::Value) -> i64 {
     match v {
         continuum_persist::Value::Int(i) => *i,
         other => panic!("列应为整数，实际 {other:?}"),
+    }
+}
+
+/// 一列文本（与 [`int_of`] 同法：列的类型不符即 panic，不猜）。
+fn text_of(v: &continuum_persist::Value) -> String {
+    match v {
+        continuum_persist::Value::Text(s) => s.clone(),
+        other => panic!("列应为文本，实际 {other:?}"),
     }
 }
 
@@ -1042,4 +1089,359 @@ fn every_kind_without_a_policy_fact_is_missing_capability() {
             ),
         }
     }
+}
+
+/// P-2 的第二半：**`--intent` 给的那个值经幂等键落库、读得回来**。
+///
+/// `effect` 表**没有 intent 列**（设计 §2.2）——意图只经幂等键的第一段进入落库。故这一读
+/// 是 §2.2 那条「`--intent` 在给出 `--effect` 时是条件必填」的**照片**：没有它，
+/// 「那条 `--intent` 可观察、故可以要求」的理由就只是一句话。规则的另一侧（零 `--effect`
+/// 时不给）由 P-16 那一族钉住——那时的取值不落任何地方。
+///
+/// **键形逐段读、又整键逐字比一次**：前四条断言按 §9 P-2 的写法读「第一段是意图的字节长、
+/// 第二段就是 `i1`」，末一条用**手写的字面量**钉住分段格式（与 [`Fixture::effect_state`]
+/// 用字面量键同一条取向：拿 `effect_key` 去拼的话，格式改了两者一起漂移、断言照过）。
+///
+/// **变异体**：把 `effect_key` 里意图那一段去掉（例如键改成 `<类型>:<目标>`）⇒ 下面
+/// 「第二段就是 `i1`」与整键相等两条都红。**键形的另一侧（长度前缀使拼接是单射）**由
+/// lib 单元用例 `the_effect_key_separates_the_intent_from_the_target` 从单射那一侧钉住
+/// ——两条各拍一半，本用例不重复那半。
+///
+/// # 第二跑（非 ASCII 意图）是「长度前缀数的是**字节**」那句的照片
+///
+/// `i1` 是纯 ASCII，字节数与字符数相同，故只有第一跑的话，「长度取 `chars().count()`」
+/// 那类实现与正确实现在本条上**不可区分**（等价变异体）。第二跑取 `意图`——两个字符、
+/// **六个字节**——把两者分开。同一处差异在 `effect_key` 的文档里是那条「长度前缀让三段的
+/// 分界可判定」的论据。
+#[test]
+fn the_intent_is_observable_in_the_idempotency_key() {
+    let fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    fixture
+        .run(&registry, &allowed_charge_call(&fixture))
+        .expect("放行的调用应当成功");
+
+    let keys = fixture.effect_keys();
+    assert_eq!(keys.len(), 1, "一条 `--effect` ⇒ `effect` 表恰一行");
+    let key = keys[0].as_str();
+    let mut segments = key.split(':');
+    assert_eq!(
+        segments.next(),
+        Some("2"),
+        "第一段是意图的**字节**长：`i1` 是两个字节"
+    );
+    assert_eq!(
+        segments.next(),
+        Some("i1"),
+        "第二段就是 `--intent` 给的那个值——这条读是「`--intent` 可观察」的照片"
+    );
+    assert_eq!(
+        (segments.next(), segments.next(), segments.next()),
+        (Some("charge"), Some("c1"), None),
+        "余下两段是类型与目标，且键到目标为止（目标里的冒号不分段，故类型段不含冒号）"
+    );
+    assert_eq!(
+        key, "2:i1:charge:c1",
+        "整键逐字相同（手写字面量）：<意图字节长>:<意图>:<类型>:<目标>"
+    );
+
+    // 第二跑：意图取**非 ASCII** 的（`意图` 是两个字符、六个字节），目标是另一条效应。
+    let mut args = fixture.args();
+    args.effects = vec![spec(EffectType::Charge, "c2")];
+    args.intent = Some(IntentId::new("意图"));
+    fixture.run(&registry, &args).expect("第二条声明也应当成功");
+
+    let keys = fixture.effect_keys();
+    assert_eq!(keys.len(), 2, "两条不同的声明 ⇒ `effect` 表两行");
+    let non_ascii = keys
+        .iter()
+        .find(|key| key.ends_with("charge:c2"))
+        .expect("第二条效应的键应当在表里");
+    assert_eq!(
+        non_ascii.split(':').next(),
+        Some("6"),
+        "`意图` 是**六个字节**：长度前缀数的是字节、不是字符\
+         （长度取 chars().count() 的实现在这里给出 2）"
+    );
+}
+
+/// P-2 的第一半：**同一条声明再跑一次 ⇒ 拒整条、库上零新行**（设计 §3 第 1 步的幂等键预检）。
+///
+/// 预检排在**强制点之前**（与命令路径同一次序），故第二次连策略表都不问、更不铸币。
+///
+/// # 变体断言与副作用断言各挡一半
+///
+/// [`TaskError::EffectAlreadyRecorded`] 那一支是**变体断言**，挡的是「把拒绝换成成功返回」
+/// 一类实现；三条「零新行 / 零新调用」是**副作用断言**，挡的是「先落下副作用、再报拒绝」
+/// 一类实现。**两件都要**，各自只挡一半——实测两枚变异体各红在一侧，见下。
+///
+/// # 简报把「删预检」记在这一格上，与实测不符（来历留此）
+///
+/// 简报的红条件写的是「把预检**删掉** → 本条的『零新行』红」。**实测不是这样**：
+/// `effect` 表上有一条唯一索引（`idx_effect_idempotency`，
+/// `crates/continuum-effect/src/persist.rs:41`），预检整段删掉之后第二次跑在步骤 5 的
+/// `record_planned` 上被它拒绝、`tx` 未提交即随作用域回滚，故 `effect_rows` 与 `audit_rows`
+/// **仍与第一次之后相同**——三条「零」断言在这个变异体下**全绿**，红的是变体断言
+/// （报的是 `Persist(Database(UNIQUE constraint failed: ...))`，不是 `EffectAlreadyRecorded`）。
+/// 三条「零」断言并非白写：它们抓的是另一枚变异体（把预检的结果攒到提交之后才返回）。
+#[test]
+fn a_repeated_declaration_is_rejected_and_writes_nothing() {
+    let fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    fixture
+        .run(&registry, &allowed_charge_call(&fixture))
+        .expect("第一次调用应当成功");
+
+    let effects_before = fixture.effect_rows();
+    let audits_before = fixture.audit_rows();
+    let calls_before = adapter.calls();
+    assert_eq!(effects_before, 1, "第一次落下恰一条效应行");
+    assert_eq!(audits_before, 5, "第一次的审计行数 = 1 条授权 + 4 条效应（见 P-15）");
+
+    let outcome = fixture.run(&registry, &allowed_charge_call(&fixture));
+
+    assert_eq!(
+        fixture.effect_rows(),
+        effects_before,
+        "拒整条 ⇒ 不许落下第二条效应行"
+    );
+    assert_eq!(
+        fixture.audit_rows(),
+        audits_before,
+        "拒整条 ⇒ 不许落下任何新审计行（第二次连强制点都没走到）"
+    );
+    assert_eq!(
+        adapter.calls(),
+        calls_before,
+        "被拒的调用不许走到那一跳：第二次一次都不该被调到"
+    );
+
+    match outcome {
+        Err(TaskError::EffectAlreadyRecorded { key }) => {
+            assert_eq!(
+                key, "2:i1:charge:c1",
+                "报的应是那条已存在的幂等键（手写字面量）"
+            );
+        }
+        other => panic!(
+            "应报 EffectAlreadyRecorded{{2:i1:charge:c1}}，实际 {other:?}\n\
+             （若无唯一索引兜底，这里会是 Persist(Database(UNIQUE constraint failed: ...))）"
+        ),
+    }
+}
+
+/// P-15：**审计行的总数与构成**——k 条 `--effect` 全通过时是 `1` 条 `capability grants`
+/// 与 `4k` 条 `external effects`。
+///
+/// # 为什么断言的是 **multiset** 而不是「有一条 `capability grants`」
+///
+/// 只断言「有一条授权审计」的实现，**多写一条也会过**。故这里读 `audit_log.kind` **列**
+/// （不是把 `AuditKind` 转一圈），排序后与手写字面量组成的 multiset **逐项相等**——
+/// 条数与构成一次钉住。
+///
+/// # `4` 这个数的来源
+///
+/// 每条效应**四次**：`record_planned` 一次（`PLANNED`），`advance` 三次
+/// （`AUTHORIZED` / `EXECUTING` / 终态）。**「三次 `advance`」不是「三条」**——登记那一步
+/// 也有一条，只看 `advance` 的调用点数不出来。同一条计数在库里已有既有断言：
+/// `crates/continuum-effect/tests/persist.rs:252` 的注释「4 = 1 次登记 + 3 次成功的推进」
+/// 与紧随其后的 `assert_eq!(audit_rows(&tx).len(), 4)`（`:253`）。
+///
+/// # `k = 0` 那一半
+///
+/// 零 `--effect` 时 `authorize` 照样被调（出示集为空、声明集为空，两次比对都空手通过），
+/// 故恰有 `1` 条 `capability grants`；效应那四次一条都不发生。
+///
+/// 这一半与 P-16 的判据**逐字相同**（据实写明：两处都写是照红条件各点一次名，不是两套
+/// 证据；P-16 那边同样的说明在它自己头上）。**这一半有独立内容的是它杀不掉的变异体**：
+/// P-15 的两枚「去掉一次审计」只让 k=1 那半红，零效应那一支根本不走 `record_planned` /
+/// `advance`，故这一半对它们无区分力——它挡的是 P-16 头上那枚（零效应那一支仍写审计）。
+///
+/// # 变异体（四条「零/恰」断言的判别力）
+///
+/// - **把 `record_planned` 或任一次 `advance` 的审计去掉**（产生方在
+///   `crates/continuum-effect/src/journal.rs`）⇒ `external effects` 变成三条、总数 4 ⇒ 红；
+/// - **多写一条审计**（驱动在步骤 5 的事务里另追加一行 `external effects`）⇒ 总数 6 ⇒ 红。
+///   这一枚正是「只断言『有一条 `capability grants`』会漏掉」的那一格。
+///
+/// 三枚都**编得过**、红在本用例的 multiset 断言上。头两枚改的是**产生方**
+/// （`crates/continuum-effect/src/journal.rs`），那是**跨 crate** 才可见的效果
+/// （同一次改动也落在 `continuum-effect` 自己的计数用例上），故那两枚在**全量套件**下
+/// 得出结论；第三枚改的是驱动（本 crate），跑本用例即可。
+#[test]
+fn the_audit_rows_are_exactly_one_grant_plus_four_per_effect() {
+    // k = 1：一条 `--effect`，成功收尾。
+    let one = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    one.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+    one.run(&registry, &allowed_charge_call(&one))
+        .expect("放行的调用应当成功");
+
+    assert_eq!(one.effect_rows(), 1, "本半的 k 是 1");
+    let mut kinds = one.audit_kinds();
+    kinds.sort();
+    assert_eq!(
+        kinds,
+        [
+            "capability grants",
+            "external effects",
+            "external effects",
+            "external effects",
+            "external effects",
+        ],
+        "k=1 时审计行恰为 {{capability grants × 1, external effects × 4}}，共 5 条\n\
+         （4 = 1 次 record_planned + 3 次 advance，同 continuum-effect/tests/persist.rs:252 的既有计数）"
+    );
+
+    // k = 0：零 `--effect` 的同形调用。
+    let zero = Fixture::with_tools(&["t1"], Vec::new(), None);
+    let zero_adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let zero_registry = registry_serving(&["t1"], Arc::clone(&zero_adapter));
+    zero.run(&zero_registry, &zero.args())
+        .expect("零效应的调用应当成功");
+
+    assert_eq!(zero.effect_rows(), 0, "本半的 k 是 0");
+    let mut zero_kinds = zero.audit_kinds();
+    zero_kinds.sort();
+    assert_eq!(
+        zero_kinds,
+        ["capability grants"],
+        "k=0 时恰一条：`authorize` 成功写的那条（出示集为空也照样授权）"
+    );
+}
+
+/// P-16：**零 `--effect` 的调用不碰 `effect` 表、也不碰 mint**，且**没有凭据捏造的审计行**。
+///
+/// 三条钉子各指一件事：
+///
+/// 1. `effect` 表 **0 行**——没有声明的效应就不落任何效应行（设计 §7.2 末条）；
+/// 2. `audit_log` 的 `kind` 列**恰为 `["capability grants"]`**——那条由 `authorize` 写，
+///    与效应行无关（零效应时它仍写，因为强制点 (1) 照样跑）；
+/// 3. 上面那条**逐项相等**同时挡掉「凭据捏造的审计行」：本子项目**不新增 `AuditKind`**
+///    （§313 的八项是封闭清单，加一项——例如为「工具被调用过」立一个 `tool invoked`——
+///    就是发明）。
+///
+/// # 与 P-15 的 k=0 半重叠（据实写明，免得后来者把两处读成两套证据）
+///
+/// 本条三条断言与 P-15 k=0 那半的判据**逐字相同**（`effect_rows` 为 0、`kind` 列排序后
+/// 恰为 `["capability grants"]`）。两处都写是照红条件各点一次名，**不是两个独立证据**：
+/// 同一条错误实现会让两处一起红。本条独有的变异体见下面那条（零效应那一支仍写审计），
+/// 它同样让两处一起红；P-15 那两枚（去掉一次审计）只让它的 k=1 半红、本条不受影响。
+///
+/// **变异体**：把零效应那一支改成**仍开事务写审计**（在 `run_tool_call` 的步骤 7 里让空
+/// 声明也 `append_audit`）⇒ 第 2 条断言红（两条、且多出一条 `external effects`）。
+#[test]
+fn an_effect_free_call_touches_neither_the_effect_table_nor_the_mint() {
+    let fixture = Fixture::with_tools(&["t1"], Vec::new(), None);
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    let args = fixture.args();
+    assert!(
+        args.effects.is_empty() && args.intent.is_none(),
+        "本条的形态是零 `--effect`（`--intent` 随之必须不给）"
+    );
+    fixture
+        .run(&registry, &args)
+        .expect("零效应的调用应当成功");
+    assert_eq!(adapter.calls(), 1, "零效应不是「不调用」的理由（P-17）");
+
+    assert_eq!(
+        fixture.effect_rows(),
+        0,
+        "零 `--effect` ⇒ `effect` 表一行都不许有"
+    );
+    let mut kinds = fixture.audit_kinds();
+    kinds.sort();
+    assert_eq!(
+        kinds,
+        ["capability grants"],
+        "零效应时审计恰一条，且是 `authorize` 那条；\
+         驱动不得为「工具被调用过」另捏一条 `tool invoked` 之类的行——\
+         §313 的八项是封闭清单，本子项目不新增 AuditKind"
+    );
+}
+
+/// P-18：**各 `--effect` 的目标经能力的 scope 原样带进授权审计的 payload**（设计 §4.3 的后半句）。
+///
+/// `authorize` 不判断作用域够不够（那是执行点与凭据签发的活），它把已获准的能力**原样**
+/// 放进 [`AuthorizedTool`] 与审计 payload。故「作用域有没有被本路径加工过」只能从那条
+/// `capability grants` 行的 `payload.capabilities[].scope` 读回来。
+///
+/// # 两个目标为什么必须彼此不同、且都不同于任何常量
+///
+/// 判据是 multiset 相等，故两个目标必须不同——相同的话「两条都填成同一个值」的实现照样过。
+/// 目标取 `c1` / `d1`（**不是**效应类型的字面串、也不是任何单一常量），于是同一对断言
+/// 一次拦住两种把 `spec.target` 换掉的实现（见下）。声明两条**不同效应类型**的效应是
+/// 刻意的：它让「换成 `effect_type` 的字面串」给出 `["charge", "deploy"]`，与
+/// `["c1", "d1"]` 不等。
+///
+/// **变异体**（两枚，各一种换法）：把步骤 3 铸币时的作用域换成**常量**
+/// （如 `"constant"`）⇒ 红；换成 `spec.effect_type.as_str()` 的**字面串** ⇒ 红。
+///
+/// **「`capability grants` 行恰一条」与「`capabilities` 恰两枚」两条计数断言也在**：
+/// 少了它们，多次授权（或多铸一枚）的 scope 会混进同一个 multiset，相等就不再指
+/// 「这一次授权的 payload」。
+#[test]
+fn each_declared_scope_is_carried_into_the_audit_payload_verbatim() {
+    let fixture = Fixture::with_registrations(&[(
+        "t1",
+        vec![
+            CapabilityKind::for_effect(EffectType::Charge),
+            CapabilityKind::for_effect(EffectType::Deploy),
+        ],
+        Some(EffectType::Charge),
+    )]);
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    let mut args = fixture.args();
+    args.effects = vec![
+        spec(EffectType::Charge, "c1"),
+        spec(EffectType::Deploy, "d1"),
+    ];
+    args.intent = Some(IntentId::new("i1"));
+
+    fixture.run(&registry, &args).expect("两条都铸得出");
+
+    let payloads = fixture.capability_grants_payloads();
+    assert_eq!(payloads.len(), 1, "成功授权恰一条 `capability grants` 行");
+    let mut scopes: Vec<&str> = payloads[0]["capabilities"]
+        .as_array()
+        .expect("payload 的 capabilities 是数组")
+        .iter()
+        .map(|capability| {
+            capability["scope"]
+                .as_str()
+                .expect("每枚已获准能力的 scope 是字符串")
+        })
+        .collect();
+    assert_eq!(scopes.len(), 2, "两条 `--effect` 铸出两枚能力、各带自己的 scope");
+    scopes.sort();
+    assert_eq!(
+        scopes,
+        ["c1", "d1"],
+        "multiset 逐项等于各 `--effect` 的目标：把 spec.target 换成常量或换成 \
+         effect_type 的字面串，本条即红"
+    );
 }
