@@ -733,8 +733,15 @@ git commit -m "test(runtime): 模型调用路径的三条模块面守卫"
   「`ModelProvider` 上不存在一个 `authorize` 方法」这一侧**本阶段没有照片**——
   要它需要 trybuild 与一份样例，而 `ModelProvider` 是 **C 的 trait**（不是 G 的），
   它的面在 C 的计划里管；**本计划不为别人的 trait 新增一条 dev 依赖**。
-- `the_async_segments_future_is_send`（设计 §3.4，**本 task 只放占位，实体在 Task 10**）：
+- `the_async_segments_future_is_send`（设计 §3.4，**本 task 只放占位，实体在 Task 8**）：
   **本 task 不写它**（`select` / `call` 尚不存在），记此以免被当成漏项。
+  > **订正（2026-10-08，G Task 5 实测：本行原写「实体在 Task 10」，与本计划自己相抵）**：
+  > **Task 8 那一节的 `Files:` 就明写着**「Modify: `crates/continuum-runtime/tests/model_call_face.rs`
+  > （**Task 5 的占位，此处补实体**）」，且 Task 8 的 Step 5 里就列着这条用例。
+  > **Task 10 是另一件事**（`usage()` / `list_models()` / `describe_model()` 的否定式照片）。
+  > **判据**：**一个交叉引用若与它所指那一节的 `Files:` / `Interfaces:` 相抵，以后者为准**——
+  > **因为 `Files:` 是那一节的执行面，而交叉引用只是一句话**。
+  > **这条我（协调者）也照错抄进了派单**——**交叉引用的错会被下游原样复制**。
 
 - [ ] **Step 2: 运行，确认失败**
 
