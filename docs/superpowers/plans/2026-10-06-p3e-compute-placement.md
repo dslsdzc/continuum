@@ -1421,8 +1421,20 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-node --depth 1 --edges all --prefix none
 ```
 
-预期：全绿、0 warning；`cargo tree` 的**直接边恰好是** `continuum-artifact`（＋ `thiserror`，
-以及测试目标下的 `trybuild`）——**实测对照，不据口径断言**。
+预期：全绿、0 warning；`cargo tree` 的**直接边恰好是四条**——[`dependencies`] 里的
+`continuum-artifact` 与 `thiserror`，[`dev-dependencies`] 里的 `trybuild` 与 **`serde_json`**
+（**实测对照，不据口径断言**）。
+> **订正（2026-10-07，E 的 Task 7 复核实测；原稿只列了三条）**：原写「`continuum-artifact`
+> （＋ `thiserror`，以及测试目标下的 `trybuild`）」——**漏了 `serde_json`**，它是 Task 5 登记的
+> dev 依赖（`crates/continuum-node/Cargo.toml` 的 `[dev-dependencies]`）。`--edges all` 把
+> dev 边一并算进来，故实测是**四条**。
+> **下一条是与它同一次复核查出、**没有**照片的一条**：`Cargo.toml` 里 `serde_json` 上面那句
+> 「**只在测试目标里用**：`src/` 里没有一行读它」**没有任何判据钉住**——
+> `ALLOWED` 的内层循环只遍历 **workspace 成员之间的边**，**外部 crate 不在它的射程里**
+> （设计 §7.3 明写），故把 `serde_json` 从 `[dev-dependencies]` 挪进 `[dependencies]`**不会让任何断言变红**。
+> **据实记为无照片，不补用例**（补它要新立一种「源码文本守卫」，本计划没有这个位置）。
+> **这也让上面那句「只在测试目标里用」落进 [[absolute-claims-need-tests]] 那一族**：
+> **注释里的全称断言，要么有对应用例，要么写明它没有。**
 
 > **下面三条 `git diff` 的对照点取「开工时的 HEAD」**（本计划定稿时是 `3a7ddad`）。
 > 开工时若仓库已前进，**把哈希换成实际起点**——判据是「**除本计划的改动之外，这些文件无别的改动**」，
