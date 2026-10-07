@@ -25,11 +25,12 @@
 //! 实现类型，它必须依赖那个 crate，而该文件的 `continuum-runtime` 条目
 //! （实测 `:172-189`，crate 名在 `:173`；含 `continuum-capability` / `continuum-effect` /
 //! `continuum-secrets`，**不含**任何 `continuum-adapter-*`）与逐对 `assert_eq!`
-//! （用例 `every_crate_depends_only_on_its_allowed_set` 在 `:255`，那条断言在 `:285-289`）
+//! （用例 `every_crate_depends_only_on_its_allowed_set` 在 `:255`，那条断言在 `:285-290`）
 //! 会因为多出那条边而红。
 //!
 //! **行号按实测写，不照抄设计**：设计 §10.3 引的是 `:246` 与 `:276-281`，
-//! 而 2026-10-08 实测是 `:255` 与 `:285-289`。两枚都不一致，本文件取实测值
+//! 而 2026-10-08 实测是 `:255` 与 `:285-290`（后者初写成 `:285-289`，少了闭括号那一行，
+//! 由本 task 的评审实测订正）。两枚都不一致，本文件取实测值
 //! （引用行号须实测）；设计引的那两枚为何不同，在这里判不了（可能是更早版本的读数），
 //! **故只记差异，不改设计里的行**。
 //!
@@ -70,6 +71,16 @@
 //! 4. **清单没列到的同义名字**（**这张清单不穷尽**，别按闭合读）：例如一个名叫
 //!    `continuum-model-<vendor>` 的适配器 crate、或 `continuum_capability` 里没列进
 //!    [`NO_POWER_NAMES`] 的另一个类型。
+//! 5. **大小写变体**：三张清单都是**大小写敏感**的字面匹配（`str::find` 逐字节比），
+//!    故同一个名字换一种大小写写出来**不报**——`OpenAI`、`deepseek`、`secretstore` 都不命中。
+//!    **这不是假想的**：`crates/continuum-model-registry/src/router.rs` 一份文件里两种拼法并存
+//!    ——`:156` 的注释写 `OpenAI`，而 `:157` 的 Rust 变体名是 `OpenAiPreferred`
+//!    （实测 2026-10-08）。**本仓同一件事两个词汇表正是这三条判据要防的东西**，
+//!    故这一条按逃逸面记，别把它当成「已挡住」。
+//!    **它的两侧都有照片**：两张新探针语料里各有一行**大小写变体、期望零命中**
+//!    （`every_adapter_spelling_is_found_in_an_independently_written_probe` 的 `OpenAI`、
+//!    `every_power_spelling_is_found_in_an_independently_written_probe` 的 `SECRETSTORE`）
+//!    ——若哪天改成大小写不敏感，这两行会先红。
 //!
 //! 要把上界也钉住得**解析**源码（`syn`），本阶段不做。故**归一化之后它仍是一个下界**。
 //!
@@ -79,9 +90,9 @@
 //! `impl ModelProvider for` 这种**多 token 短语**，`impl  ModelProvider for` 对它才是真逃逸面。
 //! **本文件的三张清单里没有一枚 needle 含内部空白**（都是单标识符或 crate 路径），而匹配用的是
 //! **词边界**：把连续空白折成一个空格**既不产生也不消除任何词边界**，故对这三条判定而言
-//! `normalize` 与恒等函数**结论相同**。**这是实测的，不是推的**：见本 task 报告
-//! `.superpowers/sdd-p3g-impl/task-4-report.md` 的「等价变异体」一节（把 `normalize` 换成恒等，
-//! 三条判定用例**逐条仍绿**，只有本文件的 `the_guard_folds_whitespace_before_matching` 红）。
+//! `normalize` 与恒等函数**结论相同**。**这是实测的，不是推的**：把 `normalize` 换成恒等函数后
+//! 重跑，三条判定用例**逐条仍绿**，只有本文件的 `the_guard_folds_whitespace_before_matching` 红。
+//! （那一轮的原始记录**不在版控内**，故这里不给路径——结论以本文件这一节与下面对应的用例为准。）
 //!
 //! **那为什么留着它**：① 设计 §1.3 的照片一栏点名要它（照 C 的形状）；
 //! ② 本文件的判定都写在归一化文本上，若后来把 needle 改成短语（例如要钉
@@ -105,18 +116,30 @@
 //! （三张清单与探针语料），把本文件算进语料就是**拿清单查清单**——它必红，
 //! 而必红的守卫与恒绿的守卫一样读不出信息（这正是「正控制不得自证」要挡的形状）；
 //! ② 派单把语料划在 `model_call.rs` 一份上（Task 4 的 Interfaces：只读该文件）。
-//! **未闭合的那一面记在这里**：G 自己的 `tests/model_call.rs`（以及后续 task 新增的测试文件）
-//! 里若出现这些拼法，本守卫**不报**。实测 2026-10-08：`tests/model_call.rs` 对三张清单
-//! **逐枚零命中**，故今天不欠账；这条记的是射程，不是欠账。
+//! **具名遗留 R-1（射程，本条按设计原文记着，不按欠账记）**：G 自己的 `tests/model_call.rs`
+//! （以及 G 后续 task 新增的测试文件）里若出现这些拼法，本守卫**不报**。
+//! 实测 2026-10-08：`tests/model_call.rs` 对三张清单（21 枚）**逐枚零命中**，故今天不欠账；
+//! 这条记的是**射程**，不是欠账——设计 §1.3 的「（及其测试）」那半边在本阶段没有落点，
+//! 若以后要补，要么把该文件加进语料（今天加上去不会红），要么在设计里写明不含。
 //!
 //! # 七、用例次序
 //!
 //! 机制的照片排在结论之前：`the_guard_sees_the_module`、
 //! `the_guard_reddens_on_the_real_module_with_a_probe_line_appended`、
 //! `the_guard_folds_whitespace_before_matching`、`the_matcher_matches_whole_identifiers_only`、
-//! `every_banned_spelling_is_found_in_an_independently_written_probe` 五条，
+//! `every_banned_spelling_is_found_in_an_independently_written_probe`、
+//! `every_adapter_spelling_is_found_in_an_independently_written_probe`、
+//! `every_power_spelling_is_found_in_an_independently_written_probe` 七条，
 //! **一条都不依赖**下面三条判定的绿——反过来，下面三条判定的「零命中」若没有它们，
 //! 与「守卫什么都没读到」在输出上无法区分。
+//!
+//! **三张清单各有一份自己的探针语料，一份都不能少。** 清单里一枚拼错或漏写**不会让任何一条
+//! 判定变红**，只会让它**静默变窄**——此后那个拼法随便写，守卫全绿。三张清单形状相同，
+//! 故处置必须一致：若只有 [`TOOL_PATH_NAMES`] 有照片而另两张没有，
+//! 「另两张被改窄」与「它们真的没出现」在输出上就分不开
+//! （本 task 的评审实测过这一形状：把 [`NO_POWER_NAMES`] 的一枚拼错，
+//! 全量门下红集为空、退出码 0）。**每一份语料都独立写出**，不从对应的清单里取
+//! ——从清单里取会恒真（清单漏一枚，语料也漏一枚，漏枚这件事永远拍不到）。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -347,6 +370,92 @@ fn probe() -> String {
     text
 }
 
+/// [`ADAPTER_NAMES`] 的**独立探针语料**——与 `PROBE_LINES` 同法：拼法照设计 §10.3 的判据
+/// **另写一遍**，**不是**从清单里取（从清单里取会恒真：清单漏一枚，语料也漏一枚）。
+///
+/// 十二行，逐行的用途：
+///
+/// | 行 | 内容 | 期望 |
+/// |---|---|---|
+/// | 1 | 说明行 | — |
+/// | 2 | `continuum-adapter-deepseek` | 命中 `continuum-adapter`（右边是 `-`，不是词字符） |
+/// | 3 | `use continuum_adapter;` | 命中 `continuum_adapter`（右边是 `;`） |
+/// | 4 | `DeepSeek` | 命中 |
+/// | 5 | `OpenAi` | 命中 |
+/// | 6 | `Anthropic` | 命中 |
+/// | 7 | `不命名Anthropic适配器` | 命中（中日韩文字**不是** ASCII 词字符，边界成立） |
+/// | 8 | `xDeepSeek` | 零命中（左边是 ASCII 字母） |
+/// | 9 | `AnthropicX` | 零命中（右边是 ASCII 字母） |
+/// | 10 | `deepseek` | 零命中（**大小写变体**，文件头第四节第 5 条） |
+/// | 11 | `OpenAI` | 零命中（同上；本仓 `router.rs` 两种拼法并存） |
+/// | 12 | `continuum_adapter_deepseek` | 零命中（`_` **是**词字符，右边边界不成立） |
+const ADAPTER_PROBE_LINES: [&str; 12] = [
+    "// 适配器判据的探针语料：拼法独立写出，不从判定清单里取",
+    "continuum-adapter-deepseek",
+    "use continuum_adapter;",
+    "DeepSeek",
+    "OpenAi",
+    "Anthropic",
+    "不命名Anthropic适配器",
+    "xDeepSeek",
+    "AnthropicX",
+    "deepseek",
+    "OpenAI",
+    "continuum_adapter_deepseek",
+];
+
+/// 适配器探针语料的全文（每行以 `\n` 收尾，故第 n 行的行号就是 n）。
+fn adapter_probe() -> String {
+    let mut text = ADAPTER_PROBE_LINES.join("\n");
+    text.push('\n');
+    text
+}
+
+/// [`NO_POWER_NAMES`] 的**独立探针语料**——同法独立写出。
+///
+/// 十七行，逐行的用途：
+///
+/// | 行 | 内容 | 期望 |
+/// |---|---|---|
+/// | 1 | 说明行 | — |
+/// | 2–7 | 三对 crate 路径（`_` 形／`-` 形各一） | 各命中自己那一枚 |
+/// | 8 | `AuthorizedEffect` | 命中 |
+/// | 9 | `EffectJournal` | 命中 |
+/// | 10 | `CapabilityKind` | 命中 |
+/// | 11 | `SecretsRuntime` | 命中 |
+/// | 12 | `SecretStore` | 命中 |
+/// | 13 | `不引用SecretStore` | 命中（中日韩文字紧挨，右边边界成立） |
+/// | 14 | `xCapabilityKind` | 零命中（左边是 ASCII 字母） |
+/// | 15 | `CapabilityKinds` | 零命中（右边是 ASCII 字母） |
+/// | 16 | `secret_store` | 零命中（裸词不在清单里，且不是这两枚） |
+/// | 17 | `SECRETSTORE` | 零命中（**大小写变体**，文件头第四节第 5 条） |
+const POWER_PROBE_LINES: [&str; 17] = [
+    "// 零能力／效应／凭据判据的探针语料：拼法独立写出，不从判定清单里取",
+    "continuum_capability",
+    "continuum-capability",
+    "continuum_effect",
+    "continuum-effect",
+    "continuum_secrets",
+    "continuum-secrets",
+    "AuthorizedEffect",
+    "EffectJournal",
+    "CapabilityKind",
+    "SecretsRuntime",
+    "SecretStore",
+    "不引用SecretStore",
+    "xCapabilityKind",
+    "CapabilityKinds",
+    "secret_store",
+    "SECRETSTORE",
+];
+
+/// 零能力／效应／凭据探针语料的全文（每行以 `\n` 收尾，故第 n 行的行号就是 n）。
+fn power_probe() -> String {
+    let mut text = POWER_PROBE_LINES.join("\n");
+    text.push('\n');
+    text
+}
+
 /// **守卫自身的正控制：先钉机制，再看结论。**
 ///
 /// 没有这一条，一个「什么都没读到」的守卫会永远绿——这正是「守卫须两侧都钉」里缺的那一侧。
@@ -394,22 +503,27 @@ fn the_guard_reddens_on_the_real_module_with_a_probe_line_appended() {
     );
 
     let mut with_probe = real.clone();
-    // 只在语料**没有**以换行收尾时才补一个——否则先补一个再拼一行会多出一整行空行，
-    // 而下面的期望行号是按「完整行的条数」算的（本文件初版就在这里多算了一行，
-    // 实测把命中报成 234 而期望 233，是这条用例自己先红的）。
+    // **期望行号随下面那一支一起定，不能写死。** 语料以换行收尾时，探针行独占第
+    // `real_lines + 1` 行；语料**不**以换行收尾时，得先补一个换行才拼得成新的一行，
+    // 探针行因此落到第 `real_lines + 2` 行。**今天走的是「以换行收尾」那一支**
+    // （实测 `model_call.rs` 以 `0x0a` 收尾），另一支今天没有绿的照片，但仍按实测口径写对：
+    // 本文件初版无条件 `push('\n')`，在「已以换行收尾」这一支上多出一整行空行，
+    // 实测报 234 而期望 233（这条用例自己先红，是「照片先于结论」的收益）；
+    // 订正那一版又把「不以换行收尾」这一支的行号写成 `real_lines + 1`，一旦真走到会**假红**。
+    let mut probe_line = real_lines + 1;
     if !with_probe.ends_with('\n') {
         with_probe.push('\n');
+        probe_line += 1;
     }
     with_probe.push_str("// 探针：本模块不碰 ToolProvider\n");
 
     let found = hits(&with_probe, &TOOL_PATH_NAMES[..]);
     assert_eq!(
         found,
-        vec![(real_lines + 1, "ToolProvider")],
+        vec![(probe_line, "ToolProvider")],
         "在真语料末尾追加一行 `// 探针：本模块不碰 ToolProvider` 之后，期望恰好一次命中、\
-         行号为 {}。实际命中 {found:?}。**若这里是零命中，匹配器或读取口坏了**；\
-         若行号不对，行号与折叠没有同批记录。",
-        real_lines + 1
+         行号为 {probe_line}。实际命中 {found:?}。**若这里是零命中，匹配器或读取口坏了**；\
+         若行号不对，行号与折叠没有同批记录。"
     );
 }
 
@@ -601,6 +715,185 @@ fn every_banned_spelling_is_found_in_an_independently_written_probe() {
             (5, "invoke_tool"),
             (6, "authorize"),
             (10, "ToolProvider"),
+        ],
+        "行号或拼法对不上：判定红的时候报不出是哪一处。实际 {found:?}"
+    );
+}
+
+/// **[`ADAPTER_NAMES`] 自身的照片**（形状与上一条相同：三件一起断）。
+///
+/// **为什么另两张清单也各要一份**：清单里一枚拼错或漏写，**不会让任何一条判定变红**，
+/// 只会让它**静默变窄**——此后那个拼法随便写，守卫全绿。三张清单形状相同，处置必须一致：
+/// 只有 [`TOOL_PATH_NAMES`] 有照片时，「另两张清单被改窄」与「它们真的没出现」在输出上
+/// 无法区分。**这条不是假想的**：本 task 的评审实测过这一形状——把 [`NO_POWER_NAMES`] 的一枚
+/// 拼错成 `Secretstore`、同时在 `model_call.rs` 里写下**正确的** `SecretStore`，
+/// 全量门下**红集为空、退出码 0**。**语料独立写出**，不从清单里取。
+#[test]
+fn every_adapter_spelling_is_found_in_an_independently_written_probe() {
+    let probe = adapter_probe();
+    let found = hits(&probe, &ADAPTER_NAMES[..]);
+
+    // 一、命中总数（钉清单**漏**枚）。
+    assert_eq!(
+        found.len(),
+        6,
+        "独立写出来的探针语料里应有 6 处命中（五枚拼法，其中 `Anthropic` 出现两次），\
+         实际 {} 处：{found:?}。**少一处就是清单里漏了一枚（或某枚拼错了）**。",
+        found.len()
+    );
+
+    // 二、逐枚。每枚各写一次，不抽代表。
+    assert_eq!(
+        hits(&probe, &["continuum-adapter"]).len(),
+        1,
+        "`continuum-adapter` 在探针里应命中一次（第 2 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["continuum_adapter"]).len(),
+        1,
+        "`continuum_adapter` 在探针里应命中一次（第 3 行）；第 12 行那一枚右边紧接 `_`，不算"
+    );
+    assert_eq!(
+        hits(&probe, &["DeepSeek"]).len(),
+        1,
+        "`DeepSeek` 在探针里应命中一次（第 4 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["OpenAi"]).len(),
+        1,
+        "`OpenAi` 在探针里应命中一次（第 5 行）；第 11 行的 `OpenAI` 是大小写变体，不该被认领"
+    );
+    assert_eq!(
+        hits(&probe, &["Anthropic"]).len(),
+        2,
+        "`Anthropic` 在探针里应命中两次（第 6 行与第 7 行紧挨中日韩文字的那一枚）"
+    );
+
+    // 第三件之前先把枚数钉住：第六枚不在探针里，上面三件都拍不到它。
+    assert_eq!(
+        ADAPTER_NAMES.len(),
+        5,
+        "设计 §10.3 的清单是**五枚**。多出来的一枚若不在探针语料里，上面的总数与逐枚断言\
+         都不会变红——故枚数单独断一次。今天的清单：{ADAPTER_NAMES:?}"
+    );
+
+    // 三、位置报对。
+    assert_eq!(
+        found,
+        vec![
+            (2, "continuum-adapter"),
+            (3, "continuum_adapter"),
+            (4, "DeepSeek"),
+            (5, "OpenAi"),
+            (6, "Anthropic"),
+            (7, "Anthropic"),
+        ],
+        "行号或拼法对不上：判定红的时候报不出是哪一处。实际 {found:?}"
+    );
+}
+
+/// **[`NO_POWER_NAMES`] 自身的照片**（形状与上面两条相同：三件一起断）。
+///
+/// **本条的来历**：本 task 的评审实测——把 [`NO_POWER_NAMES`] 的 `SecretStore` 拼错成
+/// `Secretstore`、同时在 `model_call.rs` 里写下**正确的** `SecretStore`，全量门下
+/// **红集为空、退出码 0、96/113 全 ok**。被禁的拼法躺在语料里、守卫静默变窄，
+/// **没有任何用例会红**。补上这份语料之后，那一次变异会先撞上这里的「命中总数」。
+#[test]
+fn every_power_spelling_is_found_in_an_independently_written_probe() {
+    let probe = power_probe();
+    let found = hits(&probe, &NO_POWER_NAMES[..]);
+
+    // 一、命中总数（钉清单**漏**枚）。
+    assert_eq!(
+        found.len(),
+        12,
+        "独立写出来的探针语料里应有 12 处命中（十一枚拼法，其中 `SecretStore` 出现两次），\
+         实际 {} 处：{found:?}。**少一处就是清单里漏了一枚（或某枚拼错了）**。",
+        found.len()
+    );
+
+    // 二、逐枚。每枚各写一次，不抽代表。
+    assert_eq!(
+        hits(&probe, &["continuum_capability"]).len(),
+        1,
+        "`continuum_capability` 在探针里应命中一次（第 2 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["continuum-capability"]).len(),
+        1,
+        "`continuum-capability` 在探针里应命中一次（第 3 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["continuum_effect"]).len(),
+        1,
+        "`continuum_effect` 在探针里应命中一次（第 4 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["continuum-effect"]).len(),
+        1,
+        "`continuum-effect` 在探针里应命中一次（第 5 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["continuum_secrets"]).len(),
+        1,
+        "`continuum_secrets` 在探针里应命中一次（第 6 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["continuum-secrets"]).len(),
+        1,
+        "`continuum-secrets` 在探针里应命中一次（第 7 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["AuthorizedEffect"]).len(),
+        1,
+        "`AuthorizedEffect` 在探针里应命中一次（第 8 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["EffectJournal"]).len(),
+        1,
+        "`EffectJournal` 在探针里应命中一次（第 9 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["CapabilityKind"]).len(),
+        1,
+        "`CapabilityKind` 在探针里应命中一次（第 10 行）；第 14、15 行是词边界的紧侧，不算"
+    );
+    assert_eq!(
+        hits(&probe, &["SecretsRuntime"]).len(),
+        1,
+        "`SecretsRuntime` 在探针里应命中一次（第 11 行）"
+    );
+    assert_eq!(
+        hits(&probe, &["SecretStore"]).len(),
+        2,
+        "`SecretStore` 在探针里应命中两次（第 12 行与第 13 行紧挨中日韩文字的那一枚）；\
+         第 17 行的 `SECRETSTORE` 是大小写变体，不该被认领"
+    );
+
+    // 第三件之前先把枚数钉住：第十二枚不在探针里，上面三件都拍不到它。
+    assert_eq!(
+        NO_POWER_NAMES.len(),
+        11,
+        "设计 §2.2 第一条的清单是**十一枚**。多出来的一枚若不在探针语料里，上面的总数与\
+         逐枚断言都不会变红——故枚数单独断一次。今天的清单：{NO_POWER_NAMES:?}"
+    );
+
+    // 三、位置报对。
+    assert_eq!(
+        found,
+        vec![
+            (2, "continuum_capability"),
+            (3, "continuum-capability"),
+            (4, "continuum_effect"),
+            (5, "continuum-effect"),
+            (6, "continuum_secrets"),
+            (7, "continuum-secrets"),
+            (8, "AuthorizedEffect"),
+            (9, "EffectJournal"),
+            (10, "CapabilityKind"),
+            (11, "SecretsRuntime"),
+            (12, "SecretStore"),
+            (13, "SecretStore"),
         ],
         "行号或拼法对不上：判定红的时候报不出是哪一处。实际 {found:?}"
     );
