@@ -1263,9 +1263,17 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test task_cli
 - [ ] **Step 5: 提交**
 
 ```bash
-git add crates/continuum-runtime/tests/task_cli.rs crates/continuum-runtime/tests/dependency_direction.rs
+git add crates/continuum-runtime/tests/task_cli.rs
 git commit -m "test(runtime): 强制点 (1) 的射程边界；订正 runtime 依赖注释"
 ```
+
+> **订正（2026-10-07，F 终审发现）**：本条原先写的是
+> `git add crates/continuum-runtime/tests/task_cli.rs crates/continuum-runtime/tests/dependency_direction.rs` ——
+> **`dependency_direction.rs` 是 Step 2 的残留**，而 Step 2 已裁定为重复件（本 task 不改那个文件）。
+> **一条 `git add` 里多列一个没被改动的路径不是无害的**：它让读的人以为本 task 动过那个文件，
+> 而**「本 task 动过哪些文件」正是合入时判断冲突面的依据**。
+> **判据**：**`git add` 的路径清单要与「本 task 实际改动的文件」逐条相等**——
+> **它与 `Files:` 栏是同一条断言的两处写法**（那一栏也已在 Step 2 的订正里划掉了同一行）。
 
 ---
 
