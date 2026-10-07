@@ -1038,6 +1038,11 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
   - `four_class_trust_combinations_and_only_one_passes`：全走 `LocalOnly`，`spec_floor` 没动；
   - `an_empty_artifact_set_filters_nothing` 与 `an_empty_artifact_set_returns_the_tiebreak_winner`：
     制品集为空 ⇒ 闸门连一档都不看；
+    > **订正（2026-10-07，E Task 6 实做后）**：`an_empty_artifact_set_returns_the_tiebreak_winner`
+    > **这个名字已不存在**——它被合并进了 `the_id_breaks_ties_when_the_policy_says_equal`
+    > （见 Task 6 那一节末尾的订正）。**按名引一个已被合并掉的用例，会让后来者去 `grep` 一个
+    > 查不到的名字**。本行的判断（「制品集为空 ⇒ 闸门连一档都不看」）**仍然成立**，
+    > 只是那两条路径现在同在一个用例的两条循环元素里。
   - `duplicate_node_ids_are_a_named_error` 与 `an_empty_node_set_is_unplaceable`：期望的 `Err`
     与该变异体同解；
   - **Task 6 的三条**（`the_same_node_set_in_any_order_yields_the_same_node` /
@@ -1253,12 +1258,16 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 - Modify: `crates/continuum-node/src/placement.rs`（加步骤 4 的排序；`compare` 的兜底档）
 - Modify: `crates/continuum-node/tests/placement.rs`
 - Modify: `crates/continuum-node/src/lib.rs` / `src/node.rs` / `tests/node.rs`
-  （**订正 2026-10-07 补入，来历留此**：本栏原只列前两个文件。实现时发现**四处陈述被本轮的
-  改动证伪**，最要紧的是 `lib.rs` 的「**`place` 今天只落步骤 1–3……不读 `compare`**」——
-  本轮正是去读 `compare`，故那句话**定义性地**变假；另三处同源（`node.rs` 的
-  「消费方是 Task 6」「本 task 落地时 E 内部零读取」、`tests/node.rs` 的
-  「`Ord` 今天没有照片」）。**而计划里没有任何 task 认领它们**：Task 7 的 Files 是
-  「仅在复核发现缺口时」。**故按「失真的陈述不许留在仓里」就地订正，并把它们认领到本 task。**
+  （**订正 2026-10-07 补入，来历留此**：本栏原只列前两个文件。实现时改了四处陈述，
+  **而计划里没有任何 task 认领它们**：Task 7 的 Files 是「仅在复核发现缺口时」。
+  **故按「失真的陈述不许留在仓里」就地订正，并把它们认领到本 task。**
+  **但要分清四处的性质——本注初稿写「四处全部被本轮改动证伪」，那句过宽，复审已订正**：
+  - **真被证伪的两处**：`lib.rs` 的「**`place` 今天只落步骤 1–3……不读 `compare`**」——
+    本轮正是去读 `compare`，那句话**定义性地**变假；`tests/node.rs` 的「`Ord` 今天没有照片 /
+    本 crate 内零调用」——**同一原因**（`Ord` 从此有了运行期调用点）。
+  - **另两处是到期的自排期与前向指针，不是被证伪**：`node.rs` 的「消费方是 Task 6」
+    与 `capabilities()` 的「本 task 落地时 E 内部零读取」——它们本就写着「到某时重取」，
+    本轮只是**按期重取**。**把这两处也说成「证伪」，会让后来者以为它们曾是错的。**
   **实测边界**：四处**全部落在注释/文档**（`//!` 与 `///`），**无一行代码**——
   这是本条的判据，改到代码就超出「订正失真陈述」的范围了。
   **由此得一条可搬用的判据**：**一个 task 的 Files 清单只列了「它要改的实现与它的测试」，
@@ -1322,6 +1331,17 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 - `an_empty_artifact_set_returns_the_tiebreak_winner`（**§9「无制品」那一行的后一半**）：
   `artifacts = []` ＋ **上表那三枚**（**按 `"c"` / `"a"` / `"b"` 的顺序给**）
   ＋ `BaselinePlacementPolicy` → 返回 id 最小的那一枚 `"a"`。
+  > **订正（2026-10-07，E Task 6 实做后）——本条已不再是一个独立用例**：
+  > 实现时实测「**排序那一行**（删掉 `.then_with(|| a.id().cmp(b.id()))`、删掉整个 `sort_by`、
+  > 兜底档取反、`Ord` 改按长度比）的任何变异体**都区分不开**本条与
+  > `the_id_breaks_ties_when_the_policy_says_equal`」，故**按本节末尾预先写下的那条授权合并**：
+  > 本条的路径**逐字**活在 `the_id_breaks_ties_when_the_policy_says_equal` 的**第二条循环元素**里
+  > （`tests/placement.rs`），**名字从文件里消失**。
+  > **但「区分不开」这四个字要收窄（2026-10-07 复审实测）**：评审在交付字节上
+  > **把本条按上面的原文复原成一个独立 `#[test]`**，跑 `M10`（把「空制品集」当成「一律拒」，
+  > 档位**收紧**）——**复原出来的本条红、`the_id_breaks_ties…` 绿** ⇒ **两条是分得开的**。
+  > **准确的结论只到「排序那一行及其同族变异体区分不开」为止**，不是「两条从未分开过」。
+  > **记这一笔是为了后来者**：若将来要为本条找回独立名字，**M10 就是那个能分开它们的变异体**。
   **与 Task 5 的同名用例的分工写明**：那一条钉「不过滤」（单枚节点，Ordering 无关），
   这一条钉「返回的是兜底档选中的那一枚」（多枚节点）。
   **红的条件（档位：移除）**：删掉 `.then_with(|| a.id().cmp(b.id()))` → 稳定排序保留输入序
