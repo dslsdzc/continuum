@@ -885,9 +885,9 @@ fn swapping_the_policy_changes_the_result() {
 /// **红在哪条断言**：两条 `unwrap_err()` 中的对应那一条——**每一条子例的第一句就是「必须返回 `Err`」**。
 /// **红的条件（档位：放宽；终审派单写作「收紧」，本文件同形的那条记为「放宽」，见
 /// `a_local_only_artifact_with_no_trusted_personal_node_is_unplaceable`）**：
-/// 上面那枚 `take(1)` 变异体 → **次序一红**（变异版返回 `Ok(cloud("a"))`），次序二仍绿
-/// （它读到的第一枚正是 `LocalOnly`）；反过来，只读**最后一枚**的写法 → **次序二红**、次序一绿。
-/// 实测与射程见 `.superpowers/sdd-p3e-final-fix-report.md`。
+/// 上面那枚 `take(1)` 变异体 → **次序一红**（实测，变异版返回 `Ok(cloud("a"))`；该轮 panic 在次序一，
+/// 次序二因此没被跑到）；只读**最后一枚**的写法 → **次序一绿、次序二红**（实测）。两枚各钉一侧。
+/// 实测的读数、哈希与全量门日志见 `.superpowers/sdd-p3e-final-fix-report.md`。
 ///
 /// **两枚制品的 `id` 相同**（`artifact()` 夹具把 `id` 写死成 `"artifact-1"`）**不影响本用例**：
 /// `place` 只读 `privacy_class`，制品 `id` 不在它的输入面上（它判重的对象是**节点**）。
