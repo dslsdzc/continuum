@@ -1330,7 +1330,11 @@ cd /home/DslsDZC/Continuum && cargo tree -p continuum-runtime --depth 1 --edges 
 
 - [ ] **Step 2: 复核 `main.rs` 的迁移与装配注册**
 
-`runtime_migrations()`（`main.rs:57-66`）里是 **7 处 `extend` + 开头一处 `builtin_migrations()`**
+`runtime_migrations()`（**订正 2026-10-07，F Task 9 收口实测：现在在 `main.rs:98-108`**；
+本行初稿写 `:57-66`，那是本子项目的改动落进去**之前**的位置——`tool` 分支的接线与文档把函数整体推后了。
+**按行号引一个会随本子项目自身改动漂移的函数，是本项目点过名的形状**；
+本行的判据是「**7 处 `extend` + 开头一处 `builtin_migrations()`**」那半句，行号只用来定位）
+里是 **7 处 `extend` + 开头一处 `builtin_migrations()`**
 （`let mut migrations = continuum_persist::builtin_migrations();` **不是 `extend`**）：
 builtin + P1 两条（artifact、graph）+ P2 三条（workspace、policy、effect）+ P3 capability + D 的
 model-registry。**按条数复核时别把 builtin 数成一次 `extend`。**
