@@ -1120,7 +1120,19 @@ git commit -m "feat(runtime): 工具自报失败与 authorization 字段的分�
 `tests/tool_cli.rs` 走 `env!("CARGO_BIN_EXE_continuum-runtime")`（与 `task_cli.rs` 同法）：
 
 - `an_unparsable_input_fails_at_parsing_time`（P-12 的端到端那一半）：`--input '{'` → 退出码非零、
-  stderr 含 `--input`；**库未被创建**（`--db` 指向的路径不存在）。
+  **stderr 的第一行**含 `--input`；**库未被创建**（`--db` 指向的路径不存在）。
+  > **订正（2026-10-07，F Task 7 实测；原稿写的是「stderr 含 `--input`」，那句不成判据）**：
+  > `main` 在解析失败时**先打一行 `参数错误：<CliError>`、紧接着打整份 `cli::USAGE`**，而
+  > **`USAGE` 里逐字列出了** `--base` / `--sandbox` / `--input` / `--intent` / `--effect`
+  > （`crates/continuum-runtime/src/cli.rs` 的 `USAGE`）。故「stderr 含 `--input`」这句
+  > **对「解析器压根没校验 `--input`」的实现照样成立**——`USAGE` 替它把话说圆了。
+  > **实测（M3：吞掉 `--input` 的校验）**：**第一行**变成「工具调用失败…」，
+  > 而**整份 stderr 仍含 `--input`**。故判据取 **stderr 的第一行**。
+  > **同一条订正适用于下面 `the_option_group_is_rejected_in_both_directions` 与
+  > `the_task_only_options_are_unknown_here` 里的「出错行点名某选项」**——它们也是按第一行取的。
+  > **由此得一条可搬用的判据**：**「输出里含有 X」不是判据，「输出的哪一段含有 X」才是**——
+  > **凡有「先打错误、再打用法/帮助」的界面，帮助文本会把被测实现的话说圆**，
+  > 故断言必须**限定到「只有真做了那件事才会出现」的那一段**。
 - `the_option_group_is_rejected_in_both_directions`（P-13）：两向各一条端到端用例。
 - `the_task_only_options_are_unknown_here`（P-14）：`--base` / `--exec` / `--apply` / `--sandbox`
   **四条各一条**。
