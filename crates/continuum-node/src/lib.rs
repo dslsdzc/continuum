@@ -23,9 +23,9 @@
 //! [`BaselinePlacementPolicy`] / [`place`] 与运行期错误 [`PlacementError`]，
 //! 并以 `tests/placement.rs` 钉住「判据 §4.4 的正反面、放行侧、闸门不可被策略放宽、
 //! 四种 class × trust 组合、两条失败路径、空集两例、请求面反侧照片」。
-//! **`place` 今天只落步骤 1–3**（判重 → 过闸门 → 判空）；
-//! **步骤 4（排序）与兜底档由 Task 6 落**，故 `place` 今天**不读**
-//! [`PlacementPolicy::compare`]——那是刻意的拆分，不是终态。
+//! Task 6 补 `place` 的**步骤 4–5**（排序与取头），**这就是它的最终形态**：
+//! 排序读 [`PlacementPolicy::compare`]，`ComputeNodeId` 升序是最后一道兜底档（设计 §5.9），
+//! `tests/placement.rs` 再加四条钉住「确定性、兜底档（经闸门与不经闸门两条路径）、策略可替换」。
 //!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-model-registry` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。

@@ -16,7 +16,8 @@
 ///
 /// `Ord` 是必需的，不是顺手派生的：放置的确定性格（设计 §5.9）用它做排序的**最后一道**
 /// ——`sort_by(|a, b| policy.compare(a, b).then_with(|| a.id().cmp(b.id())))`，
-/// 即无论策略给出什么样的比较，`ComputeNodeId` 升序都是兜底档。它的消费方是 Task 6。
+/// 即无论策略给出什么样的比较，`ComputeNodeId` 升序都是兜底档。
+/// 它的消费方是 `place` 的步骤 4（Task 6 落地的排序兜底档）。
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ComputeNodeId(String);
 
@@ -141,13 +142,27 @@ impl ComputeNode {
         self.trust
     }
 
-    /// 消费方：**调用方自己实现的策略**（`PlacementPolicy` 的实现体）——**本 task 落地时
-    /// E 内部零读取**（设计 §3.5 末段）。
+    /// 消费方：**调用方自己实现的策略**（`PlacementPolicy` 的实现体）——`E 内部零读取`
+    /// （设计 §3.5 末段）。
     ///
-    /// **这一句带时间与位置的限定，Task 5／6 的策略实现落地时要重取它**：今天本 crate 里
-    /// 除本文件外**没有第二个模块**，故这句话的观察对象只有 `tests/node.rs` 的三条访问器断言。
-    /// **不补用例**（已裁）：没有观察对象，写一条「本 crate 内不读它」的正则守卫是对**缺席**设守卫，
-    /// 还得自己自证两侧，成本与收益不成比例。
+    /// **这一句带时间与位置的限定，Task 5／6 的策略实现落地时约定要重取它。**
+    /// **Task 6 已重取（读数是跟着那一次的最终字节取的）**，结论与代价照实分列：
+    ///
+    /// - **「E 内部零读取」在 Task 6 之后仍然成立**（`src/` 四个模块里没有一处读它），
+    ///   但它的**观察对象多了一个**：`tests/placement.rs` 里那份按标签数排序的策略
+    ///   （`ByCapabilityCount`）真的读 `capabilities()`——**这是本方法第一次有生产形状的消费者**
+    ///   （设计 §5.5 的「策略可替换」那一格就是它的照片）。
+    /// - **`tests/node.rs` 里读它的那条断言仍然只是「搬运」那一面的照片**
+    ///   （`the_six_accessors_return_what_new_was_given` 的 `capabilities` 那一行）：
+    ///   它钉的是「`new` 存进去的值取出来一样」，与上面那条「谁在读它」不是同一件事。
+    ///   **顺带订正一处计数**：本段初稿写「三条访问器断言」——**本轮实读**
+    ///   （`command grep -rn '\.capabilities()' --include='*.rs' crates/`），
+    ///   读 `ComputeNode::capabilities()` 的**只有那一条**；同一条用例里另有 `resources` / `availability`
+    ///   各一条断言（那是另两个方法，不是本方法的观察对象）。
+    /// - **不补用例（已裁，理由不变）**：那条设想中的守卫是「**本 crate 内不读它**」的正则文本断言，
+    ///   而它的观察对象在 `src/`——**今天仍然一个都没有**，故仍是对**缺席**设守卫，
+    ///   还得自己自证两侧，成本与收益不成比例。（对「测试读了它」设守卫没有意义：
+    ///   那正是 Task 6 要的。）
     pub fn capabilities(&self) -> &[String] {
         &self.capabilities
     }

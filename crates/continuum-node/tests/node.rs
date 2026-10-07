@@ -77,8 +77,8 @@ fn the_six_accessors_return_what_new_was_given() {
 
 /// `ComputeNodeId` 是注册表的键（设计 §3.6），也是放置结果的身份；它**可比较且大小有意义**。
 ///
-/// **消费方是 Task 6 的兜底档**（设计 §5.9：`a.id().cmp(b.id())` 是排序的最后一道），
-/// 故这条不是提前铺开的 API。
+/// **消费方是 `place` 的兜底档**（设计 §5.9：`a.id().cmp(b.id())` 是排序的最后一道，
+/// Task 6 落地），故这条不是提前铺开的 API。
 ///
 /// **红的条件（档位：取反）——四条派生里两条有照片、两条没有，这里不假装有。**
 /// 下面**按断言的内容**指认是哪一条，**不写行号**：本段自身的长短一变，行号就漂，
@@ -91,9 +91,18 @@ fn the_six_accessors_return_what_new_was_given() {
 ///   `PartialEq` ＋ `Debug`。去掉 `derive(PartialEq, Eq)`、手写 `impl PartialEq` 恒返 `false`
 ///   → 它红（同一次跑还会带红 `the_six_accessors_return_what_new_was_given` 里 `id` 那一条
 ///   `assert_eq!`，因为那里也走 `==`）。
-/// - **`Ord` 今天没有照片**：只反写 `Ord`、或只把它改成按**长度**比，而**保留
-///   `derive(PartialOrd)`**，两种都**编得过、`4 passed; 0 failed`**——**等价变异体**。
-///   它的唯一消费方是 Task 6 的兜底档（见上），本 crate 内**零调用**，故今天举不出能落在它身上的变异体。
+/// - **`Ord` 在本文件里没有照片，但 Task 6 之后它在 `tests/placement.rs` 里有了**。
+///   **本段初稿的原话与它的失效原因**（照留）：初稿写
+///   「`Ord` 今天没有照片：只反写 `Ord`、或只把它改成按**长度**比，而**保留 `derive(PartialOrd)`**，
+///   两种都**编得过、`4 passed; 0 failed`**——等价变异体。它的唯一消费方是 Task 6 的兜底档（见上），
+///   本 crate 内**零调用**，故今天举不出能落在它身上的变异体」。
+///   **「本 crate 内零调用」这一句只到 Task 5 为止为真**：Task 6 把兜底档落进 `place` 的步骤 4
+///   （`a.id().cmp(b.id())`，走 `Ord::cmp`），`Ord` 因此有了运行期调用点。
+///   **那两枚变异体现在各自会红在哪**：本文件的 `4 passed; 0 failed` **仍然成立**
+///   （本文件不调 `place`），红落在 **`tests/placement.rs` 的兜底档用例**上——
+///   `the_id_breaks_ties_when_the_policy_says_equal`（**实测**：按长度比那一枚只红这一条，
+///   `4 passed; 0 failed` ＋ `13 passed; 1 failed`）。
+///   **实测与 sha256 见 `.superpowers/sdd-p3e-impl/task-6-report.md`「结转：`Ord` 的第二张照片」一节**。
 /// - **`Eq` 今天没有照片，运行期也不可能有**：它是**无方法的标记 trait**，`assert_eq!` 不读它，
 ///   故任何运行期断言对它**恒真**。今天它的要求由**编译器**顺带看住——`Ord: Eq` 是 supertrait，
 ///   **只要 `Ord` 还派生着**，去掉 `Eq` 派生就会以

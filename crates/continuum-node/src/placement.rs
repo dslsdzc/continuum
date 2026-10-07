@@ -11,14 +11,15 @@
 //!
 //! # 走到哪为止
 //!
-//! [`place`] 今天只落**步骤 1–3**（判重 → 过闸门 → 判空）与**「取过滤后的第一枚」**；
-//! **步骤 4（排序）与「兜底档」在 Task 6**。故今天的 `place` **不读**
-//! [`PlacementPolicy::compare`]——这是**刻意的拆分**（各自的判据分开写清），
-//! **不是 `place` 的最终形态**。由此还有一处可观察的后果：本 task 的每一条用例
-//! 都构造成「过闸门后恰好剩一枚」或「次序无关」。
+//! [`place`] 落**步骤 1–5 全步**（判重 → 过闸门 → 判空 → 排序 → 取头），
+//! 这就是它的**最终形态**：排序的**接口**（[`PlacementPolicy::compare`]）与**兜底档**
+//! （[`ComputeNodeId`](crate::ComputeNodeId) 升序）都在本层，
+//! 而**具体打分函数的数值明确推迟**（§291 的十一项因子里九项连量纲都没有，设计 §5.6／§10 第 7 条）。
 //!
-//! [`BaselinePlacementPolicy`] 与它的 `compare` 一并落在本模块，是本 crate 对外交出的唯一一份
-//! 策略实现——**它不对 §291 的任何一项因子作主张**（十一项里一项都算不出来，设计 §5.5／§5.6）。
+//! [`BaselinePlacementPolicy`] 与它的 `compare` 一并落在本模块，是**库里**唯一一份策略实现
+//! ——**它不对 §291 的任何一项因子作主张**（十一项里一项都算不出来，设计 §5.5／§5.6）：
+//! 它是**具名的、可替换的基线**，`compare` 恒 [`Ordering::Equal`]，次序交给兜底档。
+//! 换一份策略即换一次排序——调用方自带的实现体在 `tests/placement.rs`（两份）。
 
 use std::cmp::Ordering;
 
@@ -274,8 +275,13 @@ pub trait PlacementPolicy {
     /// **它给出的是「哪一枚更合适」，不是「哪一枚能不能」**：能不能由 §5.3 的硬闸门单独决定，
     /// 策略**无权**放宽它（[`place`] 的步骤 2 在 [`compare`](PlacementPolicy::compare) 之前）。
     ///
-    /// **今天零生产消费方**：[`place`] 的步骤 4（排序）在 Task 6，本 task 调用的
-    /// `place` 不读本方法。它的唯一实现体是 [`BaselinePlacementPolicy`]。
+    /// **它给出的是候选之间的先后，不是「排在哪一位」**：[`place`] 的步骤 4 把 `Equal`
+    /// 一律交给 `ComputeNodeId` 升序的**兜底档**，故一份恒返 `Ordering::Equal` 的策略
+    /// 仍然有确定的结果（设计 §5.9）。
+    ///
+    /// **消费方**：[`place`] 的步骤 4。
+    /// **实现体**：库里只有 [`BaselinePlacementPolicy`] 一份；
+    /// 调用方自带的在 `tests/placement.rs`（恒 `Equal` 的与按标签数降序的各一份）。
     fn compare(&self, a: &ComputeNode, b: &ComputeNode) -> Ordering;
 }
 
@@ -283,7 +289,10 @@ pub trait PlacementPolicy {
 /// （设计 §5.5／§5.6、§10 第 7 条）。
 ///
 /// [`compare`](PlacementPolicy::compare) 对任何一对返回 [`Ordering::Equal`]；
-/// 次序完全由 [`place`] 的**兜底档**决定（§5.9：`ComputeNodeId` 升序，Task 6 落地）。
+/// 次序完全由 [`place`] 的**兜底档**决定（§5.9：`ComputeNodeId` 升序，已落在 `place` 的步骤 4）。
+///
+/// **它是「可替换」的那一份默认**：换掉它（换成一份真的读因子的策略）即换一次排序，
+/// 而**闸门不受影响**——[`compare`](PlacementPolicy::compare) 在 [`place`] 的步骤 2 之后被读。
 ///
 /// **它唯一的「主张」是 [`rules`](PlacementPolicy::rules) 交出的那张表**，而那张表也是
 /// **调用方给的**——本类型一个值都不填（同上，§10 第 2 条：那四档的宽严完全取决于调用方）。
@@ -316,7 +325,7 @@ impl PlacementPolicy for BaselinePlacementPolicy {
 /// 返回**单枚**节点——不是候选序列：§291 要的是「放在哪」，
 /// `ExecutionProfile.compute_node` 也只要一枚。序列是本函数内部的中间物（§5.9）。
 ///
-/// # 步骤（本 task 落 1–3，第 4、5 步见 Task 6）
+/// # 步骤（五步全落，这就是最终形态）
 ///
 /// 1. **判重**：`request.nodes` 里同一个 [`ComputeNodeId`](crate::ComputeNodeId) 出现两次即
 ///    `Err(`[`PlacementError::DuplicateNode`]`)`。放在第一步，因为它是 §5.9 那条「确定」断言的
@@ -326,8 +335,16 @@ impl PlacementPolicy for BaselinePlacementPolicy {
 ///    [`TransferRule::TrustedPersonalOnly`] 的判据逐字是
 ///    `class == Personal && trust == TrustedPersonal`（设计 §5.3）。
 /// 3. **判空**：第 2 步之后一枚不剩即 `Err(`[`PlacementError::NoPlaceableNode`]`)`。
-/// 4. **排序**：`sort_by(|a, b| policy.compare(a, b).then_with(|| a.id().cmp(b.id())))`（§5.9 的兜底档）。**Task 6。**
-/// 5. **取头**：返回排在第一的那一枚的借用。**本 task 在此取的是过滤后的第一枚，不排序。**
+/// 4. **排序**：`sort_by(|a, b| policy.compare(a, b).then_with(|| a.id().cmp(b.id())))`（§5.9 的兜底档）。
+///    **排序的机制在本层，具体打分函数的数值明确推迟**：§291 的十一项因子里九项
+///    **连量纲都没有**（设计 §5.6），本层给不出数值基线。
+///    [`BaselinePlacementPolicy`] 是**具名的、可替换的基线**，
+///    它的 `compare` 恒 [`Ordering::Equal`]——**它不对任何一项因子作主张**。
+/// 5. **取头**：返回排在第一的那一枚的借用。
+///
+/// **代码里步骤 3 与步骤 5 合成一句**（`.first()` 取头、`.ok_or(…)` 判空），
+/// 故步骤 4 的排序插在它之前——空切片上 `sort_by` 是空操作，
+/// **「先判空还是先排序」在这里观测不到差别**。上面这个次序是设计 §5.2 的口径。
 ///
 /// # 返回的生命周期
 ///
@@ -382,7 +399,18 @@ pub fn place<'a>(
         }
     }
 
-    // ── 步骤 3：判空 ＋ 步骤 5：取头（步骤 4 的排序在 Task 6）────────
+    // ── 步骤 4：排序 ────────────────────────────────────────────────
+    // 无论策略给出什么样的比较，`ComputeNodeId` 升序都是最后的兜底档（§5.9）。
+    // `ComputeNodeId` 两两可比，且在同一份 `nodes` 里无相等——后者由步骤 1 的
+    // `DuplicateNode` 保证（这就是「判重在第一步」的理由）。
+    //
+    // `sort_by` 是稳定排序，但**这里不靠它的稳定性**：`.then_with` 已经让任意一对
+    // 都有确定的先后，等价元素不存在。
+    placeable.sort_by(|a, b| policy.compare(a, b).then_with(|| a.id().cmp(b.id())));
+
+    // ── 步骤 3（判空）＋ 步骤 5（取头）：同一个表达式的两侧 ──────────
+    // `.first()` 取头、`.ok_or(...)` 判空，合成一句——故步骤 4 的排序只能插在它之前，
+    // 而空切片上的 `sort_by` 是空操作：**先判空还是先排序，在这里观测上无差别**。
     // 空制品集时 `placeable` 就是 `request.nodes` 全体——`LocalOnly` 的判据不适用，
     // 因为没有制品要保护（§9 的「无制品」那一格）。
     placeable
