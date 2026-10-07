@@ -534,7 +534,8 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
   **但那一处必须连 `PartialOrd` 一起反写**（2026-10-07，E 的 Task 2 实现者实测；**本行初稿说窄了**）：
   `<` 走的是 **`PartialOrd::lt`**，而 `#[derive(PartialOrd)]` 与 `#[derive(Ord)]` 是**两个各自生成的
   独立派生**——**只反写 `Ord`、保留 `derive(PartialOrd)` 时，本用例**两条**断言
-  （`assert!(… < …)` 与 `assert_eq!(…)`，实测 `tests/node.rs:88-89`）走的分别是
+  （`assert!(… < …)` 与 `assert_eq!(…)`，即 `tests/node.rs` 的
+  `the_id_is_the_registry_key_and_is_ordered` 的**头两条断言**）走的分别是
   `PartialOrd::lt` 与 `PartialEq::eq`，**都不经 `Ord`**，于是「编得过、全绿」**
   （**等价变异体**：那一版与本版在任何入参上都不给出不同结果，
   本 task 里没有一处调 `Ord::cmp`）。**故「删掉 `Ord`」或「只反写 `Ord`」都不是真变异体**；
@@ -543,6 +544,14 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
   照它做会得到一次**假绿**（这正是「变异须真落到实现体」那条纪律里的等价变异体一档）。
   **它的消费方是 Task 6 的兜底档**（`a.id().cmp(b.id())`，那处走 `Ord::cmp`），
   故这条不是提前铺开的 API；**也正因本 task 还没有 `Ord::cmp` 的消费方，只反写 `Ord` 才无迹可寻**。
+  **订正（2026-10-07，E 的 Task 7 复核实测；旧形照留）**：本行初稿在这两枚断言的括注里写的是
+  「实测 `tests/node.rs:88-89`」。**那串号在今天的工作树上不成立**——实测那两条断言在
+  `:123`／`:124`；`:88`／`:89` 落在同一条用例上方的文档注释里。
+  **位移的来历**：Task 2 的修复轮往那段注释里补了内容，两条断言随之后移，
+  `tests/node.rs:85` 自己就记着这次漂移（「那一稿写 `:88`／`:89`，补完本段后那两条断言落到了别处」）。
+  **处置是换引用方式，不是把数字改成新的数字**：改成用例名 ＋「头两条断言」——
+  与设计侧那条「用例名稳定，插行不改变它」同一条判据。
+  **此处只改引用形式，不改任何判据、用例名或断言的期望。**
 - `the_two_node_classes_are_the_two_the_spec_names`（**纯编译期照片**）：`tests/node.rs` 里写一个
   `fn class_label(c: NodeClass) -> &'static str`，函数体是一个覆盖
   `NodeClass::Personal` 与 `NodeClass::Temporary` **两臂、无通配臂**的 `match`。
@@ -765,7 +774,12 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
   **订正（2026-10-07，E 的 Task 3 评审查出；旧话照留）**：本行初稿写的是
   「**以下所有说明一律写在 `tests/registry.rs` 的文件头，一个字都不许写进 `src/registry.rs`**」，
   **那不是本条的判据**——**它的理由只支持「那三个字面不许出现」，不支持「不许出现任何内容」**。
-  实测（实现者）：`src/registry.rs` 的 `:3-8` 写有 **7 行指向性说明**（点名了两条守卫与测试文件），
+  实测（实现者）：`src/registry.rs` 的 `:3-8` 写有 **6 行指向性说明**（点名了两条守卫与测试文件），
+  （**2026-10-07，E 的 Task 7 复核实测**：本行初稿写「**7 行**」，与它自己给出的区间 `:3-8` 相抵
+  ——`3,4,5,6,7,8` 是六行；`git show 011e703:crates/continuum-node/src/registry.rs` 显示该模块
+  **自建立起这段就是六行**，故那个「7」不是某次改动的产物，是落笔时的差一。
+  **判据本身不受影响**：本段要的是「守卫绿」，而下一行的 `grep` **零命中**这一条**成立**
+  ——错的只是那个数。）
   `grep -nE 'continuum_artifact|Artifact|PrivacyClass'` **零命中**，**守卫保持绿** ⇒
   **那个风险在这里不存在，这样的写法是合规的**。
   **要守的是「守卫绿」，不是「一个字都没有」。**
