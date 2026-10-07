@@ -2,7 +2,7 @@
 //! 里**不依赖四段流程**的那部分：`ProviderError` 的分类表，以及它到
 //! [`ModelCallError`] 的转换。
 //!
-//! 本 task 落在这里的就是上面那两样。**四段流程里已落地的是第①段（[`plan_candidates`]，
+//! **本模块最早落地的就是上面那两样**。**四段流程里已落地的是第①段（[`plan_candidates`]，
 //! 同步段）与第②段的前半（[`snapshot`]）**；调排序（`select`）与 `call` / `call_stream`
 //! 由后续 task 落在这里。
 //!
@@ -29,7 +29,7 @@ use crate::error::ModelCallError;
 ///
 /// **字段私有、构造点唯一**（就在 [`plan_candidates`] 里）：本 crate 外**造不出一枚**
 /// `Candidate`，故集成测试里的候选只能由 `plan_candidates` 产出。**这不是一条为测试方便的
-/// 是设计 §3.1 第 1 条的落点**——它同时挡掉了「给测试开一条 `#[cfg(test)]` 构造口」
+/// 口子——它就是设计 §3.1 第 1 条的落点**——它同时挡掉了「给测试开一条 `#[cfg(test)]` 构造口」
 /// 那条替代（那会在测试与生产之间开第二条构造通道）。
 ///
 /// **不派生任何东西**：没有当场消费方（判据同 D 的 `BudgetView`，D §6.1）。
@@ -81,7 +81,8 @@ impl Candidate {
 /// → `Err(ModelCallError::Routing(RoutingError::NoEligibleCandidate))`，**不调 `rank`**
 /// （设计 §3.1 第 9 条）。**「不调 `rank`」在这一层是类型上的事实**：本函数的参数表里
 /// 没有 `&dyn RankingPolicy`（G 这一侧调 `rank` 的地方只有 `select`），故它拿不出一次
-/// `rank` 调用——这半的照片归 `select` 落地处，不在本函数。
+/// `rank` 调用——这半的照片归端到端那一处（Task 11 的可达性用例，`select` 在它之前落地），
+/// **不在本函数**（订正 2026-10-08：原写「归 `select` 落地处」，实测 Task 7 那一节不含这条用例）。
 /// **空的判定不返回空列表**：本函数对空集返回 `Err` 而不是 `Ok(vec![])`，
 /// 故「G 交出去的候选集非空」在下游是一条构造性事实（与 D 的 `rank` 不产出空列表同形）。
 pub fn plan_candidates(

@@ -704,16 +704,26 @@ fn a_model_kept_out_for_want_of_an_adapter_comes_back_once_it_is_registered() {
 /// 实测那一版报 `error[E0728]: await is only allowed inside async functions`
 /// （`.tmp/t6-mut-M5-ids-from-list-models.log`）。
 ///
-/// **故本条的两条结构断言没有变异体照片**，成因是构造性的两条：
-/// (i) 任何候选都得是一枚 `RoutableModel`，它唯一的构造点 `try_new` 要一枚 `ModelProfile`，
-/// 而画像只能从 `model_profile` 表读出、那张表的 `id` 又是 **`model_registry(id)` 的外键**；
-/// (ii) `ProviderRegistry` 的公开面只有按 id 查（`model_for`），**没有枚举**，故「从注册表造
-/// 候选」这条路走不到。即「候选 ⊆ 登记表」与「id 两两不同」在本仓是 **D 的表结构 ＋ crate
-/// 边界**兜住的，不是 G 这段代码兜住的。**本条的价值是回归护栏**：将来若有人给候选集另开一条
-/// 来源（或 D 撤掉那条外键），它会红。
+/// **两条结构断言的处境不同，分开写（订正 2026-10-08：原写「两条都没有变异体照片」）**：
 ///
-/// **本条唯一有变异体的一侧是 `.expect("登记表里有一个模型")`**：候选集恒空那一枚（`M4`）
-/// 让它红。
+/// - **「候选 id ⊆ `list_registered` 的 id 集合」：没有可写的变异体**（这是推理结论，不是穷举）。
+///   成因是构造性的两条：(i) 任何候选都得是一枚 `RoutableModel`，它唯一的构造点 `try_new`
+///   要一枚 `ModelProfile`，而画像只能从 `model_profile` 表读出、那张表的 `id` 又是
+///   **`model_registry(id)` 的外键**；(ii) `ProviderRegistry` 的公开面只有按 id 查
+///   （`model_for`），**没有枚举**，故「从注册表造候选」这条路走不到。即这一半在本仓是
+///   **D 的表结构 ＋ crate 边界**兜住的，不是 G 这段代码兜住的。
+/// - **「候选 id 两两不同」：写得出来，且已实测跑红**（档位：取反）。把 `list_registered`
+///   的结果整份复制再接回到它自己后面（同一个 id 因此出现两遍）→ 本条与另外 6 条用例红，
+///   本条的 `distinct.len() == ids.len()` 那一条断言红。
+///   **故「两条结构断言一枚都写不出来」为假：只有 ⊆ 那一半写不出来。**
+///
+/// **⊆ 那一半的回归护栏价值**：将来若有人给候选集另开一条来源（或 D 撤掉那条外键），它会红。
+///
+/// **非空锚是必须的**：三条断言（⊆、`!any(ghost)`、去重计数）在一个**空的候选集**上**全部
+/// 空真**，`.expect("登记表里有一个模型")` 拿到的也是 `Ok(vec![])`、**不会 panic**——故没有非空锚
+/// 时，一个「永远返回空候选集」的实现（`M4`）让本条**整条绿**。下面 `ids == ["m-served"]`
+/// 那一条就是非空锚；**订正 2026-10-08：原写「`M4` 让本条红」与实测相反**，实测 `M4` 下本条是绿的，
+/// 这正是加这条锚的起因。
 #[test]
 fn the_candidate_set_comes_only_from_the_registry_table() {
     let (_dir, db) = a_model_db();
@@ -739,6 +749,13 @@ fn the_candidate_set_comes_only_from_the_registry_table() {
         .collect();
     let ids = ids_of(&candidates);
 
+    // **非空锚**：没有它，上面三条结构断言在空候选集上全是空真——一个「恒返空候选集」的实现
+    // 整条绿。位置在结构断言**之前**：空集在这里就红，读的人不必猜到后面的断言为何空过。
+    assert_eq!(
+        ids,
+        vec!["m-served".to_owned()],
+        "候选集该恰是登记表里那一条；空集说明这个实现根本没在造候选（下面的结构断言在空集上空真）"
+    );
     assert!(
         ids.iter().all(|id| registered.contains(id)),
         "候选集的 id 集合该 ⊆ `list_registered` 的 id 集合：候选 {ids:?}，登记 {registered:?}"
@@ -756,7 +773,11 @@ fn the_candidate_set_comes_only_from_the_registry_table() {
 }
 
 /// 候选集为空 → `NoEligibleCandidate`（设计 §3.1 第 9 条）。**两个来路各一条**：
-/// (a) 一个模型都没登记；(b) 登记了、也有适配器，但**全部**被闸门挡下。
+/// (a) 一个模型都没登记；(b) 登记了、也有适配器，但**全部无画像**（`load_profile` 回 `None`，
+/// 因此到不了 `try_new` 那道闸门）。
+///
+/// **措辞收窄（2026-10-08）**：来路 (b) 原写「全部被闸门挡下」，而这里构造的是「全部无画像」
+/// ——设计 §11 把两者并列为同一来路，故原话不算错，但射程比构造宽；按本仓口径收窄成实际构造的那一个。
 ///
 /// **各断言是哪一枚 `Err`**（`ModelCallError::Routing(RoutingError::NoEligibleCandidate)`），
 /// 不只「返回了 `Err`」——两层都点名。
@@ -767,7 +788,10 @@ fn the_candidate_set_comes_only_from_the_registry_table() {
 /// 而 G 这一侧调 `rank` 的地方只有 `select`（Task 7，今天不存在）。
 /// 即「空候选集不调 `rank`」在 Task 6 上是**类型上做不到**，不是「有规则在挡」——
 /// 一个没有策略参数的函数**拿不出**一次 `rank` 调用。写一个恒不被调用的 panic 策略会是一条
-/// **恒真**的断言（外加一条 `dead_code` 警告），故不写。**该半的照片归 Task 7**（`select` 落地处）。
+/// **恒真**的断言（外加一条 `dead_code` 警告），故不写。
+/// **该半的照片归 Task 11**（端到端那一节，`select` 硬依赖 Task 7）——**订正 2026-10-08**：
+/// 原写「归 Task 7」，而实读计划全文，这条用例只在 Task 6 的简报里出现过一次，
+/// Task 7 与 Task 11 两节都没有它；协调者裁定落到 Task 11。
 ///
 /// **红的条件（档位：移除）**：把空判定的短路删掉 → 函数返回 `Ok(vec![])`，
 /// 两条断言各在其「该是 `Err`」那一处红。
@@ -792,7 +816,7 @@ fn an_empty_candidate_set_is_no_eligible_candidate() {
         "一个都没登记 → NoEligibleCandidate，得到 {err:?}"
     );
 
-    // 来路 (b)：登记了、也有适配器，但全部被闸门挡下（都没有画像）。
+    // 来路 (b)：登记了、也有适配器，但全部无画像（都在 `load_profile` 那一步被丢弃）。
     let (_dir2, db2) = a_model_db();
     let tx2 = db2.begin().unwrap();
     let mut registry2 = ProviderRegistry::new();
@@ -800,7 +824,7 @@ fn an_empty_candidate_set_is_no_eligible_candidate() {
     serve(&mut registry2, &["m-bare"], Arc::new(FakeModel::new()));
     let err2 = match plan_candidates(&tx2, &registry2) {
         Ok(candidates) => panic!(
-            "全部被闸门挡下，该以 NoEligibleCandidate 回，却得到 {} 条候选",
+            "全部无画像，该以 NoEligibleCandidate 回，却得到 {} 条候选",
             candidates.len()
         ),
         Err(e) => e,
@@ -810,7 +834,7 @@ fn an_empty_candidate_set_is_no_eligible_candidate() {
             err2,
             ModelCallError::Routing(RoutingError::NoEligibleCandidate)
         ),
-        "全部被闸门挡下 → 同一枚 NoEligibleCandidate（两种情形走同一条失败路径），得到 {err2:?}"
+        "全部无画像 → 同一枚 NoEligibleCandidate（两种情形走同一条失败路径），得到 {err2:?}"
     );
 }
 
@@ -979,8 +1003,13 @@ async fn the_snapshot_is_as_long_as_the_candidate_set() {
 /// **两侧对钉**：向一钉「不丢」（改配 `Degraded` 时若实现把它丢了，向二红）；
 /// 向二钉「不升格」（把 `Degraded` 记成 `Healthy` 的实现让向二红）。
 ///
-/// **红的条件（档位：放宽）**：在快照里就把 `Unavailable` 滤掉（丢掉该候选）
+/// **红的条件（档位：收紧）**：在快照里就把 `Unavailable` 滤掉（丢掉该候选）
 /// → 本条向一（快照里找不到 m-u）与 `the_snapshot_is_as_long_as_the_candidate_set` **同时**红。
+///
+/// **档位订正（2026-10-08，协调者裁定）**：原标「放宽」，与上文 `the_snapshot_is_as_long_as_
+/// the_candidate_set` 标「收紧」矛盾——那两条变异体做的是**同一类事**（加一条过滤、丢条目：
+/// 一个是「只对 `Healthy` 的候选给条目」，一个是「把 `Unavailable` 滤掉」）。按本仓口径
+/// （**加过滤＝收紧；去掉一个过滤的效果＝放宽**），**两枚都是收紧**。
 #[tokio::test]
 async fn a_unavailable_adapter_is_carried_through_verbatim() {
     // 向一：`Unavailable` 原样带过——候选集本身也非空（G 不因健康度丢候选）。
