@@ -971,6 +971,13 @@ git commit -m "test(runtime): 强制点 (1) 的两个拒绝方向与零调用的
 - `an_effect_free_call_touches_neither_the_effect_table_nor_the_mint`（P-16）：零 `--effect` → `effect`
   **0 行**、`audit_log` **恰 1 条**（`capability grants`），**且没有凭据捏造的「tool invoked」之类审计行**
   （§313 的八项是封闭清单，本子项目**不新增 `AuditKind`**）。
+  > **用例名的后半 `nor_the_mint` 今天不可证伪（2026-10-07，F Task 5 评审发现，收口时未改）**：
+  > `mint` 的产物只在内存里，**落库侧读不出**，故名字那个全称断言**没有可观察形式**。
+  > **断言与用例本身是对的**（断的是「`effect` 0 行、`audit_log` 恰 1 条、无捏造的审计行」），
+  > **过宽的只是名字**。**收窄它要同时改计划这一行与测试文件 `:1353` 的函数名**，故与 F 的其余
+  > Minor 一并记账：见 `.superpowers/sdd/p3f-minors.md`。
+  > **判据同 [[absolute-claims-need-tests]]**：**用例名也是断言的一部分**——「皆 / 一概 / 整个 /
+  > `neither…nor`」这类全称措辞，要么有对应用例，要么收窄。
 - `each_declared_scope_is_carried_into_the_audit_payload_verbatim`（P-18）：声明两条目标各不相同的
   `--effect`，跑完之后读 `audit_log` 的 `capability grants` 行、解析 payload，断言
   `capabilities[].scope` 的 multiset **逐个等于**各 `--effect` 的目标。
