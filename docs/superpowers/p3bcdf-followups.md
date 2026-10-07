@@ -543,3 +543,38 @@
 
 **收件人：合并 `p3cf` 的那一轮**（届时逐份处置，勿整体取一边）。
 
+---
+
+## 遗留
+
+本节收 P3 子项目 F（工具调用路径）**收口 Task 9** 查出的、**在本分支上无法闭合**的事项，记一条。
+（本节**不是** F 全部遗留的收纳处：§三之二收的是 C 的实现期取读，§八收的是 B 的遗留，两节与本节的收件人各不相同。）
+
+### 1. `p3f` 上复核出的并集**不等于** E 与 G 合入后的并集
+
+- **本 task 的射程**：Task 9 的 Step 1–3 在 `p3f` 的工作树上复核三处多写者文件——
+  `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`、
+  `crates/continuum-runtime/src/main.rs` 的迁移注册与装配、workspace `Cargo.toml` 的 `members`。
+  得出的并集是 **B / C / D 三份计划在 `p3f` 这一条分支上的并集**。
+- **为什么它不是最终并集**：`p3e`（E，`continuum-node`）与 `p3g`（G，模型调用路径）**都不是 `p3f` 的祖先**
+  （`git merge-base --is-ancestor p3e p3f` 与 `… p3g p3f` 实测均非祖先），故这两条的改动在 `p3f` 上看不见；
+  `crates/` 下无 `continuum-node`（实测）。
+- **合入时会动到本 task 复核过的那几处**。实测两条分支相对 `p3f` 的差异，**限本 task 复核过的那四个路径**
+  （`Cargo.toml`、`crates/continuum-runtime/Cargo.toml`、`crates/continuum-runtime/src/main.rs`、
+  `crates/continuum-runtime/tests/dependency_direction.rs`）：
+  - **`p3e` 改两个**：`Cargo.toml`（+1 行，`crates/continuum-node` 进 `members`）；
+    `crates/continuum-runtime/tests/dependency_direction.rs`（+6 行，新增**主体**条目
+    `("continuum-node", &["continuum-artifact"])`）。
+  - **`p3g` 改一个**：`crates/continuum-runtime/Cargo.toml`（+10 行，`[dev-dependencies]` 两条**外部** dev 边：
+    `async-trait` 与 `futures-core`）。
+- **一条要在合入时当场处置的具体形状**：`async-trait` 这条 dev 边**两边各加过一次**——
+  F 的 Task 3 加在 `p3f` 上，G 的 Task 2 加在 `p3g` 上（G 那侧的注释已写明「谁先落地谁登记」）。
+  两条分支合入时，`crates/continuum-runtime/Cargo.toml` 的 `[dev-dependencies]` 里这个键会**落成重复键或文本冲突**，
+  两种都要按**「同一条边、一个键」**收口（TOML 的重复键是错误）。它不是「两份登记」，是**一条边有两个使用者**。
+- **不得把本 task 的结论报成「三处合并后的并集已核」**：那份并集要到 E 与 G 合入之后才存在。
+  §八.1 / §八.2 同理在等 B 的接线，但那两条是**使用点**缺，与本条**成员/边集合**缺是两件事，不要并成一条。
+- **收件人：协调者。在哪一步做：E 与 G 合入 `main` 的那一轮**——合入后照 Task 9 的 Step 1–3 另跑一次三处并集复核：
+  `cargo tree -p continuum-runtime --depth 1 --edges all --prefix none` 与 `ALLOWED` 的 runtime 条目逐行比对、
+  `crates/continuum-runtime/Cargo.toml` 的 normal 依赖与 `ALLOWED` 精确一致、
+  `workspace_crates()` 与 `ALLOWED` 的 `subjects` 互为覆盖、`main.rs` 的注册集合与 `tests/migrations.rs` 对照。
+
