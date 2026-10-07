@@ -936,14 +936,37 @@ fn a_corrupt_registration_is_reported_as_a_persist_failure() {
     }
 }
 
-/// **设计 §5.3 的绝对措辞逐项一条**：不在 `PolicyContext.effect_type` 事实集合里的那六个
-/// kind，**本路径一律得到 `MissingCapability`**。
+/// **设计 §5.3 措辞订正之后的形状**：不在 `PolicyContext.effect_type` 事实集合里的那六个
+/// kind，**在出示集为空时一律得到 `MissingCapability`**。
+///
+/// # 「出示集为空时」这个限定词是修复轮 1 加的（原句过大，来历留此）
+///
+/// 本条原先写的是「**本路径一律得到 `MissingCapability`**」。**那句过大**：`authorize` 的次序是
+/// **先查出示集、再查声明集**（`crates/continuum-capability/src/registry.rs` 的第一遍与第二遍；
+/// 照片是 `crates/continuum-capability/tests/authorize.rs` 的
+/// `the_presented_set_is_checked_before_the_declared_set`），故一个**还出示了工具未声明的能力**
+/// 的调用方拿到的是 [`CapabilityError::UndeclaredCapability`]，不是 `MissingCapability`
+/// ——P-4 就是这条机制的照片。**设计那侧已按同一判据订正**（`8fc601e`，§5.3 现在把这两条
+/// 分列成两行），本条只是当时没跟上。
 ///
 /// 六条登记项各声明其中一枚（`required_capabilities` 取单枚），**不声明任何 `--effect`**
 /// （出示集为空），故每条都应报 [`CapabilityError::MissingCapability`]，且 kind 与该条自己
-/// 声明的那一枚**逐项相同**。六项逐个跑、逐个断言，**不抽代表**：六个 `CapabilityKind` 是
-/// 不同的值，实现里那两处手写分支（`CapabilityKind::for_effect` 的正向与 `effect` 的反向）
-/// 能各自漂移。
+/// 声明的那一枚**逐项相同**。
+///
+/// # 为什么六项**逐项**跑、不抽代表
+///
+/// 六个 `CapabilityKind` 是**不同的值**，而这条路径上有一对**各十二臂的手写表**：
+/// `CapabilityKind::as_str`（`crates/continuum-capability/src/capability.rs`，
+/// 经 `save_tool` 的 `encode_capabilities` 写库）与 [`CapabilityKind::parse`]（同文件，
+/// 经 `load_tool` 的 `decode_capabilities` 读回）。六条登记项**各把这对表的两侧走了一遍**，
+/// 故抽一个代表会让另外五臂的漂移无人过问。
+///
+/// **原句在这里点错了分支，来历留此**：原先写的是「那两处手写分支（`CapabilityKind::for_effect`
+/// 的正向与 `effect` 的反向）能各自漂移」。**两个都指错了**——`authorize` **不调** `for_effect`
+/// （它只用 `declared.contains(&capability.kind())` 与相等比较），而 `CapabilityKind::effect()`
+/// 那张反向表**在本路径上没有调用点**：它在 `crates/*/src` 里的唯一调用者是连接器的
+/// `crates/continuum-connector/src/entry.rs`（`bound.effect()`，属 B 那条路径）。
+/// **枚举这件事本身做得对（六枚确实各有照片），错的只是依据。**
 ///
 /// # 六条的 `effect_class` **必须**取 `None`
 ///
