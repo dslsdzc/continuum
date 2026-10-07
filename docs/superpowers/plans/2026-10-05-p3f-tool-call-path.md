@@ -147,7 +147,10 @@ B 与 D 的产物（`CapabilityKind::effect`、`continuum-model-registry`、迁�
    `error: test failed, to rerun pass …`，故判「编译失败」要用 `could not compile` 或 `error[E….`。
 2. **凡注释写绝对措辞，必须有对应用例**；写不出的就改成名副其实的说法，或**明写它为什么没有照片**。
    **枚举式绝对断言须逐项有照片**——本计划有两处这类断言：设计 §5.3「六个无 `EffectType` 对应的 kind
-   在本路径上**一律** `MissingCapability`」（Task 4 逐项一条）、设计 §12.1「命令路径**不过**强制点 (1)」
+   在本路径上**必然被拒**，**零 `--effect` 时是 `MissingCapability`**」（Task 4 逐项一条；
+   **订正 2026-10-07**：此处原引设计那句为「**一律** `MissingCapability`」——**设计那句已收窄**
+   （「无论调用方怎么声明」为假，见设计 §5.3 的订正段：`authorize` 先查出示集、后查声明集））、
+   设计 §12.1「命令路径**不过**强制点 (1)」
    （Task 8 的 P-19）。**改完一处枚举，通读整段。**
 3. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 Err」。本计划里凡是 `TaskError` 的出口，
    用例一律断言到**变体**（`TaskError::Capability(CapabilityError::UnknownTool { .. })` 这一层）。
@@ -846,6 +849,15 @@ git commit -m "feat(runtime): tool 子命令的解析面、工具调用路径与
 
 > 本 task **只加用例与变异**，不改 `run_tool_call` 的语义（它在 Task 3 已经全量落地）。
 > **红的条件由变异给出**——本仓接受变异为红条件。
+>
+> **订正（2026-10-07，回灌 F Task 4 `6eef98f` 的实测）——本 task 的标题要打个补丁**：题名是
+> 「**强制点 (1)** 的照片」，但它列的第一条用例 **P-1 其实是「强制点 (2)」的照片**：
+> `an_unmintable_effect_refuses_the_call_and_the_tool_is_never_invoked` 在**步骤 3**
+> （`mint_declared_effects`）就 `Err` 了，**根本走不到第 4 步的 `authorize`**——这与它断言的变体
+> （`TaskError::EffectNotAuthorized`，那是 `mints` 六格表的判断）同源。**故 P-1 归强制点 (2)**，
+> 它列在本题只因「零调用」那条断言与本题几条同在一个用例文件里。**下面 Step 1 与 Step 3 的订正
+> 都由此而来**；**Task 9 完成判据表里那一格已同批改掉**（原把 P-1 当「强制点 (1) 的拒绝侧」，
+> 现改用 P-3 / P-4 / P-5）。
 
 **Files:**
 - Modify: `crates/continuum-runtime/tests/tool_call.rs`
@@ -874,9 +886,14 @@ git commit -m "feat(runtime): tool 子命令的解析面、工具调用路径与
   （`Some(t)` 而能力表不含 `for_effect(t)` 时 `save_tool` 直接拒），那会让本条在登记期就红，
   验不到本路径的 `MissingCapability`。
 
-**红的条件（逐条）**：
-- P-1 / P-3 / P-4 / P-5 / P-8：把 `authorize` 那一跳**挪到写效应行之后**（或把它的 `Err` 吞掉继续往下走）
-  → 「零效应行 / 零审计 / 零调用」的断言全红；
+**红的条件（逐条，**订正 2026-10-07**；原稿把 P-1 与下面这组并列，那是错的——P-1 走不到 `authorize`）**：
+- **P-1 的红条件与下面这组不是同一条**：P-1 在**步骤 3**就拒（强制点 (2)），故它的红由**强制点 (2)**
+  的变异体给出——**`mints` 恒真** ⇒ 那条效应铸得出能力，调用于是往下走，**P-1 红在它自己的
+  `calls == 0` 断言上**（且只有它一条红，见 Step 3 的表）；
+- **P-3 / P-4 / P-5 / P-8**：把 `authorize` 那一跳**挪到写效应行之后**
+  → 「零效应行 / 零审计 / 零调用」的断言红。**P-8 原稿漏了，实测它在列**（写坏的登记项要到
+  `authorize` 读它时才报 `Persist`，挪到 `commit()` 之后就落在效应行已写之后）。
+  **至于「把 `authorize` 的 `Err` 吞掉继续往下走」这条写法——它在调用点写不出来**，见 Step 3 的订正；
 - `every_kind_without_a_policy_fact_is_missing_capability`：把 `presented` 换成「按登记项的
   `required_capabilities` 逐枚铸」的那条被否掉的路 → 六条全部变成 `Ok`（或另一变体），本条红。
 
@@ -890,8 +907,23 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test tool_call
 
 | 变异 | 期望 |
 |---|---|
-| 把 `authorize(...)` 从步骤 4 挪到步骤 5 的 `tx.commit()` **之后** | P-1 / P-3 / P-4 / P-5 全红（`effect` 行与 `EXECUTING` 已落库） |
-| 把 `authorize` 的 `Err` 用 `unwrap_or_else(\|_\| ...)` 换成放行 | 同上四条红，且零调用的断言红 |
+| 把 `authorize(...)` 从步骤 4 挪到步骤 5 的 `tx.commit()` **之后** | **P-3 / P-4 / P-5 / P-8** 红（`effect` 行与 `EXECUTING` 已落库）。**订正 2026-10-07**：原写「**P-1** / P-3 / P-4 / P-5 全红」——**P-1 不在这枚变异体的射程里**（它在步骤 3 就 `Err`，走不到 `authorize`，故本变异下 **P-1 仍绿**）；**P-8 原稿漏了，实测在列** |
+| 把 `authorize` **内部**那几支拒绝（`UnknownTool` / `UndeclaredCapability` / `MissingCapability` / `Expired`）换成 `Ok`（fail-open 落在**函数内**） | 同上那组红（P-3 / P-4 / P-5 / P-8，且零调用的断言红）。**订正 2026-10-07**：原写「把 `authorize` 的 `Err` 用 `unwrap_or_else(\|_\| …)` 换成放行」——**那个变异体在调用点写不出来**，见下面的订正块 |
+| **`mints` 恒真**（**强制点 (2)** 的变异体） | **只 P-1 一条红**（红在它的 `calls == 0` 断言上）——**P-1 的红由这一枚给出，不由上面两枚** |
+
+> **订正（2026-10-07，回灌 F Task 4 的实测）——上表第 2 行原写的那个变异体「在调用点写不出来」**：
+> 原稿写的是「把 `authorize` 的 `Err` 用 `unwrap_or_else(|_| …)` 换成放行」。**实测该变异体编不过**：
+> `AuthorizedTool` 字段私有、**无公开构造函数**（§6.3；C 设计 §3.4 的保证）⇒ **「放行」之后根本没有
+> 一个可继续往下走的值**——那个 `match` 的 `Ok` 臂要交出 `AuthorizedTool`，而那里造不出来。
+> **这是类型上做不到，不是「有规则挡着」**（与 §10.2 那条「中立性」的精度分级同族；但**这一次真的是
+> 类型上做不到**，故**没有「换个写法」的逃逸面**）。**等价的 fail-open 只能落在 `authorize` 内部**
+> （把它的拒绝臂换成 `Ok`）——上表第 2 行已按此改写。
+> **由此得一条可搬用的判据（写此以备后用）**：**「把一个 `Result` 的 `Err` 换成放行」这类变异体，
+> 要问一句「放行之后那个值从哪来」**——**若那个值的类型没有公开构造路径，这个变异体在调用点就
+> 写不出来**。**注意它的失效形态与纪律 1 说的三种都不同**：它既不是「锚点不唯一」（变异没落到
+> 实现体）、也不是「等价变异体」、更不是「变异导致编译失败——那不算变红」里的后者（那是**落到实现体
+> 之后**编不过）；它是**在调用点根本落不了笔**——故不能按「变红／非红」去读它，只能换一枚落得进去的
+> 等价变异体（**与「换真变异体而非补用例」同一处置**）。
 
 - [ ] **Step 4: 提交**
 
@@ -1216,7 +1248,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 
 | 判据 | 证据 |
 |---|---|
-| §4.4「工具调用前校验 Capability」 | P-1（拒时零调用）+ P-17 / P-6（放行时真的调用）这对**对照臂** |
+| §4.4「工具调用前校验 Capability」 | **P-3 / P-4 / P-5**（在强制点 (1) 被拒、零调用）+ P-17 / P-6（放行时真的调用）这对**对照臂**。**订正 2026-10-07**：原写「**P-1**（拒时零调用）+ …」——**P-1 走不到强制点 (1)**（它在步骤 3 就拒），它是**强制点 (2)** 的照片，见 Task 4 开头那条订正 |
 | 强制点 (1) **有生产调用方** | Task 7 的 `a_registered_tool_is_still_unrouted_and_the_call_fails_at_the_last_hop`（真二进制走到步骤 4） |
 | 强制点 (1) 的射程边界 | P-19 |
 | 登记项不变量 | Task 1 的两向用例 |
@@ -1284,7 +1316,10 @@ granted() 的消费方      按 C 设计 §7.5，是**适配器**（在 invoke �
                         经 invoke_tool 交出去。无照片（本阶段没有真实适配器）。
 六个 kind 无策略事实     Filesystem(Read|Write)、Git(Read|WorktreeWrite|CommitLocal)、
                         Github(CreatePr) 在 EffectType 里没有对应项，故驱动铸不出它们，
-                        含它们的工具在本路径上**一律** MissingCapability（Task 4 逐项拍了照片）。
+                        含它们的工具在本路径上**必然被拒**；**变体不唯一**——零 --effect 时是
+                        MissingCapability（Task 4 逐项拍了照片），若调用方**还**出示了工具未声明的
+                        能力则先撞 UndeclaredCapability（**订正 2026-10-07**：本行原写「**一律**
+                        MissingCapability」；理由见设计 §5.3 的订正段与那里的检查次序）。
                         **本路径不在登记期拦**（那会在别人的入口上装一道只有本层知道的口径）。
                         收件人：策略层（PolicyContext 的事实集合）与子项目 D。
 作用域的**判定**        本路径不判作用域（authorize 只比 kind），强制落在凭据签发（§51）与执行点。
