@@ -301,6 +301,24 @@
 本项目的既有事实：**手写的计划代码块错误率很高**，且已确立「**代码块是示意，正文的措辞才是约束**」。
 故本计划只给**类型签名、枚举取值与关键判定**，**不给整段可粘贴实现**。
 
+> **示例命令一律不写死代码树（2026-10-07 收）**：**本计划里的每一条示例命令都在「本 worktree
+> 的根目录」运行，绝对路径由派单给出**。故命令块**不写 `cd <某棵树>`**——它们开头是
+> `TMPDIR="$PWD/.tmp"`（`$PWD` 即你所在的那棵树）或直接是命令本身。
+> **旧话照留**：本计划初稿的每一条命令都写成 **`cd /home/DslsDZC/Continuum && …`**
+> （全文 **21 处**：20 处是这个 `&&` 形式，1 处是 Task 5 Step 5 变异模板里单独一行的
+> `cd /home/DslsDZC/Continuum`；2026-10-07 由我逐处实测后改掉）。
+> **两个读数都留在此处**（**数的语料包含本注自身**，故改完之后那个数会变小，只留一个读数就说不清）：
+> **原有 21 处可执行命令形式**（上段的 20 ＋ 1）；**改掉 21 处**；**改完后命令形式剩 0 处**，
+> 而**本注里另有 3 处「提及」**（两处是上面那句旧话引文的两半、一处是说明里的树名）
+> ——**「提及」不是「可执行的命令」，这两个数不是同一个东西**，故要分开写。
+> **为什么要改（这次的实测）**：**同一份计划的两条流（E 与 F）各自需要不同的树，而计划只有一份**
+> ——`/home/DslsDZC/Continuum` 今天在分支 **`p3f`** 上，E 的实现者在它上面跑就会**跑到 F 的树上**。
+> **覆盖只在我派出派单的那几轮有效**；**照抄计划的后来者（Task 6 的实现者、复审者）没有派单**，
+> 会照抄那 21 处里的任意一处（brief 就是从这份计划生成的：它的 `:157/255/265/289` 四处命令
+> 即由此而来）。
+> **推广**：**凡示例命令，都不写死一棵会被并行的另一条流占用的树**——写「在本 worktree 根运行」，
+> 把绝对路径留给派单。
+
 > **报错码的纪律（本计划一律照此写，2026-10-06 收）**：
 > **「预期报错码」必须来自实跑**——`.stderr` 不会替你报错，**码写错了它照样让用例绿**；
 > **跑不了就把话说成「预期是某一类」**（「名字未解析」/「缺字段」/「字段私有」那一类），
@@ -404,7 +422,7 @@ crates/continuum-node/                 ← 新建 crate（§7.1）
 **先不动** `dependency_direction.rs`。跑：
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
 ```
 
 预期：`every_crate_depends_only_on_its_allowed_set` 红，信息为
@@ -456,7 +474,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 - [ ] **Step 4: 运行，确认绿**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
 TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 ```
 
@@ -470,7 +488,7 @@ Global Constraints 第 19 条）。
 - [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add Cargo.toml Cargo.lock crates/continuum-node/Cargo.toml crates/continuum-node/src/lib.rs \
         crates/continuum-runtime/tests/dependency_direction.rs
 git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员与依赖边"
@@ -561,7 +579,7 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
 ```
 
 预期：**「名字未解析」这一类**（`continuum_node::ComputeNode` 与它的类型尚未存在）。
@@ -634,7 +652,7 @@ impl ComputeNode {
 - [ ] **Step 4: 运行，确认 `tests/node.rs` 绿、trybuild 产出 `.stderr`**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
 ```
 
 **首跑 trybuild 会因缺 `.stderr` 而失败**（它打的是「wip」并写出实际输出）。
@@ -662,7 +680,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 - [ ] **Step 6: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/Cargo.toml Cargo.lock crates/continuum-node/src/lib.rs \
         crates/continuum-node/src/node.rs crates/continuum-node/tests/node.rs \
         crates/continuum-node/tests/type_level.rs crates/continuum-node/tests/compile_fail
@@ -767,7 +785,7 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test registry
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test registry
 ```
 
 - [ ] **Step 3: 实现**
@@ -807,7 +825,7 @@ pub enum NodeRegistryError {
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/src/registry.rs crates/continuum-node/src/lib.rs \
         crates/continuum-node/tests/registry.rs
 git commit -m "feat(node): 进程内 Compute Node 注册表与模块面守卫"
@@ -870,7 +888,7 @@ git commit -m "feat(node): 进程内 Compute Node 注册表与模块面守卫"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test rules
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test rules
 ```
 
 - [ ] **Step 3: 实现**
@@ -924,7 +942,7 @@ pub enum RulesError {
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/src/placement.rs crates/continuum-node/src/error.rs \
         crates/continuum-node/src/lib.rs crates/continuum-node/tests/rules.rs
 git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
@@ -1088,7 +1106,7 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
 ```
 
 - [ ] **Step 3: 实现**
@@ -1186,7 +1204,7 @@ pub enum PlacementError {
 - [ ] **Step 4: 运行，确认绿**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
 ```
 
 - [ ] **Step 5: 真跑裁定义务 1 的那条变异体（**本 task 的核心交付物之一**）**
@@ -1196,7 +1214,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 换成只算 `spec_floor(level)`**（即：闸门完全不读 `policy.rules()`）。
 
 ```bash
-cd /home/DslsDZC/Continuum
+# 在**本 worktree 的根目录**运行（绝对路径由派单给出；本计划不写死代码树）
 MUT=crates/continuum-node/src/placement.rs
 BAK="$PWD/.tmp/placement.rs.bak"
 LOG="$PWD/.tmp/mut_rules.txt"
@@ -1220,7 +1238,7 @@ TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast 2>&1 | tee
 - [ ] **Step 6: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/Cargo.toml Cargo.lock crates/continuum-node/src/placement.rs \
         crates/continuum-node/src/error.rs crates/continuum-node/src/lib.rs \
         crates/continuum-node/tests/placement.rs
@@ -1310,7 +1328,7 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
 ```
 
 预期：本 task 新加的四条红（Task 5 的用例**全绿**——步骤 4 只影响多枚可比节点的情形，
@@ -1336,7 +1354,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/src/placement.rs crates/continuum-node/tests/placement.rs
 git commit -m "feat(node): 全序排序与 ComputeNodeId 兜底档"
 ```
@@ -1351,7 +1369,7 @@ git commit -m "feat(node): 全序排序与 ComputeNodeId 兜底档"
 - [ ] **Step 1: 全量验证**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-node --depth 1 --edges all --prefix none
 ```
@@ -1366,7 +1384,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-node --depth 1 --edges al
 - [ ] **Step 2: 复核「只登记了自己那一条」（裁定义务 2、4）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff 3a7ddad -- Cargo.toml crates/continuum-runtime/tests/dependency_direction.rs
+git diff 3a7ddad -- Cargo.toml crates/continuum-runtime/tests/dependency_direction.rs
 TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency_direction
 ```
 
@@ -1377,7 +1395,7 @@ TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency
 - [ ] **Step 3: 复核「不落库、不取迁移号」（纪律 11）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff 3a7ddad --stat -- crates/continuum-runtime/src/main.rs crates/continuum-runtime/src/lib.rs
+git diff 3a7ddad --stat -- crates/continuum-runtime/src/main.rs crates/continuum-runtime/src/lib.rs
 git diff 3a7ddad --stat -- crates/continuum-artifact crates/continuum-graph crates/continuum-model-registry
 ```
 
@@ -1389,7 +1407,7 @@ git diff 3a7ddad --stat -- crates/continuum-artifact crates/continuum-graph crat
 - [ ] **Step 4: 通读复核「注册表入度为零」的两层落点**
 
 ```bash
-cd /home/DslsDZC/Continuum && grep -rn "continuum_artifact\|Artifact\|PrivacyClass" crates/continuum-node/src/registry.rs
+grep -rn "continuum_artifact\|Artifact\|PrivacyClass" crates/continuum-node/src/registry.rs
 grep -rn "continuum_model_registry\|continuum-model-registry\|RankedExecutionCandidates\|rank(" crates/continuum-node/src/
 ```
 
@@ -1429,7 +1447,7 @@ grep -rn "continuum_model_registry\|continuum-model-registry\|RankedExecutionCan
 若复核发现了缺口并改了文件，**按实际改动的显式路径逐个 `git add`**——形如：
 
 ```bash
-cd /home/DslsDZC/Continuum && git add crates/continuum-node/src/placement.rs \
+git add crates/continuum-node/src/placement.rs \
         crates/continuum-node/tests/placement.rs
 git commit -m "fix(node): 收尾复核发现的缺口"
 ```
