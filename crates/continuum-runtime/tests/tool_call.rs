@@ -435,11 +435,19 @@ fn an_unregistered_id_reports_the_routing_failure() {
 ///
 /// # 这条用例是计划用例清单之外补的，理由是「不补就没有照片」
 ///
-/// 上面那句话若只由文档承载，一个把 `Decision` 写成常量的实现在**任何**用例上都不会红：
-/// 单条效应、放行策略下裁决本来就是 `Allow`。故这里造一次**两条效应各得不同裁决**的调用
-/// ——`deploy` 拿 `Allow`、`charge` 拿 `RequireApproval`（同层的更严规则压过内建的
-/// `Allow`，`--approve` 已给出故照样铸造）。**变异体**：把填进去的 `Decision` 换成常量
-/// （`Allow` 或 `RequireApproval` 任一个）⇒ 本条两条断言里必有一条红。
+/// 上面那句话若只由文档承载，一个把 `Decision` 写成常量的实现在**下面这一族情形的用例上**
+/// 都不会红：**单条效应 ＋ 放行策略**（裁决本来就是 `Allow`，常量 `Allow` 与「填自己的那次」
+/// 不可区分）。故这里造一次**两条效应各得不同裁决**的调用——`deploy` 拿 `Allow`、
+/// `charge` 拿 `RequireApproval`（同层的更严规则压过内建的 `Allow`，`--approve` 已给出故照样
+/// 铸造）。**变异体**：把填进去的 `Decision` 换成常量（`Allow` 或 `RequireApproval` 任一个）
+/// ⇒ 本条两条断言里必有一条红。
+///
+/// **限定词「单条效应 ＋ 放行策略」是必须的（初稿漏掉，来历留此）**：单条效应**并不自动**
+/// 让常量变异体不可观察——**单条效应 ＋ 一条按 `effect_type` 限定的 `RequireApproval` 规则 ＋
+/// `--approve`** 同样能杀掉「常量 `Allow`」（那条效应的裁决是 `RequireApproval`，而常量给出
+/// 的是 `allow`）。本文件已有现成装置 `Fixture::require_approval_for`。故本用例取两条效应**不是**
+/// 「唯一能杀它的形状」，而是**一次就把「逐条各带自己的裁决」这件事钉在两个方向上的形状**
+/// （一条 `Allow`、一条 `RequireApproval`，任何单一常量必在其中一侧露馅）。
 #[test]
 fn each_effect_row_records_its_own_verdict() {
     let fixture = Fixture::with_tools(

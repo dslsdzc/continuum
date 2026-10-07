@@ -7,9 +7,9 @@
 //! 3. 它带过来的那几个判定小件（[`explicit_current_rule`] / [`arbitrate`] / [`mints`] /
 //!    [`decision_name`] / [`policy_context`] / `policy_context_for_effect`）；
 //! 4. **工具调用路径本身**（[`run_tool_call`]，F 的 Task 3 落地）；
-//! 5. 命令路径与工具路径**共用**的两个落库取值函数（[`effect_key`] /
-//!    [`authorization_field`]，F 的 Task 3 从 bin 的 `task_cmd.rs` 搬来——两条路径各写
-//!    一份就是同一件事两个产生点）。
+//! 5. 命令路径与工具路径**共用**的三个落库取值/推进函数（[`effect_key`] /
+//!    [`authorization_field`] / [`finish_declared_effects`]，F 的 Task 3 从 bin 的
+//!    `task_cmd.rs` 搬来——两条路径各写一份就是同一件事两个产生点）。
 //!
 //! # 为什么整批搬进 lib
 //!
@@ -24,14 +24,14 @@
 //!
 //! bin 是**另一个 crate**（`pub(crate)` 对它不可见），而 `task_cmd` 与它自己的单元用例
 //! 还要用 [`arbitrate`] / [`mints`] / [`explicit_current_rule`] / [`effect_key`] /
-//! [`authorization_field`] 等，故这几个函数一律 `pub`。它们不是给 crate 外用的接口，
-//! 是 bin 与 lib 之间的接缝。
+//! [`authorization_field`] / [`finish_declared_effects`] 等，故这几个函数一律 `pub`。
+//! 它们不是给 crate 外用的接口，是 bin 与 lib 之间的接缝。
 //!
 //! **可见性按「搬完之后谁还调用它」定，不按「搬之前谁调用过」**（F 的 Task 3 口径）：
 //! [`run_tool_call`] 把**整条工具调用流程**搬进了 lib，那些调用点也随之进来；但
-//! [`effect_key`] / [`authorization_field`] 的**命令路径调用点仍在 bin**
-//! （`task_cmd.rs` 的 `record_declared_effects` / `finish_declared_effects`），
-//! 故这两个仍必须是 `pub`。`policy_context_for_effect` 是唯一的例外，理由见它的文档。
+//! [`effect_key`] / [`authorization_field`] / [`finish_declared_effects`] 的
+//! **命令路径调用点仍在 bin**（`task_cmd.rs` 的 `record_declared_effects` / `run` 第 6 步），
+//! 故这三个仍必须是 `pub`。`policy_context_for_effect` 是唯一的例外，理由见它的文档。
 
 use continuum_capability::{AuthorizedEffect, Capability, CapabilityKind, authorize, mint};
 use continuum_effect::{
@@ -428,19 +428,22 @@ pub fn run_tool_call(
     let result = runtime.block_on(registry.invoke_tool(&authorized_tool, args.input.clone()));
 
     // 步骤 7：终态与 stdout。失败那一格按本函数文档的说明处置（写 FAILED 后带出错误）。
-    let tool_result = match result {
-        Ok(tool_result) => tool_result,
-        Err(e) => {
-            finish_declared_effects(db, args, EffectState::Failed, now)?;
-            return Err(TaskError::ToolCall(e));
-        }
+    //
+    // **先判空、再取 intent**（顺序是要紧的）：零 `--effect` 时 `--intent` 按设计**必须不给**
+    // （`cli::parse_tool` 的同进同出），故那时 `declared_intent(args)` 会 panic 在一条**合法**的
+    // 调用上。**这不是假想**：修复轮 1 ③ 的第一次合并正是无条件求值，被 P-9 / P-17 两条零效应
+    // 用例当场抓到（`panicked at …: 有 --effect 必有 --intent`）。`finish_declared_effects` 自己
+    // 也有一次早退，但**早退救不了实参求值**。
+    let terminal = match &result {
+        Ok(tool_result) if tool_result.is_error => EffectState::Failed,
+        Ok(_) => EffectState::Committed,
+        Err(_) => EffectState::Failed,
     };
-    let terminal = if tool_result.is_error {
-        EffectState::Failed
-    } else {
-        EffectState::Committed
-    };
-    finish_declared_effects(db, args, terminal, now)?;
+    if !args.effects.is_empty() {
+        finish_declared_effects(db, declared_intent(args), &args.effects, terminal)?;
+    }
+
+    let tool_result = result?;
 
     // `Value` 的 JSON 是一行紧凑文本（`Display` 即 `serde_json::to_string`）；
     // 无论 `is_error` 为何都打印——这是调用方仅有的那条通道（设计 §3.3）。
@@ -448,28 +451,54 @@ pub fn run_tool_call(
     Ok(())
 }
 
-/// 步骤 6/7 用的终态写入：把各效应推到最后那个状态，一个事务、一次提交。
+/// 步骤 6/7 用的终态写入（**命令路径第 6 步与工具调用路径第 7 步共用**）。
 ///
-/// 零效应时不碰库（与 `task_cmd` 的 `finish_declared_effects` 同一条早退理由：一个空
-/// 事务没有意义，也会让无效应的调用凭空多一次写锁）。
+/// `to` 由调用方**一处**判定：命令路径按 `--exec` 的退出形态（退出码 0 → `Committed`，
+/// 非 0 → `Failed`）、工具调用路径按 `ToolResult.is_error`。崩溃那一支不走这里：进程都没了，
+/// 记录停在 `EXECUTING`，由恢复钩子转 `UNKNOWN`（设计第 6.3、6.4 节）。
 ///
-/// 与 `task_cmd` 里的同名函数**不合并**：两者收的参数类型不同（[`ToolArgs`] /
-/// `TaskArgs`），合并要求先给两者造一个共同形状——而那正是「同一件事两个类型」的
-/// 反方向（为了合并而发明一个中间类型）。两处各三行，判据同源（[`effect_key`]）。
-fn finish_declared_effects(
+/// 零效应时不碰库（与 `task_cmd` 原先那份同一条早退理由：一个空事务没有意义，也会让
+/// 无效应的一次调用凭空多一次写锁）。
+///
+/// # 每条效应**各取一次**时钟（两条路径在此**语义相同**）
+///
+/// `updated_at` 说的是「这条记录**在那一刻**被推到了新状态」，故循环内逐条取
+/// [`now_millis`]。这一点与第 5 步那次写入**不同**：那一次是同一瞬间写下的若干行
+/// （工具调用路径的 `planned_at` / `updated_at` 取同一个 `now`，那是刻意的，见
+/// [`run_tool_call`] 的步骤 5），而这里是**若干次独立的推进**。
+///
+/// **写准这一条是有代价换来的**：本函数原先在两条路径上各有一份（bin 的 `task_cmd.rs`
+/// 与 lib 的 `tool_call.rs`），而两份的差别**只有**这一点——bin 那份在循环内每条各取一次
+/// [`now_millis`]，lib 那份复用第 4 步取的那**一个** `now`。**那个差别是语义差别，
+/// 不是形状差别**：复用旧 `now` 会让 `COMMITTED` 的 `updated_at` 早于它实际发生的时刻
+/// （工具调用可以跑任意久），而命令路径从来不是这么写的。故这里按**命令路径已有的语义**
+/// 合并成一份：每次 `advance` 各取一次时钟。
+///
+/// **初稿在这里写过一句假话，来历留此**：那句话把「不合并」的理由说成「合并要求先给两条
+/// 路径造一个共同形状，而那正是『同一件事两个类型』的反方向」。**评审判它不是真障碍，判得对**
+/// ——共同形状用现成参数即可（`&IntentId` ＋ `&[EffectSpec]` ＋ `EffectState`），不必发明任何类型；
+/// 而那句话会让后来者**照着它去避免合并**，从而把上面这处**真实的**时间戳差别永久留在两份实现里。
+/// 错不在代码，在一句会让后来者做错事的话。
+///
+/// # 两条路径共用一份定义
+///
+/// 与 [`effect_key`] / [`authorization_field`] 同一条理由：命令路径调它（`task_cmd` 的第 6 步），
+/// 工具调用路径也调它（[`run_tool_call`] 的第 7 步）。**它是 `pub`**：搬完之后 bin 侧的调用点
+/// 还在（命令路径那一处）。
+pub fn finish_declared_effects(
     db: &Db,
-    args: &ToolArgs,
+    intent: &IntentId,
+    effects: &[EffectSpec],
     to: EffectState,
-    now: i64,
 ) -> Result<(), TaskError> {
-    if args.effects.is_empty() {
+    if effects.is_empty() {
         return Ok(());
     }
     let tx = db.begin()?;
-    for spec in &args.effects {
+    for spec in effects {
         // 记录的 `id` 与幂等键同源（[`effect_key`]），故这里由同一次派生取回 id。
-        let id = EffectId::new(effect_key(declared_intent(args), spec));
-        advance(&tx, &id, to, now)?;
+        let id = EffectId::new(effect_key(intent, spec));
+        advance(&tx, &id, to, now_millis())?;
     }
     tx.commit()?;
     Ok(())

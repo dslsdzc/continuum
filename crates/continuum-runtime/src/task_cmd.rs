@@ -156,8 +156,8 @@ use continuum_runtime::TaskError;
 use continuum_runtime::cli::TaskArgs;
 use continuum_runtime::sandbox_select;
 use continuum_runtime::tool_call::{
-    arbitrate, authorization_field, decision_name, effect_key, mint_declared_effects, mints,
-    now_millis, policy_context,
+    arbitrate, authorization_field, decision_name, effect_key, finish_declared_effects,
+    mint_declared_effects, mints, now_millis, policy_context,
 };
 use continuum_sandbox::Sandbox;
 use continuum_workspace::{
@@ -255,7 +255,7 @@ pub fn run(args: &TaskArgs, argv: &[OsString]) -> Result<(), TaskError> {
     } else {
         EffectState::Failed
     };
-    if let Err(e) = finish_declared_effects(&db, args, terminal) {
+    if let Err(e) = finish_declared_effects(&db, &args.intent, &args.effects, terminal) {
         return Err(match discard_recorded_workspace(&db, &args.intent) {
             Ok(()) => e,
             Err(cleanup) => TaskError::Context {
@@ -410,31 +410,18 @@ fn record_declared_effects(
     Ok((decision, authorized))
 }
 
-/// 第 6 步：把各效应记为命令退出形态对应的终态。
-///
-/// `to` 只可能是 [`EffectState::Committed`]（退出码 0）或 [`EffectState::Failed`]
-/// （非 0）——由 [`run`] 一处判定。崩溃那一支不走这里：进程都没了，记录停在
-/// `EXECUTING`，由恢复钩子转 `UNKNOWN`（设计第 6.3、6.4 节）。
-///
-/// 没有声明任何 `--effect` 时不碰库：一个空事务没有意义，也会让「无效应的命令」
-/// 凭空多一次写锁。
-fn finish_declared_effects(
-    db: &Db,
-    args: &TaskArgs,
-    to: EffectState,
-) -> Result<(), TaskError> {
-    if args.effects.is_empty() {
-        return Ok(());
-    }
-    let tx = db.begin()?;
-    for spec in &args.effects {
-        // 记录的 `id` 与幂等键同源（[`effect_key`]），故这里由同一次派生取回 id。
-        let id = EffectId::new(effect_key(&args.intent, spec));
-        advance(&tx, &id, to, now_millis())?;
-    }
-    tx.commit()?;
-    Ok(())
-}
+// 第 6 步（把各效应记为命令退出形态对应的终态）的实现**已搬进 lib**：它是命令路径与工具
+// 调用路径**共用**的那一个（`continuum_runtime::tool_call::finish_declared_effects`）。
+//
+// **搬家的理由（F 的 Task 3 修复轮 1 订正，来历留此）**：本文件原先另有一份同形实现，
+// 两份的差别**只有一处**——那一份在循环内**每条效应各取一次** `now_millis()`（`updated_at`
+// 说「这条记录在那一刻被推到新状态」），而 lib 那一份复用了第 4 步取的**那一个** `now`。
+// **那是语义差别，不是形状差别**：复用旧 `now` 会让终态的 `updated_at` 早于它实际发生的
+// 时刻（一次工具调用可以跑任意久）。故按本文件已有的语义合并成一份，**命令路径的行为一字未改**。
+//
+// 本文件初稿在这处写过一句假话（把「不合并」的理由说成「合并要发明一个中间类型」）——
+// **评审判它不是真障碍，判得对**：共同形状用现成参数即可（`&IntentId` ＋ `&[EffectSpec]`
+// ＋ `EffectState`）。错误说法的来历留在 `finish_declared_effects` 的文档里。
 
 // 效应的身份与幂等键（设计第 6.1、6.5 节）：由 意图 id / 类型 / 目标 派生。
 //
