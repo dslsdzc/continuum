@@ -489,6 +489,46 @@ fn the_registry_is_the_only_way_the_tool_is_reached() {
     );
 }
 
+/// **成功侧的终态 `COMMITTED`**：放行、适配器回显成功（`is_error: false`）⇒ 该效应行记
+/// `COMMITTED`。与 P-6 同一夹具、同一份参数。
+///
+/// # 这一格此前在整个工作区没有照片（F 终审 I-1，唯一阻断项）
+///
+/// 同族里只有这一格缺：`is_error == true` ⇒ `FAILED` 有照片
+/// （[`a_tool_that_reports_its_own_failure_marks_the_effects_failed`]）、`Err` ⇒ `FAILED`
+/// 有照片（[`a_provider_failure_is_carried_through`]），**成功 ⇒ `COMMITTED` 一条都没有**。
+/// 命令路径的同一格**有**照片（`tests/task_cli.rs` 里
+/// `effect_states(&db) == vec!["committed".to_owned()]` 那一条，`the_same_idempotency_key_refuses_to_run_again`）；
+/// 两条路径共用同一份终态写入函数，只有一侧被拍下来。
+///
+/// **变异体**：把 `run_tool_call` 步骤 7 的 `else { EffectState::Committed }` 改成
+/// `EffectState::Failed`（**编得过、非等价**：`is_error == false` 的每一次调用落库结果都不同）。
+/// 实测：补本条**之前**它在 `cargo test --workspace --no-fail-fast` 下
+/// **97 个目标全跑、724 passed / 0 failed**（终审 §1 的 MA，一枚穿过整个套件的变异体）；
+/// 补上之后红在本条读回 `effect.state` 的那条断言上。
+#[test]
+fn a_successful_call_marks_the_effects_committed() {
+    let fixture = Fixture::with_tools(
+        &["t1"],
+        vec![CapabilityKind::for_effect(EffectType::Charge)],
+        Some(EffectType::Charge),
+    );
+    fixture.allow_everything();
+    let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
+    let registry = registry_serving(&["t1"], Arc::clone(&adapter));
+
+    fixture
+        .run(&registry, &allowed_charge_call(&fixture))
+        .expect("放行的调用应当成功");
+
+    assert_eq!(
+        fixture.effect_state("2:i1:charge:c1"),
+        Some(EffectState::Committed),
+        "适配器回显成功（is_error == false）⇒ 各效应记 COMMITTED——\n\
+         把步骤 7 的 else 支写成 Failed 的实现红在这一行"
+    );
+}
+
 /// P-7：工具 id **由授权证明定**。
 ///
 /// 同一个适配器服务 `t1` 与 `t2` 两个 id（两条登记项都合法），用 `--tool t1` 调用，断言
@@ -584,6 +624,16 @@ fn an_effect_free_call_still_reaches_the_tool() {
 ///
 /// 登记项仍要写进 `tool` 表（见文件头「为什么仍要往 `tool` 表里写一行」）——否则强制点 (1)
 /// 先以 `UnknownTool` 拒掉，测到的就不是路由这一格了。
+///
+/// # 设计 §9 给 P-9 的另一半「效应记 `FAILED`」：这一格**没有照片**（据实写明，F 终审 m-4）
+///
+/// 本条取 `fixture.args()`，是**零 `--effect`** 的形态，故失败时**没有效应行可读**；
+/// 端到端那一条（`tests/tool_cli.rs` 的 `a_registered_tool_is_still_unrouted_and_the_call_fails_at_the_last_hop`）
+/// 失败之后只断言键的清单、不读 `state`。那一支今天**只有 P-10 的 `Provider` 那枚同臂代拍**
+/// （[`a_provider_failure_is_carried_through`]；`Err(_) => EffectState::Failed` 是同一个臂）。
+/// **这是同臂传递覆盖，不是完全没覆盖**：把 `Err(_)` 按内层变体分岔（例如只把 `Unregistered`
+/// 记成 `Committed`）不会有任何一条用例红。**不为它另造照片**——设计 §9 的 P-9 行已把这一格的
+/// 分工据实写明。
 #[test]
 fn an_unregistered_id_reports_the_routing_failure() {
     let fixture = Fixture::with_tools(&["t1"], Vec::new(), None);
@@ -1527,6 +1577,15 @@ fn the_audit_rows_are_exactly_one_grant_plus_four_per_effect() {
 ///
 /// **变异体**：把零效应那一支改成**仍开事务写审计**（在 `run_tool_call` 的步骤 7 里让空
 /// 声明也 `append_audit`）⇒ 第 2 条断言红（两条、且多出一条 `external effects`）。
+///
+/// # 用例名后半 `nor_the_mint` 今天**不可证伪**（F 终审 m-5，与计划侧同口径）
+///
+/// `mint` 的产物只在内存里，**落库侧读不出**，故名字后半那个全称**没有可观察形式**。
+/// **断言与用例本身是对的**（断的是「`effect` 0 行、`audit_log` 恰 1 条、无捏造的审计行」），
+/// **过宽的只是名字**。收窄它要**同时改计划那一行与本行的函数名**（计划
+/// `docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md` 的 Task 5 有一份同口径的来历注），
+/// 代价大于收益，故保留名字、在此记明来历。判据同「用例名也是断言的一部分」：全称措辞要么有
+/// 对应用例，要么收窄。
 #[test]
 fn an_effect_free_call_touches_neither_the_effect_table_nor_the_mint() {
     let fixture = Fixture::with_tools(&["t1"], Vec::new(), None);

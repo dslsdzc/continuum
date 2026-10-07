@@ -165,18 +165,29 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // §11 第 15 条把这条边的所有者写死为 B）。
     //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
-    // 故它容忍「允许但尚无使用点」的边。这一条对 sandbox 与 core / events / provider 都成立：
+    // 故它容忍「允许但尚无使用点」的边。这一条今天对 sandbox 与 events 成立
+    // （**core 与 provider 已不成立**——下方的订正块记着这两处的使用点）：
     // sandbox 的使用点是驱动（设计第 10 节）装配 Sandbox，而驱动不在 P2 上篇。
+    // **这句话原写「对 sandbox 与 core / events / provider 都成立」，是过宽的主句**；
+    // 旧说法留在原处（见下一段订正块的引文），此处只收窄射程——初稿漏改，
+    // 与紧邻的订正块相抵（F 终审 I-2）。
     //
     // **订正（2026-10-07，P3 子项目 F 的 Task 3）**：本段原先写「core / events / provider 在
     // runtime 内**至今无任何引用**」——那半句对 core 与 provider **已假**：`src/cli.rs` 用
     // `continuum_core::tool::ToolId`（`tool` 子命令的 `--tool`；`tests/cli.rs` 与
     // `tests/tool_call.rs` 也各引它一处），`src/error.rs` / `src/tool_call.rs` / `src/tool_cmd.rs`
     // 用 `continuum_provider` 的 `ToolCallError` / `ProviderRegistry`（`tests/tool_call.rs`
-    // 也引它一处）。**`events` 仍无引用**（`grep -rln continuum_events crates/continuum-runtime/`
-    // 无命中），故那句话的射程收成「events 至今无引用」。**原句是过宽的说法，自本 task 起不再成立**
+    // 也引它一处）。**`events` 仍无引用**：`grep -rn continuum_events crates/continuum-runtime/src/`
+    // **exit 1、零命中**（语料限定在 `src/`），故那句话的射程收成「events 至今无引用」。
+    // **原句是过宽的说法，自本 task 起不再成立**
     // （它出现在一份正要引入那个引用的计划里——「至今无任何引用」这种状态陈述自带到期日，
     // 本 task 就是兑现它的那一天）。
+    // **订正（2026-10-08，F 终审 m-2）**：此处原写「`grep -rln continuum_events
+    // crates/continuum-runtime/` 无命中」——**那句按字面执行有命中，命中处就是这句注释自己**
+    // （注释里写着那个标识符），按字面做判据的人会以为结论被推翻。旧说法留此以免下一轮再照它
+    // 得出错的结论；判据本身改为**限定到 `src/`**（该处为零命中）或读成「命中处只有这句注释」。
+    // 同族见 m-1（`src/` 的「唯一一处 `println!`」）与本仓 Global Constraints 那条
+    // 「凡『零命中』类判据，先问本仓的哪条规矩会往那个语料里加字」。
     // 订正的来历记此，免得下一轮扫查照着它得出错的结论（设计 §10.1 点名要求本处随实现同步订正）。
     // 表的取值不变——本表本就不按使用点派生，变的只是这段注释的真假。
     //

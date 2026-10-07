@@ -279,9 +279,17 @@ lib 内的一处，不需要跨 crate 传递事务。
 `println!` 被测试框架捕获」。**「打印在 bin 层」是笔误**——**实测打印在 lib**：走的是
 `continuum_runtime::tool_call::run_tool_call` 的**终态一步**
 （`println!("{}", tool_result.output)`；**定位按结构、不按行号**：**`crates/continuum-runtime/src/tool_call.rs`
-里整个 `src/` 唯一的那一处 `println!`**，判据是 `grep -rn 'println!' crates/continuum-runtime/src/`
-在该文件上**恰好命中一次**，且它就落在 `run_tool_call` 的终态一步；
+这一个文件里恰好命中一次的那一处 `println!`**，判据是
+`grep -rn 'println!' crates/continuum-runtime/src/tool_call.rs` **恰好命中一次**，且它就落在
+`run_tool_call` 的终态一步；
 bin 的 `tool_cmd.rs` 里**没有任何** `println!`（实测 0 命中），它连 `ToolResult` 都拿不到）。
+**订正（2026-10-08，F 终审 m-1）**：此处原写「**整个 `src/` 唯一的那一处 `println!`**，判据是
+`grep -rn 'println!' crates/continuum-runtime/src/` 在该文件上恰好命中一次」——**前半句为假，
+判据也写错**：那条命令实测 **11 行**（`recover_cmd.rs` 的 4 处真正的 `println!` ＋ `main.rs` 的
+6 处 `eprintln!`——不带词界的模式把 `eprintln!` 也算了进来 ＋ 本处 1 处）；
+**即便把 `eprintln!` 排除，`src/` 下也另有 4 处**（`recover_cmd.rs:32/:42/:46/:48`，属 `recover`
+子命令，与本路径无关）。**事实结论不变**（打印在 lib 的 `run_tool_call` 里、不在 `tool_cmd.rs`），
+变的只是这条定位句：**「唯一」只对本文件成立，对 `src/` 不成立**——照字面读会以为全仓只有一处。
 **（订正 2026-10-07 晚：本句原写死 `tool_call.rs:450`；F Task 6 在该行上方加了 12 行后它成了 `:462`
 ——行号引用会随**别人的下一次编辑**静默变假，故改为结构性定位。）** **故「库级用例到不了
 那一跳」这一半不成立**：库级用例的夹具适配器一登记，调用就走到终态那一步、那一句**会**被执行。
@@ -838,7 +846,7 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | P-6 | **F 确实经注册表调用**（不是自己另开一条路） | 登记一个夹具适配器，放行后断言它**收到了一次调用**；与 P-1 互为对照臂（见末尾的变异说明）。**「唯一入口」那条类型层保证的照片归 C**（C 设计 §7.1），F 不重复 |
 | P-7 | 工具 id **由 `AuthorizedTool` 定**（配对） | 授权 t1 后调用，夹具断言**它收到的那份请求里的工具 id 是 t1**（该 id 由 `invoke_tool` 从授权证明取出，C §7.1）；另一条断言请求里承载的 `input` 与 `--input` 逐字相同。**原稿按已删类型写「`call.tool`」，已随 §6.5 改**（plan-f 第 2 条） |
 | P-8 | 登记项被写坏 ⇒ `CapabilityError::Persist` 原样带出 | 照 `tests/authorize.rs` 的 `insert_bad_capabilities` 写坏 `required_capabilities` 列 |
-| P-9 | 注册表里没有该 id ⇒ 效应记 `FAILED`、报 `ToolCallError::Unregistered` | 注册表为空（不登记任何适配器） |
+| P-9 | 注册表里没有该 id ⇒ 报 `ToolCallError::Unregistered`（**「效应记 `FAILED`」这半边在 P-9 上没有照片，分工据实写明**） | 注册表为空（不登记任何适配器）。**订正（2026-10-08，F 终审 m-4）**：交付的库级用例（`tests/tool_call.rs` 的 `an_unregistered_id_reports_the_routing_failure`）取 `fixture.args()`，是**零 `--effect`** 的形态，没有效应行可读；端到端那一条（`tests/tool_cli.rs`）失败后只断言键的清单、不读 `state`。故「效应记 `FAILED`」这一支今天**只有 P-10 的 `Provider` 那枚同臂代拍**（`Err(_) => EffectState::Failed` 是同一个臂）——把 `Err(_)` 按内层变体分岔（例如只把 `Unregistered` 记成 `Committed`）没有任何一条用例会红。**本行原只写「效应记 `FAILED`」**，计划 Task 3 Step 4 转录时静默收窄成「只写变体」，交付与设计由此分岔——据实写明这一格的分工，不为它另造照片 |
 | P-10 | 适配器报错 ⇒ 效应记 `FAILED`、`ToolCallError::Provider` 原样带出 | 夹具返回 `Err(ProviderError::Transport)` |
 | P-11 | 适配器自报失败（`is_error`）⇒ 效应记 `FAILED`；**「stdout 仍有 output」这一半没有照片**（plan-f 第 4 条） | 夹具返回 `is_error: true`，断言效应记 `FAILED` 与 `TaskError::ToolReportedError`。**「stdout 仍有 output」这一半拍不到**——**打印在 lib 的 `run_tool_call` 终态一步**，故库级用例**会**执行到那一句；拍不到是因为 (a) `println!` 被 libtest 捕获、(b) 函数不把该值交出来（**订正 2026-10-07**：原写「库级用例到不了那一跳」，那半句随 §3.3 的「打印在 bin 层」笔误一并作废）；**据实记为无照片，不许为它造夹具** |
 | P-12 | 非法 `--input` ⇒ 解析期 `Err` | 端到端，`--input '{'` |
