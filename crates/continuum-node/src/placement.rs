@@ -377,9 +377,16 @@ pub fn place<'a>(
     // ── 步骤 2：过闸门 ──────────────────────────────────────────────
     // 对每一枚制品算一次规则，规则更严的那一枚胜出（取交：一枚制品说不行就是不行）。
     //
-    // **这里有本层唯一的 fail-closed 机制**：`strictest` 的右操作数是 `spec_floor(level)`，
-    // 而 `spec_floor` **不读 `policy`**——故调用方的表只能收紧、放不宽。
+    // **这里有的是「闸门不可被策略放宽」的唯一机制**：`strictest` 的右操作数是
+    // `spec_floor(level)`，而 `spec_floor` **不读 `policy`**——故调用方的表只能收紧、放不宽。
     // `LocalOnly` 那一档上右臂恒为 `TrustedPersonalOnly`，于是那一格填什么都一样。
+    //
+    // **限定语是承重的，别把它读掉**：本行此前写「本层唯一的 fail-closed 机制」，
+    // **射程过宽**（订正于 2026-10-07 的 P3-E 终审修复轮）。fail-closed 在本层是
+    // **三条各自可指认的通道**（设计 §5.4：`spec_floor` 的穷尽 `match`／`PlacementRules`
+    // 的覆盖判据／E 不经字符串解码），本行只说其中一条的一半——
+    // 准确的说法与设计 §5.3 逐字对齐：「**闸门不可被策略放宽**」的那一半，
+    // 另一半是 `strictest` 让 `TrustedPersonalOnly` 一侧吸收一切（见该函数的文档）。
     let mut placeable: Vec<&ComputeNode> = Vec::with_capacity(request.nodes.len());
     for node in request.nodes.iter() {
         let mut allowed = true;

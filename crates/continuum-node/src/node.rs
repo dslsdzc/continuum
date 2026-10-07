@@ -157,8 +157,16 @@ impl ComputeNode {
     ///   它钉的是「`new` 存进去的值取出来一样」，与上面那条「谁在读它」不是同一件事。
     ///   **顺带订正一处计数**：本段初稿写「三条访问器断言」——**本轮实读**
     ///   （`command grep -rn '\.capabilities()' --include='*.rs' crates/`），
-    ///   读 `ComputeNode::capabilities()` 的**只有那一条**；同一条用例里另有 `resources` / `availability`
-    ///   各一条断言（那是另两个方法，不是本方法的观察对象）。
+    ///   读 `ComputeNode::capabilities()` 的有**两条**：`tests/node.rs:73`
+    ///   （就是上面那条搬运断言）与 `tests/placement.rs:240`（`ByCapabilityCount::compare` 的
+    ///   `b.capabilities().len().cmp(&a.capabilities().len())`，**就是上面说的那个消费者**）。
+    ///   同一条用例里另有 `resources` / `availability` 各一条断言
+    ///   （那是另两个方法，不是本方法的观察对象）。
+    ///   **旧话照留（它错在哪）**：这里此前写「读它的**只有那一条**」——**射程丢了**：
+    ///   本意是「`tests/node.rs` 里只有那一条」，而**同一段上一行自己就承认了另一条**
+    ///   在 `tests/placement.rs`（订正于 2026-10-07 的 P3-E 终审修复轮）。
+    ///   （`crates/continuum-runtime` 与 `crates/continuum-sandbox` 里那些 `.capabilities()`
+    ///   是**别的类型**的方法 `Sandbox::capabilities()`，不是本方法的读者。）
     /// - **不补用例（已裁，理由不变）**：那条设想中的守卫是「**本 crate 内不读它**」的正则文本断言，
     ///   而它的观察对象在 `src/`——**今天仍然一个都没有**，故仍是对**缺席**设守卫，
     ///   还得自己自证两侧，成本与收益不成比例。（对「测试读了它」设守卫没有意义：
@@ -169,12 +177,19 @@ impl ComputeNode {
 
     /// 消费方：调用方自己实现的策略——**本 task 落地时 E 内部零读取**
     /// （同 `capabilities`，含那里关于时间限定与「不补用例」的说明）。
+    ///
+    /// **但「同 `capabilities`」只覆盖「`src/` 零读取」那一半**（订正于 2026-10-07 的
+    /// P3-E 终审修复轮）：`capabilities` 那一段还讲了「Task 6 的策略消费者」，
+    /// 而**本方法与 `availability` 今天连测试侧的消费者都没有**——
+    /// `command grep -rn '\.resources()\|\.availability()' --include='*.rs' crates/` 只命中
+    /// `tests/node.rs` 的搬运断言那两行。照旧指针读会以为它们也有策略读者。
     pub fn resources(&self) -> &[String] {
         &self.resources
     }
 
     /// 消费方：调用方自己实现的策略——**本 task 落地时 E 内部零读取**
-    /// （同 `capabilities`，含那里关于时间限定与「不补用例」的说明）。
+    /// （同 `capabilities`，含那里关于时间限定与「不补用例」的说明；
+    /// 那个「同」的射程限制见 `resources` 的第二段）。
     pub fn availability(&self) -> &[String] {
         &self.availability
     }

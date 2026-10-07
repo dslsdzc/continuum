@@ -18,9 +18,22 @@ use crate::node::ComputeNodeId;
 /// `NodeRegistryError` 同口径：用例一律 `match` 取出 `level` 再断言是哪一档；
 /// 派生 `PartialEq` 会把「两枚错误相等」变成一条**本层没有判据**的命题。
 ///
-/// **`Debug` 是必需的、不是装饰**：`try_new` 返回 `Result<Self, RulesError>`，
-/// 而 `unwrap_err()` / `expect_err()` 的签名要求 `E: Debug`；它也是断言红时
-/// 能读出实际值的前提。
+/// **`Debug` 是必需的、不是装饰**——但**理由不是 `unwrap_err()`**（那半句曾写在这里，
+/// **是错的，订正于 2026-10-07 的 P3-E 终审修复轮，旧的错话留在此段末尾**）：
+///
+/// - **`unwrap_err()` / `expect_err()` 的界在 `T` 上，不在 `E` 上**
+///   （`impl<T: Debug, E> Result<T, E>` 的 `unwrap_err`，实测 rustc 1.95.0：
+///   `T` 缺 `Debug` 报 E0277「required by a bound in `Result::<T, E>::unwrap_err`」，
+///   `E` 缺 `Debug` 一字不提）。这里 `T` 是 **`PlacementRules`**，
+///   而它**一个 trait 都不派生**，故这两个方法**在本层根本写不出来**——
+///   它们举不出 `Debug` 的必要性，缺的正是 `T` 那一侧。
+/// - **真正要 `E: Debug` 的是另外两处**：`try_new(...).expect(…)`（`Result::expect`
+///   的界在 `E` 上）与断言红时的 `{err:?}`；`thiserror::Error` 本身也要求
+///   `Self: Debug + Display`。
+///
+/// **旧话照留（它错在哪）**：本段此前写「`unwrap_err()` / `expect_err()` 的签名要求 `E: Debug`」
+/// ——把界记到了 `E` 上，与本 crate 的 `node.rs`（`ComputeNode` 的 `Debug` 一段，
+/// 那里写的是 `T: Debug`）相抵；两处矛盾时**那一处是对的**。
 #[derive(Debug, thiserror::Error)]
 pub enum RulesError {
     /// 表里没有 `level` 这一档。
@@ -50,11 +63,20 @@ pub enum RulesError {
 /// **只派生 `Debug` 与 `thiserror::Error`，不派生 `PartialEq`**——与 [`RulesError`] 同口径：
 /// 用例一律 `matches!`／`match` 取出载荷再断言。
 ///
-/// **`Debug` 在这里比在 [`RulesError`] 那里更硬**：本类型是 `place` 的 `Err` 侧，
-/// 而**每一条失败路径的用例**都写 `let err = place(…).unwrap_err();`——
-/// `Result::unwrap_err` 的签名是 `impl<T: Debug, E> Result<T, E>` 上的方法，
-/// 故 `E: Debug` 是**硬约束**，不是断言红时读值方便而已。
-/// （`T` 那一侧的 `Debug` 由 [`ComputeNode`](crate::ComputeNode) 提供。）
+/// **`Debug` 是必需的，但承重的那一侧是 `T`、不是 `E`**（这一句曾把两侧记反，
+/// **订正于 2026-10-07 的 P3-E 终审修复轮，旧话照留在本段末尾**）：
+/// **每一条失败路径的用例**都写 `let err = place(…).unwrap_err();`，
+/// 而 `Result::unwrap_err` 的签名是 `impl<T: Debug, E> Result<T, E>` 上的方法
+/// ——**界在 `T` 上**。这里 `T` 是 `&ComputeNode`，它的 `Debug` 由
+/// [`ComputeNode`](crate::ComputeNode) 的派生提供（那也是 `ComputeNode` 派生 `Debug` 的理由，
+/// 见 `node.rs` 的 `ComputeNode` 文档），**与本类型的 `E` 无关**
+/// （实测 rustc 1.95.0：`E` 那一侧完全不派生 `Debug` 时，`unwrap_err()` 照样编得过）。
+/// **本类型这一侧的 `Debug` 由另两处要**：断言红时的 `{err:?}`，
+/// 以及 `thiserror::Error`（它要求 `Self: Debug + Display`）。
+///
+/// **旧话照留（它错在哪）**：本段此前先逐字引出 `impl<T: Debug, E> Result<T, E>`，
+/// 紧接着却结论成「故 `E: Debug` 是**硬约束**」——**一句话内自相矛盾**：
+/// 它自己引的那句签名就写着界在 `T` 上。
 ///
 /// **三处「看起来该收但没有产生方」的不收，逐条**（设计 §5.8）：
 ///

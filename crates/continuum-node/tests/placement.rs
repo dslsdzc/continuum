@@ -860,3 +860,68 @@ fn swapping_the_policy_changes_the_result() {
         "标签最多者该胜出"
     );
 }
+
+/// **判据 §4.4 在「制品 ≥ 2 枚」上的那一面**：设计 §5.3 要求
+/// 「`place` 对**每一枚** `required_artifacts` 里的制品做同一件事……据此过滤节点集」
+/// ——即多枚制品**取交**，**一枚说不许就是不许**，与它排在第几枚无关。
+///
+/// # 为什么要补这一条（来历：P3-E 终审 I1，2026-10-07）
+///
+/// **本文件此前每一份夹具都只有 0 枚或 1 枚制品**（`artifacts = vec![…]` 逐处量过），
+/// 设计 §9 的测试表与计划 Task 5 的用例清单也都没有这一行。
+/// 于是「对每一枚制品都算一次」这条要求在**交付字节上没有任何照片**——
+/// 终审的变异体把 `place` 步骤 2 的 `request.artifacts.iter()` 改成 `…iter().take(1)`
+/// （**只读第一枚**制品的等级），**全量门 `cargo test --workspace --no-fail-fast` 下
+/// `exit=0`、0 条 FAILED**：一枚 `LOCAL_ONLY` 制品被真的放到了云节点上，而没有一处红。
+///
+/// # 夹具与红的条件
+///
+/// `nodes = [cloud("a")]`（`class ≠ Personal` ＋ 未被信任）、表五档全 `AnyNode`。
+/// 两枚制品**两种次序各拍一次**，故「只读第一枚」与「只读最后一枚」两种写法**各自都有一条挡它**：
+///
+/// - 次序一：`[Public, LocalOnly]`——放行的那一枚在**前**；
+/// - 次序二：`[LocalOnly, Public]`——放行的那一枚在**后**。
+///
+/// **红在哪条断言**：两条 `unwrap_err()` 中的对应那一条——**每一条子例的第一句就是「必须返回 `Err`」**。
+/// **红的条件（档位：放宽；终审派单写作「收紧」，本文件同形的那条记为「放宽」，见
+/// `a_local_only_artifact_with_no_trusted_personal_node_is_unplaceable`）**：
+/// 上面那枚 `take(1)` 变异体 → **次序一红**（变异版返回 `Ok(cloud("a"))`），次序二仍绿
+/// （它读到的第一枚正是 `LocalOnly`）；反过来，只读**最后一枚**的写法 → **次序二红**、次序一绿。
+/// 实测与射程见 `.superpowers/sdd-p3e-final-fix-report.md`。
+///
+/// **两枚制品的 `id` 相同**（`artifact()` 夹具把 `id` 写死成 `"artifact-1"`）**不影响本用例**：
+/// `place` 只读 `privacy_class`，制品 `id` 不在它的输入面上（它判重的对象是**节点**）。
+///
+/// **本用例为什么排在本文件最末**：它属 Task 5 那一族（判据 §4.4），本该紧邻
+/// `a_local_only_artifact_with_no_trusted_personal_node_is_unplaceable`；
+/// 但本文件里那几处 `:NNN:CC` 的行号是**按字节量出来的**（见文件头那一节），
+/// 插在中间会让它们整体漂移。排在末尾是**为了不制造新的漂移**，不是归类如此。
+#[test]
+fn a_local_only_artifact_among_several_makes_the_whole_batch_unplaceable() {
+    let nodes = vec![cloud("a")];
+    let policy = RecordingPolicy::new(rules_all_any());
+
+    // 次序一：不限制的那一枚在**前**。只读第一枚的实现在这里放过 `LocalOnly`。
+    let permissive_first = vec![artifact(PrivacyClass::Public), artifact(PrivacyClass::LocalOnly)];
+    let request = PlacementRequest {
+        artifacts: &permissive_first,
+        nodes: &nodes,
+    };
+    let err = place(&request, &policy).unwrap_err();
+    assert!(
+        matches!(err, PlacementError::NoPlaceableNode),
+        "[Public, LocalOnly]：第二枚是 LocalOnly，整批该被拒，实际是 {err:?}"
+    );
+
+    // 次序二：不限制的那一枚在**后**。只读最后一枚的实现在这里放过 `LocalOnly`。
+    let permissive_last = vec![artifact(PrivacyClass::LocalOnly), artifact(PrivacyClass::Public)];
+    let request = PlacementRequest {
+        artifacts: &permissive_last,
+        nodes: &nodes,
+    };
+    let err = place(&request, &policy).unwrap_err();
+    assert!(
+        matches!(err, PlacementError::NoPlaceableNode),
+        "[LocalOnly, Public]：第一枚是 LocalOnly，整批该被拒，实际是 {err:?}"
+    );
+}

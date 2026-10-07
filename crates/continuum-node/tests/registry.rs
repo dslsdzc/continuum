@@ -82,14 +82,22 @@ fn node(id: &str, trust: NodeTrust) -> ComputeNode {
 ///   （`nodes()` 交回 `&[ComputeNode]`，副本活不过返回），故实测取的是可表达的等价形态：
 ///   **在登记时就把表维护成升序**，`nodes()` 照旧交回借用）→ 同样红在那一条上。
 ///
-/// **用例名里的「two」与夹具的三枚相抵（来历留在原地）**：本名逐字取自 E 计划 Task 3
-/// （`docs/superpowers/plans/2026-10-06-p3e-compute-placement.md`，Task 3 Step 1 第一条），
-/// 而它同一条的正文写的是「登记**三**枚（id `"c"` / `"a"` / `"b"`）」。**名字说二、正文说三**，
-/// 是上游计划的一处笔误（本 task 按派单要求「用例名逐字照用」，故不改名；已另报协调者）。
+/// **用例名里那个「三」的来历（含一次改名，旧的名字与旧的处置留在原地）**：
+/// 本名初稿逐字取自 E 计划 Task 3（`docs/superpowers/plans/2026-10-06-p3e-compute-placement.md`，
+/// Task 3 Step 1 第一条），那一行当时写的是 `registering_**two**_nodes_…`，
+/// 而它同一条的正文写的是「登记**三**枚（id `"c"` / `"a"` / `"b"`）」——**名字说二、正文说三**。
+/// 当时的处置是「逐字照用、不改名」（派单要求），于是**名字里那句假话留在了交付字节里**
+/// ——**那句「故不改名」今天已不成立**，据实留在此处。
+///
+/// **订正（2026-10-07，P3-E 终审修复轮）**：计划那一行已由提交 `63a022b` 改成
+/// `registering_three_nodes_keeps_the_registration_order`，本文件随后把名字与这里改齐。
+/// 判据是本仓那条「**用例名也是一种断言——声称的必须与实际覆盖的相等**」：
+/// 名字不参与运行，删改断言时它不会被任何东西顶红，故只能靠人核对。
+///
 /// 实际登记 **三**枚——三条 `id` 才能让「登记序」与「升序」在一个含逆序对的序列上分开，
 /// 两枚里若恰好是升序同样不可区分。
 #[test]
-fn registering_two_nodes_keeps_the_registration_order() {
+fn registering_three_nodes_keeps_the_registration_order() {
     let mut registry = NodeRegistry::new();
     for id in ["c", "a", "b"] {
         registry
@@ -163,7 +171,8 @@ fn registering_the_same_id_twice_is_a_named_error() {
 /// **初稿那句「举不出让它们单独红的 M」是错的**（订正于修复轮 1，来历留在原地）：
 /// 事实句是真的——**本 task 原先那 11 个变异体里，两枚都单独红不了**
 /// （M1 的 `insert(0, …)` 与 M6 的 `sort_by(id)` 都同时红了
-/// `registering_two_nodes_keeps_the_registration_order`）；**错的是紧跟的那句推论**——
+/// `registering_three_nodes_keeps_the_registration_order`；**本文件当时还叫
+/// `registering_two_nodes_…`，那次改名见上一条用例的注释**）；**错的是紧跟的那句推论**——
 /// 它把射程丢掉、由「**我没试出来**」跳到了「**不存在**」。**这两件事不同**：
 /// 前者是「试过的形态不够」，后者才是「没有照片」，而后者需要把**所有**形态走遍才能说。
 /// 评审造出的 M7／M8 两枚即是反例，**故本段只写「本 task 原先那 11 个变异体里，两枚都单独红不了」**（引号内是本段实句；初稿在此引的「试过的那些形态里没有」**本段没有**，修复轮 2 订正）。
