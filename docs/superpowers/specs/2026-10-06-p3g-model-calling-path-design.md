@@ -197,8 +197,18 @@ pub fn plan_candidates(tx: &Tx<'_>, registry: &ProviderRegistry)
     -> Result<Vec<Candidate>, ModelCallError>;
 
 // ② 异步段：取可用性快照 → 组装请求 → 调 rank，并把**句柄与排序结果成对带出**。**不收 `Tx`**（§3.4）。
-pub async fn select(candidates: Vec<Candidate>, input: RouteInput, policy: &dyn RankingPolicy)
+pub async fn select(candidates: Vec<Candidate>, input: RouteInput,
+                    policy: &(dyn RankingPolicy + Send + Sync))
     -> Result<CallPlan, ModelCallError>;
+
+// ⚠️ **本代码块在 2026-10-08 改过一处**：`select` 的 `policy` 参数由 `&dyn RankingPolicy`
+//    改为 `&(dyn RankingPolicy + Send + Sync)`。**原文与本块的正文相抵**——本设计 §3.4 与 §11
+//    要求那条 future 是 `Send`（`:368` 的 `assert_send` 与 `:905` 的判据行），而 `select` 在
+//    `snapshot(..).await` **之后**才用 `policy`，`&T: Send` 要 `T: Sync`；D 的 `RankingPolicy`
+//    （`crates/continuum-model-registry/src/router.rs`）**没有超界**，故原写法编不过
+//    （G 的 Task 8 实测 `E0277: dyn RankingPolicy cannot be shared between threads safely`）。
+//    **改的是代码块，不是正文**：正文那条判据（future 必须 `Send`）是约束，代码块只是它的一种示意写法。
+//    具体类型会自动 coerce，故调用点一处未改。
 
 // ③ 异步段：对**一个候选**发起调用。**不收 `Tx`**；**也不收 `ModelId`**（§2.2）；
 //    句柄是**显式的一枚入参**——`ExecutionCandidate` 里没有它（D 的类型不含适配器）。
