@@ -3,7 +3,7 @@
 //! [`ModelCallError`] 的转换。
 //!
 //! **本模块最早落地的就是上面那两样**。**四段流程里已落地的是第①段（[`plan_candidates`]，
-//! 同步段）与第②段的前半（[`snapshot`]）**；调排序（`select`）与 `call` / `call_stream`
+//! 同步段）与第②段（[`snapshot`] 与 [`select`]，异步段）**；`call` / `call_stream`
 //! 由后续 task 落在这里。
 //!
 //! [`ModelCallError`] 的定义在 [`crate::error`]——那是设计 §10.2 指定的落点
@@ -15,7 +15,11 @@ use std::sync::Arc;
 use continuum_core::model::{ModelId, ProviderHealth};
 use continuum_core::ProviderError;
 use continuum_graph::failure::FailureClass;
-use continuum_model_registry::{list_registered, load_profile, RoutableModel, RoutingError};
+use continuum_model_registry::{
+    list_registered, load_profile, rank, BudgetView, ExecutionCandidate, FamilyPreference,
+    RankedExecutionCandidates, RankingPolicy, RoutableModel, RoutingError, RoutingRequest,
+    TaskSkillRequirement,
+};
 use continuum_persist::Tx;
 use continuum_provider::model::ModelProvider;
 use continuum_provider::ProviderRegistry;
@@ -153,6 +157,172 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
         snapshot.push((candidate.model.profile().id().clone(), health));
     }
     snapshot
+}
+
+/// ② 的三个输入值**来自别处，G 不产它们**（设计 §3.1）：`requirements` 与 `family`
+/// 来自规划侧（§250 的第 1、5 项），`budget` 来自驱动从语义层 `Budget` 的投影（D §6.1）。
+/// **这三个值今天的生产方都不存在**（设计 §12 第 1 条）——故所有用例的输入都由测试直接构造，
+/// **钉不了「驱动真的这么传」**；本设计也不向规划侧／语义层提这条请求（它们尚未建）。
+///
+/// **按值收，无生命周期参数**（设计 §3.1 第 7 条）：`RoutingRequest` 要按值持有这三者，
+/// 而 `TaskSkillRequirement` **没有 `Clone`**（D 计划 Task 10）——**收引用会逼出一次不可得的克隆**。
+/// **不取「给 `TaskSkillRequirement` 加 `Clone`」这条替代**：那要改 D 的类型，
+/// 而收益只是省一次移动（设计 §3.1 第 7 条的原话）。
+///
+/// **字段 `pub`、没有 accessor**：它是一份纯数据投影，唯一的生产方（驱动）在别处，
+/// 加一对 `fn requirements(&self)` 只会让同一件事有两个落点（判据同 D 的 `BudgetView`）。
+/// **不派生任何东西**：与 D 的请求面同一条判据——从构造到读回之间没有本 crate 的代码，
+/// 故「读回来还是原值吗」这类断言必然恒真（D §5.1）。
+pub struct RouteInput {
+    /// §250 #1 的能力需求。来自规划侧。
+    pub requirements: TaskSkillRequirement,
+
+    /// §250 #5 的 family 偏好（§19 的封闭清单）。来自规划侧。
+    pub family: FamilyPreference,
+
+    /// ENG-005 的预算视图。来自驱动从语义层 `Budget` 的投影（D §6.1）。**G 只搬运它**
+    /// （设计 §8.1）：不解释单位、不换算、不做减法——那要用一份没有单位的余量做算术。
+    pub budget: BudgetView,
+}
+
+/// ② 的产物：D 的排序结果与**每个候选自己的适配器句柄**成对带出（设计 §3.1 第 1 条
+/// 与第 6 条）。
+///
+/// # 为什么需要它
+///
+/// `rank` 交回的 [`ExecutionCandidate`] **只带 `ModelId`**（D §5.2 的五个访问器里没有句柄），
+/// 而 `call` / `call_stream` / `abort` 都要句柄（设计 §3.1 第 4 条：`ModelStream` 自己不带句柄，
+/// 故「中止一条流」除了 `CallId` 还必须知道问哪个适配器）。句柄于是必须在 ② 与 ③ 之间有地方安放。
+///
+/// # 配对键是 `ModelId`，**不是位置**
+///
+/// 按位置配（让 `adapters` 与 `ranked.candidates()` 逐位对应）要求「句柄表的次序恰好等于
+/// D 排序之后的次序」，**那是 D 的排序结果的一个未经声明的假设**——而按 id 复原用的是
+/// 设计 §3.1 第 6 条写死的那个键。故 `adapters` **保持构造时的次序**，查的时候按 id 找。
+///
+/// **唯一性的两个来源**（缺一不可，设计 §3.1 第 6 条）：(a) 候选集**逐行来自
+/// `model_registry`**，`id` 是该表的 `PRIMARY KEY`，故 G 交出去的候选 id 两两不同；
+/// (b) D 在 `rank` 内**另有一道判重**（`DuplicateModelCandidate`）。
+/// **若少了 (a)**，按 id 配对就可能把两条候选配到同一个句柄上，而那是**静默的错误配对**。
+///
+/// **字段私有、构造点唯一**（就在 [`select`] 里）：本 crate 外造不出一枚 `CallPlan`。
+/// **不派生任何东西**：`RankedExecutionCandidates` 与 `Arc<dyn ModelProvider>` 都不好比对，
+/// 而没有当场消费方的派生一律不加。
+pub struct CallPlan {
+    /// D 的排序结果，原样带出。**G 不再排一次序、不做第二份判断**（设计 §4.6）。
+    ranked: RankedExecutionCandidates,
+
+    /// 候选 id → 它自己的句柄，次序是**构造时的候选集次序**（查的时候按 id，见类型文档）。
+    adapters: Vec<(ModelId, Arc<dyn ModelProvider>)>,
+}
+
+impl CallPlan {
+    /// 取一条候选自己的句柄。
+    ///
+    /// **`expect` 不会触发，理由是构造性的**：[`select`] 把候选集**同一份**解构成
+    /// `models`（交给 `rank`）与 `adapters`（留在这里），而 `rank` 的输出**只从它的入参里选**，
+    /// 不会凭空造出一个 id；`adapters` 覆盖解构前的每一个候选，故每条候选都查得到。
+    /// 查不到即「`rank` 输出了一条不在入参里的候选」——那是 D 的缺陷，不是这里能兜的。
+    fn adapter_for(&self, id: &ModelId) -> &Arc<dyn ModelProvider> {
+        self.adapters
+            .iter()
+            .find(|(known, _)| known == id)
+            .map(|(_, adapter)| adapter)
+            .expect("rank 的每一条候选都出自交进去的那个候选集，故 id 必在 adapters 里")
+    }
+
+    /// §84 的 `selected_model` 与**它对应的**句柄。
+    ///
+    /// **两枚返回值的对应关系是配过对的、不是各取各的表头**：一起返回正是为了让调用方
+    /// 拿不到「候选是这一条、句柄是另一条」的那种组合。照片是
+    /// `tests/model_call.rs` 的 `the_result_pairs_every_candidate_with_its_own_adapter`。
+    pub fn selected(&self) -> (&ExecutionCandidate, &Arc<dyn ModelProvider>) {
+        let candidate = self.ranked.selected();
+        (candidate, self.adapter_for(candidate.model()))
+    }
+
+    /// §84 的 `alternatives` 与各自的句柄，**次序与 D 的输出相同**。
+    ///
+    /// **不是第二份数据**：它就是 [`CallPlan::selected`] 那一份有序列表的表尾（D §5.2
+    /// 对 `RankedExecutionCandidates::alternatives` 的同一处置），故这里**不重新排序、
+    /// 不重新解析**——G 在排序这件事上不做第二份判断（设计 §4.6）。
+    /// 照片：`tests/model_call.rs` 的 `alternatives_is_the_tail_of_the_same_list`
+    /// （输入次序与 D 的输出次序不同的构造下，再排一次序就会红）。
+    pub fn alternatives(&self) -> Vec<(&ExecutionCandidate, &Arc<dyn ModelProvider>)> {
+        self.ranked
+            .alternatives()
+            .iter()
+            .map(|candidate| (candidate, self.adapter_for(candidate.model())))
+            .collect()
+    }
+}
+
+/// ② 异步段：取可用性快照 → 组装 [`RoutingRequest`] → 调 `rank`，并把句柄与排序结果
+/// **成对带出**（[`CallPlan`]）。
+///
+/// # 不收 `Tx`
+///
+/// 设计 §3.4：`Tx` 内部持一枚 `MutexGuard`，故持着它跨 `await` 的 future 不是 `Send`；
+/// 且整个库是单连接 + 单 `Mutex`，跨 `await` 持有它会**把模型调用期间的整仓库访问全部挡住**。
+/// 故本函数**不收 `Tx`**——这条不是风格，是那两条事实的直接后果。
+///
+/// # 按值收候选集，不是 `&[Candidate]`
+///
+/// 设计 §3.1 第 3 条：`rank` 的第二个入参是 `&[RoutableModel]`，而 `RoutableModel`
+/// **字段私有、不可克隆**，`Candidate` 按值持有它——**`&[Candidate]` 变不出 `&[RoutableModel]`**。
+/// 故本函数按值收，内部把每个候选**解构成**它的模型（进 `Vec<RoutableModel>`，正是 `rank`
+/// 要的那个）与它的句柄（进 `CallPlan` 的配对表）。
+///
+/// # G 在这一段里不做任何二次裁剪
+///
+/// 设计 §4.4 第 2 条：`Degraded` / `Healthy` **都照原样送进 `availability`**，
+/// **不因健康度做任何判断**——只过滤 `Unavailable` 是 `rank` 的事，而 `Healthy` 与 `Degraded`
+/// 之间**没有判据**。在这里做二次裁剪会是在 D 已写死的地方加第二个判据。
+/// **照片：Task 3 的 `a_unavailable_adapter_is_carried_through_verbatim`**——快照这一层
+/// （本函数唯一产生 `availability` 的地方）原样带过 `Unavailable` 与 `Degraded`；
+/// 本函数只是把快照原样装进请求，不在这之上再加一层。
+///
+/// # 唯一的 `Err` 来源是 D 的 `rank`
+///
+/// `select` 自己不产生任何新的失败：它不读库（不接 `Tx`）、不解析适配器（解析在
+/// [`plan_candidates`] 里只发生一次，设计 §3.1 第 1 条）。故本函数的失败面**就是**
+/// `ModelCallError::Routing`——带出 D 那一枚，不压平成一枚同名的变体。
+///
+/// # 候选集为空时不在这里判
+///
+/// 设计 §3.1 第 9 条把「空候选集 → `NoEligibleCandidate`、不调 `rank`」落在
+/// [`plan_candidates`] 里（它才是候选集的产生点，且它的 `Err` 在 `rank` 之前）。
+/// 本函数因此**收不到空 `Vec`**；若真收到，`rank` 会以同一枚 `NoEligibleCandidate` 返回，
+/// 形状一致。
+pub async fn select(
+    candidates: Vec<Candidate>,
+    input: RouteInput,
+    policy: &dyn RankingPolicy,
+) -> Result<CallPlan, ModelCallError> {
+    // 快照是逐候选取的（设计 §3.3），故它与候选集**同一次构造**：条目集天然覆盖候选集，
+    // 这正是 `UnknownAvailability` 在 G 这条路径上不可达的那条构造性事实（设计 §4.5）。
+    let availability = snapshot(&candidates).await;
+
+    // 解构：每个候选按值拆成「模型」（`rank` 要的）与「句柄」（要与 D 的输出配对带出的）。
+    // 两件事在同一次遍历里做，句柄因此与模型同源——不是第二次解析。
+    let mut models: Vec<RoutableModel> = Vec::with_capacity(candidates.len());
+    let mut adapters: Vec<(ModelId, Arc<dyn ModelProvider>)> = Vec::with_capacity(candidates.len());
+    for candidate in candidates {
+        let Candidate { model, adapter } = candidate;
+        adapters.push((model.profile().id().clone(), adapter));
+        models.push(model);
+    }
+
+    // 三个值原样搬进请求：本函数不解释它们、不换算、不做减法（设计 §8.1）。
+    let request = RoutingRequest {
+        requirements: input.requirements,
+        family: input.family,
+        availability,
+        budget: input.budget,
+    };
+
+    let ranked = rank(&request, &models, policy).map_err(ModelCallError::Routing)?;
+    Ok(CallPlan { ranked, adapters })
 }
 
 /// 设计 §6.1 的分类表：**G 这一侧的默认口径，不是对适配器的断言**。

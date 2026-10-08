@@ -1,8 +1,17 @@
-//! G 这一侧的失败面：分类表与 `ModelCallError` 的照片（设计 §6.1、§11），
-//! 以及**假模型适配器夹具自身的用例**（Task 2）。
+//! G 这一侧的用例，按四段流程与失败面分节：
 //!
-//! **本文件到本 task 为止只有这两部分**：四段流程（取快照、调排序、`call`、`call_stream`）
-//! 的用例由后续 task 追补。
+//! 1. **失败面**：分类表与 `ModelCallError` 的照片（设计 §6.1、§11）——Task 1；
+//! 2. **夹具自身的用例**：假模型适配器真的读配置、真的计数（Task 2）；
+//! 3. **候选集的构造（同步段）与可用性快照**——Task 6 ＋ Task 3；
+//! 4. **`select`**：组装请求、调 `rank`、把句柄与排序结果成对带出——Task 7。
+//!
+//! **`call` / `call_stream` / 中止入口的用例由后续 task 追补**（它们今天还不存在，
+//! 故本节第 4 条只到 `select` 为止）。
+//!
+//! **订正（2026-10-08，Task 7）**：本行原写「本文件到本 task 为止只有这两部分：四段流程
+//! （取快照、调排序、`call`、`call_stream`）的用例由后续 task 追补」——**那句在 Task 3／6
+//! 落地时就已经不成立**（候选集与快照两节在那之后进的同一个文件），Task 7 落地后更远。
+//! 错的只是这句概述，各节的判据不变。
 
 mod common;
 
@@ -12,15 +21,18 @@ use continuum_core::ProviderError;
 use continuum_graph::failure::FailureClass;
 use continuum_graph::p1_graph_migrations;
 use continuum_model_registry::{
-    list_registered, p3d_model_migrations, BudgetView, CandidateScore, FamilyPreference,
-    FamilyRelation, LifecycleState, RankingPolicy, Ratio, RoutableModel, RoutingError,
-    RoutingReason, RoutingRequest, SkillDimension, TaskSkillRequirement,
+    list_registered, p3d_model_migrations, BudgetView, CandidateScore, ExecutionCandidate,
+    FamilyPreference, FamilyRelation, LifecycleState, RankingPolicy, Ratio, RoutableModel,
+    RoutingError, RoutingReason, RoutingRequest, SkillDimension, TaskSkillRequirement,
 };
 use continuum_persist::{builtin_migrations, Db, PersistError, Tx, Value};
 use continuum_provider::model::ModelProvider;
 use continuum_provider::ProviderRegistry;
-use continuum_runtime::model_call::{classify, into_call_error, plan_candidates, snapshot, Candidate};
+use continuum_runtime::model_call::{
+    classify, into_call_error, plan_candidates, select, snapshot, Candidate, RouteInput,
+};
 use continuum_runtime::ModelCallError;
+use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
@@ -280,6 +292,20 @@ impl CapturedBudget {
     }
 }
 
+/// 一枚常数打分：`compatibility` 与 `confidence` 都取 1.0，family 记 `SameFamily`。
+///
+/// **两条策略共用它**（本文件的 [`RecordingPolicy`] 与 Task 7 的 [`ReversingPolicy`]）。
+/// 打分取常数是刻意的：那些用例判的是「抄到了什么」或「输出是什么次序」，
+/// **让打分也参与判断会把两件事混进同一条用例的红里**——读的人分不清红是「次序配错了」
+/// 还是「分数变了」。
+fn constant_score() -> CandidateScore {
+    CandidateScore {
+        compatibility: Ratio::try_new(1.0).expect("1.0 是合法的比值"),
+        confidence: Ratio::try_new(1.0).expect("1.0 是合法的比值"),
+        reason: RoutingReason::new(FamilyRelation::SameFamily, Vec::new(), Vec::new(), Vec::new()),
+    }
+}
+
 /// 记录用的排序策略：把 `evaluate` 收到的请求里那五个 `Option<i64>` 抄进自己的记录。
 ///
 /// 它是设计 §8.2 那条两向对钉（`None` ≠ `Some(0)`）的**观测端**：驱动把 `BudgetView` 装进
@@ -293,36 +319,41 @@ impl CapturedBudget {
 /// 端到端钉住**：本文件里 `evaluate` 只有 `self.capture(request)` 一句，别处没有第二份抄写。
 struct RecordingPolicy {
     seen: Mutex<Vec<CapturedBudget>>,
+    /// **`evaluate` 收到的 `availability` 的抄本**，按被抄的次序（Task 7 追补）。
+    ///
+    /// 与 `seen` 分开两枚 `Vec` 而不是合成一枚记录类型：两处的消费方不同
+    /// （预算那条读 `seen`，可用性那条读这里），合起来会让任一条用例的读口都多带一半无关字段。
+    availability: Mutex<Vec<Vec<(ModelId, ProviderHealth)>>>,
 }
 
 impl RecordingPolicy {
     fn new() -> Self {
         Self {
             seen: Mutex::new(Vec::new()),
+            availability: Mutex::new(Vec::new()),
         }
     }
 
-    /// 抄下这一枚请求的预算，并交出一枚**常数**打分——本策略不排序，只记录。
+    /// 抄下这一枚请求的预算与可用性，并交出一枚**常数**打分——本策略不排序，只记录。
     ///
-    /// 打分取常数是刻意的：本条的照片只判「抄到了什么」，
-    /// 让打分也参与判断会把两件事混进同一条用例的红里。
+    /// 打分取常数是刻意的（见 [`constant_score`]）。
     fn capture(&self, request: &RoutingRequest) -> CandidateScore {
         self.seen.lock().unwrap().push(CapturedBudget::of(request));
-        CandidateScore {
-            compatibility: Ratio::try_new(1.0).expect("1.0 是合法的比值"),
-            confidence: Ratio::try_new(1.0).expect("1.0 是合法的比值"),
-            reason: RoutingReason::new(
-                FamilyRelation::SameFamily,
-                Vec::new(),
-                Vec::new(),
-                Vec::new(),
-            ),
-        }
+        self.availability
+            .lock()
+            .unwrap()
+            .push(request.availability.clone());
+        constant_score()
     }
 
     /// 抄下来的每一份记录，按被抄的次序。
     fn captured(&self) -> Vec<CapturedBudget> {
         self.seen.lock().unwrap().clone()
+    }
+
+    /// 抄下来的每一份可用性，按被抄的次序。
+    fn captured_availability(&self) -> Vec<Vec<(ModelId, ProviderHealth)>> {
+        self.availability.lock().unwrap().clone()
     }
 }
 
@@ -339,6 +370,33 @@ fn a_routing_request(budget: BudgetView) -> RoutingRequest {
             .expect("一个维度是非空集合"),
         family: FamilyPreference::Auto,
         availability: Vec::new(),
+        budget,
+    }
+}
+
+/// 一份**五个量纲都不构成约束**（全 `None`）的预算视图。
+///
+/// Task 7 的用例里与预算无关的那几条用它：`Some` 的取值今天只能由测试构造
+/// （设计 §10 第 2 条），而「不构成约束」是一个不需要编数值的形态。
+fn no_constraints() -> BudgetView {
+    BudgetView {
+        money: None,
+        wall_time: None,
+        token: None,
+        gpu_time: None,
+        network_transfer: None,
+    }
+}
+
+/// 一枚 [`RouteInput`]：只有预算可变，需求与 family 取固定值。
+///
+/// **需求与 family 也由测试直接构造**：它们来自规划侧，而那一边尚未建（设计 §12 第 1 条），
+/// 故「驱动真的这么传」在这条路径上钉不了——本函数就是那条事实的落点。
+fn a_route_input(budget: BudgetView) -> RouteInput {
+    RouteInput {
+        requirements: TaskSkillRequirement::try_new(vec![SkillDimension::Coding])
+            .expect("一个维度是非空集合"),
+        family: FamilyPreference::Auto,
         budget,
     }
 }
@@ -1036,6 +1094,358 @@ async fn a_unavailable_adapter_is_carried_through_verbatim() {
         health_of(&probed2, "m-d"),
         &ProviderHealth::Degraded,
         "`Degraded` 该是 `Degraded`，既不被丢掉、也不被升格成 `Healthy`"
+    );
+}
+
+// ===== Task 7：组装请求、调 `rank`、成对带出句柄 =====
+
+/// **反序**策略：打分取常数（见 [`constant_score`]），`compare` 按 `ModelId` **降序**。
+///
+/// # 为什么要一枚会改次序的策略
+///
+/// `plan_candidates` 的候选按 id **升序**出（`list_registered` 的 SQL 是 `ORDER BY id ASC`），
+/// 而缺省的 `compare` 在分数打平时也按 id **升序**兜底——**两者恰好同序**。
+/// 于是两枚变异体在缺省策略下**不可观察**：
+///
+/// - 「G 把句柄按**输入次序**配回去」——输入次序与 D 的输出次序相同，错配与正确配对
+///   给出同一个结果，全绿；
+/// - 「G 对 `alternatives` **再排一次序**」——再排一次的次序与原次序相同，也全绿。
+///
+/// 本策略让 D 的输出次序**与输入次序相反**（m-a / m-b / m-c 进 → m-c / m-b / m-a 出），
+/// 那两枚变异体这才落得到红。**它同时是「策略可替换」的一次实际使用**（设计 §5.1）：
+/// G 不假定 D 用哪一份策略，只按 `rank` 的输出走。
+///
+/// **本策略自己不是被测对象**：它的 `evaluate` 与 `compare` 都短到读一眼就能核，
+/// 故没有为它单立用例——它承重的地方是上面那两条断言（次序真被改了，断言才有效力）。
+struct ReversingPolicy;
+
+impl RankingPolicy for ReversingPolicy {
+    fn evaluate(&self, _request: &RoutingRequest, _model: &RoutableModel) -> CandidateScore {
+        constant_score()
+    }
+
+    fn compare(&self, a: &ExecutionCandidate, b: &ExecutionCandidate) -> Ordering {
+        b.model().as_str().cmp(a.model().as_str())
+    }
+}
+
+/// 组装进 `RoutingRequest` 的 `availability`，其 **id 集合**等于候选集的 id 集合
+/// （**集合相等，不是 `len` 相等**）。
+///
+/// 这是设计 §4.5 里 `UnknownAvailability` 在 G 路径上**不可达**的那条构造性断言：
+/// 快照逐候选取（Task 3 的 `the_snapshot_is_as_long_as_the_candidate_set` 钉它自身的
+/// 长度与 id），而本条钉的是**组装进请求之后仍相等**——中间隔了一次搬运（快照 → 请求字段），
+/// 而搬运是可以丢东西的。
+///
+/// **三个候选的健康度取三档各一**：`Degraded` 不是摆设——「只把 `Healthy` 的条目放进
+/// `availability`」那一枚变异体要靠它才落得到红（若三条都是 `Healthy`，那枚变异体是
+/// 等价变异体）。`Unavailable` 那一条同样要留在 `availability` 里：`rank` 才做过滤，
+/// **G 不在这一层裁剪**（设计 §4.4 第 2 条）。
+///
+/// **红的条件（档位：收紧）**：在组装请求时加一条过滤（只把 `Healthy` 的条目放进
+/// `availability`）→ id 集合不等，红。
+#[tokio::test]
+async fn the_request_reaching_the_policy_carries_the_candidates_availability() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Healthy);
+    seed_routable(&tx, &mut registry, "m-b", ProviderHealth::Degraded);
+    seed_routable(&tx, &mut registry, "m-c", ProviderHealth::Unavailable);
+
+    let candidates = plan_candidates(&tx, &registry).expect("健康度不过闸门，三条都该在");
+    let candidate_ids: BTreeSet<String> = ids_of(&candidates).into_iter().collect();
+
+    let policy = RecordingPolicy::new();
+    let _plan = select(candidates, a_route_input(no_constraints()), &policy)
+        .await
+        .expect("m-a 与 m-b 都不是 Unavailable，该有输出");
+
+    let seen = policy.captured_availability();
+    // **非空锚**：没有它，下面那个循环在空记录上整条空真——一个「根本不调策略」的实现全绿。
+    assert!(
+        !seen.is_empty(),
+        "策略一次都没收到请求，说明请求根本没走到 rank（下面那条断言会空过）"
+    );
+    for availability in &seen {
+        let asked: BTreeSet<String> = availability
+            .iter()
+            .map(|(id, _)| id.as_str().to_owned())
+            .collect();
+        assert_eq!(
+            asked, candidate_ids,
+            "交给 rank 的 availability 的 id 集合该等于候选集的 id 集合（不是只断 len）：\
+             候选 {candidate_ids:?}，请求里 {asked:?}"
+        );
+    }
+}
+
+/// 探到的健康度**真的通到排序**（设计 §11）：`Unavailable` 的模型不被选中；**两侧对钉**。
+///
+/// # 为什么两向都要
+///
+/// 只钉向一时，一个「永远返回空候选集」的实现**全绿**：向一断的是「m-a 不在输出里」，
+/// 而那与「输出永远是空的」在读数上一样。**向二就是那条守卫**——改回 `Healthy` 之后它
+/// **回到输出，且成为 `selected()`**（不只是「出现了」）。
+///
+/// # 两向为什么在同一条用例里
+///
+/// 两向在**同一个 id**上做：向一里它是 `Unavailable`、向二里它是 `Healthy`，
+/// 别的一切不变。这样才能把红归因到「健康度」这一样上，而不是「换了一组候选」。
+///
+/// **排序为什么落到 id 升序**：本策略的打分是常数、family 都记 `SameFamily`，故缺省的
+/// `compare` 前四档全平，由第四档（`ModelId` 升序）定序——`m-a` 因此排在 `m-b` 前面。
+/// 这条依赖是缺省比较口径的，不是本用例发明的。
+///
+/// **红的条件**：向一（档位：**移除**）把 `availability` 一律填 `Healthy`（不取快照）
+/// → m-a 不被滤掉且成为 selected()，向一红。**向二挡的是相反方向**：一个把探到的
+/// `Healthy` 也丢掉的实现让向二红。
+#[tokio::test]
+async fn a_probed_health_actually_reaches_the_ranking() {
+    // 向一：m-a 探到 Unavailable → 不被选中；m-b 仍是可执行的候选。
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Unavailable);
+    seed_routable(&tx, &mut registry, "m-b", ProviderHealth::Healthy);
+
+    let candidates = plan_candidates(&tx, &registry).expect("健康度不是闸门，两条都该在候选集里");
+    let plan = select(candidates, a_route_input(no_constraints()), &RecordingPolicy::new())
+        .await
+        .expect("m-b 可执行，该有输出");
+
+    assert_eq!(
+        plan.selected().0.model().as_str(),
+        "m-b",
+        "探到 Unavailable 的 m-a 该被 rank 滤掉，选中的该是 m-b"
+    );
+    assert!(
+        plan.alternatives().is_empty(),
+        "滤掉之后只剩一条，表尾该是空的"
+    );
+
+    // 向二：同一个 id 改回 Healthy → 它回到输出，且成为 selected()。
+    let (_dir2, db2) = a_model_db();
+    let tx2 = db2.begin().unwrap();
+    let mut registry2 = ProviderRegistry::new();
+    seed_routable(&tx2, &mut registry2, "m-a", ProviderHealth::Healthy);
+    seed_routable(&tx2, &mut registry2, "m-b", ProviderHealth::Healthy);
+
+    let candidates2 = plan_candidates(&tx2, &registry2).expect("两条都该在");
+    let plan2 = select(candidates2, a_route_input(no_constraints()), &RecordingPolicy::new())
+        .await
+        .expect("两条都可执行，该有输出");
+
+    assert_eq!(
+        plan2.selected().0.model().as_str(),
+        "m-a",
+        "改回 Healthy 之后它该回到输出，且成为 selected()（不是只出现在表尾）"
+    );
+    let mut ids = vec![plan2.selected().0.model().as_str().to_owned()];
+    ids.extend(
+        plan2
+            .alternatives()
+            .iter()
+            .map(|(candidate, _)| candidate.model().as_str().to_owned()),
+    );
+    assert_eq!(
+        ids,
+        vec!["m-a".to_owned(), "m-b".to_owned()],
+        "两条都在，且按 id 升序（缺省 compare 的第四档）"
+    );
+}
+
+/// G 对 `BudgetView` 的**全部动作是搬运**（设计 §8.1、§8.2）：五个 `Option<i64>` 原样到达策略。
+///
+/// # 两向各自钉什么，以及为什么缺一不可
+///
+/// - **向一**：传 `budget.money = None` → 请求里 `money` **仍是 `None`**；
+/// - **向二**：传 `budget.token = Some(0)` → 它**仍是 `Some(0)`**。
+///
+/// **fail-open 的那一侧是向二的反面**：把 `Some(0)` 读成 `None` 就是「**把额度为零读成
+/// 不构成约束**」——路由会在额度耗尽时照常花钱，而它在结果上**看不出来**（`rank` 的
+/// 输出一个字都不变）。反向的 `None → Some(0)` 是 fail-closed（凭空没有候选），错得刺眼。
+/// **故两向都要**：只写向一时，向二那一档变异**不红**。
+///
+/// **两向为什么在同一个测试体内、同一个库上**：两次 `select` 之间只改了预算这一样，
+/// 红的归因因此唯一。`select` 按值收候选集，故第二次要重新 `plan_candidates`
+/// ——那是**同一个库上的同一次构造**，不是另建一个形状不同的夹具。
+///
+/// **红的条件**：向一（档位：**放宽**）把 `None` 折成 `Some(0)` → 向一红；
+/// 向二（档位：**收紧**）把 `Some(0)` 当「没有约束」折成 `None` → 向二红。
+#[tokio::test]
+async fn the_budget_reaches_the_policy_verbatim_both_ways() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Healthy);
+    let policy = RecordingPolicy::new();
+
+    // 向一：money = None（该量纲当前不构成约束）。
+    let candidates = plan_candidates(&tx, &registry).expect("候选在");
+    let _ = select(
+        candidates,
+        a_route_input(BudgetView {
+            money: None,
+            wall_time: None,
+            token: Some(7),
+            gpu_time: None,
+            network_transfer: None,
+        }),
+        &policy,
+    )
+    .await
+    .expect("候选可执行，该有输出");
+
+    // 向二：token = Some(0)（额度为零，**不是**「没有约束」）。
+    let candidates2 = plan_candidates(&tx, &registry).expect("候选在");
+    let _ = select(
+        candidates2,
+        a_route_input(BudgetView {
+            money: Some(3),
+            wall_time: None,
+            token: Some(0),
+            gpu_time: None,
+            network_transfer: None,
+        }),
+        &policy,
+    )
+    .await
+    .expect("候选可执行，该有输出");
+
+    let seen = policy.captured();
+    assert_eq!(
+        seen.len(),
+        2,
+        "两次 select 各该抄下一份预算记录（0 份意味着策略根本没有收到请求）"
+    );
+    assert_eq!(
+        seen[0].money, None,
+        "向一：送进去的 None 该原样到达策略——折成 Some(0) 就是把「不构成约束」读成「额度为零」"
+    );
+    assert_eq!(
+        seen[1].token,
+        Some(0),
+        "向二：送进去的 Some(0) 该原样到达策略——折成 None 就是「把额度为零读成不构成约束」，\
+         而那是 fail-open 的那一侧"
+    );
+}
+
+/// **句柄与候选按 id 配对**（设计 §3.1 第 6 条、§11）：三个候选、三个**互不相同**的适配器，
+/// 逐项断言候选自己那条 id 与句柄所服务的那个模型是同一个。
+///
+/// # 这条是本 task 新增类型的唯一承重用例
+///
+/// 没有它，一个「句柄随便给一个」的实现——按 id 发起调用时会打到**另一个模型**——
+/// 会全绿，而那是这条路径上最坏的一种错（调用打给了错的模型，而返回值看起来一切正常）。
+///
+/// **三个句柄互不相同是承重的**：句柄在两条候选之间共用时，「配错」在那两条之间不可观察
+/// （等价变异体），故夹具刻意一 id 一个适配器。
+///
+/// **为什么用 [`ReversingPolicy`]**：本用例的红条件是「把句柄按**输入次序**配回去」。
+/// 输入次序是 id 升序，而缺省 `compare` 在打平时也按 id 升序——**两者同序时错配不可观察**。
+/// 反序策略让 D 的输出与输入次序相反，错配才落得到红。
+///
+/// **红的条件（档位：取反）**：把句柄表按候选集的输入次序配回去（而不是按 id）→ 红。
+#[tokio::test]
+async fn the_result_pairs_every_candidate_with_its_own_adapter() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    let a = seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Healthy);
+    let b = seed_routable(&tx, &mut registry, "m-b", ProviderHealth::Healthy);
+    let c = seed_routable(&tx, &mut registry, "m-c", ProviderHealth::Healthy);
+
+    let candidates = plan_candidates(&tx, &registry).expect("三个候选都在");
+    let plan = select(candidates, a_route_input(no_constraints()), &ReversingPolicy)
+        .await
+        .expect("三条都可执行，该有输出");
+
+    // 该模型自己的那个句柄——按**夹具的构造**给出（不是从被测实现里读回来的）。
+    let expected = |id: &str| -> Arc<dyn ModelProvider> {
+        match id {
+            "m-a" => a.clone(),
+            "m-b" => b.clone(),
+            "m-c" => c.clone(),
+            other => panic!("夹具里没有 {other} 这个模型"),
+        }
+    };
+
+    let (selected, adapter) = plan.selected();
+    assert!(
+        Arc::ptr_eq(adapter, &expected(selected.model().as_str())),
+        "选中的那对不是同一个模型的那一对：候选是 {}，句柄服务的却是别的模型",
+        selected.model().as_str()
+    );
+
+    let alternatives = plan.alternatives();
+    assert_eq!(alternatives.len(), 2, "三个候选里表头之外该有两条表尾");
+    for (candidate, adapter) in &alternatives {
+        assert!(
+            Arc::ptr_eq(adapter, &expected(candidate.model().as_str())),
+            "表尾里的配对错了：候选是 {}，句柄服务的却是别的模型",
+            candidate.model().as_str()
+        );
+    }
+
+    // **覆盖完整**：三对恰好覆盖那三个模型，一个不多一个不少——只断言「每一对都配得上」
+    // 时，一个丢掉一条候选的实现（例如把两条配到同一个句柄上）仍可全绿。
+    let mut ids = vec![selected.model().as_str().to_owned()];
+    ids.extend(
+        alternatives
+            .iter()
+            .map(|(candidate, _)| candidate.model().as_str().to_owned()),
+    );
+    ids.sort();
+    assert_eq!(
+        ids,
+        vec!["m-a".to_owned(), "m-b".to_owned(), "m-c".to_owned()],
+        "三对该恰好覆盖三个候选"
+    );
+}
+
+/// `CallPlan::alternatives()` 是**同一份有序列表的表尾**，次序与 D 的输出相同
+/// （**G 不重新排序、不重新解析**——设计 §4.6：G 在排序这件事上不做第二份判断）。
+///
+/// **为什么用 [`ReversingPolicy`]**：本用例的红条件是「G 对 alternatives 再排一次序」
+/// （例如按候选集的输入次序重排）。输入次序与缺省 `compare` 的兜底档同序，故**必须**让
+/// D 的输出与输入反序，那枚变异体才落得到红。下面的 `input_ids` 那一条断言就把这件事写明了：
+/// **输入是升序、输出是降序**，两者不同序，故本用例不是空转。
+///
+/// **红的条件（档位：放宽）**：在 G 里对 alternatives 再排一次序（或按输入次序给出）
+/// → 红。
+#[tokio::test]
+async fn alternatives_is_the_tail_of_the_same_list() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Healthy);
+    seed_routable(&tx, &mut registry, "m-b", ProviderHealth::Healthy);
+    seed_routable(&tx, &mut registry, "m-c", ProviderHealth::Healthy);
+
+    let candidates = plan_candidates(&tx, &registry).expect("三个候选都在");
+    let input_ids = ids_of(&candidates);
+    let plan = select(candidates, a_route_input(no_constraints()), &ReversingPolicy)
+        .await
+        .expect("三条都可执行，该有输出");
+
+    let mut ids = vec![plan.selected().0.model().as_str().to_owned()];
+    ids.extend(
+        plan.alternatives()
+            .iter()
+            .map(|(candidate, _)| candidate.model().as_str().to_owned()),
+    );
+
+    assert_eq!(
+        input_ids,
+        vec!["m-a".to_owned(), "m-b".to_owned(), "m-c".to_owned()],
+        "夹具的输入次序该是 id 升序（`list_registered` 是 ORDER BY id ASC）——\
+         若它与输出同序，下面那条断言对「再排一次序」就没有效力"
+    );
+    assert_eq!(
+        ids,
+        vec!["m-c".to_owned(), "m-b".to_owned(), "m-a".to_owned()],
+        "selected() 与 alternatives() 拼起来该恰是 D 那份有序列表（次序原样，不重排）"
     );
 }
 
