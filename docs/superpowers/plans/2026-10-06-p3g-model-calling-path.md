@@ -999,9 +999,16 @@ impl CallPlan {
 }
 
 /// ② 异步段：取可用性快照 → 组装 `RoutingRequest` → 调 `rank`。**不收 `Tx`**（设计 §3.4）。
-pub async fn select(candidates: Vec<Candidate>, input: RouteInput, policy: &dyn RankingPolicy)
+pub async fn select(candidates: Vec<Candidate>, input: RouteInput,
+                    policy: &(dyn RankingPolicy + Sync))
     -> Result<CallPlan, ModelCallError>;
 ```
+
+> **订正（2026-10-09，G Task 9 评审查出本块一直没跟上）**：本块的参数原写 `&dyn RankingPolicy`（无界），
+> **而那条 future 必须是 `Send`**（设计 §3.4／§11）——`select` 在 `snapshot(..).await` **之后**才用 `policy`，
+> `&T: Send` 要 `T: Sync`，而 D 的 `RankingPolicy` 没有超界，**故原写法编不过**（Task 8 实测 `E0277`）。
+> 设计与实现都已改成 `+ Sync`（**不是 `+ Send + Sync`**：评审实测 `+ Sync` 单独就够，
+> `+ Send` 多余——`&(dyn RankingPolicy + Send)` 单独反而不够）。**本块是最后一处没改的**。
 
 **G 在这一段里不做任何二次裁剪**（设计 §4.4 第 2 条）：`Degraded` / `Healthy` 都照原样送进
 `availability`，**不因健康度做任何判断**——那会是在 D 已写死的地方加第二个判据。
@@ -1186,7 +1193,13 @@ git commit -m "feat(runtime): 发起模型调用与截止"
   「`abort` 真的取消了那一条流」这件事就无从谈起。
 - `dropping_a_stream_does_not_cancel`（设计 §3.5，**否定式照片，两侧对钉的向一**）：
   发起一次流式调用、**丢弃** `ModelStream`、再断言假适配器记录的 `cancel` **为空**。
-  **红的条件（档位：放宽）**：在 `ModelStream` 的 `Drop` 里调 `cancel` → 红。
+  **红的条件（档位：放宽；**订正 2026-10-09，G Task 9 评审逐条实测**）**：
+  **本行初稿写「在 `ModelStream` 的 `Drop` 里调 `cancel` → 红」，而那枚变异体在本 crate 里写不出来**——
+  `ModelStream` 是 **C 的类型**，`impl Drop for ModelStream` 实测报 **`E0117`（孤儿规则）＋ `E0120`**；
+  绕开它要 G 自己包一层 `Stream` 实现，**而 `Stream` 是 `futures_core` 的 trait、在本 crate 里只挂 dev 依赖**
+  （lib 里实现不了）。**故取它的可写邻形**：「**在 `call_stream` 里建立流之后顺手取消一次**」→ **红三条**
+  （本条 ＋ 两条 `abort` 计数条；**注意**：多列 `a_stream_call_...` 的 `stream_calls() == 1` 是错的，
+  那一条**要让 `stream` 被调两次**才红）。**用例本身照留**——它是那张否定式照片的落点。
   **为什么这一向必须单独钉**：「取消经 `CallId` 走 `cancel()`，**不经流的 drop**」是
   `ModelStream` 的文档已经写死的契约（`crates/continuum-core/src/model.rs:89-92`）。
   一个「drop 即取消」的实现在**适配器侧什么也没做**（drop 不产生任何远端动作），
@@ -1201,7 +1214,13 @@ git commit -m "feat(runtime): 发起模型调用与截止"
   （「这个 `CallId` 已完成」不算错），`abort` 返回 `Ok(())`。
   **设计 §3.5：取消的语义是幂等、尽力而为**——**一次取消与一次完成天然竞态**，
   故 G 的中止入口不把「这个 `CallId` 已完成」判成错误。
-  **红的条件（档位：收紧）**：在 `abort` 里对「已完成」的 `CallId` 直接返回一个 `Err` → 红。
+  **红的条件（档位：收紧；**订正 2026-10-09，G Task 9 评审实测**）**：
+  **本行初稿写「对『已完成』的 `CallId` 直接返回一个 `Err`」，而那在 G 手里表达不出来**——
+  G **没有任何「这条流已完成」的读数**：`ModelStream` 只有 `call` 与 `chunks`（`chunks` 要 `Pin<&mut>` 才推得动，
+  而 `abort` 收的是 `&ModelStream`），`cancel` 的返回值也不带状态。
+  **故只能写成「在 `Ok` 路径上返 `Err`」**，**实测红两条**（本条 ＋ `aborting_a_stream_calls_cancel_with_the_streams_own_call_id`）。
+  **据实记它的强度**：它是「**G 不在 `Ok` 路径上自行合成 `Err`**」的**回归护栏**，
+  **不是能把「已完成／未完成」分开的判别式**（**但它不是空转用例**——那一枚挡得住）。
   **注意这一条钉的是 G 侧的判定，不是适配器的行为**：假适配器返回 `Ok`，
   而 G **不得**在它返回 `Ok` 之后自行合成一个 `Err`。
 - `each_provider_failure_on_abort_keeps_its_class`：`cancel` 返回 `Transport` → `abort` 返回
