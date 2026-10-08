@@ -31,8 +31,25 @@ continuum-workspace = { path = "../continuum-workspace" }
 # `condition` 只能经 `Condition::parse(&serde_json::Value)` 造出——`continuum-policy`
 # 不提供别的构造入口，故驱动取用它。
 serde_json = { workspace = true }
+# F 的 Task 3 起**第一次真的用上它**（此前 `src/` 与 `tests/` 对它零引用，`grep` 只命中
+# 这一行）：`tool_call::run_tool_call` 要用 `block_on` 跑异步的
+# `ProviderRegistry::invoke_tool`（其内层是 `async_trait` 的 `ToolProvider::invoke`）。
+# 用当前线程运行时，**不 `enable_all`**——workspace 的 features 是
+# `["rt-multi-thread", "macros"]`，`enable_all` 按 `net` / `time` 等 feature 门控，
+# 换 feature 会动这份依赖清单（F 设计 §10.1 记的正是这一条）。
 tokio = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# F 的 Task 3 起：库级用例（`tests/tool_call.rs`）的夹具适配器要 `impl ToolProvider`，
+# 而那个 trait 是 `#[async_trait]` 的。**它是外部 crate**，故内部边表
+# （`tests/dependency_direction.rs` 的 `ALLOWED`）不受影响（F 设计 §10.1：「不新增 crate
+# 边」的射程是那张内部边表，不是本文件的全部）。
+# **订正（F 的 Task 3 实测）**：本行先前照设计写成「与 `Cargo.lock` 都不受影响」——
+# **那半句是假的**：锁文件记的是**每个包的依赖清单**，与那条边是内部还是外部无关；
+# 加这条 dev 边之后，`Cargo.lock` 的 `continuum-runtime` 条目实测多出一行 `async-trait`。
+# 本 task 把 `Cargo.lock` 一并提交（不提交它，仓库里的锁就是过期的）。
+# 错误说法的来历留此：设计 §10.1 的原句是「它是**外部** crate，故 `ALLOWED`（内部边表）
+# 与 `Cargo.lock` 都不受影响」——前半句成立，后半句不成立。
+async-trait = { workspace = true }

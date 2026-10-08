@@ -104,7 +104,10 @@
   与 `EffectType::parse` 同一条判据）。
 - `--effect <类型>:<目标>`（可零次、可多次）：**这条工具调用计划施加的外部效应**。与命令路径同一个
   `EffectSpec::parse`（`cli.rs:145`），不在本子项目另立一套声明语法。
-- `--intent`（可选，只一次）：效应幂等键的第一段（`task_cmd.rs:512` 的 `effect_key`）。
+- `--intent`（可选，只一次）：效应幂等键的第一段（`effect_key`，**锚点用函数名**）。
+  **订正（2026-10-07）**：原稿在此引 `task_cmd.rs:512`——该函数随 F 的 Task 3 **搬进 lib 的
+  `tool_call`**（工具路径的调用点在 lib、定义在 bin，前者调不到后者）；且**实测**它在搬家前的树上
+  （**`dfefb54^`**）位于 `task_cmd.rs:446`，`:512` 这个读数对不上。
 - `--approve`（可选，开关）：与命令路径同一个含义（第 2 级显式确认，`task_cmd.rs:728` 的
   `explicit_current_rule`）。
 - **不接受** `--base` / `--exec` / `--apply` / `--sandbox`：解析期一律 `UnknownOption`
@@ -231,8 +234,24 @@ fn mint_declared_effects(
   来历留此**（plan-f 第 1 条）。
 - **`Cargo.toml` 并非「不动」**（plan-f 第 8 条）：库级夹具要实现 `#[async_trait]` 的 `ToolProvider`，
   故 `continuum-runtime` 需要 **`async-trait` 的 dev 边**。它是**外部 crate**，
-  故 `ALLOWED`（内部边表）与 `Cargo.lock` 都不受影响——**「不新增任何 crate 边」这句话的射程是
+  故 `ALLOWED`（内部边表）不受影响——**「不新增任何 crate 边」这句话的射程是
   `ALLOWED` 那张内部边表，不是 `Cargo.toml` 的全部**（§10.1 据此加限定）。
+  **订正（2026-10-07，回灌 F Task 3 的实测）**：本行原写「`ALLOWED`（内部边表）与 **`Cargo.lock`**
+  都不受影响」。**`Cargo.lock` 那一半是假的**——dev 边同样写进锁文件（`[[package]] continuum-runtime`
+  的 `dependencies` 多一行 `"async-trait"`）；**实测** Task 3 的提交 `dfefb54` 对 `Cargo.lock` 的改动
+  为 **`1 +`**。**旧话留此**，免得后来者照它断言「锁不变」。
+- **随搬家一并进 lib 的判定小件，以及本设计里引它们的行号（2026-10-07 据实测补记）**：
+  把共享函数搬进 lib **不止搬它自己**——它的**函数体**要调 `arbitrate` / `mints` / `decision_name` /
+  `policy_context`（逐条效应那次用 `policy_context_for_effect`），而 bin 的 `task_cmd.rs` 仍在调
+  `arbitrate` / `policy_context` / `mints` / `decision_name` / `explicit_current_rule`。**函数体在 lib、
+  调用方分处两个 crate** ⇒ 这些定义必须跟着进 lib 并取 **`pub`**（bin 看不见 `pub(crate)`；唯一例外是
+  `policy_context_for_effect`，bin 侧只在注释里提它，收窄为 `pub(crate)`）。**这是「行为不变」的必要条件，
+  不是新增 API**（实现计划 Task 2 的 Produces 已记）。
+  **由此，本设计里凡引 `task_cmd.rs:` 来定位 `mint` / `mints` / `arbitrate` / `policy_context` /
+  `policy_context_for_effect` / `explicit_current_rule` 的，都是「搬家前」的读数**（§2.1 的 `:728`、
+  §2.2 的 `:814`、§3.2 段内的 `:459-463`、§4.3 的 `:459-463`、§5.1 的 `:459`、§5.3 的 `:563`、
+  §8.1 的 `:459-463`），**引用时以函数名为锚**；本文档不逐一改写这些历史读数，记此以免后来者照着
+  去 `task_cmd.rs` 里找它们。
 
 **由此得到一条「承重」性质**（原稿即有，现在才真的成立）：步骤 4 与 5 用**同一个事务**，一次 `commit`。
 故「工具已获准」的审计行与「效应已在执行」的 `EXECUTING` 行**要么都在、要么都不在**：不存在
@@ -254,7 +273,31 @@ lib 内的一处，不需要跨 crate 传递事务。
 不打印等于调用方付了一次调用却看不到结果。**这正是两条路径在此处必须不同的原因**，不是风格取舍
 ——把它按命令路径的规矩删掉，工具调用的结果就没有任何出口了。记在此以免后来者照 `task` 的样子删。
 
-**这条决定的照片有一半拍不到（plan-f 第 4 条）**：「结果确实出现在 stdout 上」这一半，库级用例到不了那一跳（打印在 `tool_cmd` 的 bin 层）、且 `println!` 被测试框架捕获，故**据实记为无照片，不许为它造夹具**；能拍的是它的**上游**——`ToolResult` 被交回到调用处（P-11 那一半）。
+**这条决定的照片有一半拍不到（plan-f 第 4 条）**：「结果确实出现在 stdout 上」这一半，**据实记为无照片，不许为它造夹具**；能拍的是它的**上游**——`ToolResult` 被交回到调用处（P-11 那一半）。
+
+**订正（2026-10-07）**：本句原写「**库级用例到不了那一跳（打印在 `tool_cmd` 的 bin 层）**、且
+`println!` 被测试框架捕获」。**「打印在 bin 层」是笔误**——**实测打印在 lib**：走的是
+`continuum_runtime::tool_call::run_tool_call` 的**终态一步**
+（`println!("{}", tool_result.output)`；**定位按结构、不按行号**：**`crates/continuum-runtime/src/tool_call.rs`
+这一个文件里恰好命中一次的那一处 `println!`**，判据是
+`grep -rn 'println!' crates/continuum-runtime/src/tool_call.rs` **恰好命中一次**，且它就落在
+`run_tool_call` 的终态一步；
+bin 的 `tool_cmd.rs` 里**没有任何** `println!`（实测 0 命中），它连 `ToolResult` 都拿不到）。
+**订正（2026-10-08，F 终审 m-1）**：此处原写「**整个 `src/` 唯一的那一处 `println!`**，判据是
+`grep -rn 'println!' crates/continuum-runtime/src/` 在该文件上恰好命中一次」——**前半句为假，
+判据也写错**：那条命令实测 **11 行**（`recover_cmd.rs` 的 4 处真正的 `println!` ＋ `main.rs` 的
+6 处 `eprintln!`——不带词界的模式把 `eprintln!` 也算了进来 ＋ 本处 1 处）；
+**即便把 `eprintln!` 排除，`src/` 下也另有 4 处**（`recover_cmd.rs:32/:42/:46/:48`，属 `recover`
+子命令，与本路径无关）。**事实结论不变**（打印在 lib 的 `run_tool_call` 里、不在 `tool_cmd.rs`），
+变的只是这条定位句：**「唯一」只对本文件成立，对 `src/` 不成立**——照字面读会以为全仓只有一处。
+**（订正 2026-10-07 晚：本句原写死 `tool_call.rs:450`；F Task 6 在该行上方加了 12 行后它成了 `:462`
+——行号引用会随**别人的下一次编辑**静默变假，故改为结构性定位。）** **故「库级用例到不了
+那一跳」这一半不成立**：库级用例的夹具适配器一登记，调用就走到终态那一步、那一句**会**被执行。
+**改后的理由（结论不变，仍是「拍不到」）**：拍不到靠**两条**，都与「打印在哪一层」无关——
+(a) `println!` 的输出**被 libtest 捕获**，用例里没有可断言的句柄；(b) `run_tool_call` 的返回类型是
+`Result<(), TaskError>`，**它不把打印出去的那个值交出来**。**另有一条是另一件事**：**端到端**那条路
+**到不了**这一跳（生产注册表为空 ⇒ `Unregistered`，§3.4）——那是「哪条路走不到」，不是「打印在哪一层」，
+两者不要混。**结论照旧：据实记为无照片，不许为它造夹具**（拍它就要发明一个设计里没有的可注入 writer）。
 
 ## 3.4 决定 F4：工具调用（那一跳）排在强制点与效应行**之后**
 
@@ -273,8 +316,12 @@ lib 内的一处，不需要跨 crate 传递事务。
 **由此，今天生产路径的终点位置是确定的**：只要步骤 2、3 不先拒（幂等键冲突、某条效应铸不出
 能力），本路径就**会**走到强制点 (1)——**它不会因为「没有适配器」而停在强制点之前**（那是步骤 6 的
 事）。故 `authorize` 有生产调用方，这正是 F 的兑现。步骤 6 因**注册表是空的**而失败
-（`ToolCallError::Unregistered`），这不是遗留物——见第 14 节第 2 条，它是 C 的交付缺口，
-且它**不挡**强制点 (1) 的接线。
+（`ToolCallError::Unregistered`），**它不挡**强制点 (1) 的接线（`authorize` 在步骤 4，早于那一跳）。
+**订正（2026-10-07）**：本行原写「这不是遗留物——见第 14 节第 2 条，**它是 C 的交付缺口**」——
+**「C 的交付缺口」是过期读数**：C 已交付注册表机制，而按中立性规则它不会在自己 `src/` 里提供
+`impl`；缺的是**一个可登记的适配器实现**，收件人是**驱动自己／将来的适配器子项目**。
+三条依据（C 设计 §4.1 表与末段、§7.1 末段、`tests/neutrality.rs` 的守卫）见 §10.2 那条订正。
+**旧话留此。**
 
 **调用失败时各效应记 `FAILED`**（而不是什么都不写）：与 `task` 第 5 步机制选择失败时的处置
 一致（`task_cmd.rs:249-255`：注释在 `:249-251`、那两行走第 6 步记终态在 `:252-255`；
@@ -451,10 +498,28 @@ trace 无落点）。这条不变量管的是「登记项与其声明一致」�
 故策略的 `PolicyContext.effect_type`（`task_cmd.rs:563`）也没有它们的事实，**驱动无从为它们裁决、
 也就无从铸出它们**。
 
-**后果（可观察）**：一条 `required_capabilities` 含上述六种之一的工具，在本路径上**一律**得到
-`MissingCapability`，**无论调用方怎么声明**——因为声明不出这种能力。故今天能走通的工具，其
+**后果（可观察）**：一条 `required_capabilities` 含上述六种之一的工具，**在本路径上必然被拒**——
+因为这些 kind 驱动根本铸不出来。故今天能走通的工具，其
 `required_capabilities` 必须**恰好**是某组 `--effect` 声明经 `for_effect` 派生出的那些 kind，且两向
 必须相等（多一枚 `UndeclaredCapability`、少一枚 `MissingCapability`，两向都由 `authorize` 判）。
+
+**订正（2026-10-07，回灌 F Task 4 的实测）**：本句原写「在本路径上**一律**得到 `MissingCapability`，
+**无论调用方怎么声明**」——**「无论调用方怎么声明」那半句是假的**，过大。**被拒是必然的，但「被拒时
+拿到哪个变体」不唯一**：它取决于调用方**还出示了什么**。**实测的理由是 `authorize` 两次检查的先后**：
+
+> **`authorize` 的检查次序（2026-10-07 实测写明——本设计原先没有写这一条，而它决定了变体）**：
+> `authorize` **先**遍历**出示集**（逐枚出示的能力：不在声明集里 ⇒ `UndeclaredCapability`；已失效 ⇒
+> `Expired`），**再**遍历**声明集**（逐个声明的 kind：未被出示集覆盖 ⇒ `MissingCapability`）。
+> 出处：`crates/continuum-capability/src/registry.rs` 的 `authorize` 体内那两遍循环
+> （`load_tool` 的 `UnknownTool` 排在两者之前）。**故「多一枚」与「少一枚」同时存在时，报的是
+> `UndeclaredCapability`**——次序在这里**承重**，不是实现细节。
+
+于是本路径上那六种 kind 的两种情形分开说：
+- 调用方**只**出示「工具认下的」能力，或**零 `--effect`**（出示集为空）⇒ 声明集里那枚铸不出的 kind
+  必缺 ⇒ **`MissingCapability`**。**这正是本设计那条用例的情形**（它的名字只主张「这六种 kind 拿不到」，
+  **零 `--effect`**、六项逐项拍到——**与该用例相符的是收窄后的这句，不是原稿那句**）；
+- 调用方**另外**出示了「工具未声明的」能力（＝声明了一条铸出别的 kind 的 `--effect`）⇒ **先**撞上
+  第一遍 ⇒ 他拿到的是 **`UndeclaredCapability`**，**不是** `MissingCapability`。
 
 这是一处**分阶段的限度**，不是本子项目的缺陷，也不是本子项目能关掉的东西：给这六个 kind 一条
 策略事实，要动的是 `PolicyContext` 的事实集合（策略层）与「非效应类能力由谁判准」这条口径。
@@ -678,10 +743,16 @@ F 只负责**把整枚 `AuthorizedTool` 放进构造处**。故本节的措辞�
 `Effect` 记录体（§267，`crates/continuum-effect/src/effect.rs`）＋ `PLANNED → AUTHORIZED → EXECUTING`
 → `COMMITTED` / `FAILED`（§269）。
 
-- **`id` 与 `idempotency_key` 同源**：复用 `effect_key(intent, spec)`（`task_cmd.rs:512`），
-  **不在本路径另派一次**（理由与 `task_cmd.rs:499-504` 逐字相同：不给「这条记录是谁」立第二个来源）。
+- **`id` 与 `idempotency_key` 同源**：复用 `effect_key(intent, spec)`（**锚点用函数名**），
+  **不在本路径另派一次**（理由与 `effect_key` 自己文档里那条逐字相同：不给「这条记录是谁」立第二个来源）。
+  **订正（2026-10-07，回灌 F Task 3 的实测）**：原稿在此引 `task_cmd.rs:512`（以及 `:499-504` 的
+  文档）。**该函数与它的文档、单元用例随 F 的 Task 3 一并搬进 lib 的 `tool_call`**——本路径在 lib、
+  定义在 bin 时前者调不到后者，就地再写一份就是同一件事两个产生点；`task_cmd.rs` 改为 `use` 它。
+  故**锚点用函数名**，不再引 bin 的行号（`dfefb54^` 上它在 `task_cmd.rs:446`）。
 - **`authorization` 字段**：复用同一编码形状 `approve=<bool>;policy=<裁决名>`
-  （`authorization_field`，`task_cmd.rs:537`），但**填的是这条效应自己的那次裁决**——即 §3.2 那个共享
+  （`authorization_field`，**锚点用函数名**；**订正 2026-10-07**：原稿引 `task_cmd.rs:537`，该函数与
+  `effect_key` 同批搬进 lib 的 `tool_call`，见上一条——`dfefb54^` 上它在 `task_cmd.rs:472`），
+  但**填的是这条效应自己的那次裁决**——即 §3.2 那个共享
   函数**成对返回**的 `Decision`（`(AuthorizedEffect, Decision)` 的后一项），而不是像 `task` 那样填集成
   那次裁决：**工具调用没有集成裁决这一回事**，凭空造一次（`effect_type` 缺省的裁决）就是一次没有意义
   的判定。**它也不是本路径第二次 `arbitrate` 出来的**——那正是 §5.1 禁止的第二个判定点；
@@ -768,16 +839,16 @@ F **包装**它而不另起一个词汇——同一件事两个变体正是本�
 | 编号 | 验什么 | 怎么验 |
 |---|---|---|
 | P-1 | 铸不出能力 ⇒ **工具一次都没被调用**、零效应行、零审计 | 空策略表；夹具适配器断言调用次数为 0；读 `effect` 与 `audit_log` 行数 |
-| P-2 | 幂等键已存在 ⇒ 拒整条、零新行；**且第一条调用的记录里读得回它给的 `--intent`** | 先跑一次成功调用（带 `--intent i1`），再跑同一条声明；**读回第一条的 `effect.idempotency_key`，断言它带有长度前缀 `<意图字节长>:<意图>:` 且该段就是 `i1`**（键形见 `task_cmd.rs:512-520`）。**这一读是 §2.2 那条「`--intent` 可观察」的照片**：没有它，「条件必填」的理由就只是一句话 |
+| P-2 | 幂等键已存在 ⇒ 拒整条、零新行；**且第一条调用的记录里读得回它给的 `--intent`** | 先跑一次成功调用（带 `--intent i1`），再跑同一条声明；**读回第一条的 `effect.idempotency_key`，断言它带有长度前缀 `<意图字节长>:<意图>:` 且该段就是 `i1`**（键形见 `effect_key`；原稿引 `task_cmd.rs:512-520`，该函数随 F 的 Task 3 搬进 lib 的 `tool_call`，见 §7.2）。**这一读是 §2.2 那条「`--intent` 可观察」的照片**：没有它，「条件必填」的理由就只是一句话 |
 | P-3 | 未登记的工具 ⇒ `UnknownTool`，工具未被调用 | 库里有 `tool` 表但无该 id |
 | P-4 | 出示了未声明的能力 ⇒ `UndeclaredCapability` | 登记项声明能力 A，声明 `--effect` 铸出能力 B |
 | P-5 | 缺声明的能力 ⇒ `MissingCapability` | 登记项声明 A+B，只声明铸出 A 的那条 `--effect` |
 | P-6 | **F 确实经注册表调用**（不是自己另开一条路） | 登记一个夹具适配器，放行后断言它**收到了一次调用**；与 P-1 互为对照臂（见末尾的变异说明）。**「唯一入口」那条类型层保证的照片归 C**（C 设计 §7.1），F 不重复 |
 | P-7 | 工具 id **由 `AuthorizedTool` 定**（配对） | 授权 t1 后调用，夹具断言**它收到的那份请求里的工具 id 是 t1**（该 id 由 `invoke_tool` 从授权证明取出，C §7.1）；另一条断言请求里承载的 `input` 与 `--input` 逐字相同。**原稿按已删类型写「`call.tool`」，已随 §6.5 改**（plan-f 第 2 条） |
 | P-8 | 登记项被写坏 ⇒ `CapabilityError::Persist` 原样带出 | 照 `tests/authorize.rs` 的 `insert_bad_capabilities` 写坏 `required_capabilities` 列 |
-| P-9 | 注册表里没有该 id ⇒ 效应记 `FAILED`、报 `ToolCallError::Unregistered` | 注册表为空（不登记任何适配器） |
+| P-9 | 注册表里没有该 id ⇒ 报 `ToolCallError::Unregistered`（**「效应记 `FAILED`」这半边在 P-9 上没有照片，分工据实写明**） | 注册表为空（不登记任何适配器）。**订正（2026-10-08，F 终审 m-4）**：交付的库级用例（`tests/tool_call.rs` 的 `an_unregistered_id_reports_the_routing_failure`）取 `fixture.args()`，是**零 `--effect`** 的形态，没有效应行可读；端到端那一条（`tests/tool_cli.rs`）失败后只断言键的清单、不读 `state`。故「效应记 `FAILED`」这一支今天**只有 P-10 的 `Provider` 那枚同臂代拍**（`Err(_) => EffectState::Failed` 是同一个臂）——把 `Err(_)` 按内层变体分岔（例如只把 `Unregistered` 记成 `Committed`）没有任何一条用例会红。**本行原只写「效应记 `FAILED`」**，计划 Task 3 Step 4 转录时静默收窄成「只写变体」，交付与设计由此分岔——据实写明这一格的分工，不为它另造照片 |
 | P-10 | 适配器报错 ⇒ 效应记 `FAILED`、`ToolCallError::Provider` 原样带出 | 夹具返回 `Err(ProviderError::Transport)` |
-| P-11 | 适配器自报失败（`is_error`）⇒ 效应记 `FAILED`；**「stdout 仍有 output」这一半没有照片**（plan-f 第 4 条） | 夹具返回 `is_error: true`，断言效应记 `FAILED` 与 `TaskError::ToolReportedError`。**「stdout 仍有 output」这一半拍不到**——库级用例到不了那一跳、库函数不交出该值、且 `println!` 被测试框架捕获；**据实记为无照片，不许为它造夹具** |
+| P-11 | 适配器自报失败（`is_error`）⇒ 效应记 `FAILED`；**「stdout 仍有 output」这一半没有照片**（plan-f 第 4 条） | 夹具返回 `is_error: true`，断言效应记 `FAILED` 与 `TaskError::ToolReportedError`。**「stdout 仍有 output」这一半拍不到**——**打印在 lib 的 `run_tool_call` 终态一步**，故库级用例**会**执行到那一句；拍不到是因为 (a) `println!` 被 libtest 捕获、(b) 函数不把该值交出来（**订正 2026-10-07**：原写「库级用例到不了那一跳」，那半句随 §3.3 的「打印在 bin 层」笔误一并作废）；**据实记为无照片，不许为它造夹具** |
 | P-12 | 非法 `--input` ⇒ 解析期 `Err` | 端到端，`--input '{'` |
 | P-13 | 选项组两向都拒 | 两条端到端用例（见 §2.2） |
 | P-14 | `tool` 不认识的选项 ⇒ `UnknownOption` | 逐条：`--base` / `--exec` / `--apply` / `--sandbox`（**四条各一**：四个是四条独立的分支，抽一个代表不算） |
@@ -809,8 +880,16 @@ payload 用例覆盖，本路径不重复。
 `AuthorizedToolInvocation<'_>` 亦在此 crate，**后者由库级夹具 `impl ToolProvider` 的签名用到**）、`continuum-policy`（沿用）、
 `continuum-effect`（沿用）、`continuum-persist`（沿用）。**故不改 `ALLOWED` 表**（那张表记的是**内部**
 crate 边）。**`Cargo.toml` 的射程要限定**（plan-f 第 8 条）：内部依赖清单不动，但**要加 `async-trait` 的 dev 边**
-（库级夹具实现 `#[async_trait]` 的 `ToolProvider` 需要它）——它是**外部** crate，故 `ALLOWED` 与
-`Cargo.lock` 都不受影响。**原稿在此处写「也不改 `Cargo.toml`」，那是过宽的说法，已限定。**
+（库级夹具实现 `#[async_trait]` 的 `ToolProvider` 需要它）——它是**外部** crate，故 **`ALLOWED` 不受影响**。
+**原稿在此处写「也不改 `Cargo.toml`」，那是过宽的说法，已限定。**
+
+**订正（2026-10-07，回灌 F Task 3 的实测）——本行原写「故 `ALLOWED` 与 `Cargo.lock` 都不受影响」，
+「`Cargo.lock` 不受影响」那一半是假的**：**dev 边也写进锁文件**——`Cargo.lock` 里
+`[[package]] continuum-runtime` 的 `dependencies` 列表**会多出一行 `"async-trait"`**（该**包**本身早已
+在锁里，多的是这条**边**）。**实测**：Task 3 的提交 `dfefb54` 对 `Cargo.lock` 的改动是 **`1 +`**，
+正是这一行；故实现计划的 Task 3 Step 11 **必须把 `Cargo.lock` 一并 `git add`**（否则锁与
+`Cargo.toml` 不一致、锁过期）。**旧话留此。**（同一条假句子在设计 §3.2 与实现计划的 Global Constraints
+里各有一处，已同批订正。）
 
 **但有两处注释会变成假的，必须就地订正**（本仓的既有做法：订正时把错误说法的来历留在原地）：
 `dependency_direction.rs:121` 写着「core / events / provider 在 runtime 内**至今无任何引用**」
@@ -849,8 +928,27 @@ C 不一致，就是同一件事的第二个形状。
 `Arc<dyn ToolProvider>`。**今天的驱动没有这一句**（没有任何适配器可登记）。
 
 - **今天没有任何适配器可登记**：注册表是空的，故步骤 6 那一跳返回
-  `ToolCallError::Unregistered`。**这不是遗留物**——它是 C 的交付缺口，记在第 14 节第 2 条。
-  **它不挡强制点 (1)**：`authorize` 在步骤 4，早于那一跳（§3.4）。
+  `ToolCallError::Unregistered`。**它不挡强制点 (1)**：`authorize` 在步骤 4，早于那一跳（§3.4）。
+
+  **订正（2026-10-07，F Task 3 评审翻出「设计与 brief 相抵」）**：本行原写「**这不是遗留物**——它是
+  **C 的交付缺口**，记在第 14 节第 2 条」。**那句是过期读数，已按 C 的中立性规则订正。旧话留此。**
+  **核过的事实（三条，逐条给出处）**：
+  1. **C 已交付的是「注册表机制」（登记的入口），不是「适配器」**：注册表按 id 显式登记、装配期
+     填装（C 设计 §3.1），入口存在且可用。
+  2. **C 按中立性规则不会在自己 `src/` 里提供 `impl`**：C 设计 §4.1 的表把「实现（适配器）」一行的
+     crate 记为「**未来的 `continuum-adapter-*`，本阶段不建**」；§4.1 末段与 §4.2 形态 4 把「把实现
+     写进 `continuum-provider` 自己内部」列为**一片全绿的违规路径**，并有一条**可执行的模块面守卫**
+     钉它——`crates/continuum-provider/tests/neutrality.rs` 的
+     `the_neutral_crate_contains_no_implementation` 断言该 crate 的 `src/` 下不出现
+     `impl ModelProvider for` / `impl ToolProvider for` / `impl Connector for`（带正控制
+     `the_guard_sees_the_source_tree`，防「什么都没读到」的假绿）。
+     **说准一层**：这**不是「类型上写不出来」**，而是**一条规则加一条可执行的守卫**；且该守卫是
+     **下界**（按文本匹配，全限定路径 / `use … as` 别名 / `include!` / `macro_rules!` 的 `$trait`
+     仍逃逸，见 C 设计 §4.1 末段与 `neutrality.rs` 文件头那张**非穷尽**的清单）。
+  3. **装配者是驱动自己**：C 设计 §7.1 末段点名 composition root 是驱动，装配期由它构造并登记适配器。
+  **故「生产装配点为空」的收件人不是 C，而是负责装配的那一条流**——**F（驱动）自己**，准确说是
+  **将来的适配器子项目 / 下一轮驱动**：由它提供一个 `ToolProvider` 实现、经注册表的登记入口装进
+  组合根。**F 本轮不做这一步**（本设计明写不建适配器），只把它记成具名未决（第 14 节第 2 条）。
 - **F 不再声明「交出什么」**：注册表**不交出**适配器（C 设计 §7.1 的裁定），F 不需要、也不得
   再包一层。**原稿在此处写的「只交出 `ToolCaller`、不交出裸的 `Box<dyn ToolProvider>`」作废**，
   那句保证现在由 C 的注册表承担（来历见 §6.2）。
@@ -888,8 +986,11 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
 裸字符串互换」。本子项目承担的是**前半句在生产路径上落地**：
 
 - **「工具调用前校验」**：由步骤 4（强制点 (1)）与步骤 6（那一跳）之间的次序承担，
-  照片是 P-1（拒时零调用）与 P-17（放行时真的调用）这对**对照臂**——单有 P-1 时，一个永不调用的
-  实现全绿；单有 P-17 时，一个从不校验的实现全绿。
+  照片是 **P-3 / P-4 / P-5（在强制点 (1) 被拒、零调用）与 P-6 / P-17（过强制点 (1)、真的调用）**
+  这对**对照臂**——单有前者时，一个永不调用的实现全绿；单有后者时，一个从不校验的实现全绿。
+  **订正（2026-10-07，回灌 F Task 4 的实测）**：本行原把**拒绝侧**写成 **P-1**。**P-1 当不了这一侧的
+  照片**——它在**步骤 3**（强制点 (2)）就被拒，**根本走不到强制点 (1)**，故它不是 (1) 的拒绝侧；
+  它是**强制点 (2)** 的照片（Task 4 的标题下已写明）。**改后的对照臂两侧都真的经过强制点 (1)。**
 - **「Capability 不可与裸字符串互换」**：P3A 已交付（四份 `tests/compile_fail/` 样例），
   本子项目**不重复**。
 
@@ -938,7 +1039,9 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
 7. §6.5（裁决 2 的**请求侧传值**）：**照片待 C 定下那个位置的类型**——今天写不出实参，
    故这条保证暂时只由正文承载（理由与替代处置写在 §6.5 末段）。
 8. §3.3「结果打到 stdout」与 P-11 的「stdout 仍有 output」：**这一半拍不到**（plan-f 第 4 条）——
-   库级用例到不了那一跳、库函数不交出该值、`println!` 又被测试框架捕获。**据实记为无照片，不许为它造夹具**。
+   库函数不交出该值、`println!` 又被 libtest 捕获。**订正（2026-10-07）**：本行原还写「**库级用例到不了
+   那一跳**」——**那半句随 §3.3 的「打印在 bin 层」笔误一并作废**（打印在 lib，库级用例会执行到那一句）。
+   **结论照旧：据实记为无照片，不许为它造夹具。**
 
 ---
 
@@ -957,16 +1060,34 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
    - **`tool` 表的登记**（`save_tool` 写的一行）：**无生产调用方**，**收件人是 `continuum-capability`**
      ——它与第 7 条的「登记项合法性」是同一侧（谁写库谁把关）；**本设计不发明登记用的 CLI**，
      故 F 侧不缺东西。
-   - **适配器登记**（C 注册表里 `ToolId → Arc<dyn ToolProvider>`）：**收件人是子项目 C**，
-     即下面第 2 条与 §10.2；C §7.4 接缝二说的正是这一条，**与上面那条不是一回事**。
+   - **适配器登记**（C 注册表里 `ToolId → Arc<dyn ToolProvider>`）：**要分两件事**——**登记的
+     *入口***（那张表与它的登记方法）是 **C 的交付**，**已交付**；C §7.4 接缝二说的正是这一条，
+     **与上面那条不是一回事**。而**「谁来登记」**（提供一个 `ToolProvider` 实现、并调那个入口）
+     **不是 C**——是负责装配的那一条流，见下面第 2 条与 §10.2。
+     （**订正 2026-10-07**：原稿在此写「**收件人是子项目 C**」，把「入口归 C」与「实现归谁」混成
+     一句；**旧的单句写法留此**。）
    旧稿把二者写成一句「收件人：子项目 C（登记入口）」，**那是含糊，已按本段拆开**。
    另：C §8 记的那处 `input_schema` 双产生点，**调用的权威是适配器的 `ToolDescriptor.input_schema`**，
    C 设计 §12 第 5 条把这条一致性缺口的收件人记为 F/D，**本路径不消费任何一份 `input_schema`**，
    故此处只登记、不认领。
-2. **注册表里没有任何工具适配器**：`ToolProvider` 的唯一实现是
-   `crates/continuum-provider/tests/fake_provider.rs` 里的夹具，生产代码一个都没有。故组合根
-   （§10.2）登记不出东西，步骤 6 那一跳在生产里必然返回 `ToolCallError::Unregistered`
-   （§3.4、第 13 节第 6 条）。**收件人：子项目 C。**
+2. **注册表里没有任何工具适配器**：`ToolProvider` 的实现在**生产代码里一个都没有**——
+   `crates/continuum-provider/src/` 下零 `impl`，由中立性守卫
+   （`tests/neutrality.rs::the_neutral_crate_contains_no_implementation`）钉住；**实现在 `tests/` 下**
+   有几份夹具（**实测 2026-10-07**：`tests/common/mod.rs` 的 `FakeTool` / `RecordingTool` 两份、
+   `tests/registry_tools.rs` 两份；`tests/fake_provider.rs` 自己只 `mod common;` 再引用它们）。
+   故组合根（§10.2）登记不出东西，步骤 6 那一跳在生产里必然返回 `ToolCallError::Unregistered`
+   （§3.4、第 13 节第 6 条）。
+   **订正（2026-10-07，两处，旧话留此）**：
+   - **收件人**：原写「**收件人：子项目 C。**」——**过期读数**。收件人是**负责装配的那一条流**：
+     **F（驱动）自己**，准确说是**将来的适配器子项目 / 下一轮驱动**：由它提供一个 `ToolProvider`
+     实现、经注册表的登记入口装进组合根。**它与 C 的中立性规则相抵**（C 不会在自己 `src/` 里提供
+     `impl`——C 设计 §4.1 表把实现一行记为「未来的 `continuum-adapter-*`」，且
+     `tests/neutrality.rs` 有守卫钉 `src/` 下零实现）；**C 已交付的是登记的入口**（§14 第 1 条）。
+     依据逐条见 §10.2 那条订正。
+   - **实现的份数**：原写「`ToolProvider` 的**唯一实现**是
+     `crates/continuum-provider/tests/fake_provider.rs` 里的夹具」——**两处都不准**：实现**不止一份**，
+     且 `fake_provider.rs` 里原本那两份**已移入 `tests/common/mod.rs`**（该文件今天只 `mod common;`）。
+     **承重的那半句仍然成立**：**生产代码里一个都没有**。
 3. **`AuthorizedTool::granted()` 的消费方：按 C 设计 §7.5，是「适配器」。**
    **三种口径的来历全部留此**（本节改了三次，免得后来者按任一旧版改回去）：
    ① 原稿把它指派给**子项目 B**——**那句没有依据**（B 设计全文不含 `granted`；
@@ -979,7 +1100,10 @@ Connector 一行移入 §5.1、§9.1 写出箭头读法并补 `资源层 → 边
    （P3A 那条既决「按出示顺序照录、保留重复项」**不受影响**，且**正是**适配器读它时不自行挑选的理由。）
 4. **六个 kind 没有策略事实**（`Filesystem(Read|Write)`、`Git(Read|WorktreeWrite|CommitLocal)`、
    `Github(CreatePr)`）：`PolicyContext.effect_type` 只有 `EffectType`，故驱动**铸不出**这六种能力，
-   含它们的工具在本路径上**一律** `MissingCapability`（§5.3）。要开这条路，须给 `PolicyContext` 加一条
+   含它们的工具在本路径上**必然被拒**；**变体不唯一**——零 `--effect`（或只出示工具认下的能力）时是
+   `MissingCapability`，若调用方**还**出示了工具未声明的能力则先撞 `UndeclaredCapability`
+   （§5.3 的订正段与那里的次序说明；**订正 2026-10-07**：本行原写「**一律** `MissingCapability`」，
+   那半句是假的）。要开这条路，须给 `PolicyContext` 加一条
    能力事实并定「非效应类能力由谁判准」——本子项目无权处置。
    **对登记面的后果**：今天**可以**登记一条这样的工具（`required_capabilities` 收十二个 kind 全合法），
    而它**永远调不动**；本设计**只在正文写明、不在登记期拦**（理由见 §5.3：本层不该在别人的入口上装闸

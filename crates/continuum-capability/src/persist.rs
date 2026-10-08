@@ -11,6 +11,18 @@
 //! 本文件只做两件适配：`required_capabilities` 的**容器**（JSON 字符串数组，与
 //! `continuum-graph` 的 `adfir_node.capabilities` 列同形），以及**列 ↔ `Option`**
 //! （`NULL` ↔ `None`）。表外取值一律转成 [`PersistError`]，**不取默认值**。
+//!
+//! **本文件的第三个职责是唯一一条语义判定**：写侧的登记期不变量
+//! （`assert_effect_class_is_covered`，设计 §5.2）。它与上面两条适配不同，是本文件
+//! 自己的判断而非委托。落在此处的理由见该函数的文档：`save_tool` 是 `tool` 表的唯一
+//! 生产写点，不变量必须关在唯一入口上；那句「唯一生产写点」由
+//! `tests/single_writer.rs` 的 `only_save_tool_writes_the_tool_table` 扫 `crates/*/src/`
+//! 的源码文本钉住（本文件自己的用例钉不住它——别处的写入不经过本文件）。
+//! **读侧不重判**：`load_tool` / `load_tools` 只解码，不因不满足不变量而报错（旧库里的
+//! 历史行仍读得出来，这与本仓「表外取值一律 `Err`」那条**不冲突**——这里管的是取值合法性，
+//! 不变量管的是登记项自洽性）。历史行的照片是 `tests/persist.rs` 的
+//! `a_legacy_row_that_violates_the_invariant_is_still_readable`（「读得出来」这一句原先
+//! 没有照片，Task 1 评审 Minor 3 指出后补）。
 
 use continuum_core::tool::ToolId;
 use continuum_effect::EffectType;
@@ -58,11 +70,20 @@ pub fn p3_capability_migrations() -> Vec<Migration> {
 
 /// 插入一条登记项。调用方（Task 5 起是 Registry 的装载方）负责给出完整的画像。
 ///
-/// 裸 `INSERT`，不 `OR REPLACE`：同 id 的第二次写入由主键拒绝，判据在库层而非调用方
-/// 自查（设计 §3.3；与 `effect` 表的唯一索引同一条判据）。
+/// 写入前先过登记期不变量 `assert_effect_class_is_covered`（设计 §5.2）：声明了
+/// `effect_class == Some(t)` 而 `required_capabilities` 不含 `for_effect(t)` 的登记项
+/// 在此即被拒，**一行都不写**。
+///
+/// 通过之后是裸 `INSERT`，不 `OR REPLACE`：同 id 的第二次写入由主键拒绝，判据在库层而非
+/// 调用方自查（设计 §3.3；与 `effect` 表的唯一索引同一条判据）。
 /// `tests/persist.rs` 的 `saving_the_same_id_twice_is_rejected` 断言被拒后原行不变。
+///
+/// 两条拒绝**顺序固定**：不变量在前，主键冲突在后。故同 id 且不满足不变量的第二次写入
+/// 报的是不变量那条，不是主键那条——不变量在前是因为它不需要读库，且「登记项本身自相
+/// 矛盾」比「这个 id 已被占」更根本。
 pub fn save_tool(tx: &Tx<'_>, profile: &ToolProfile) -> Result<(), PersistError> {
     let tool = profile.tool();
+    assert_effect_class_is_covered(tool)?;
     tx.execute(
         "INSERT INTO tool
            (id, version, input_schema, output_schema, required_capabilities,
@@ -85,6 +106,54 @@ pub fn save_tool(tx: &Tx<'_>, profile: &ToolProfile) -> Result<(), PersistError>
         ],
     )?;
     Ok(())
+}
+
+/// 登记期不变量（设计 §5.2）：声明了 `effect_class == Some(t)` 的工具，
+/// 其 `required_capabilities` 必须含 [`CapabilityKind::for_effect`]`(t)`。
+///
+/// # 为什么落在本函数
+///
+/// `save_tool` 是 `tool` 表**唯一的生产写点**（`load_tool` / `load_tools` 只读），故不变量
+/// 「关在唯一入口上」，不依赖任何调用方自觉。反过来，若把它写在调用方（Registry 的装载方
+/// 或更上层的驱动），就多出一个可以忘记的入口。
+///
+/// **「唯一」这两个字不是修辞**：它由 `tests/single_writer.rs` 的
+/// `only_save_tool_writes_the_tool_table` 扫 `crates/*/src/` 的源码文本钉住。
+/// 少了那条守卫，别处新添一个写点会让本段理由静默失效而全仓照绿
+/// （Task 1 评审 Minor 4 指出后补）。
+///
+/// # 为什么这条不变量够
+///
+/// 它使 `authorize` 的两向合取**要求**出示集里有一枚 `for_effect(t)`，而出示集只可能来自
+/// `--effect` 铸出的能力（[`CapabilityKind::for_effect`] 是单射），于是那条效应必进
+/// Journal——「工具做了外部效应却没有效应记录」的洞由此堵上。
+///
+/// # 射程
+///
+/// 前提不成立（`effect_class == None`）时**无结论**：本函数不管 `None` 的工具，其
+/// `required_capabilities` 取何值都放行。不变量形如 `Some(t) ⇒ …`，不是双条件。
+///
+/// # 判定的关键点
+///
+/// - `for_effect` 写在 [`CapabilityKind`] 上（不是 `EffectType` 上）——后者会让
+///   `continuum-effect` 反向依赖本 crate，而依赖方向在本项目是逐对断言的硬约束；
+/// - 比对按 `CapabilityKind` 的**相等**（`contains`），不比字符串。串是落库编码，
+///   两者今天同形，但编码改了不该动判定；
+/// - `required_capabilities` 是**列表不是集合**：重复项不影响判定。
+fn assert_effect_class_is_covered(tool: &Tool) -> Result<(), PersistError> {
+    let Some(effect) = tool.effect_class() else {
+        return Ok(());
+    };
+    let expected = CapabilityKind::for_effect(effect);
+    if tool.required_capabilities().contains(&expected) {
+        return Ok(());
+    }
+    Err(PersistError::Database(format!(
+        "工具 {} 声明了 effect_class = {}，但 required_capabilities 不含其对应的能力 {}",
+        tool.id().as_str(),
+        effect.as_str(),
+        expected.as_str(),
+    )))
 }
 
 /// 按 id 读一条登记项。不存在返回 `None`。

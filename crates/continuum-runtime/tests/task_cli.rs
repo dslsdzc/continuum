@@ -253,6 +253,42 @@ fn audit_rows(db: &Path) -> Vec<(String, String)> {
     out
 }
 
+/// 库里 `audit_log` 中 `kind` 等于 `kind` 的行数；**库读不开时返回 `None`**。
+///
+/// 与 [`audit_rows`] 的两处不同：只要行数，且**读失败不是断言失败**——P-19
+/// （[`the_command_path_never_reaches_the_first_checkpoint`]）要拿它区分「本机根本
+/// 打不开库（表还不存在）」与「实现没走到第 4 步」，前者是跳过、后者是断言失败。
+/// 表不存在时 `query` 报错，正是这个区分要的那条信号。
+fn audit_kind_count(db: &Path, kind: &str) -> Option<i64> {
+    let handle = Db::open(db).ok()?;
+    let tx = handle.begin().ok()?;
+    let rows = tx
+        .query(
+            "SELECT COUNT(*) FROM audit_log WHERE kind = ?1",
+            &[Value::text(kind)],
+        )
+        .ok()?;
+    let count = match rows.first()?.first()? {
+        Value::Int(n) => *n,
+        other => panic!("COUNT(*) 应为整数，实际 {other:?}"),
+    };
+    tx.commit().ok()?;
+    Some(count)
+}
+
+/// 库里 `effect` 表的行数；库读不开时返回 `None`（同 [`audit_kind_count`]，理由见那里）。
+fn effect_row_count(db: &Path) -> Option<i64> {
+    let handle = Db::open(db).ok()?;
+    let tx = handle.begin().ok()?;
+    let rows = tx.query("SELECT COUNT(*) FROM effect", &[]).ok()?;
+    let count = match rows.first()?.first()? {
+        Value::Int(n) => *n,
+        other => panic!("COUNT(*) 应为整数，实际 {other:?}"),
+    };
+    tx.commit().ok()?;
+    Some(count)
+}
+
 /// 一条条件恒真（空合取）的规则：任何 `PolicyContext` 都成立。
 ///
 /// 恒真是刻意的：本文件的用例要钉的是**驱动有没有按裁决行事**，条件怎么求值属
@@ -1667,6 +1703,90 @@ fn the_authorization_field_records_the_flag_and_the_verdict() {
         authorization_of(&db, "a3"),
         "approve=true;policy=allow",
         "给出 --approve 时裁决为 Allow，两个事实都要写进 authorization"
+    );
+    ran(TEST);
+}
+
+// ── 强制点 (1) 的射程边界（P-19，设计 §12.1）─────────────────────────────
+
+/// **命令路径不经过强制点 (1)**——设计 §12.1 那条射程边界的照片（P-19）。
+///
+/// 判据是**否定式的行数不变量**：`capability grants` 这个 `AuditKind` 的产生方是
+/// `authorize` 成功时写**恰一条**（设计 §7.1 的表；F **不补写**它——同一条路径上另写
+/// 一条会让同一次授权有两个产生点），故「`task` 不走强制点 (1)」可以拍成「跑完之后这一类
+/// 审计行数为 0」。**把强制点 (1) 接到命令路径上，本条即红——红在哪一条断言上分两种
+/// 形态**（两枚变异体实测）：
+///
+/// **订正（2026-10-07，F Task 8 评审实测）**：上一句是**排他的枚举**，已被**第三种形态**
+/// 证伪——那一种形态下本条**根本不红**（绿、且非跳过）。**已实测的形态有三种**：
+///
+/// - **M1：命令路径没有工具 id**（§12.1 的原话），照最直白的写法凭空给一个：`authorize`
+///   对空注册表返回 `UnknownTool`，整条命令在第 4 步就 `Err`，**一条审计行也没写**——本条
+///   红在下面的**正控制**上，计数断言此时根本走不到；
+/// - **M2：连那一跳需要的登记项一起造出来、让它真的成功**：本条红在**计数断言**上（实测
+///   `capability grants` 为 1 行）；
+/// - **M3：把 `authorize` 接在第 4 步 `record_declared_effects` 提交之后**：**本条绿、且
+///   非跳过**（实测 `--nocapture` 自报「执行 1、跳过 0」；全量门 97 行 `Running`，`task_cli`
+///   21 条红里不含 P-19）。**机理**：第 4 步**已提交** ⇒ 正控制绿；`authorize` 失败
+///   （`UnknownTool`）**不写审计行** ⇒ 计数断言也绿。
+///
+/// **M2 才是设计 §12.1 那句「接上去本条即红」的直接验证——那句话只对能成功的接入成立**。
+/// M1 与 M3 都属「接入失败」，靠正控制兜住的只有 M1 那半支（失败发生在第 4 步提交之前）：
+/// M1 是「照最直白的写法接上去」的读数，**故不要让正控制退化成一句可以顺带删掉的补充**。
+///
+/// 命令路径走的是强制点 (2)——逐条 `--effect` 铸能力。故本用例**先放行这条效应**：铸不出
+/// 能力时整条命令在第 4 步就被拒，行数断言会**空转**（没有落库就没有可数的行）。这也是
+/// 本条唯一读策略表的原因。
+///
+/// **不受 [`require_auto_selected_sandbox`] 门控**：这条断言的承重处只有一处——**库里的
+/// 行数**，而第 4 步（`record_declared_effects`，写效应行之处）**早于**第 5 步的沙箱选择。
+/// 故即便本机选不出沙箱、`task` 在第 5 步失败，效应行与「若接了强制点 (1) 就会写下的审计
+/// 行」都已经在库里（本仓没有删除 `effect` 行的路径，`task_cmd` 的模块文档有这句话的
+/// 由来），行数断言照样有判别力。**退出码不作为本条的判据。**
+///
+/// **正控制**：先断言第 4 步真的落了库（`effect` 表里有那一条 `charge:x`）。少了它，
+/// 「命令在更早的地方就结束了」与「命令路径没走强制点 (1)」会给出同一张照片（0 行）——
+/// 而前者**正是**上面第一种形态。它**不**顺带断言「命令跑成了」：第 5 步失败（本机选不出
+/// 沙箱）与命令退出码非 0 都不影响第 4 步的落库。
+///
+/// **只有「库读不开」才算本机跑不到第 4 步**（驱动第 3 步之前的失败，表都还不存在），那时
+/// 用 [`skip`] 显式跳过并报执行/跳过条数，不静默通过。**不拿「效应行为 0」当跳过条件**：
+/// 那正是上面第一种形态的读数。
+#[test]
+fn the_command_path_never_reaches_the_first_checkpoint() {
+    const TEST: &str = "the_command_path_never_reaches_the_first_checkpoint";
+    let (_d, base) = git_repo();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("t.db");
+    seed_policy_rows(&db, &[("r_eff", allow_only_effect(EffectType::Charge))]);
+
+    let out = run_task(&base, &db, &["--effect", "charge:x", "--exec", "true"], &[]);
+
+    let Some(grants) = audit_kind_count(&db, "capability grants") else {
+        skip(
+            TEST,
+            "库读不开（第 4 步之前就结束了，`audit_log` 表不存在）：本机跑不到第 4 步",
+        );
+        return;
+    };
+
+    // 正控制：第 4 步真的落库了。
+    assert_eq!(
+        effect_row_count(&db),
+        Some(1),
+        "第 4 步没有落下 `charge:x` 这条效应记录，命令在更早的地方就结束了，\
+         下面的行数断言会空转\n--- stdout ---\n{}\n--- stderr ---\n{}",
+        stdout_of(&out),
+        stderr_of(&out)
+    );
+
+    assert_eq!(
+        grants, 0,
+        "命令路径不该经过强制点 (1)：`capability grants` 的唯一产生方是 `authorize`，\
+         命令路径没有工具 id，这一类审计行应为 0，实际 {grants} 行\n\
+         --- stdout ---\n{}\n--- stderr ---\n{}",
+        stdout_of(&out),
+        stderr_of(&out)
     );
     ran(TEST);
 }

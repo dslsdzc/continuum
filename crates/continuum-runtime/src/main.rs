@@ -9,9 +9,9 @@ use std::process::ExitCode;
 
 mod recover_cmd;
 mod recovery;
-mod sandbox_select;
 mod secrets;
 mod task_cmd;
+mod tool_cmd;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -55,6 +55,21 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
                 eprintln!("任务失败: {e}");
+                ExitCode::FAILURE
+            }
+        },
+        // 与 `Task` 臂同形。**这一臂与 `cli::Command::Tool` 必须同批**：少了它就是
+        // `error[E0004]`（非穷尽），而 `cargo build --workspace --all-targets` 才是这一臂的守卫
+        // ——它管的是**一整类目标**（bin、各 `--test`、benches、examples）。
+        //
+        // **订正（F 的 Task 3 实测，来历留此）**：此处原先照 brief 写成「而 `cargo test
+        // --test cli` **单独能过**（它不构 bin）」。**那半句是假的**：实测
+        // `cargo test -p continuum-runtime --test cli` **会一并编译 bin 目标**，`E0004`
+        // 在那条命令上就现形。**守卫本身不因此多余**（见上句），不成立的是「为什么」那句。
+        Command::Tool(a) => match tool_cmd::run(&a) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(e) => {
+                eprintln!("工具调用失败: {e}");
                 ExitCode::FAILURE
             }
         },

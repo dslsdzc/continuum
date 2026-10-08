@@ -8,11 +8,29 @@
 //!                   [--sandbox <机制>]
 //!                   [--effect <类型>:<目标>]...
 //!                   --exec <命令> [参数...]        （--exec 必须最后）
+//! continuum tool    --db <路径> --tool <工具 id> [--input <JSON>]
+//!                   [--effect <类型>:<目标>]... [--intent <id>] [--approve]
 //! continuum recover --db <路径>
 //! ```
 //!
 //! `task` 的 `--db` 是必填项：第 4.2 节第 3 步要 `save_workspace` 落库、第 7 步要按
 //! 落库记录判后端，库路径无从推得。
+//!
+//! # `tool` 的两个决定（F 设计 §2.1、§2.2）
+//!
+//! - **`--input` 省略即 `{}`**（不是 `null`）：`input` 是对象形状的输入参数表，`{}` 是
+//!   「没有参数」、`null` 是「没有输入」——后者是一个本层无从赋予含义的值。取 `{}`
+//!   而不是编一个值，照的是 `task` 对效应的 `parameters` 填 `json!({})` 的先例。
+//!   非法 JSON 在**解析期**即 `Err`（不可解析的输入不该到运行期才失败，与
+//!   [`EffectType::parse`] 同一条判据）。
+//! - **`--effect` 与 `--intent` / `--approve` 同进同出**（两向都拒，见
+//!   [`CliError::OptionRequiresEffect`]）。`effect` 表没有 intent 列，零 `--effect` 时
+//!   给出 `--intent` 等于要求调用方交出一个**没有任何读者**的取值；零效应时
+//!   `--approve` 也什么也不开关——静默收下不生效的选项正是本模块要拒的形状。
+//!
+//! `tool` 与 `task` 是两个并列的子命令，各有自己的选项表：`--base` / `--exec` /
+//! `--apply` / `--sandbox` 在 `tool` 上落到兜底臂，报 [`CliError::UnknownOption`]
+//! （前三个在工具调用上没有对象，`--sandbox` 没有子进程可沙箱化）。
 //!
 //! 手写解析，不引第三方 CLI 库：本 crate 的参数表很小，且现有依赖里没有这类库。
 //! 口径照 `continuum-policy` 的 `Condition::parse`——**任何一项不符即 `Err`**，
@@ -36,9 +54,10 @@
 //!
 //! # 重复选项
 //!
-//! 带取值的选项（`task` 的 `--base` / `--intent` / `--db` / `--sandbox`，`recover` 的
-//! `--db`）**只接受一次**，第二次出现即 `Err`。两处 `--db` 是**各自手写的分支**（各子命令
-//! 有自己的选项表），故要有各自的用例，不能抽一个代表。
+//! 带取值的选项（`task` 的 `--base` / `--intent` / `--db` / `--sandbox`，`tool` 的
+//! `--db` / `--tool` / `--input` / `--intent`，`recover` 的 `--db`）**只接受一次**，
+//! 第二次出现即 `Err`。三处 `--db` 是**各自手写的分支**（各子命令有自己的选项表），
+//! 故要有各自的用例，不能抽一个代表。
 //!
 //! **为什么不取「后者胜」**：`--base /a --base /b` 在后者胜下会按 `/b` 跑，而写的人
 //! 若本意是 `/a`（例如把两条命令拼在一起、或复制粘贴时忘了删），他看到的是一次
@@ -49,6 +68,7 @@
 //! 开关型选项（`--apply` / `--approve`）重复给出是幂等的——重复不会改变结果，
 //! 故照常接受；`--effect` 按设计第 4.1 节的 `...` 本就可重复。
 
+use continuum_core::tool::ToolId;
 use continuum_effect::EffectType;
 use continuum_workspace::IntentId;
 use std::path::PathBuf;
@@ -65,6 +85,8 @@ pub const USAGE: &str = "\
                     [--sandbox <机制>]
                     [--effect <类型>:<目标>]...
                     --exec <命令> [参数...]        （--exec 必须最后）
+  continuum tool    --db <路径> --tool <工具 id> [--input <JSON>]
+                    [--effect <类型>:<目标>]... [--intent <id>] [--approve]
   continuum recover --db <路径>
 
 说明：
@@ -73,12 +95,17 @@ pub const USAGE: &str = "\
          选项一律写在 --exec 之前（见用法行，--exec 排在最后）。
   --sandbox 取 landlock 或 bubblewrap；不给则由装配点按能力自动选。
   --effect 形如 <类型>:<目标>，类型取 EffectType 的封闭枚举，目标按「第一个」冒号切开。
-  --base / --intent / --db / --sandbox 各只接受一次，第二次出现即报错。";
+  --input 省略即为 {}（空对象）；给则须是合法 JSON，解析期即校验。
+  --effect 与 --intent / --approve 同进同出：有 --effect 就必须给 --intent，
+         零 --effect 时不得给 --intent 或 --approve。
+  --base / --intent / --db / --sandbox 与 tool 的 --tool / --input
+         各只接受一次，第二次出现即报错。";
 
-/// 一次调用的子命令（设计下篇第 4.1 节）。
+/// 一次调用的子命令（设计下篇第 4.1 节；`tool` 见 F 设计 §2.1）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Task(TaskArgs),
+    Tool(ToolArgs),
     Recover(RecoverArgs),
 }
 
@@ -109,6 +136,30 @@ pub struct TaskArgs {
     /// 显式指定的沙箱机制；`None` 表示命令行未指定。
     pub sandbox: Option<SandboxMechanism>,
     /// 本条命令计划施加的效应，按出现次序。可为零条。
+    pub effects: Vec<EffectSpec>,
+}
+
+/// `tool` 子命令的参数（F 设计 §2.1）。只承载解析结果。
+///
+/// 与 [`TaskArgs`] 分开而不是共用一个类型：两条路径共用的只有 `--effect` 一族
+/// （[`EffectSpec`]）与 `--db`，其余项各自有对象或没有对象（`task` 有 `--base` /
+/// `--exec` / `--apply` / `--sandbox`，`tool` 有工具 id 与 `input`）。并为一个类型会让
+/// 「哪条路径有哪些选项」变成运行期才知道的事。
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToolArgs {
+    /// 数据库路径。工具登记项（强制点 (1) 要读 `tool` 表）与审计都要经库。
+    pub db: PathBuf,
+    /// 工具 id：复用 [`continuum_core::tool::ToolId`]，**不另建第二个**（F 设计 §2.1）。
+    /// 字形不校验：未登记的工具由强制点 (1) 以 `UnknownTool` 拒掉。
+    pub tool: ToolId,
+    /// 请求侧承载的那段 `input` JSON。**省略即 `{}`**（F 设计 §2.1）。
+    pub input: serde_json::Value,
+    /// 幂等键的第一段。**有 `--effect` 时必填**，零效应时必须不给
+    /// （[`CliError::OptionRequiresEffect`]）。
+    pub intent: Option<IntentId>,
+    /// 与命令路径同一个含义（第 2 级显式确认）。
+    pub approve: bool,
+    /// 本条调用计划施加的效应，按出现次序。可为零条。
     pub effects: Vec<EffectSpec>,
 }
 
@@ -203,10 +254,10 @@ impl SandboxMechanism {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum CliError {
     /// 一个参数都没有。
-    #[error("缺少子命令，可用：task、recover")]
+    #[error("缺少子命令，可用：task、tool、recover")]
     MissingSubcommand,
-    /// 首参数不是 `task` 也不是 `recover`。
-    #[error("未知子命令：{name}，可用：task、recover")]
+    /// 首参数不是任何一个已知子命令。
+    #[error("未知子命令：{name}，可用：task、tool、recover")]
     UnknownSubcommand { name: String },
     /// 选项后面没有取值。
     #[error("选项 {option} 缺少取值")]
@@ -232,9 +283,22 @@ pub enum CliError {
     /// `--effect` 的类型不在 [`EffectType`] 的封闭枚举内。
     #[error("未知效应类型：{name}")]
     UnknownEffectType { name: String },
+    /// `--input` 不是合法 JSON。解析期即拒（同 [`EffectType::parse`] 的判据：
+    /// 不可解析的输入不该到运行期才失败）。`reason` 取 serde_json 的消息。
+    #[error("--input 不是合法 JSON（{value}）：{reason}")]
+    InvalidToolInput { value: String, reason: String },
+    /// `--effect` 与 `--intent` / `--approve` **必须同进同出**（F 设计 §2.2），
+    /// 两向都拒。`option` 点名是哪一个选项缺了它的搭档。
+    ///
+    /// **判定次序写死**：零效应时若两个选项同时给出，报 `--intent`（按选项表次序先判）。
+    /// 照片：`tests/cli.rs` 的 `both_options_without_an_effect_report_the_intent`——没有
+    /// 那一条，两条各只给一个选项的断言钉不住次序（换成先判 `--approve` 也全过）。
+    #[error("选项 {option} 与 --effect 必须同进同出：给出 --effect 时必须给 --intent；\
+             未给任何 --effect 时不得给 {option}")]
+    OptionRequiresEffect { option: &'static str },
 }
 
-/// 解析一整条命令行（**不含** argv[0]）。
+/// 解析一整条命令行（**不含** `argv[0]`）。
 ///
 /// 收 `IntoIterator<Item = Into<String>>` 而非 `&[String]`：调用方给 `env::args()`
 /// 的余项与给字面量数组都能直接用，不必为其中一种多写一次转换。
@@ -254,6 +318,7 @@ where
 
     match subcommand.as_str() {
         "task" => parse_task(&rest).map(Command::Task),
+        "tool" => parse_tool(&rest).map(Command::Tool),
         "recover" => parse_recover(&rest).map(Command::Recover),
         other => Err(CliError::UnknownSubcommand {
             name: other.to_owned(),
@@ -351,6 +416,108 @@ fn parse_task(args: &[String]) -> Result<TaskArgs, CliError> {
         apply,
         approve,
         sandbox,
+        effects,
+    })
+}
+
+/// `tool` 子命令的选项表（F 设计 §2.1、§2.2）。
+///
+/// # 判定次序
+///
+/// 1. 逐 token 收进各自的局部量（带取值的选项各只接受一次，同 `task` 的口径）；
+/// 2. **两个必填项**（`--db` / `--tool`）缺任一即 `MissingOption`；
+/// 3. **同进同出**（[`CliError::OptionRequiresEffect`]）：有 `--effect` 无 `--intent`
+///    即拒；零 `--effect` 时给了 `--intent` 或 `--approve` 也拒，**两个同时给出时报
+///    `--intent`**（选项表次序）。
+///
+/// 第 2 步排在第 3 步之前：两项必填与效应表无关，先报与效应无关的缺项更贴近出错处。
+/// 两条次序都**没有**「两个错误同时成立时报哪一个」之外的射程——各自的方向性判据见
+/// `tests/cli.rs` 的三个用例。
+///
+/// `--base` / `--exec` / `--apply` / `--sandbox` **不进本函数的 match**，故自然落到
+/// 兜底臂报 `UnknownOption`——**不为它们写专门的臂**（那是同一件事两个产生点）。
+fn parse_tool(args: &[String]) -> Result<ToolArgs, CliError> {
+    let mut db: Option<PathBuf> = None;
+    let mut tool: Option<ToolId> = None;
+    let mut input: Option<serde_json::Value> = None;
+    let mut intent: Option<IntentId> = None;
+    let mut approve = false;
+    let mut effects = Vec::new();
+
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--db" => {
+                if db.is_some() {
+                    return Err(CliError::DuplicateOption { option: "--db" });
+                }
+                db = Some(PathBuf::from(take_value(args, &mut i, "--db")?));
+            }
+            "--tool" => {
+                if tool.is_some() {
+                    return Err(CliError::DuplicateOption { option: "--tool" });
+                }
+                tool = Some(ToolId::new(take_value(args, &mut i, "--tool")?));
+            }
+            "--input" => {
+                if input.is_some() {
+                    return Err(CliError::DuplicateOption { option: "--input" });
+                }
+                let value = take_value(args, &mut i, "--input")?;
+                // 解析在**收下之前**：不可解析的输入不该到运行期才失败。`value` 只在
+                // 失败臂里被移动，故先借后还。
+                input = Some(serde_json::from_str(&value).map_err(|e| {
+                    CliError::InvalidToolInput {
+                        value,
+                        reason: e.to_string(),
+                    }
+                })?);
+            }
+            "--intent" => {
+                if intent.is_some() {
+                    return Err(CliError::DuplicateOption { option: "--intent" });
+                }
+                intent = Some(IntentId::new(take_value(args, &mut i, "--intent")?));
+            }
+            "--approve" => {
+                approve = true;
+                i += 1;
+            }
+            "--effect" => {
+                let value = take_value(args, &mut i, "--effect")?;
+                effects.push(EffectSpec::parse(&value)?);
+            }
+            other => {
+                return Err(CliError::UnknownOption {
+                    name: other.to_owned(),
+                });
+            }
+        }
+    }
+
+    let db = db.ok_or(CliError::MissingOption { option: "--db" })?;
+    let tool = tool.ok_or(CliError::MissingOption { option: "--tool" })?;
+
+    // 同进同出（F 设计 §2.2）。零效应时先判 `--intent` 再判 `--approve`——次序是写死的
+    // 决定，不是实现顺序的副产品；照片见 `both_options_without_an_effect_report_the_intent`。
+    if effects.is_empty() {
+        if intent.is_some() {
+            return Err(CliError::OptionRequiresEffect { option: "--intent" });
+        }
+        if approve {
+            return Err(CliError::OptionRequiresEffect { option: "--approve" });
+        }
+    } else if intent.is_none() {
+        return Err(CliError::OptionRequiresEffect { option: "--intent" });
+    }
+
+    Ok(ToolArgs {
+        db,
+        tool,
+        // 省略即 `{}`（不是 `null`），见本模块文档「`tool` 的两个决定」。
+        input: input.unwrap_or_else(|| serde_json::json!({})),
+        intent,
+        approve,
         effects,
     })
 }
