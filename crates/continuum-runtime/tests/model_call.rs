@@ -2379,3 +2379,349 @@ async fn each_provider_failure_on_a_stream_call_keeps_its_class() {
         other => panic!("Cancelled 该走 Cancelled 那一枚（它不是失败），实际 {other:?}"),
     }
 }
+
+// ===== Task 10：不调 `usage()` / `list_models()` / `describe_model()` 的否定式照片 =====
+//
+// 三条**否定式照片**（本节自己就是那三条判据的落点）加一条**正控制**。
+// 判据是「G 的路径上这三个方法**一次都没被调过**」，读数取夹具的计数器。
+//
+// **本节与 Task 4 的模块面守卫**不**构成「同一件事的两个照片」，据实写明**：
+// Task 10 的简报（`.superpowers/sdd/p3g-task-10-brief.md` 的第 12–14 行）写「本 task 的三条与
+// Task 4 的模块面守卫互补：Task 4 钉**文本里不出现**」，而**实测**
+// `crates/continuum-runtime/tests/model_call_discipline.rs` 的三张清单（21 枚 needle）
+// **不含** `usage` / `list_models` / `describe_model` 任何一枚（2026-10-09 实测零命中），
+// 设计 §11 的两格判据（「G 不调 `list_models()`」与「G 不调 `usage()` / `describe_model()`」）
+// 也都只写「否定式照片」、没有文本那一层——那三张清单钉的是工具路径名 / 适配器名 / 能力凭据名。
+// **故本节没有可互补的文本守卫**，简报那句话的来历照留在此，免得后来者照着它去找一条不存在的守卫。
+//
+// **本节的红条件逐条按「写不写得出来」分过层**（成例是 G 的 M-8-3 / M-9-1 / M-9-2 / M-9-3：
+// 计划里写的红条件有几枚**在交付签名上写不出来**）。**逐条实测结论写在各自的用例上**。
+
+/// G 的路径**不问适配器的用量口径**（设计 §5）：假适配器的 `usage()` 返 `Err`，正常路径照过。
+///
+/// # 判据（设计 §5）
+///
+/// `usage()` 的语义**两种读法都不成立**：
+///
+/// - 读作「**累计**」→ 它就成了同一事实的**第二个产生点**：累计量由逐次返回值求和可得，
+///   而适配器自报的累计与客户端求和**可以不一致且无从核对**；
+/// - 读作「**本会话**」→ **「会话」在 §315 里没有定义**（谁开、谁关、跨不跨进程重启，
+///   规范一个字都没给）。
+///
+/// 故 **G 不定义它、也不用它**。G 实际依赖的是**逐次**的那一个——`InvokeResponse.usage`，
+/// 与那次调用**同一物证**的量，不需要与任何「累计」对账。下面 `reply.usage` 那条断言
+/// 就是这件事的正面照片：用量真的读出来了，而且是从这一次调用的返回值里读的。
+///
+/// # 为什么还要断 `health_calls() == 1`
+///
+/// 只断「计数为 0」时，一个**什么都没问**的实现也全绿（0 与「没问」在输出上不可区分）。
+/// 故另断这条路径**确实问过适配器一次**，而那一次是可用性快照（`health()`），不是 `usage()`。
+///
+/// **红的条件（档位：移除）**：在 `call` 里加一句 `let _ = adapter.usage().await;` → 计数变 1，红。
+/// **实测（2026-10-09）**：`cargo test -p continuum-runtime --test model_call --no-fail-fast`
+/// 下红**两条**——本用例与共用适配器那条（后者也读 `usage_calls()`）。
+/// 变异体写法与日志路径见 task-10 报告 §4（`M-A`）。
+#[tokio::test]
+async fn the_path_does_not_ask_for_usage() {
+    let adapter = FakeModel::new().with_usage(Answer::Fail(ProviderError::Unavailable(
+        "usage() 的语义未定义，G 不用它".into(),
+    )));
+    let (plan, handles) = a_plan_over(vec![("m-usage", adapter)], &RecordingPolicy::new()).await;
+    let observed = handle_of(&handles, "m-usage");
+
+    let messages = a_dialog();
+    let (candidate, provider) = plan.selected();
+    let reply = call(
+        candidate,
+        provider,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    .expect("G 的路径不调 usage()，故那一枚 Err 不该露头");
+
+    assert_eq!(
+        reply.usage,
+        Usage {
+            input_tokens: 1,
+            output_tokens: 1,
+        },
+        "逐次用量该是这一次调用自己的返回值里那一份（设计 §5），不是问适配器要来的"
+    );
+    assert_eq!(
+        observed.usage_calls(),
+        0,
+        "G 的路径上 usage() 一次都不该被调——计数非 0 说明某处把它当成了第二个用量产生点"
+    );
+    assert_eq!(
+        observed.health_calls(),
+        1,
+        "这条路径确实问过适配器一次（可用性快照取的是 health()），故上面的 0 不是「什么都没问」"
+    );
+}
+
+/// 候选集的来路是**登记表**，不是适配器自报的清单（设计 §3.2 末条）。
+///
+/// # 判据（设计 §3.2）
+///
+/// **登记是路由的权威、`list_*` 是描述的权威**，而 G 要的是**路由事实**。三个来源里
+/// （D 的 `model_registry` 表 / C 的 `ProviderRegistry` / 适配器的 `list_models()`）
+/// **第三个在这条路径上一次都不出现**。
+///
+/// **夹具与 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table` 同一份**
+/// （同一条登记行、同一个「自报表外 id」的适配器）：那条钉的是候选集的**结构**
+/// （⊆ 登记表、无表外 id、两两不同），本条的独立增量是**适配器的计数**。
+///
+/// # 本条为什么跑到 ② 异步段（不止 ① `plan_candidates`）
+///
+/// 简报给本条的**红条件是「把候选集的 id 来源换成 `list_models()` → 计数变 1 且候选集多出那个 id」**，
+/// 而**那一枚在交付签名上写不出来**（**层③：只能在改签名的前提下表达**）：
+/// `plan_candidates` 是**同步**函数（它就是设计 §3.4 那两个同步边界之一，它持 `Tx`），
+/// 而 `list_models()` 是 `async`——要把 id 来源换成它，得先把 `plan_candidates` 改成
+/// `async fn`，那会连带改掉 7 处调用侧，**唯一可观察者是调用侧编译失败，而按纪律那不算红**。
+/// **故实测取它的可写邻形**：在**异步段**（`snapshot` 或 `select` 里）插一次
+/// `list_models().await` → 只动计数、不动类型。本条因此把 ② 也跑一遍，
+/// 让那条计数断言有一个**能写出来的**红。**这不是把候选集的判据挪到 ②**：
+/// `plan_candidates` 那三条断言照旧在 ① 上（同一份夹具、同一个入口）。
+///
+/// **红的条件（档位：放宽，可写邻形）**：在 `snapshot` 里插一句
+/// `let _ = candidate.adapter.list_models().await;` → `list_models_calls()` 变 1，本条红。
+///
+/// **实测（2026-10-09）**：那一枚红**两条**——本用例与共用适配器那条（`M-B`）。
+/// **强形（即简报给的那一枚）实测为层③**：把 `plan_candidates` 改成 `async fn` 并把 id 来源换成
+/// `list_models()` 之后，`cargo test -p continuum-runtime --test model_call --no-run` 报
+/// **28 个编译错误**（20 枚 `E0599`「`impl Future` 上没有 `expect`」＋ 8 枚 `E0308`），
+/// **全部落在调用侧**（`tests/model_call.rs`），`src/` 一处不报。按纪律那不算红，
+/// 故本条的红取上面那枚可写邻形（日志 `M-B-strong`）。
+///
+/// **本条跑 ② 这一半是可写红的来源**：只跑 ① 时，上面那枚邻形**只红共用适配器那一条**，
+/// 本条的计数断言**一个能写出来的红都没有**（实测：本用例在 `M-B` 下红，正因为 ② 也跑了）。
+#[tokio::test]
+async fn the_path_does_not_ask_the_adapter_what_models_it_serves() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+
+    register_with_state(&tx, "m-served", LifecycleState::Active);
+    insert_profile(&tx, "m-served");
+    let adapter = Arc::new(FakeModel::new().with_list_models(Answer::Ok(vec![descriptor(
+        "ghost-not-registered",
+    )])));
+    serve(&mut registry, &["m-served"], Arc::clone(&adapter));
+
+    // ① 同步段：候选集只从登记表来。
+    let candidates = plan_candidates(&tx, &registry).expect("登记表里有一个模型");
+    drop(tx);
+
+    let ids = ids_of(&candidates);
+    // **非空锚**（与 Task 6 那条同源）：空候选集会让下面那条「不含 ghost」的断言空真。
+    assert_eq!(
+        ids,
+        vec!["m-served".to_owned()],
+        "候选集该恰是登记表里那一条；空集说明这个实现根本没在造候选"
+    );
+    assert!(
+        !ids.iter().any(|id| id == "ghost-not-registered"),
+        "适配器自报而登记表里没有的 id 不该进候选集（G 不调 `list_models()`）：{ids:?}"
+    );
+
+    // ② 异步段：同一份候选集走一次 `select`——上面那条计数断言的可写红落在这一段。
+    let plan = select(
+        candidates,
+        a_route_input(no_constraints()),
+        &RecordingPolicy::new(),
+    )
+    .await
+    .expect("候选集非空，该有输出");
+    assert_eq!(
+        plan.selected().0.model().as_str(),
+        "m-served",
+        "被选中的该是登记表里那一条，不是适配器自报的表外 id"
+    );
+
+    assert_eq!(
+        adapter.list_models_calls(),
+        0,
+        "G 的路径上 list_models() 一次都不该被调——计数非 0 说明候选集（或别的什么）改从描述那一侧取了"
+    );
+}
+
+/// 可用性快照取自 `health()`，**不是**从 `describe_model()` 的返回里推（设计 §4.3、§3.3）。
+///
+/// # 判据（设计 §4.3）
+///
+/// **描述是 `ModelDescriptor`、可用性是 `ProviderHealth`，两个方法、两个类型、两件事**：
+/// `list_models()` **不返回任何健康度**，取可用性的方法只有 `health()`。C 的设计初稿把
+/// 「取描述」与「取可用性」混称成一步，**已拆成两步**；本设计据此照办——G 用 `health()`
+/// 取快照，**不拿第 1 步的产物当可用性**。
+///
+/// `health_calls() == 1` 那一断言就是这条的正面锚：快照**确实**取了，且是从 `health()` 取的。
+///
+/// **红的条件（档位：放宽）**：把快照的来源换成 `describe_model()` 的返回 →
+/// `describe_model_calls()` 变 1、`health_calls()` 变 0，本条两处红。
+/// **据实记**：那一枚的字面写法在交付签名上也写不出来（`ModelDescriptor` 变不出
+/// `ProviderHealth`，两个类型之间没有转换），**可写邻形**是「照旧用 `health()`，另加一次
+/// `describe_model().await`」——只动计数、不动类型。
+///
+/// **实测（2026-10-09）**：那一枚邻形红**两条**——本用例与共用适配器那条（`M-C`）。
+#[tokio::test]
+async fn the_path_does_not_ask_for_model_descriptions() {
+    let adapter =
+        FakeModel::new().with_describe_model(Answer::Fail(ProviderError::Unavailable(
+            "描述不是可用性，G 不拿它推健康度".into(),
+        )));
+    let (plan, handles) = a_plan_over(vec![("m-desc", adapter)], &RecordingPolicy::new()).await;
+    let observed = handle_of(&handles, "m-desc");
+
+    let messages = a_dialog();
+    let (candidate, provider) = plan.selected();
+    call(
+        candidate,
+        provider,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    .expect("G 的路径不调 describe_model()，故那一枚 Err 不该露头");
+
+    assert_eq!(
+        observed.describe_model_calls(),
+        0,
+        "G 的路径上 describe_model() 一次都不该被调——描述是 ModelDescriptor，可用性是 ProviderHealth"
+    );
+    assert_eq!(
+        observed.health_calls(),
+        1,
+        "快照该恰好取一次，且取自 health()——两条一起才把「可用性不是从描述里推的」钉住"
+    );
+}
+
+/// **本节四条的头一条正控制**：三条否定式照片钉在**同一个适配器**上，
+/// 而它在**同一次运行里既跑通成功路径、又跑通失败路径**。
+///
+/// # 三个方法**同时**配成返 `Err`（设计 §11 的「三条共用一个假适配器」）
+///
+/// 三个 `Err` 内容各不相同，故若要归因，读得出是哪一处露的头。
+///
+/// # 它的独立增量：失败路径的类别是**它自己的那一枚**
+///
+/// 「计数为 0」这件事若被读成「这条路径整个坏掉了」，那三条否定式照片就都没意义了。
+/// 上面 1、3 两条各自带 `expect(… 该回 Ok)`，本身已经挡掉「恒错实现」；
+/// **本条 1、2、3 都拍不到的是**：一条**失败**路径的类别**不受那三个 `Err` 影响**
+/// ——成功的那条 `Ok`、失败的那条走 `Provider { class: Permanent }`（`Protocol` 自己的类别），
+/// 三个否定方法的 `Err` 一个都没渗进去。
+///
+/// **红的条件（档位：取反）**：让三个 `Err` 中的任何一个污染路径，例如把
+/// `snapshot` 里的 `candidate.adapter.health().await` 换成「`describe_model` 成功即 `Healthy`、
+/// 失败即 `Unavailable`」→ `describe_model` 那一枚 `Err` 把候选打成 `Unavailable`，
+/// `select` 转而报 `NoEligibleCandidate`，`a_plan_over` 的 `expect` 先炸，红。
+///
+/// **实测（2026-10-09）**：那一枚红**七条**（逐条见日志 `M-D`）——
+/// 本节的三条（本用例、`the_path_does_not_ask_for_usage`、`the_path_does_not_ask_for_model_descriptions`，
+/// 它们都断 `health_calls()` / `describe_model_calls()`）＋
+/// Task 3 的三条（`one_probe_per_candidate`、`the_snapshot_is_indexed_by_the_candidates_own_model_id`、
+/// `a_unavailable_adapter_is_carried_through_verbatim`）＋
+/// Task 7 的一条（`a_probed_health_actually_reaches_the_ranking`）。
+/// **这一枚不隔离**——它改的是快照的来源，而快照是 Task 3 起五条用例的被测面。**据实报**：
+/// 不换更窄的变异体，因为「三个 `Err` 里的哪一个污染路径」在实现上就落在这里。
+#[tokio::test]
+async fn the_three_negative_methods_share_one_adapter_and_the_positive_path_still_works() {
+    let adapter = FakeModel::new()
+        .with_usage(Answer::Fail(ProviderError::Unavailable(
+            "usage() 无定义".into(),
+        )))
+        .with_list_models(Answer::Fail(ProviderError::Unavailable(
+            "清单是描述那一侧的权威".into(),
+        )))
+        .with_describe_model(Answer::Fail(ProviderError::Unavailable(
+            "描述不是可用性".into(),
+        )))
+        // 失败路径**不复用**那三个 `Err`：它是这条路径自己的失败面（`stream` 那一支），
+        // 配置一个 G 没有理由去问的类别（`Protocol` → `Permanent`），
+        // 好让「类别是它自己的那一枚」这句话在读数上分得开。
+        .with_stream(StreamOutcome::Fail(ProviderError::Protocol(
+            "响应不合契约".into(),
+        )));
+
+    let (plan, handles) = a_plan_over(vec![("m-shared", adapter)], &RecordingPolicy::new()).await;
+    let observed = handle_of(&handles, "m-shared");
+    let messages = a_dialog();
+
+    // 成功路径：`call` → `Ok`。
+    let (candidate, provider) = plan.selected();
+    let reply = call(
+        candidate,
+        provider,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    .expect("三个否定方法都返 Err，而成功路径不该受它们影响");
+    assert_eq!(
+        reply.content, "pong",
+        "成功路径该交出适配器配的那一枚响应，逐字回读"
+    );
+
+    // 失败路径：`call_stream` → 它自己那个类别。
+    let (candidate, provider) = plan.selected();
+    match call_stream(
+        candidate,
+        provider,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    {
+        Ok(_) => panic!("`stream` 配的是 Fail，该回 Err"),
+        Err(ModelCallError::Provider { class, source }) => {
+            assert_eq!(
+                class,
+                FailureClass::Permanent,
+                "`Protocol` 自己的类别是 Permanent，三个否定方法的 Err 一个都没渗进来"
+            );
+            assert_eq!(
+                source,
+                ProviderError::Protocol("响应不合契约".into()),
+                "source 该是 `stream` 配的那一枚，逐字回读"
+            );
+        }
+        Err(other) => panic!("该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 三个否定方法的计数：整条路径（成功与失败各一次）一次都没调过它们。
+    assert_eq!(
+        observed.usage_calls(),
+        0,
+        "usage() 一次都没被调——三个 Err 里任何一个污染路径都会先在这里露头"
+    );
+    assert_eq!(
+        observed.list_models_calls(),
+        0,
+        "list_models() 一次都没被调"
+    );
+    assert_eq!(
+        observed.describe_model_calls(),
+        0,
+        "describe_model() 一次都没被调"
+    );
+    // 两条路径**确实各做了一件事**，故上面那三个 0 不是「这条路径什么都没干」。
+    assert_eq!(
+        observed.health_calls(),
+        1,
+        "两条路径共用一次规划，故快照只取一次"
+    );
+    assert_eq!(observed.invoke_calls(), 1, "成功路径该恰好发起一次 invoke");
+    assert_eq!(observed.stream_calls(), 1, "失败路径该恰好发起一次 stream");
+}
