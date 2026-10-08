@@ -1391,9 +1391,15 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 
 - [ ] **Step 6: 残余落到有版本的文档**
 
-`.superpowers/` 是 gitignore 的，**只写在报告或 ledger 里的结论会随 branch 消失**。把残余写进
-`docs/superpowers/p3bcdf-followups.md`（**不新建第二个同类文件**——同一类事项两个家正是本项目反复处置
-的毛病）。本 task 追加的内容以 `## 遗留` 一节为准。
+`.superpowers/` 是 gitignore 的，**只写在报告或 ledger 里的结论会随 branch 消失**。
+**收件处（2026-10-08 订正）**：
+- **本 task 那类「本分支上无法闭合」的事** → `docs/superpowers/p3bcdf-followups.md` 的 `## 遗留`（本节末尾的 M-6-1 那条已按此办）。
+- **F 实现期逐 task 评审攒下的 Minor 与未结项** → **`docs/superpowers/p3f-followups.md`**
+  （**本行初稿写「不新建第二个同类文件」，故把它们指向了 `p3bcdf-followups.md`——那是错的**：
+  那一份的 `## 遗留` **自己声明了收件范围**，与实现期 Minor **不是同一类**；
+  **E 已立 `p3e-followups.md` 这个先例**，体例照它）。
+  **落地时它们只在 `.superpowers/sdd/p3f-minors.md`（gitignored）里**——**这正是 M-6-1 被终审读不到的原因**，
+  已于 2026-10-08 搬进版控（正本 `p3f-followups.md`，陈的那份已删）。
 
 > **订正（2026-10-07，F 全分支终审实测：本步在本轮**没被完整执行**，代价是一条阻断项）**。
 > 协调者在 `.superpowers/sdd/p3f-minors.md` 里记过一条 **M-6-1**，原文写着
