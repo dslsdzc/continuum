@@ -91,22 +91,25 @@
 //! 编辑一起漂了。**故本文件对本计划的引用一律改成按内容**——「一个文件引用另一个文件的行号时，
 //! 后者的编辑者不会知道」。**引用本计划的行号一处都不再留**，见下。）
 //!
-//! ## 一条据实记的边界：`call_stream` 今天不在这条用例里
+//! ## 三枚 future 都在这条用例里了（Task 9 收口）
 //!
-//! 计划的 Step 5 列的是三个 future（`select` / `call` / `call_stream`），
-//! **而 `call_stream` 由 Task 9 落地、今天不存在**，写进去只会编不过。
-//! **故本条今天断言的是 `select` 与 `call` 两枚**；`call_stream` 的实体落地时，
-//! 由那一个 task 把它加进同一个 `probe_the_async_segments_are_send`（加一行，不是另立一条用例）。
-//! **这不是省略，是收件人换了**（Task 5 的占位交给 Task 8，`call_stream` 那一份交给 Task 9）。
-//! 差异记进 task-8 报告。
+//! 计划的 Step 5 列的是三个 future（`select` / `call` / `call_stream`）。
+//! **Task 8 落地时只到两枚**（`call_stream` 那时不存在，写进去只会编不过），
+//! **Task 9 把它加进了同一个 [`probe_the_async_segments_are_send`]**——
+//! 加的是**一行**，不是另立一条用例（这是交接时写死的形态：`p3g-followups.md` 的 M-8-1
+//! 与本节原先那段「`call_stream` 今天不在这条用例里」）。
 //!
+//! **原先那段的来历照留**（免得后来者以为从没缺过）：Task 5 放的占位只覆盖 `select` / `call`，
+//! 因为那两个函数当时都不存在；Task 8 补上实体，`call_stream` 那一份的收件人是 Task 9。
 //! **简报曾写「实体在 Task 10」，与计划不符**（实测计划 Task 10 是另一件事：不调
 //! `usage()` / `list_models()` / `describe_model()` 的否定式照片）。本文件按计划记 Task 8。
 
 use continuum_core::model::{InvokeRequest, Message, ModelId, Role};
 use continuum_model_registry::{ExecutionCandidate, RankingPolicy};
 use continuum_provider::ModelProvider;
-use continuum_runtime::model_call::{call, select, CallInput, Candidate, RouteInput};
+use continuum_runtime::model_call::{
+    call, call_stream, select, CallInput, Candidate, RouteInput,
+};
 use std::sync::Arc;
 
 /// 设计 §2.1 强制点 (1)（`:108`）的落点：`InvokeRequest` 上**没有授权位**。
@@ -195,7 +198,7 @@ fn the_model_provider_face_is_callable_in_seven_ways() {
 /// 下面还能 `.await` 它（设计 §3.4 原话：「`assert_send(&fut);`，再 `.await` 它」）。
 fn assert_send<T: Send>(_: &T) {}
 
-/// 取 `select` / `call` 交出的 future，断言它们是 `Send`，**再 `.await` 它们**。
+/// 取 `select` / `call` / `call_stream` 交出的 future，断言它们是 `Send`，**再 `.await` 它们**。
 ///
 /// **本函数从不被调用**，与 [`probe`] 同形（理由见文件头第一节）：Rust 对**非泛型**函数的
 /// 函数体**在定义处**就做完类型检查（不实例化也查），而 `assert_send(&fut)` 这一句要求
@@ -205,16 +208,16 @@ fn assert_send<T: Send>(_: &T) {}
 /// 而这里要钉的是「**这个签名的 future 是 `Send`**」——被钉的对象是签名本身的性质，
 /// 写进用例比写成样例更直接，也不必为它新增一条 dev 依赖。
 ///
-/// **它的证明力有边界，写明**（设计 §3.4 原话）：它只覆盖被断言的**这两枚** future，
+/// **它的证明力有边界，写明**（设计 §3.4 原话）：它只覆盖被断言的**这几枚** future，
 /// **不证明 G 的每一处异步代码都不持 `Tx`**；后者由「异步段的参数表里没有 `Tx`」这条
 /// 构造性事实兜住（`plan_candidates` 是唯一的 `Tx` 收口）。
 ///
-/// **为什么两枚 future 要分开取、不能像 [`probe`] 那样列表**：它们的**输入类型各不相同**
-/// （`select` 收候选集与策略，`call` 收一枚候选、句柄与载荷），
+/// **为什么这几枚 future 要分开取、不能像 [`probe`] 那样列表**：它们的**输入类型各不相同**
+/// （`select` 收候选集与策略，`call` / `call_stream` 各收一枚候选、句柄与载荷），
 /// 故这里逐枚各取一次——**逐枚各断一次，不抽代表**（与 §315 那七项同一条判据）。
 ///
-/// **红的条件（档位：取反）**：给 `select`（或 `call`）加一个**跨 `await` 活着**的
-/// `tx: &Tx<'_>` 参数 → 本文件**编译不过**。
+/// **红的条件（档位：取反）**：给 `select` / `call` / `call_stream` 里的任何一个加一个
+/// **跨 `await` 活着**的 `tx: &Tx<'_>` 参数 → 本文件**编译不过**。
 /// **「编译不过不算变红」在这里是刻意的例外，写明**：本判据的**红形态就是编译失败**
 /// （与 P3A 用 trybuild 钉「写不出来」同类），因为被钉的对象是**类型层的性质**、
 /// 不是运行期行为。编译不过时本文件一条用例都产出不了——**那正是要的结果**
@@ -222,13 +225,20 @@ fn assert_send<T: Send>(_: &T) {}
 async fn probe_the_async_segments_are_send(
     candidates: Vec<Candidate>,
     route_input: RouteInput,
-    // 这里的 `+ Send + Sync` **不是可选的装饰**：`select` 收的就是这个形态的参数
+    // 这里的 `+ Sync` **不是可选的装饰**：`select` 收的就是这个形态的参数
     // （它为什么收这个形态，写在 `src/model_call.rs` 那条签名的文档里），
     // 而把界擦成 `&dyn RankingPolicy` 就会**把要钉的那条性质从本 probe 里抹掉**。
-    policy: &(dyn RankingPolicy + Send + Sync),
+    // **`+ Send` 不在这里**：实测 `select` 侧收 `+ Sync` 就够，多写一个 auto trait
+    // 会给调用方加一条没有判据的要求（`src/model_call.rs` 那条签名的文档里记了实测）。
+    policy: &(dyn RankingPolicy + Sync),
     candidate: &ExecutionCandidate,
     adapter: &Arc<dyn ModelProvider>,
     call_input: CallInput<'_>,
+    // **④ 那一次另收一枚 `CallInput`**：`CallInput` 不派生 `Copy` / `Clone`
+    // （它虽是两枚 `Copy` 字段，但**没有当场消费方**，见 `src/model_call.rs` 里它的类型文档），
+    // 故 ③ 与 ④ 各要一份。**这与「逐枚各取一次」是同一条判据的两次落点**：
+    // 抽一份共用的载荷，就得先把 `CallInput` 变成 `Copy`，而那会改动被测面的形状。
+    stream_input: CallInput<'_>,
 ) {
     // ② 异步段交出的那一枚。
     let selecting = select(candidates, route_input, policy);
@@ -239,12 +249,18 @@ async fn probe_the_async_segments_are_send(
     let calling = call(candidate, adapter, call_input, None);
     assert_send(&calling);
     let _ = calling.await;
+
+    // ④ 异步段交出的那一枚（Task 9 加进来的，与 ③ 同形）。
+    let streaming = call_stream(candidate, adapter, stream_input, None);
+    assert_send(&streaming);
+    let _ = streaming.await;
 }
 
 /// 见 [`probe_the_async_segments_are_send`] 的文档。本用例自己不发任何调用：
 /// **判据是本文件编译通过本身**。
 ///
-/// **第三条 future（`call_stream`）今天不在这里**，理由与收件人写在文件头第四节。
+/// **三枚 future（`select` / `call` / `call_stream`）现在都在这里**；
+/// 「Task 8 落地时只到两枚」的来历与收件人写在文件头第四节。
 #[test]
 fn the_async_segments_future_is_send() {
     // 取一次函数项，使它在编译单元里**有引用**——否则整个模块会报 `dead_code`，

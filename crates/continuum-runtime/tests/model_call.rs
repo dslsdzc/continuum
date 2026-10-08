@@ -4,10 +4,9 @@
 //! 2. **夹具自身的用例**：假模型适配器真的读配置、真的计数（Task 2）；
 //! 3. **候选集的构造（同步段）与可用性快照**——Task 6 ＋ Task 3；
 //! 4. **`select`**：组装请求、调 `rank`、把句柄与排序结果成对带出——Task 7；
-//! 5. **`call`**：装配请求、发起一次调用、两侧对钉的截止——Task 8。
-//!
-//! **`call_stream` / 中止入口的用例由后续 task 追补**（它们今天还不存在，
-//! 故本节第 5 条只到 `call` 为止）。
+//! 5. **`call`**：装配请求、发起一次调用、两侧对钉的截止——Task 8；
+//! 6. **`call_stream` 与中止入口**：流式那一支的装配、`CallId` 的原样带出、
+//!    「丢弃流不是取消」的两侧对钉、以及 `abort` 的失败面——Task 9。
 //!
 //! **订正（2026-10-08，Task 7）**：本行原写「本文件到本 task 为止只有这两部分：四段流程
 //! （取快照、调排序、`call`、`call_stream`）的用例由后续 task 追补」——**那句在 Task 3／6
@@ -16,9 +15,10 @@
 
 mod common;
 
-use common::{descriptor, Answer, FakeModel, InvokeOutcome};
+use common::{descriptor, Answer, FakeModel, InvokeOutcome, StreamOutcome};
 use continuum_core::model::{
-    CallId, InvokeRequest, InvokeResponse, Message, ModelId, ProviderHealth, Role, Usage,
+    CallId, InvokeRequest, InvokeResponse, Message, ModelId, ModelStream, ProviderHealth, Role,
+    StreamChunk, Usage,
 };
 use continuum_core::ProviderError;
 use continuum_graph::failure::FailureClass;
@@ -32,8 +32,8 @@ use continuum_persist::{builtin_migrations, Db, PersistError, Tx, Value};
 use continuum_provider::model::ModelProvider;
 use continuum_provider::ProviderRegistry;
 use continuum_runtime::model_call::{
-    call, classify, into_call_error, plan_candidates, select, snapshot, CallInput, CallPlan,
-    Candidate, RouteInput,
+    abort, call, call_stream, classify, into_call_error, plan_candidates, select, snapshot,
+    CallInput, CallPlan, Candidate, RouteInput,
 };
 use continuum_runtime::ModelCallError;
 use std::cmp::Ordering;
@@ -1482,9 +1482,9 @@ fn a_request() -> InvokeRequest {
 /// 「配错了哪一条」在那一对上不可观察（等价变异体）。
 async fn a_plan_over(
     adapters: Vec<(&str, FakeModel)>,
-    // `select` 收的就是这个形态（它为什么带 `Send + Sync`，写在那条签名的文档里）；
+    // `select` 收的就是这个形态（它为什么带 `Sync`，写在那条签名的文档里）；
     // 这里照抄，**不擦成 `&dyn RankingPolicy`**——擦掉的话本函数就调不动 `select` 了。
-    policy: &(dyn RankingPolicy + Send + Sync),
+    policy: &(dyn RankingPolicy + Sync),
 ) -> (CallPlan, Vec<(String, Arc<FakeModel>)>) {
     let (_dir, db) = a_model_db();
     let tx = db.begin().unwrap();
@@ -1867,4 +1867,515 @@ async fn the_deadline_wraps_one_call_only() {
         2,
         "两次调用该各发起一次（不是被折成一次）"
     );
+}
+
+// ===== Task 9：`call_stream` 与中止入口（设计 §3.5、§8.3） =====
+
+/// 播下**一条**候选、发起一次流式调用，交回那枚 [`ModelStream`] 与它的**两个面**：
+/// 夹具的观测句柄（读计数与记录）与 `abort` 要的那枚 `Arc<dyn ModelProvider>`。
+///
+/// **两个面指同一个对象**：`Arc<FakeModel>` 与 `Arc<dyn ModelProvider>` 是同一枚适配器的
+/// 两种写法，故「经 `abort` 发出去的那次取消」在夹具那一侧读得到。
+/// **不在这里断言任何东西**：它是夹具装配，判据在各用例里。
+///
+/// **只播一条候选**（与 Task 8 的 `a_call_failing_with` 同取舍）：这些用例判的是
+/// 「流的 `CallId` 是谁给的」「取消有没有发出去」，与「选中了哪一条候选」无关。
+async fn a_stream_over(
+    id: &str,
+    adapter: FakeModel,
+) -> (ModelStream, Arc<FakeModel>, Arc<dyn ModelProvider>) {
+    let (plan, handles) = a_plan_over(vec![(id, adapter)], &RecordingPolicy::new()).await;
+    let messages = a_dialog();
+    let (candidate, provider) = plan.selected();
+    let stream = call_stream(
+        candidate,
+        provider,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    .expect("夹具的默认态是「交出一枚单分片流」，故该回 Ok");
+    (stream, handle_of(&handles, id), Arc::clone(provider))
+}
+
+/// 适配器收到的 `model` **正是该候选自己的 id**；`messages` 与 `max_tokens` 逐项相符。
+/// **与 `call` 那条同形**（设计 §3.1 把 ④ 写成「与 ③ 同形」），故判据也同源。
+///
+/// # 为什么这条同时是「`call_stream` 收 `&ExecutionCandidate` 而不收 `ModelId`」的正面照片
+///
+/// **id 只有一处来源——候选自己。** 本用例用 [`ReversingPolicy`] 让被选中的那条
+/// （`m-c`）**不是输入次序里的第一条**，故「取第一条候选的 id」「取一个固定字面量」
+/// 这两枚变异体都落得到红。
+///
+/// **另加两条计数器断言**：`invoke_calls() == 0` 与 `stream_calls() == 1`——
+/// 它们把「流式那一支走的是 `stream`」钉住。少了它们，一个**转调 `invoke`**、把响应
+/// 包成单分片流的实现会全绿（那是一个真会发生的实现选择，而它绕开了 `stream`）。
+///
+/// **红的条件（档位：取反 / 放宽）两条，各自实测过**（2026-10-08）：
+/// 1. **取反**：把 `model` 取自一枚新造的字面量 → 只红本条（`model` 那条断言）。
+/// 2. **放宽**：在 `call_stream` 里多插一次 `adapter.invoke(..)` →
+///    **只红本条**，落点是 `invoke_calls() == 0` 那条断言。
+///
+/// **一条据实记的边界**：把 `adapter.stream(..)` **整个换成** `adapter.invoke(..)`
+/// 这一枚变异体**在本 task 里写不出来**——两者的返回类型不同（`InvokeResponse` /
+/// `ModelStream`），要它成型得先把响应包成一枚 `Stream`，而 `Stream` 是
+/// `futures_core` 的 trait、在本 crate 里**只挂了 dev 依赖**（lib 里实现不了它，
+/// 而简报明写本 task 不动 `Cargo.toml`）。故上面第 2 条取的是它的**可写邻形**：
+/// 只多插一次 `invoke`，不动返回类型。**这不是「写不出变异体」的层①或层②，
+/// 是第三类的一半：要做到那一枚，得先动本 crate 的依赖表。**
+#[tokio::test]
+async fn a_stream_call_hands_the_candidate_s_model_id_to_the_adapter() {
+    let (plan, handles) = a_plan_over(
+        vec![
+            ("m-a", FakeModel::new()),
+            ("m-b", FakeModel::new()),
+            ("m-c", FakeModel::new()),
+        ],
+        &ReversingPolicy,
+    )
+    .await;
+
+    let (candidate, adapter) = plan.selected();
+    assert_eq!(
+        candidate.model().as_str(),
+        "m-c",
+        "反序策略下被选中的该是 m-c——它同时是输入次序里的第三条，\
+         故「取第一条候选」那种实现会在这里露馅"
+    );
+    let observed = handle_of(&handles, "m-c");
+
+    let messages = a_dialog();
+    let stream = call_stream(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: Some(37u32),
+        },
+        None,
+    )
+    .await
+    .expect("适配器配的是默认的成流态，该回 Ok");
+
+    let received = observed.stream_requests();
+    assert_eq!(received.len(), 1, "该恰好调了适配器的 `stream` 一次");
+    let request = &received[0];
+    assert_eq!(
+        request.model,
+        *candidate.model(),
+        "适配器收到的 model 该是候选自己的 id"
+    );
+    assert_eq!(
+        request.messages, messages,
+        "messages 该逐项相符（原样搬运：不重排、不改写）"
+    );
+    assert_eq!(
+        request.max_tokens,
+        Some(37u32),
+        "max_tokens 该是 CallInput 给的那一枚"
+    );
+
+    // 流式那一支走的是 `stream`，不是 `invoke`。
+    assert_eq!(
+        observed.invoke_calls(),
+        0,
+        "流式那一支不该走 `invoke`（一个「转调 invoke 再包成单分片流」的实现会在这里露馅）"
+    );
+    assert_eq!(observed.stream_calls(), 1, "该恰好调了 `stream` 一次");
+
+    // 交回的那枚 `CallId` 是**适配器给的**那一枚（默认态是 `call-1`），不是 G 现造的一枚。
+    assert_eq!(
+        stream.call,
+        CallId::new("call-1"),
+        "默认态给的 `CallId` 该原样出现在交回的流上"
+    );
+}
+
+/// 交回的 `ModelStream.call` **就是适配器在那一枚流里给的那个 `CallId`**
+/// （G 不新造、不改写它）。
+///
+/// **夹具给一枚与默认态不同的 `CallId`**（`adapter-supplied-7`）：若实现自己
+/// `CallId::new(...)` 造一枚，或照抄默认态那个字面量，两条路都在这里对不上。
+///
+/// **这一条是 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id` 的前提**：
+/// 若 `call_stream` 交回的 `CallId` 与适配器记的不是同一个，
+/// 「`abort` 真的取消了那一条流」这件事就无从谈起——`abort` 会拿一枚**谁也没听说过**的
+/// `CallId` 去问适配器，而适配器照样返 `Ok`（它不做校验）。**故那一条的红会晚一步、
+/// 落到一个已完成的流上**，这里先把它挡住。
+///
+/// **红的条件（档位：取反）**：G 在 `call_stream` 交回之前把 `ModelStream.call` 改写成
+/// 自己造的一枚 → **实测红的是两条**：本条与
+/// `a_stream_call_hands_the_candidate_s_model_id_to_the_adapter`（后者钉的是默认态那枚
+/// `call-1`）。**两条一起才钉得住「没被写死」**：写死成 `call-1` 的实现在本条上红、
+/// 在后一条上绿；写死成 `adapter-supplied-7` 的实现在本条上绿、在后一条上红。
+/// **单看本条，一枚写死 `adapter-supplied-7` 的实现是绿的**——这是本条的射程边界，据实写明。
+///
+/// **另一条实测**：把 `CallId` 改写成别的一枚时，**`aborting_a_stream_calls_cancel_...`
+/// 那一条仍是绿的**（它拿 `stream.call` 当基准，两者一起被改写，于是自洽）——
+/// 这正是本条被单列出来的原因：它是那一条的前提，而它自己的红**不会**传到那一条上。
+#[tokio::test]
+async fn the_stream_carries_the_call_id_the_adapter_produced() {
+    let distinctive = CallId::new("adapter-supplied-7");
+    let (stream, _observed, _provider) = a_stream_over(
+        "m-stream",
+        FakeModel::new().with_stream(StreamOutcome::Chunks {
+            call: distinctive.clone(),
+            chunk: Ok(StreamChunk {
+                delta: "pong".into(),
+                done: true,
+            }),
+        }),
+    )
+    .await;
+
+    assert_eq!(
+        stream.call, distinctive,
+        "交回的 ModelStream.call 该就是适配器在那枚流里给的那一个（G 不新造、不改写）"
+    );
+}
+
+/// **否定式照片的两侧之向一**（设计 §3.5）：发起一次流式调用、**丢弃** `ModelStream`，
+/// 再断言假适配器记录的 `cancel` **为空**。
+///
+/// # 为什么这一向必须单独钉
+///
+/// 「取消经 `CallId` 走 `cancel()`，**不经流的 drop**」是 `ModelStream` 的文档已经写死的契约
+/// （`crates/continuum-core/src/model.rs`）。一个「drop 即取消」的实现在**适配器侧什么也没做**
+/// （drop 不产生任何远端动作），而它会让**向二**（经 `abort` 中止）照样绿——
+/// **只钉向二等于没钉**。
+///
+/// **两条断言不是重复的**：`cancel_calls()` 与 `cancelled()` 是两个独立的观测端，
+/// 故「调了 `cancel` 但没记下 `CallId`」这类夹具级错只在前一条上露馅。
+///
+/// **红的条件（档位：放宽——多做了不该做的事）**：**设计 §3.5 写的字面形态是「在
+/// `ModelStream` 的 `Drop` 里调 `cancel`」，而那一枚在本 crate 里写不出来**（实测 2026-10-08）：
+/// `ModelStream` 是 C 的类型，`impl Drop for ModelStream` 报
+/// `E0117`（孤儿规则）＋ `E0120`（`Drop` 只能对本地类型实现）。要绕开它就得让 G 包一层
+/// 自己的 `Stream` 实现，而 `Stream` 是 `futures_core` 的 trait、在本 crate 里只挂 dev 依赖
+/// （lib 里实现不了；简报明写本 task 不动 `Cargo.toml`）。
+/// **故本条的实测取的是它的可写邻形**：在 `call_stream` 里**建立流之后顺手取消一次**
+/// → **实测红的是四条**：本条、`aborting_a_stream_calls_cancel_with_the_streams_own_call_id`、
+/// `aborting_a_finished_stream_is_not_an_error`（这三条读的都是 `cancel` 的计数）与
+/// `a_stream_call_hands_the_candidate_s_model_id_to_the_adapter`（那枚邻形多调了一次
+/// `stream`，`stream_calls() == 1` 那条断言因此红）。
+/// **本条是这四条里唯一直接读「丢弃之后 `cancel` 为空」的**，故它是那张否定式照片的落点。
+#[tokio::test]
+async fn dropping_a_stream_does_not_cancel() {
+    let (stream, observed, _provider) = a_stream_over("m-drop", FakeModel::new()).await;
+
+    // 丢弃它——若取消被塞进 `ModelStream` 的 `Drop`，下面两条会红。
+    drop(stream);
+
+    assert_eq!(
+        observed.cancel_calls(),
+        0,
+        "丢弃一条流不该调 `cancel`（设计 §3.5：取消经 `CallId` 走 `cancel()`，不经流的 drop）"
+    );
+    assert_eq!(
+        observed.cancelled(),
+        Vec::<CallId>::new(),
+        "`cancel` 收到过的 `CallId` 该为空——空 `Vec` 正是这张否定式照片的读数"
+    );
+}
+
+/// **两侧之向二**（设计 §3.5）：经 G 的中止入口 [`abort`] 中止 → 断言
+/// (a) 适配器的 `cancel` **被调用了一次**、(b) 收到的 `CallId` **== `stream.call`**。
+///
+/// **三个断言缺一不可**（「被调用」「恰好一次」「是那一个」）——
+/// 只断「被调用」时，一个 `cancel(&CallId::new(""))` 的实现会绿。
+///
+/// **基准那枚 `CallId` 取自被测实现交回的值**（`stream.call`），不是夹具的常量：
+/// 拿常量当基准的话，「`call_stream` 交回了一枚错的 `CallId`」会与本条一起绿。
+/// 前者由 `the_stream_carries_the_call_id_the_adapter_produced` 单独挡住。
+///
+/// **红的条件（档位：取反）**：把 `abort` 里送出去的 `CallId` 换成一枚新造的
+/// → 第三条断言红。**实测（2026-10-08）：红集只有本条一枚**——
+/// `aborting_a_finished_stream_is_not_an_error` 与
+/// `each_provider_failure_on_abort_keeps_its_class` 都照绿（它们不看那枚 `CallId`），
+/// 故本条不是靠别的用例替它红的。
+#[tokio::test]
+async fn aborting_a_stream_calls_cancel_with_the_streams_own_call_id() {
+    let (stream, observed, provider) = a_stream_over("m-abort", FakeModel::new()).await;
+    let own = stream.call.clone();
+
+    abort(&provider, &stream)
+        .await
+        .expect("夹具的 `cancel` 默认成功，该回 Ok");
+
+    assert_eq!(observed.cancel_calls(), 1, "`abort` 该恰好调一次 `cancel`");
+    let seen = observed.cancelled();
+    assert_eq!(seen.len(), 1, "`cancel` 该恰好收到一枚 `CallId`");
+    assert_eq!(
+        seen[0], own,
+        "`cancel` 收到的那枚该就是 `stream.call`——G 不新造、不改写它"
+    );
+}
+
+/// 适配器对 `cancel` 返回 `Ok(())`（「这个 `CallId` 已完成」不算错）→ `abort` 返回 `Ok(())`。
+///
+/// 设计 §3.5：取消的语义是**幂等、尽力而为**（C §5.3 定案）——**一次取消与一次完成天然竞态**，
+/// 故 G 的中止入口不把「这个 `CallId` 已完成」判成错误。
+///
+/// **这一条钉的是 G 侧的判定，不是适配器的行为**：假适配器返 `Ok`，
+/// 而 G **不得**在它返回 `Ok` 之后自行合成一个 `Err`。
+///
+/// **据实记一处射程**：本夹具的 `cancel` 一律返它被配的那一枚结果——
+/// 它**没有「已完成」这个可配面**，故本条实际断的是「适配器返 `Ok` 时，G 原样交回 `Ok`」。
+/// 「一个**真**已完成流上的取消」在本夹具上不可表达（`StreamOutcome` 不带「这条流已经结束」）。
+/// **这不是漏项，是夹具的可配面边界**：要它，得给 `FakeModel` 加一个「已完成」的态，
+/// 而那要 G 侧先有一位能表达「流已完成」的输入（今天没有）。
+///
+/// **红的条件（档位：收紧）**：在 `abort` 里对「已完成」的 `CallId` 直接返回一个 `Err`。
+/// **实测（2026-10-08）：这一枚只能写成「`Ok` 路径上也返 `Err`」**——G 手里没有任何
+/// 「这条流已完成」的读数（`ModelStream` 只带 `call` 与 `chunks`，而 `chunks` 要
+/// `Pin<&mut>` 才推得动，`abort` 收的是 `&ModelStream`；`cancel` 的返回值也不带状态）。
+/// 实测红的是**两条**：本条与 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id`。
+///
+/// **故本条的定位据实写清**：它**不是一条能把「已完成」与「未完成」分开的判别式**
+/// （那一类判断在 G 侧今天不可表达），而是**「G 不在 `Ok` 路径上自行合成 `Err`」这条
+/// 回归护栏**。**它挡得住的那一枚是实测过的**，故它不是空转的用例。
+#[tokio::test]
+async fn aborting_a_finished_stream_is_not_an_error() {
+    let (stream, observed, provider) = a_stream_over("m-done", FakeModel::new()).await;
+
+    let result = abort(&provider, &stream).await;
+    assert!(
+        result.is_ok(),
+        "取消的语义是幂等、尽力而为——「已完成」不是错误，得到 {:?}",
+        result.err()
+    );
+    assert_eq!(
+        observed.cancel_calls(),
+        1,
+        "取消该真的发出去过一次（不是被 G 在调适配器之前就挡下了）"
+    );
+}
+
+/// 一个 `cancel` 返这一枚错误的适配器 → `abort` 交回的那枚 `Err`（`Ok` 即 panic）。
+///
+/// 与 `a_call_failing_with` 同形、**不是它的复用**：那一个走 `call` 与 `invoke`，
+/// 这一个走 `call_stream` 与 `cancel`——两处被测入口不同，故两套装配各写一次。
+async fn an_abort_failing_with(error: ProviderError) -> ModelCallError {
+    let (stream, _observed, provider) = a_stream_over(
+        "m-abort-fail",
+        FakeModel::new().with_cancel(Answer::Fail(error)),
+    )
+    .await;
+    match abort(&provider, &stream).await {
+        Ok(()) => panic!("适配器的 `cancel` 返错，`abort` 该回 Err，却拿到 Ok"),
+        Err(e) => e,
+    }
+}
+
+/// `abort` 的失败面**逐变体各写一次**：`class` 是哪一枚、`source` 仍是给进去的那一枚。
+///
+/// # 判据：**同一批失败，两个转换点**
+///
+/// `call` / `call_stream` / `abort` 都要经 [`into_call_error`]（设计 §6.1 的落点）。
+/// **两个转换点各映射一套，正是本项目一贯判为缺陷的形状**（同一件事两个产生点）：
+/// 一处改了、另一处没改，行为在两条路径上分叉，而两条路径各自看起来都「对」。
+/// 故本用例把**与 `each_provider_failure_keeps_its_class_and_its_source` 同一批**的
+/// 五枚 `ProviderError` 在 `abort` 这一侧再钉一遍。
+///
+/// # 五臂各写一次、不抽代表
+///
+/// 五枚**逐项**各断一次（四枚失败变体各得一个写死的类别，`Cancelled` 走**不带 `class`**
+/// 的那一枚）——`into_call_error` 的类别取自 [`classify`] 的手写 `match`，每个臂能各自漂移，
+/// 一条表驱动的循环会把「某一臂被改错」藏在别的臂后面。
+/// **`Cancelled` 那一臂不是凑数**：少了它，一个「在 `abort` 里自己映射一遍、把取消记成
+/// 一次 `Transient` 失败」的实现在本用例上全绿——而那正是本条要挡的形状。
+///
+/// **每条只断它自己那一臂**：`ModelCallError` 不派生 `PartialEq`，故用 `match` + `panic!`。
+///
+/// **红的条件（档位：放宽）**：在 `abort` 里另写一套转换（如一律 `Transient`）→
+/// **实测（2026-10-08）：红集只有本用例一枚**。**另有一枚更细的（档位：替换）**：
+/// 若 `abort` 只换了 `cancel` 送出去的那枚 `CallId`、而失败转换照旧，
+/// **实测本用例全绿**——那一枚由 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id` 挡。
+#[tokio::test]
+async fn each_provider_failure_on_abort_keeps_its_class() {
+    // 一、Transport → Transient。
+    match an_abort_failing_with(ProviderError::Transport("连接被重置".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Transient, "Transport 的类别该是 Transient");
+            assert_eq!(
+                source,
+                ProviderError::Transport("连接被重置".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Transport 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 二、Unavailable → Transient。
+    match an_abort_failing_with(ProviderError::Unavailable("上游 503".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Transient, "Unavailable 的类别该是 Transient");
+            assert_eq!(
+                source,
+                ProviderError::Unavailable("上游 503".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Unavailable 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 三、Protocol → Permanent。
+    match an_abort_failing_with(ProviderError::Protocol("响应不合契约".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Permanent, "Protocol 的类别该是 Permanent");
+            assert_eq!(
+                source,
+                ProviderError::Protocol("响应不合契约".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Protocol 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 四、UnknownModel → Permanent。
+    match an_abort_failing_with(ProviderError::UnknownModel("登记表里的 id 对不上".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Permanent, "UnknownModel 的类别该是 Permanent");
+            assert_eq!(
+                source,
+                ProviderError::UnknownModel("登记表里的 id 对不上".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("UnknownModel 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 五、`Cancelled` **不是失败**：它走不带 `class` 的那一枚（与 `call` 那一侧同判定）。
+    match an_abort_failing_with(ProviderError::Cancelled("调用方发起的取消".into())).await {
+        ModelCallError::Cancelled { source } => assert_eq!(
+            source,
+            ProviderError::Cancelled("调用方发起的取消".into()),
+            "source 该是给进去的那一枚，逐字回读"
+        ),
+        other => panic!("Cancelled 该走 Cancelled 那一枚（它不是失败），实际 {other:?}"),
+    }
+}
+
+/// 一个 `stream` 返这一枚错误的适配器 → `call_stream` 交回的那枚 `Err`（`Ok` 即 panic）。
+///
+/// 第三个同形装配（`a_call_failing_with` 走 `invoke`、`an_abort_failing_with` 走 `cancel`，
+/// 本函数走 `stream`）：**三处被测入口不同，故三套装配各写一次**，不抽成一个收闭包的助手
+/// ——抽了就得把「调哪一个方法」也参数化，那会让三条用例的红都从同一条装配路径上来。
+async fn a_stream_call_failing_with(error: ProviderError) -> ModelCallError {
+    let (plan, _handles) = a_plan_over(
+        vec![(
+            "m-stream-fail",
+            FakeModel::new().with_stream(StreamOutcome::Fail(error)),
+        )],
+        &RecordingPolicy::new(),
+    )
+    .await;
+    let messages = a_dialog();
+    let (candidate, adapter) = plan.selected();
+    match call_stream(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    {
+        Ok(_stream) => {
+            panic!("适配器报错、没有交出流，`call_stream` 该回 Err，却拿到 Ok")
+        }
+        Err(e) => e,
+    }
+}
+
+/// `call_stream` 的失败面**逐变体各写一次**：`class` 是哪一枚、`source` 仍是给进去的那一枚。
+///
+/// # 为什么本用例不在简报列的用例表里，而仍然要写
+///
+/// 简报列的失败面用例只有 `abort` 那一侧（`each_provider_failure_on_abort_keeps_its_class`），
+/// 判据是「**同一批失败两个转换点**」。**而转换点今天是三处**：`call`（Task 8 有照片）、
+/// `call_stream`（本用例）、`abort`（Task 9 那一条）。
+/// 少了本用例，`call_stream` 的失败路径**一条照片都没有**——而写在这里的
+/// `src/model_call.rs` 文档会指着 `abort` 那条说「照片在那」，
+/// 那是**指着一条走别的入口的用例**（本 task 的自审把它查了出来）。
+/// **它同时是 `StreamOutcome::Fail` 这一可配面的第一个使用者**
+/// （`tests/common/mod.rs` 那张表里这一项此前没有收件人被用上）。
+///
+/// # 五臂各写一次、不抽代表
+///
+/// 与另两条同源：`into_call_error` 的类别取自 [`classify`] 的手写 `match`，每个臂能各自漂移；
+/// `Cancelled` 那一臂同样不是凑数（少了它，一个把取消记成一次 `Transient` 失败的实现会全绿）。
+///
+/// **红的条件（档位：放宽）**：在 `call_stream` 里另写一套转换（不用 [`into_call_error`]）
+/// → **实测（2026-10-08）：红集只有本用例一枚**。
+#[tokio::test]
+async fn each_provider_failure_on_a_stream_call_keeps_its_class() {
+    // 一、Transport → Transient。
+    match a_stream_call_failing_with(ProviderError::Transport("连接被重置".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Transient, "Transport 的类别该是 Transient");
+            assert_eq!(
+                source,
+                ProviderError::Transport("连接被重置".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Transport 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 二、Unavailable → Transient。
+    match a_stream_call_failing_with(ProviderError::Unavailable("上游 503".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Transient, "Unavailable 的类别该是 Transient");
+            assert_eq!(
+                source,
+                ProviderError::Unavailable("上游 503".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Unavailable 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 三、Protocol → Permanent。
+    match a_stream_call_failing_with(ProviderError::Protocol("响应不合契约".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Permanent, "Protocol 的类别该是 Permanent");
+            assert_eq!(
+                source,
+                ProviderError::Protocol("响应不合契约".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Protocol 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 四、UnknownModel → Permanent。
+    match a_stream_call_failing_with(ProviderError::UnknownModel("登记表里的 id 对不上".into()))
+        .await
+    {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Permanent, "UnknownModel 的类别该是 Permanent");
+            assert_eq!(
+                source,
+                ProviderError::UnknownModel("登记表里的 id 对不上".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("UnknownModel 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 五、`Cancelled` **不是失败**：它走不带 `class` 的那一枚（与另两个入口同判定）。
+    match a_stream_call_failing_with(ProviderError::Cancelled("调用方发起的取消".into())).await {
+        ModelCallError::Cancelled { source } => assert_eq!(
+            source,
+            ProviderError::Cancelled("调用方发起的取消".into()),
+            "source 该是给进去的那一枚，逐字回读"
+        ),
+        other => panic!("Cancelled 该走 Cancelled 那一枚（它不是失败），实际 {other:?}"),
+    }
 }

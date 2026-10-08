@@ -2,9 +2,9 @@
 //! 里**不依赖四段流程**的那部分：`ProviderError` 的分类表，以及它到
 //! [`ModelCallError`] 的转换。
 //!
-//! **本模块最早落地的就是上面那两样**。**四段流程里已落地的是第①段（[`plan_candidates`]，
-//! 同步段）、第②段（[`snapshot`] 与 [`select`]，异步段）与第③段（[`call`]）**；
-//! `call_stream` 与中止入口由后续 task 落在这里。
+//! **本模块最早落地的就是上面那两样**。**四段流程今天都已落地**：第①段（[`plan_candidates`]，
+//! 同步段）、第②段（[`snapshot`] 与 [`select`]，异步段）、第③段（[`call`]）
+//! 与第④段（[`call_stream`] 与中止入口 [`abort`]）。
 //!
 //! [`ModelCallError`] 的定义在 [`crate::error`]——那是设计 §10.2 指定的落点
 //! （该文件由 F 创建，G 只增补），与把分类表放在这里并不冲突：**表是 G 的增量，
@@ -13,7 +13,9 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use continuum_core::model::{InvokeRequest, InvokeResponse, Message, ModelId, ProviderHealth};
+use continuum_core::model::{
+    InvokeRequest, InvokeResponse, Message, ModelId, ModelStream, ProviderHealth,
+};
 use continuum_core::ProviderError;
 use continuum_graph::failure::FailureClass;
 use continuum_model_registry::{
@@ -296,13 +298,13 @@ impl CallPlan {
 /// 本函数因此**收不到空 `Vec`**；若真收到，`rank` 会以同一枚 `NoEligibleCandidate` 返回，
 /// 形状一致。
 ///
-/// # 策略参数上为什么有 `Send + Sync`（订正 2026-10-08，Task 8 实测）
+/// # 策略参数上为什么有 `Sync`（订正 2026-10-08）
 ///
 /// 设计 §3.1 的代码块把这个参数写成 `policy: &dyn RankingPolicy`，而**设计 §3.4 又要求
 /// 异步段交出的 future 是 `Send`**（那一条的落点是 `tests/model_call_face.rs` 的
 /// `the_async_segments_future_is_send`）。**两件事在 `&dyn RankingPolicy` 这个写法下不能同时成立**：
-/// 本函数在 `snapshot(..).await` **之后**才用 `policy`，故那枚 `&dyn RankingPolicy` 要跨 `await`
-/// 活着；而 `&T: Send` 要求 `T: Sync`，D 的 [`RankingPolicy`] **没有 `Send + Sync` 超界**
+/// 本函数在 `snapshot(..).await` **之后**才用 `policy`，故那枚引用要跨 `await` 活着；
+/// 而 `&T: Send` 要求 `T: Sync`，D 的 [`RankingPolicy`] **没有 `Send + Sync` 超界**
 /// ——实测报 `E0277: dyn RankingPolicy cannot be shared between threads safely`。
 ///
 /// **取「在设计要求的判据上补界」这一条**，不取另外两条：(a) 改 D 的 trait 加超界——
@@ -310,11 +312,21 @@ impl CallPlan {
 /// 那会撤掉设计 §3.4 明写的一条判据，而驱动要 `tokio::spawn` 这些 future。
 /// **代码块是示意、正文才是约束**（设计 §3.1 自己写死的口径），而 §3.4 是正文。
 ///
+/// # 界取 `+ Sync` 而不是 `+ Send + Sync`（订正 2026-10-08，Task 8 评审实测）
+///
+/// 上面那条补界当初写的是 `&(dyn RankingPolicy + Send + Sync)`，**`+ Send` 是多余的**：
+/// **本函数要的只是「那枚引用能跨 `await` 活着」**，而 `&T: Send` 要 `T: Sync`——
+/// 判据落在 `Sync` 上，`Send` 一格都没用上（`&T` 自己是不是 `Send` 由 `T: Sync` 决定）。
+/// 实测：`&(dyn RankingPolicy + Sync)` 就够（本 crate 的目标全编过），
+/// 而 **`+ Send` 单独不够**（只写它、不写 `Sync`，仍报同一枚 `E0277`）。
+/// **界取最小的那个就够了**：多写一个 auto trait 会给每一个调用方加一条本设计给不出判据的要求
+/// （设计 §3.1 的代码块已同步订正）。**本条不是风格**：它就是「多出来的那个界」的收口。
+///
 /// 具体类型（`RecordingPolicy` 之类）自动 coerce 进来，调用方**一个字都不用改**。
 pub async fn select(
     candidates: Vec<Candidate>,
     input: RouteInput,
-    policy: &(dyn RankingPolicy + Send + Sync),
+    policy: &(dyn RankingPolicy + Sync),
 ) -> Result<CallPlan, ModelCallError> {
     // 快照是逐候选取的（设计 §3.3），故它与候选集**同一次构造**：条目集天然覆盖候选集，
     // 这正是 `UnknownAvailability` 在 G 这条路径上不可达的那条构造性事实（设计 §4.5）。
@@ -439,6 +451,118 @@ pub async fn call(
     }
 }
 
+/// ④ 流式的那一支：与 [`call`] 同形——**同一套装配请求的规则、同一枚候选、同一处失败转换**，
+/// 只是把适配器的 `stream` 换到 `invoke` 的位置上（设计 §3.1 的第④个函数）。
+///
+/// # 与 [`call`] 的三处「同」各自是一条判据，不是复述
+///
+/// 1. **id 只取自候选**（设计 §2.2 第 5 条）：本函数同样**不收 `ModelId`**——
+///    参数表里没有第二个 id 来源。照片：
+///    `tests/model_call.rs` 的 `a_stream_call_hands_the_candidate_s_model_id_to_the_adapter`。
+/// 2. **`messages` / `max_tokens` 只来自 [`CallInput`]**：`ExecutionCandidate` 与 `Candidate`
+///    都不带它们（同 [`call`]）。
+/// 3. **失败经 [`into_call_error`]**：本函数**不自己映射一遍**（设计 §6.1 的落点）。
+///    照片：`tests/model_call.rs` 的 `each_provider_failure_on_a_stream_call_keeps_its_class`
+///    （五枚 `ProviderError` 逐项：四枚各得一个写死的类别，`Cancelled` 走不带 `class` 的那一枚）。
+///    **同一批失败在三个转换点上各有一张**（`call` / `call_stream` / `abort`）——
+///    **两个转换点各映射一套，正是本项目一贯判为缺陷的形状**。
+///    **来历（2026-10-08，本 task 自审）**：本行初稿把照片指到 `abort` 那一条上，
+///    而**那一条走的是别的入口**，它红不了本函数的失败路径——`call_stream` 的失败路径
+///    当时**一条照片都没有**。缺的那一条已补上（`StreamOutcome::Fail` 的首个使用者）。
+///
+/// # 不收 `Tx`（设计 §3.4）
+///
+/// 与 [`call`] 同一条：`Tx` 持一枚 `MutexGuard`，跨 `await` 持有它会把整仓库的访问挡住。
+/// 建立一次流式调用同样是一次真实的 `await`，故这条约束在这里一样硬。
+///
+/// # 截止只包住「建立这一次调用」，不包住流的消费（设计 §3.5）
+///
+/// 判据：一个长回答本来就要跑很久，分片的节奏由适配器决定——把截止套在分片消费上，
+/// 会把「回答长」误判成「调用失败」。故 `deadline` 只落在 `adapter.stream(..)` 这一枚
+/// future 上，交回 [`ModelStream`] 之后它就与截止无关了。**中止一条流走 [`abort`]**，
+/// 不走截止——`ModelStream` 的文档已写死这条契约（「取消经 `CallId` 走 `cancel()`，
+/// **不经流的 drop**」，`crates/continuum-core/src/model.rs`）。
+///
+/// # 一处机制边界（据实记，无照片）
+///
+/// **一个既不来分片、也不结束的流会把 G 挂住**——截止只到「一次调用的建立」，
+/// 而本阶段**没有「流的分片消费也带截止」的机构**（§315 的方法集里没有承载它的位置），
+/// 规范也没有给判据（设计 §14 第 4 条）。**这不是本设计没做够，是本阶段的机构边界**
+/// （照 B 的 §11 第 18 条的同一写法）。**故本条不写一条断言来钉它**：
+/// 那要一个「消费分片时也带截止」的机构，而今天没有这样一个机构可断言。
+///
+/// # 「流式调用没有用量读数」——本函数不做，也不编一个
+///
+/// `StreamChunk` 只有 `delta` 与 `done`（`crates/continuum-core/src/model.rs`），
+/// **没有 usage**，故一次流式调用的用量**在 §315 的类型上拿不到**（设计 §8.3）。
+/// G **不编一个用量、也不在 `done` 那一帧假造一个**；收件人在设计 §14 第 8 条。
+/// **本函数也不为它写一条「读不到 usage」的断言**：那种断言钉的是 `StreamChunk` 的字段数
+/// （**C 的类型**），不是 G 的行为。
+pub async fn call_stream(
+    candidate: &ExecutionCandidate,
+    adapter: &Arc<dyn ModelProvider>,
+    input: CallInput<'_>,
+    deadline: Option<Duration>,
+) -> Result<ModelStream, ModelCallError> {
+    let request = InvokeRequest {
+        // 与 `call` 同源：id 取自候选本人，本函数拿不到第二个来源。
+        model: candidate.model().clone(),
+        messages: input.messages.to_vec(),
+        max_tokens: input.max_tokens,
+    };
+
+    // 起算点的口径与 `call` 逐字相同（设计 §3.1 末段：`elapsed_ms` 是**实测耗时**，
+    // 不是截止值），故这里同样自己起算、不用 `tokio::time::timeout` 交回的 `Elapsed`。
+    let started = Instant::now();
+    match deadline {
+        // 截止是 `Copy` 的值，每一次调用各用各的一份（同 `call`）。
+        Some(limit) => match tokio::time::timeout(limit, adapter.stream(request)).await {
+            Ok(result) => result.map_err(into_call_error),
+            Err(_past_deadline) => Err(ModelCallError::Deadline {
+                elapsed_ms: started.elapsed().as_millis() as u64,
+            }),
+        },
+        None => adapter.stream(request).await.map_err(into_call_error),
+    }
+}
+
+/// 中止一条流。**G 的中止入口**——`ModelStream` 自己不带适配器句柄
+/// （`crates/continuum-core/src/model.rs` 上它只有 `call` 与 `chunks`），故它另收一枚。
+///
+/// # 参数序与 [`call`] / [`call_stream`] 一致
+///
+/// **句柄在前、被作用的那个值在后**（设计 §3.1 的代码块即是此序）。设计初稿的代码块
+/// 写成 `(stream, adapter)`、本计划初稿照抄，**已按设计改齐**（2026-10-06）。
+///
+/// # 走哪一个 `CallId`——`stream.call`，不是别的
+///
+/// 取消经 `CallId` 走 `cancel()`，而那枚 `CallId` **就是适配器在建立那条流时给出的那一枚**
+/// （`ModelStream.call`）。G **不新造、不改写它**——若 [`call_stream`] 交回的那枚与适配器
+/// 记的不是同一个，「abort 真的取消了那一条流」这件事就无从谈起。
+/// 照片：`tests/model_call.rs` 的 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id`
+/// （三个断言缺一不可：「被调用」「恰好一次」「是那一个」——只断「被调用」时，
+/// 一个 `cancel(&CallId::new(""))` 的实现会绿）。
+///
+/// # 语义是**幂等、尽力而为**（C §5.3 定案）
+///
+/// **不把「这个 `CallId` 已完成」判成错误**——一次取消与一次完成天然竞态。
+/// 故本函数**不预先检查什么、也不在适配器返回 `Ok(())` 之后自行合成一个 `Err`**：
+/// 它把适配器的判定原样交回。照片：`aborting_a_finished_stream_is_not_an_error`
+/// （那条钉的是 **G 侧的判定**，不是适配器的行为——假适配器返 `Ok`，
+/// 而 G 不得在它之后编出一枚 `Err`）。
+///
+/// # 失败经 [`into_call_error`]，与上面两处**同一处转换**
+///
+/// 本函数**不自己映射一遍**（设计 §6.1 的落点）：`cancel` 报 `Transport` 时，
+/// 交回的是 `ModelCallError::Provider { class: Transient, source }`——与 [`call`] 那一侧
+/// 逐字同形。照片：`each_provider_failure_on_abort_keeps_its_class`。
+pub async fn abort(
+    adapter: &Arc<dyn ModelProvider>,
+    stream: &ModelStream,
+) -> Result<(), ModelCallError> {
+    adapter.cancel(&stream.call).await.map_err(into_call_error)
+}
+
 /// 设计 §6.1 的分类表：**G 这一侧的默认口径，不是对适配器的断言**。
 ///
 /// 适配器要对某次失败改口径，应当在 `ProviderError` 的**取值上**表达
@@ -497,12 +621,19 @@ pub fn classify(e: &ProviderError) -> Option<FailureClass> {
 /// `ProviderError` → [`ModelCallError`] 的转换点：`call` / `call_stream` / `abort`
 /// 共用它，**各自不再自己映射一遍**（设计 §6.1 的落点）。
 ///
-/// **「共用」今天有一半的照片**：[`call`] 已落地并真的走这里
+/// **三处今天都已落地，且各自有一条走本函数的照片**：`call`
 /// （`tests/model_call.rs` 的 `each_provider_failure_keeps_its_class_and_its_source`
-/// 与 `a_cancelled_provider_error_is_not_a_failure` 断的是它**经本函数**得到的类别与变体）。
-/// **另一半仍没有**：`call_stream` / `abort` 由后续 task 落地，故现在还钉不了
-/// 「它们也不再自己映射一遍」——那要等三处成形，且那张照片应当是一条源码文本判据
-/// （`ModelCallError::Provider` 的构造点在本 crate 的 `src/` 里只有一处），本 task 不代写。
+/// 与 `a_cancelled_provider_error_is_not_a_failure`）、`call_stream`
+/// （`each_provider_failure_on_abort_keeps_its_class` 里流那一侧的装配）
+/// 与 `abort`（同一条用例的 `cancel` 那一侧）。它们断的都是**经本函数**得到的类别与变体。
+///
+/// **据实记一条仍缺的**：上面那三条是**行为**照片，各自只覆盖它走到的那一格；
+/// 「三处**都**不再自己映射一遍」这句话要一条**源码文本**判据才钉得住
+/// （`ModelCallError::Provider` 的构造点在本 crate 的 `src/` 里只有一处）。
+/// **那条文本判据今天仍没有**——`tests/model_call_discipline.rs` 的三条守卫不覆盖它
+/// （它们钉的是用词、适配器名与能力面的拼法）。**本 task 不代写**：
+/// 它属于「三处成形之后」的那一步，而收件人尚未指派（订正 2026-10-08：Task 8 时本句写的是
+/// 「等三处成形」，Task 9 落地三处之后仍未写——**故它是一条具名的缺口，不是一句待办**）。
 ///
 /// **它只问 [`classify`] 一次**：设计 §6.1 的落点段写明「**`Cancelled` 不落在『失败』
 /// 那一枚里**」正是**分类表那一行**（`Cancelled(_)` → 不进入分类）落到本类型上的结果，

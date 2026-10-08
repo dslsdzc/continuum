@@ -198,17 +198,25 @@ pub fn plan_candidates(tx: &Tx<'_>, registry: &ProviderRegistry)
 
 // ② 异步段：取可用性快照 → 组装请求 → 调 rank，并把**句柄与排序结果成对带出**。**不收 `Tx`**（§3.4）。
 pub async fn select(candidates: Vec<Candidate>, input: RouteInput,
-                    policy: &(dyn RankingPolicy + Send + Sync))
+                    policy: &(dyn RankingPolicy + Sync))
     -> Result<CallPlan, ModelCallError>;
 
-// ⚠️ **本代码块在 2026-10-08 改过一处**：`select` 的 `policy` 参数由 `&dyn RankingPolicy`
-//    改为 `&(dyn RankingPolicy + Send + Sync)`。**原文与本块的正文相抵**——本设计 §3.4 与 §11
-//    要求那条 future 是 `Send`（`:368` 的 `assert_send` 与 `:905` 的判据行），而 `select` 在
-//    `snapshot(..).await` **之后**才用 `policy`，`&T: Send` 要 `T: Sync`；D 的 `RankingPolicy`
+// ⚠️ **本代码块在 2026-10-08 改过两处，都在 `select` 的 `policy` 参数上**。
+//    **第一处**：由 `&dyn RankingPolicy` 改为 `&(dyn RankingPolicy + Sync)`。
+//    **原文与本块的正文相抵**——本设计 §3.4 与 §11 要求那条 future 是 `Send`
+//    （§3.4 末段那句 `fn assert_send<T: Send>(_: &T) {}`，与 §11 表里「`Tx` 不跨 `await`」
+//    那一行的判据），而 `select` 在 `snapshot(..).await` **之后**才用 `policy`，
+//    `&T: Send` 要 `T: Sync`；D 的 `RankingPolicy`
 //    （`crates/continuum-model-registry/src/router.rs`）**没有超界**，故原写法编不过
 //    （G 的 Task 8 实测 `E0277: dyn RankingPolicy cannot be shared between threads safely`）。
 //    **改的是代码块，不是正文**：正文那条判据（future 必须 `Send`）是约束，代码块只是它的一种示意写法。
 //    具体类型会自动 coerce，故调用点一处未改。
+//    **第二处**：第一处当时写成了 `+ Send + Sync`，**`+ Send` 是多余的**。
+//    实测（G 的 Task 8 评审）`&(dyn RankingPolicy + Sync)` 就够——整 crate 的目标全编过；
+//    而 `+ Send` **单独不够**（只写它、不写 `Sync`，仍编不过）。**界取最小的那个就够了**：
+//    多写一个 auto trait 会给每一个调用方加一条本设计给不出判据的要求。
+//    **本条的两处引用按内容写、不写行号**——本文件自己在上方插过行，写行号的引用会随下一次
+//    编辑一起漂（G 的 Task 8 评审实测到过同一个失效模式，`p3g-followups.md` 的 M-8-5）。
 
 // ③ 异步段：对**一个候选**发起调用。**不收 `Tx`**；**也不收 `ModelId`**（§2.2）；
 //    句柄是**显式的一枚入参**——`ExecutionCandidate` 里没有它（D 的类型不含适配器）。
