@@ -968,7 +968,7 @@ git commit -m "test(runtime): 强制点 (1) 的两个拒绝方向与零调用的
   k=1 时 multiset 恰为 `{capability grants × 1, external effects × 4}`、共 **5** 条；
   **k=0 时恰 1 条**（`capability grants`）。两处 `kind` 的值**手写字面量**（钉格式）；
   `4 = 1 次登记 + 3 次推进`（同 `continuum-effect/tests/persist.rs:252` 的既有注释，`assert_eq!` 在 `:253`）。
-- `an_effect_free_call_touches_neither_the_effect_table_nor_the_mint`（P-16）：零 `--effect` → `effect`
+- `an_effect_free_call_leaves_the_effect_table_empty_and_writes_no_fabricated_audit_row`（P-16）：零 `--effect` → `effect`
   **0 行**、`audit_log` **恰 1 条**（`capability grants`），**且没有凭据捏造的「tool invoked」之类审计行**
   （§313 的八项是封闭清单，本子项目**不新增 `AuditKind`**）。
   > **用例名的后半 `nor_the_mint` 今天不可证伪（2026-10-07，F Task 5 评审发现，收口时未改）**：
@@ -981,6 +981,11 @@ git commit -m "test(runtime): 强制点 (1) 的两个拒绝方向与零调用的
   > 也能看到这条限定。
   > **判据同 [[absolute-claims-need-tests]]**：**用例名也是断言的一部分**——「皆 / 一概 / 整个 /
   > `neither…nor`」这类全称措辞，要么有对应用例，要么收窄。
+  > **已收窄（2026-10-08，F 遗留台账清理轮）**：本行与测试文件的同名函数已改为
+  > `an_effect_free_call_leaves_the_effect_table_empty_and_writes_no_fabricated_audit_row`，
+  > 只声称「`effect` 表留空」与「不写捏造的审计行」两件**有可观察形态**的事；测试文件首段那句
+  > 「也不碰 mint」同步收窄。台账见 `docs/superpowers/p3f-followups.md` 的 M-5-1
+  > （上面旧引的 `.superpowers/sdd/p3f-minors.md` 已随台账搬入版控作废）。
 - `each_declared_scope_is_carried_into_the_audit_payload_verbatim`（P-18）：声明两条目标各不相同的
   `--effect`，跑完之后读 `audit_log` 的 `capability grants` 行、解析 payload，断言
   `capabilities[].scope` 的 multiset **逐个等于**各 `--effect` 的目标。

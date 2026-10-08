@@ -115,7 +115,10 @@ impl Fixture {
         save_tool(&tx, &ToolProfile::new(tool, None, None, Trust)).unwrap();
         let allow = Policy {
             // 第 5 级（`RuntimeDefault`）：本仓在「第 5 级」这个名字下的既有写法见
-            // `tests/task_cli.rs` 的同名夹具。恒真是刻意的——本文件钉的是接线，
+            // `tests/task_cli.rs` 的 `always(Level::RuntimeDefault, Decision::Allow)`
+            // （经 `seed_policies` 落库）。那里**没有同名夹具**——这是一条「同形不同名」的指路：
+            // 形态是「空合取 + `Allow` + `Scope::User`」，写法是具名辅助函数（订正 2026-10-08，
+            // 原写「`tests/task_cli.rs` 的同名夹具」不确）。恒真是刻意的——本文件钉的是接线，
             // 条件怎么求值属 `continuum-policy` 的用例。
             level: Level::RuntimeDefault,
             condition: Condition::parse(&json!({"all": []})).expect("空合取是合法条件"),

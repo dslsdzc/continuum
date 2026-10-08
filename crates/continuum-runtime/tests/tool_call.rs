@@ -1373,7 +1373,12 @@ fn the_intent_is_observable_in_the_idempotency_key() {
     assert_eq!(
         (segments.next(), segments.next(), segments.next()),
         (Some("charge"), Some("c1"), None),
-        "余下两段是类型与目标，且键到目标为止（目标里的冒号不分段，故类型段不含冒号）"
+        "余下两段是类型与目标，且键到目标为止。\
+         **本输入下**类型段是 `charge`、目标段是 `c1`，两段都不含冒号——\
+         长度前缀保的是**分界可判定**（它钉住意图段到哪里为止），**不是**「后续段不含冒号」：\
+         类型与目标之间仍靠冒号分段。\
+         （原写「目标里的冒号不分段，故类型段不含冒号」——该理由作为通则不成立，\
+         2026-10-08 由 F 遗留台账清理轮收窄，旧说法留此）"
     );
     assert_eq!(
         key, "2:i1:charge:c1",
@@ -1557,7 +1562,7 @@ fn the_audit_rows_are_exactly_one_grant_plus_four_per_effect() {
     );
 }
 
-/// P-16：**零 `--effect` 的调用不碰 `effect` 表、也不碰 mint**，且**没有凭据捏造的审计行**。
+/// P-16：**零 `--effect` 的调用让 `effect` 表留空，且不写捏造的审计行**。
 ///
 /// 三条钉子各指一件事：
 ///
@@ -1578,16 +1583,19 @@ fn the_audit_rows_are_exactly_one_grant_plus_four_per_effect() {
 /// **变异体**：把零效应那一支改成**仍开事务写审计**（在 `run_tool_call` 的步骤 7 里让空
 /// 声明也 `append_audit`）⇒ 第 2 条断言红（两条、且多出一条 `external effects`）。
 ///
-/// # 用例名后半 `nor_the_mint` 今天**不可证伪**（F 终审 m-5，与计划侧同口径）
+/// # 用例名的来历与收窄（2026-10-08，F 遗留台账清理轮）
 ///
-/// `mint` 的产物只在内存里，**落库侧读不出**，故名字后半那个全称**没有可观察形式**。
+/// 原名 `an_effect_free_call_touches_neither_the_effect_table_nor_the_mint`（出自计划 Task 5），
+/// 首段那句「也不碰 mint」与名字后半 `nor_the_mint` 同病：`mint` 的产物只在内存里、
+/// **落库侧读不出**，故那个全称断言**没有可观察形式**、今天不可证伪。
 /// **断言与用例本身是对的**（断的是「`effect` 0 行、`audit_log` 恰 1 条、无捏造的审计行」），
-/// **过宽的只是名字**。收窄它要**同时改计划那一行与本行的函数名**（计划
-/// `docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md` 的 Task 5 有一份同口径的来历注），
-/// 代价大于收益，故保留名字、在此记明来历。判据同「用例名也是断言的一部分」：全称措辞要么有
-/// 对应用例，要么收窄。
+/// **过宽的只是名字与那半句**。故名字收窄为
+/// `an_effect_free_call_leaves_the_effect_table_empty_and_writes_no_fabricated_audit_row`，
+/// 只声称上面那两件有可观察形态的事，首段同步改为「让 `effect` 表留空」。
+/// 计划 `docs/superpowers/plans/2026-10-05-p3f-tool-call-path.md` 的 Task 5 保留同口径的来历注。
+/// 判据同「用例名也是断言的一部分」：全称措辞要么有对应用例，要么收窄。
 #[test]
-fn an_effect_free_call_touches_neither_the_effect_table_nor_the_mint() {
+fn an_effect_free_call_leaves_the_effect_table_empty_and_writes_no_fabricated_audit_row() {
     let fixture = Fixture::with_tools(&["t1"], Vec::new(), None);
     let adapter = Arc::new(RecordingTool::new(Outcome::Echo));
     let registry = registry_serving(&["t1"], Arc::clone(&adapter));
