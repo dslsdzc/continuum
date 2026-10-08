@@ -934,7 +934,17 @@ git commit -m "feat(runtime): 候选集的构造（同步段）"
   `availability` 的 id 集合 **== 候选集的 id 集合**（**集合相等，不是 `len` 相等**）。
   这是设计 §4.5 里 `UnknownAvailability` 在 G 路径上**不可达**的那条构造性断言
   （另一半在 Task 3 的 `the_snapshot_is_as_long_as_the_candidate_set`）。
-  **红的条件（档位：收紧）**：在组装请求时只把 `Healthy` 的条目放进 `availability` → 集合不等，红。
+  **红的条件（档位：收紧）**：在组装请求时只把 `Healthy` 的条目放进 `availability` → **本条红**。
+  > **订正（2026-10-08，G Task 7 评审实测：本行初稿把机制写错了）**。初稿写「→ **集合不等，红**」，
+  > **实测不是**：那一枚（记作 **M1a**）红在 **`select(...).expect(...)`** 上——两个 panic 点
+  > （`tests/model_call.rs` 的 `.expect`）报 `Routing(UnknownAvailability { … })`，
+  > **而那条集合相等断言根本没被求值**。成因：**D 在 `rank` 里对 `UnknownAvailability` 是 fail-closed**
+  > （D 设计 §5.3），故请求里的条目先少了一枚、`rank` 就先返回 `Err` 了。
+  > **要红在集合断言上，得另做一枚隔离版（M1b）**：**多塞一条表外条目**——
+  > 它让 `rank` 收下请求，于是红**恰好落在**那条集合相等 `assert_eq!` 上
+  > （消息逐字：`候选 {"m-a","m-b","m-c"}，请求里 {"ghost-not-a-candidate",…}`）。
+  > **故本行钉的东西由 `M1b` 提供，不由 `M1a`**——**「别处先红」不等于「这条断言有照片」**。
+  > **判据（本轮又一次付代价的）**：**报「某枚变异体让某条断言红」之前，看红的**位置**是不是那条断言**。
 - `a_probed_health_actually_reaches_the_ranking`（设计 §11）：假适配器配 `Unavailable` →
   该模型**不被选中**；**两侧对钉**：改回 `Healthy` → 它**回到输出**（且成为 `selected()`）。
   **只钉向一时，一个「永远返回空候选集」的实现全绿**。
