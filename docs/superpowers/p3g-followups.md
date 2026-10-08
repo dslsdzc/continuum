@@ -27,11 +27,34 @@
 那一条要**让 `stream` 被调两次**才会红；报告 §4 自己的括注正是这么说的，与本格相抵。实测那三条。）****计划那句的收件人：协调者**——它与 M-8-3 同族（红条件写在计划里、而那一枚写不出来），**处置照 M-8-3：只在本表记实测，不代改计划** |
 | **M-9-2** | `a_stream_call_hands_the_candidate_s_model_id_to_the_adapter` 的红条件 | 那句「把 `adapter.stream(..)` 换成 `adapter.invoke(..)`」**也写不出来**：两者返回类型不同（`InvokeResponse` / `ModelStream`），要成型得把响应包成一枚 `Stream`，**而那要 `futures-core` 进 lib 依赖**。**（订正 2026-10-09，Task 9 评审：本行「位置」栏原先读起来像那是**计划**的红条件，错了——计划 Task 9 那一条写的是「**同 Task 8**」，而这句话**只出现在交付用例的文档里**（`crates/continuum-runtime/tests/model_call.rs` 的 `:1922`，实测全仓唯一）。**照本行去计划里找这句话会找不到**；实质成立（评审另实测：`use futures_core::Stream` 进 lib ⇒ `E0432`），立的柱子立错了地方。）** | **实测取可写邻形**：多插一次 `adapter.invoke(..)`（不动返回类型）→ **只红该条**，落点 `invoke_calls() == 0`。**这与 M-8-3 的第三类相邻但不同**：不是「改签名才能表达」，是「**要动本 crate 的依赖表才能表达**」 |
 | **M-9-3** | `aborting_a_finished_stream_is_not_an_error` 的定位 | 它的红条件（「对已完成的 `CallId` 返 `Err`」）**只能写成「`Ok` 路径上返 `Err`」**——G 手里没有任何「这条流已完成」的读数（`ModelStream` 只有 `call` 与 `chunks`，而 `chunks` 要 `Pin<&mut>` 才推得动，`abort` 收的是 `&ModelStream`；`cancel` 的返回值也不带状态） | **据实记**：它是「G 不在 `Ok` 路径上自行合成 `Err`」的**回归护栏**，不是能把「已完成／未完成」分开的判别式。实测红两条（该条 ＋ `aborting_a_stream_calls_cancel_with_the_streams_own_call_id`）。**不是空转用例**（那一枚挡得住） |
-| **M-9-4** | `into_call_error` 的「三处共用」 | **行为照片三处都有了**（`call` / `call_stream` / `abort` 各一条，Task 9 补齐后两条），而「三处**都**不再自己映射一遍」这句话要一条**源码文本**判据才钉得住（`ModelCallError::Provider` 在本 crate 的 `src/` 里只有一处构造点） | **仍缺，收件人未指派**（`tests/model_call_discipline.rs` 的三条守卫不覆盖它）。**据实记为具名缺口**——`into_call_error` 的文档里已写明这一条 |
+| **M-9-4** | `into_call_error` 的「三处共用」 | **行为照片三处都有了**（`call` / `call_stream` / `abort` 各一条，Task 9 补齐后两条），而「三处**都**不再自己映射一遍」这句话要一条**源码文本**判据才钉得住（`ModelCallError::Provider` 在本 crate 的 `src/` 里只有一处构造点） | **仍缺，收件人未指派**（`tests/model_call_discipline.rs` 的三条守卫不覆盖它）。**据实记为具名缺口**——`into_call_error` 的文档里已写明这一条。**复查（2026-10-09，Task 10）：本轮未闭合，且查出一条它自己要先定的口径**——最小写法「`ModelCallError::Provider` 在 `src/` 里只有一处构造点」**今天实测为真**（`src/model_call.rs:646` 一处），**但那枚拼法在同一份文件的文档注释里另出现两次**（`:557`、`:632`），故一个朴素的行数统计会报 **3 处**：**要么先剥注释（本仓不做 `syn`），要么把判据收成「构造点」的字面形态**。这是**一条要先定口径再落笔的新判据族**，落点是 `tests/model_call_discipline.rs`（那份文件的口径正是「源码文本判据」）——**Task 10 的 `Files:` 只有 `tests/model_call.rs` 一份，故未动别的文件**；开工前已就此问协调者，未获回复，按简报字面办 |
 | **M-9-5** | Task 9 的一处自审 | 交付时写下的 `call_stream` 文档把失败面照片指到 `abort` 那条用例上，**而那一条走的是别的入口**——`call_stream` 的失败路径当时**一条照片都没有**（`StreamOutcome::Fail` 这一可配面也没被任何用例用上） | **已闭合（2026-10-08，同 task 内）**：补 `each_provider_failure_on_a_stream_call_keeps_its_class`（五枚变体逐项），实测红集只有它一枚。**它不在简报列的六条用例内，是本 task 加写的第七条**——理由与来历写在用例文档与 task-9 报告里 |
 
 | **M-9-7** | `call_stream` 的**截止** | **零覆盖**（2026-10-09，Task 9 评审实测）：**把 `Some(limit)` 那整臂删掉，35 条全绿**——三个调用点**全传 `None`**，而 `StreamOutcome` 也没有 `Never`／`ReplyAfter` 一类的可配面，故「截止」在流式这一侧**一次都没被触发过**。它**原先只活在 gitignored 的 task-9 报告里**（`grep -n '截止' docs/superpowers/p3g-followups.md` 当时**零命中**）——**按本台账自己写死的收口判据（「在版控里 `grep` 得到吗」），它会在收口时丢掉**。**本行就是为它补的。** | **收件人：下一轮补 `call_stream` 截止用例的人**——**必须连 `tests/common/mod.rs` 一起派**（可配面在那里，`StreamOutcome` 要加一档能“永不返回／延迟返回”的形态）。**另一处落点已订正**：计划 Task 12 Step 4 的 §3.5 那一格原先把截止整格记到 `call` 那侧、读起来像两侧都覆盖了，现已补一行「`call_stream` 侧无照片」 |
 | **M-9-6** | `rustfmt` | **本仓不是 fmt 干净的、且无配置无 CI**（`p0-followups.md` 已记）。**实测**（`rustfmt --edition 2021 --check`）：`tests/model_call.rs` 在 Task 9 之前已有 **23** 处、之后 **32** 处（新增 9 处，与既有 23 处**同形**——那座文件的 `assert_eq!(class, FailureClass::X, "…")` 单行写法）；`tests/model_call_face.rs` 由 0 变 **1**（Task 9 加宽了那行 `use`）；`src/model_call.rs` 两版都是 **0** | **不整文件重排**：那样会顺手改掉 Task 8 的 22 处（不是本 task 的行），而 fmt 不是本仓的门。**中途一度整文件重排过、随后撤回**，撤回后工作树与提交逐字节相同。**判据（量法本身的一处坑）**：**带 `mod` 声明的文件不能挪出它所在目录去测**——把旧版复制到 `.tmp/` 再跑 `rustfmt --check` 会因解析不到 `mod common;` 而报「0 处」，**那是测具的假象** |
+
+## 一之二、Task 10（`usage()` / `list_models()` / `describe_model()` 的否定式照片）的新增与订正
+
+**交付**：`tests/model_call.rs` 起一节（`:2383`）四条用例——**与本仓「否定式照片」的成例同源**
+（`p3bcdf-followups.md` §四.4）。提交 `55bf688`（交付）＋ `22ff790`（注释补隔离读数）。
+`src/` 一字节未动（`sha256` 变异前后同为 `eb277904…`）。
+
+| # | 位置 | 内容 | 处置 |
+|---|---|---|---|
+| **M-10-1** ✅ | 简报 `p3g-task-10-brief.md:12-14` | **「本 task 的三条与 Task 4 的模块面守卫互补：Task 4 钉**文本里不出现**」——实测无对应物**：`crates/continuum-runtime/tests/model_call_discipline.rs` 的三张清单（`TOOL_PATH_NAMES` 5 ＋ `ADAPTER_NAMES` 5 ＋ `NO_POWER_NAMES` 11 ＝ **21 枚**）**不含**这三个方法名任何一枚（`grep` 零命中），设计 §11 那两格也只写「否定式照片」、没有文本那一层。**这是「派单措辞会漂移」的又一个实例**（成例：`p3bcdf-followups.md` §六.4 记协调者派单措辞是漂移源） | **已交付**：节头（`tests/model_call.rs:2388-2395` 实测）写明实测与来历，**不代改简报**（照 M-8-3 的处置：只记实测）。**收件人：协调者** |
+| **M-10-2** | 简报 `:30` | 用例 2 的红条件「**把候选集的 id 来源换成 `list_models()`**」**实测为层③**（只能在改签名的前提下表达）：`plan_candidates` 是**同步**函数（设计 §3.4 的两个同步边界之一、持 `Tx`），`list_models()` 是 `async`，要它成型先把前者改 `async fn` ⇒ `cargo test --no-run` 报 **28 个编译错误全部落在调用侧**（20 枚 `E0599`＋8 枚 `E0308`），`src/` 一处不报；**按纪律调用侧编译失败不算红**。**另查出一重不可达**：`ProviderRegistry` 今天**没有同步的适配器枚举**（只有 `model_for(&ModelId)`，即按已知 id 取句柄），故「用 `list_models()` 当 id 来源」在这个交付面上**双重不可达** | **实测取可写邻形**并交付（`snapshot` 里插一次 `list_models().await`）：红 2 条。**与 M-8-3 / M-9-1 / M-9-2 同族**（计划或派单里的红条件写不出来），**只在本表记实测，不代改简报** |
+| **M-10-3** | 简报 `:32` | 用例 3 的红条件「**把快照改成从 `describe_model` 的返回里推**」**字面写法编译不过**——`ModelDescriptor` 变不出 `ProviderHealth`，两个类型之间没有转换（层①的语法/类型面） | **实测取可写邻形**（照旧用 `health()`，另插一次 `describe_model().await`，只动计数不动类型）：红 2 条 |
+| **M-10-4** | 简报 `:40-42` | 用例 4 的理由与实测相抵：原写「没有它，一个『整个 `select` 永远返回 `Err`』的实现也会让上面三条全绿」——**实测上面 1、3 两条各自带 `expect(…该回 Ok)`，`a_plan_over` 自己带 `expect("候选集非空，该有输出")`，故一个恒错实现会先在那几条上炸**，不会全绿。本条**真正的独立增量是另一件**：一条**失败**路径的类别**是它自己那一枚**（`Protocol` → `Permanent`），三个 `Err` 一个都没渗进去——这是 1／2／3 三条都拍不到的 | **用例注释按实测成立的那一句写**（`tests/model_call.rs` 用例 4 的「它的独立增量」一节），简报原话的来历留在 task-10 报告 §5.2，**不代改简报** |
+| **M-10-5** ✅ | Task 10 交付的用例 2 | **射程比简报字面宽**：简报说「与 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table` 同一份夹具」，交付版**另跑 ② 异步段**（`select`）。理由是可写红：`M-B` 的变异落在 `snapshot` 里，**只跑 ① 的用例看不到它**——即那条计数断言会**一个能写出来的红都没有** | **已交付，并附隔离版实测**：把 ② 关掉（`if false`）后跑 `M-B` ⇒ `FAILED. 38 passed; 1 failed`，红集**只剩共用适配器那条**、**用例 2 `ok`**（日志 `M-B-iso-sync-only`）。**这是本 task 唯一对简报字面的偏离**（提交 `22ff790` 把这条读数补进注释） |
+| **M-10-6** ✅ | 交付（简报 Step 2） | **「运行，确认失败」在本 task 上不成立**：本 task 是纯测试、被测实现早在 Task 6–9 落地，四条用例一写出来就是绿的（`39 passed`） | **TDD 的「先红」由变异探针承担**：四条用例**逐条**各有一枚真能红的变异体（`M-A` 红 2／`M-B` 红 2／`M-C` 红 2／`M-D` 红 7），另有一枚隔离版。变异体写法、命令与红集见 task-10 报告 §4 |
+| **M-10-7** | Task 10 的交付与 M-9-7 的关系 | **`call_stream` 的截止仍零覆盖**：本 task 的用例 4 走了 `call_stream` 的失败路径，但**仍传 `None` 截止** | **M-9-7 状态不变**，据实记在此免得「`model_call` 目标 39 条」这个数字被读成「流式那一侧都盖到了」 |
+
+**门读数（自证覆盖，2026-10-09）**：`cargo clean -p continuum-runtime` 后
+`cargo test --workspace --no-fail-fast` ⇒ `Compiling` 2 行、`Running` **97** 行、
+`test result:` **114** 行（＝97 目标 ＋ **17** Doc-tests），通过 **735**、失败 0、**warning 0**。
+**「0 warning」这条读数有效**：先 `cargo clean -p continuum-runtime`（那 2 行 `Compiling` 即这次重建），
+另做正控制（注入 `use std::fmt;` ⇒ 日志里真出现 2 行 warning），随后还原、
+`sha256` 回到 `eb277904…`。日志 `.tmp/t10-gate-workspace.log` 与 `.tmp/t10-warning-positive-control.log`。
 
 ## 二、据实记为无照片（本轮不补）
 
