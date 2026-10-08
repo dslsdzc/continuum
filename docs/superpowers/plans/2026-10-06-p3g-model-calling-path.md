@@ -1453,7 +1453,12 @@ grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 | §3.2 G 不调 `list_models()` | Task 10 的第二条（**否定式**，计数为 0） |
 | §3.3 快照逐候选、原样摊给每个模型 | Task 3 四条（含 `Unavailable` 原样带过） |
 | §3.4 `Tx` 不跨 `await` | Task 8 Step 5 的 `assert_send`（**编译期**，红形态就是编译失败） |
-| §3.5 截止两侧 + 只包住一次调用 | Task 8 的 `a_call_that_never_returns_hits_the_deadline` 两向 + `the_deadline_wraps_one_call_only` |
+| §3.5 截止两侧 + 只包住一次调用 | Task 8 的 `a_call_that_never_returns_hits_the_deadline` 两向 + `the_deadline_wraps_one_call_only`。
+  **订正（2026-10-09，G Task 9 评审实测）：本格原先读起来像「§3.5 的截止面已覆盖」，而 `call_stream` 那一侧是零覆盖**——
+  **把 `Some(limit)` 那整臂删掉，35 条全绿**（三个调用点全传 `None`；`StreamOutcome` 也没有 `Never`／`ReplyAfter` 一类的可配面）。
+  **故本格只覆盖 `call` 那一侧。** `call_stream` 的截止**记在 `docs/superpowers/p3g-followups.md` 的 M-9-7**（具名缺口，未指派），
+  **本格不得被读成「两侧都覆盖了」** |
+| §3.5 截止（`call_stream` 侧） | **无照片**——见上一格的订正与本计划台账 M-9-7。**本行是「找不到证据的不得标注为覆盖」的一个实例** |
 | §3.5 「丢弃流不是取消」两侧 | Task 9 的 `dropping_a_stream_does_not_cancel` 与 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id` |
 | §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 + Task 11 的三处（**若等价则据实合并**） |
 | §4.5 `NotRoutable` / `DuplicateModelCandidate` / `UnknownAvailability` 不可达 | 前者**构造性**（D 的样例，G 不重钉）；后者 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table`；第三 Task 11 的一一对应 |
