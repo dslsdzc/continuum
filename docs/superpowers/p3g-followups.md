@@ -28,6 +28,8 @@
 | **M-9-4** | `into_call_error` 的「三处共用」 | **行为照片三处都有了**（`call` / `call_stream` / `abort` 各一条，Task 9 补齐后两条），而「三处**都**不再自己映射一遍」这句话要一条**源码文本**判据才钉得住（`ModelCallError::Provider` 在本 crate 的 `src/` 里只有一处构造点） | **仍缺，收件人未指派**（`tests/model_call_discipline.rs` 的三条守卫不覆盖它）。**据实记为具名缺口**——`into_call_error` 的文档里已写明这一条 |
 | **M-9-5** | Task 9 的一处自审 | 交付时写下的 `call_stream` 文档把失败面照片指到 `abort` 那条用例上，**而那一条走的是别的入口**——`call_stream` 的失败路径当时**一条照片都没有**（`StreamOutcome::Fail` 这一可配面也没被任何用例用上） | **已闭合（2026-10-08，同 task 内）**：补 `each_provider_failure_on_a_stream_call_keeps_its_class`（五枚变体逐项），实测红集只有它一枚。**它不在简报列的六条用例内，是本 task 加写的第七条**——理由与来历写在用例文档与 task-9 报告里 |
 
+| **M-9-6** | `rustfmt` | **本仓不是 fmt 干净的、且无配置无 CI**（`p0-followups.md` 已记）。**实测**（`rustfmt --edition 2021 --check`）：`tests/model_call.rs` 在 Task 9 之前已有 **23** 处、之后 **32** 处（新增 9 处，与既有 23 处**同形**——那座文件的 `assert_eq!(class, FailureClass::X, "…")` 单行写法）；`tests/model_call_face.rs` 由 0 变 **1**（Task 9 加宽了那行 `use`）；`src/model_call.rs` 两版都是 **0** | **不整文件重排**：那样会顺手改掉 Task 8 的 22 处（不是本 task 的行），而 fmt 不是本仓的门。**中途一度整文件重排过、随后撤回**，撤回后工作树与提交逐字节相同。**判据（量法本身的一处坑）**：**带 `mod` 声明的文件不能挪出它所在目录去测**——把旧版复制到 `.tmp/` 再跑 `rustfmt --check` 会因解析不到 `mod common;` 而报「0 处」，**那是测具的假象** |
+
 ## 二、据实记为无照片（本轮不补）
 
 | # | 属性 | 现状 |
