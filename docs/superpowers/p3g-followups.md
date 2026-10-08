@@ -49,7 +49,7 @@
 | **M-10-6** ✅ | 交付（简报 Step 2） | **「运行，确认失败」在本 task 上不成立**：本 task 是纯测试、被测实现早在 Task 6–9 落地，四条用例一写出来就是绿的（`39 passed`） | **TDD 的「先红」由变异探针承担**：四条用例**逐条**各有一枚真能红的变异体（`M-A` 红 2／`M-B` 红 2／`M-C` 红 2／`M-D` 红 7），另有一枚隔离版。变异体写法、命令与红集见 task-10 报告 §4 |
 | **M-10-7** | Task 10 的交付与 M-9-7 的关系 | **`call_stream` 的截止仍零覆盖**：本 task 的用例 4 走了 `call_stream` 的失败路径，但**仍传 `None` 截止** | **M-9-7 状态不变**，据实记在此免得「`model_call` 目标 39 条」这个数字被读成「流式那一侧都盖到了」 |
 
-**门读数（自证覆盖，2026-10-09，跑在交付树 tip `ba84cda` 上）**：`cargo clean -p continuum-runtime` 后
+**门读数（自证覆盖，2026-10-09，跑在 `ba84cda` 提交的树上；此后只再改过台账这一份 `.md`，`.rs` 未动）**：`cargo clean -p continuum-runtime` 后
 `cargo test --workspace --no-fail-fast` ⇒ `Compiling` 2 行、`Running` **97** 行、
 `test result:` **114** 行（＝97 目标 ＋ **17** Doc-tests），通过 **735**、失败 0、**warning 0**。
 **「0 warning」这条读数有效**：先 `cargo clean -p continuum-runtime`（那 2 行 `Compiling` 即这次重建），
