@@ -1154,6 +1154,21 @@ git commit -m "feat(runtime): 发起模型调用与截止"
 **Files:**
 - Modify: `crates/continuum-runtime/src/model_call.rs`
 - Modify: `crates/continuum-runtime/tests/model_call.rs`
+- Modify: `crates/continuum-runtime/tests/model_call_face.rs`
+  （**订正 2026-10-08，G Task 8 评审发现：本行原缺，而缺了它会静默丢一件事**）
+  > **交回本 task 的一行**：Task 8 那条 `assert_send` 用例今天只断言了**两枚 future**
+  > （`select` 与 `call`）——**`call_stream` 是第三枚，它今天还不存在**。
+  > **故 Task 9 要往「同一个 probe 函数」里加一行**，别另起一个。
+  > **交接现在存在于两处，别让它们只活在别处**：该文件头的第四节
+  > （`tests/model_call_face.rs` 的「一条据实记的边界：`call_stream` 今天不在这条用例里」）
+  > 与 `docs/superpowers/p3g-followups.md` 的 **M-8-1**。
+  > **判据**：**跨 task 的交接若只写在被交出去那个文件里，派单时就会丢**——
+  > **派 Task 9 的人的 brief 是按本 task 一节切的，切不到别的文件里去。**
+  > **故本 task 的 `git add` 也要跟着加这个文件**（见本节 Step 末的提交命令）。
+  > **同一族另有一例**，派 Task 11 时要先想清楚：本计划 Task 11 的
+  > `the_path_writes_nothing_to_the_database` 红条件写「在 `call` 里插 `tx.execute(...)`」，
+  > **而交付的 `call` 没有 `Tx`**——**那条变异也只能以改签名表达**（与 Task 8 的
+  > `the_deadline_wraps_one_call_only` 同形：**唯一可观察者是调用侧编译失败，而按纪律那不算红**）。
 
 **Interfaces:**
 - Consumes: Task 8 的 `CallInput`；**既有的** `continuum_core::model::{ModelStream, CallId}`
@@ -1236,7 +1251,8 @@ pub async fn abort(adapter: &Arc<dyn ModelProvider>, stream: &ModelStream)
 
 ```bash
 cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
-git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs
+git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs \
+        crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "feat(runtime): 流式调用与中止入口"
 ```
 
