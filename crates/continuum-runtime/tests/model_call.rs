@@ -3,10 +3,11 @@
 //! 1. **失败面**：分类表与 `ModelCallError` 的照片（设计 §6.1、§11）——Task 1；
 //! 2. **夹具自身的用例**：假模型适配器真的读配置、真的计数（Task 2）；
 //! 3. **候选集的构造（同步段）与可用性快照**——Task 6 ＋ Task 3；
-//! 4. **`select`**：组装请求、调 `rank`、把句柄与排序结果成对带出——Task 7。
+//! 4. **`select`**：组装请求、调 `rank`、把句柄与排序结果成对带出——Task 7；
+//! 5. **`call`**：装配请求、发起一次调用、两侧对钉的截止——Task 8。
 //!
-//! **`call` / `call_stream` / 中止入口的用例由后续 task 追补**（它们今天还不存在，
-//! 故本节第 4 条只到 `select` 为止）。
+//! **`call_stream` / 中止入口的用例由后续 task 追补**（它们今天还不存在，
+//! 故本节第 5 条只到 `call` 为止）。
 //!
 //! **订正（2026-10-08，Task 7）**：本行原写「本文件到本 task 为止只有这两部分：四段流程
 //! （取快照、调排序、`call`、`call_stream`）的用例由后续 task 追补」——**那句在 Task 3／6
@@ -15,8 +16,10 @@
 
 mod common;
 
-use common::{descriptor, Answer, FakeModel};
-use continuum_core::model::{CallId, InvokeRequest, Message, ModelId, ProviderHealth, Role};
+use common::{descriptor, Answer, FakeModel, InvokeOutcome};
+use continuum_core::model::{
+    CallId, InvokeRequest, InvokeResponse, Message, ModelId, ProviderHealth, Role, Usage,
+};
 use continuum_core::ProviderError;
 use continuum_graph::failure::FailureClass;
 use continuum_graph::p1_graph_migrations;
@@ -29,12 +32,14 @@ use continuum_persist::{builtin_migrations, Db, PersistError, Tx, Value};
 use continuum_provider::model::ModelProvider;
 use continuum_provider::ProviderRegistry;
 use continuum_runtime::model_call::{
-    classify, into_call_error, plan_candidates, select, snapshot, Candidate, RouteInput,
+    call, classify, into_call_error, plan_candidates, select, snapshot, CallInput, CallPlan,
+    Candidate, RouteInput,
 };
 use continuum_runtime::ModelCallError;
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 /// `ProviderError` 的五个变体**逐项**各得一个类别（设计 §6.1 的表）。
 ///
@@ -1459,4 +1464,407 @@ fn a_request() -> InvokeRequest {
         }],
         max_tokens: Some(16),
     }
+}
+
+// ===== Task 8：`call`——装配请求、发起一次调用、截止的两侧 =====
+
+/// 播下若干条可路由的候选、各配一个**自己的**假适配器，选一次，把 `CallPlan` 与
+/// 「id → 那枚 `FakeModel`」的句柄表一起交回。
+///
+/// **`call` 的两个入参直接从 `plan.selected()` 取**（候选与它自己的句柄是同一次配好的，
+/// 设计 §3.1 第 1、6 条），而**观测端**（适配器收到了什么、被调了几次）在那枚 `FakeModel`
+/// 上，故句柄表要一起带出来。
+///
+/// **`TempDir` 与 `Db` 不返回**：规划完就不再需要它们——`select` 不读库（设计 §3.4），
+/// 而 `CallPlan` 不持有任何来自库的借用。**这不是遗漏**：它们在本函数返回前就 drop 干净了。
+///
+/// **一条 id 一个适配器**（不是共用一个）：句柄在两条候选之间共用时，
+/// 「配错了哪一条」在那一对上不可观察（等价变异体）。
+async fn a_plan_over(
+    adapters: Vec<(&str, FakeModel)>,
+    // `select` 收的就是这个形态（它为什么带 `Send + Sync`，写在那条签名的文档里）；
+    // 这里照抄，**不擦成 `&dyn RankingPolicy`**——擦掉的话本函数就调不动 `select` 了。
+    policy: &(dyn RankingPolicy + Send + Sync),
+) -> (CallPlan, Vec<(String, Arc<FakeModel>)>) {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    let mut handles = Vec::new();
+    for (id, adapter) in adapters {
+        register_with_state(&tx, id, LifecycleState::Active);
+        insert_profile(&tx, id);
+        let handle = Arc::new(adapter);
+        serve(&mut registry, &[id], Arc::clone(&handle));
+        handles.push((id.to_owned(), handle));
+    }
+
+    let candidates = plan_candidates(&tx, &registry).expect("播下的每一条都该是可路由的候选");
+    drop(tx);
+    let plan = select(candidates, a_route_input(no_constraints()), policy)
+        .await
+        .expect("候选集非空，该有输出");
+    (plan, handles)
+}
+
+/// 从句柄表里按 id 取那枚 `FakeModel`（**夹具的**那一枚，不是从被测实现里读回来的）。
+fn handle_of(handles: &[(String, Arc<FakeModel>)], id: &str) -> Arc<FakeModel> {
+    handles
+        .iter()
+        .find(|(known, _)| known == id)
+        .map(|(_, handle)| Arc::clone(handle))
+        .unwrap_or_else(|| panic!("夹具里没有 {id} 这一条"))
+}
+
+/// 一枚最小的对话载荷，供 `CallInput` 用。
+fn a_dialog() -> Vec<Message> {
+    vec![Message {
+        role: Role::User,
+        content: "ping".into(),
+    }]
+}
+
+/// 适配器回的那一枚响应。`ReplyAfter` 要**按值**收一枚，故用例自己给，
+/// 不从夹具的默认态里抠（`FakeModel` 的默认响应是它自己的私有字段）。
+fn a_reply() -> InvokeResponse {
+    InvokeResponse {
+        model: ModelId::new("fake-1"),
+        content: "pong".into(),
+        usage: Usage {
+            input_tokens: 1,
+            output_tokens: 1,
+        },
+    }
+}
+
+/// 一个 `invoke` 立刻返这一枚错误的适配器 → `call` 交回的那枚 `Err`（`Ok` 即 panic）。
+///
+/// **`panic!` 那一支不是装饰**：`ModelCallError` 不派生 `PartialEq`，
+/// 故四臂的断言只能是 `match` + `panic!(other)`——若把 `Ok` 折进「随便返回一枚」，
+/// 一个恒返 `Err` 的实现会全绿。
+async fn a_call_failing_with(error: ProviderError) -> ModelCallError {
+    let (plan, _handles) = a_plan_over(
+        vec![("m-fail", FakeModel::new().with_invoke(InvokeOutcome::Fail(error)))],
+        &RecordingPolicy::new(),
+    )
+    .await;
+    let messages = a_dialog();
+    let (candidate, adapter) = plan.selected();
+    match call(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    {
+        Ok(reply) => panic!("适配器返错，call 该回 Err，却拿到 {reply:?}"),
+        Err(e) => e,
+    }
+}
+
+/// 适配器收到的 `model` **正是该候选自己的 id**（设计 §2.2、§3.1 第 5 条）；
+/// `messages` 与 `max_tokens` 逐项相符。
+///
+/// # 为什么这条同时是「`call` 收 `&ExecutionCandidate` 而不收 `ModelId`」的正面照片
+///
+/// **id 只有一处来源——候选自己。** 本用例用 [`ReversingPolicy`] 让被选中的那条
+/// （`m-c`）**不是输入次序里的第一条**，故「取第一条候选的 id」「取一个固定字面量」
+/// 这两枚变异体都落得到红。
+///
+/// **`messages` / `max_tokens` 只能来自 `CallInput`**：`ExecutionCandidate` 与
+/// `Candidate` 都不带它们，故这三条断言一起把「请求是照 `CallInput` 装出来的」钉住。
+///
+/// **红的条件（档位：取反）**：把 `model` 取自别处（固定字面量、或输入次序的第一条）
+/// → 第一条断言红。
+#[tokio::test]
+async fn a_successful_call_hands_the_candidate_s_model_id_to_the_adapter() {
+    let (plan, handles) = a_plan_over(
+        vec![
+            ("m-a", FakeModel::new()),
+            ("m-b", FakeModel::new()),
+            ("m-c", FakeModel::new()),
+        ],
+        &ReversingPolicy,
+    )
+    .await;
+
+    let (candidate, adapter) = plan.selected();
+    assert_eq!(
+        candidate.model().as_str(),
+        "m-c",
+        "反序策略下被选中的该是 m-c——它同时是输入次序里的第三条，\
+         故「取第一条候选」那种实现会在这里露馅"
+    );
+    let observed = handle_of(&handles, "m-c");
+
+    let messages = a_dialog();
+    let reply = call(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: Some(37u32),
+        },
+        None,
+    )
+    .await
+    .expect("适配器配的是默认成功态，该回 Ok");
+
+    let received = observed.invoke_requests();
+    assert_eq!(received.len(), 1, "该恰好调了适配器一次");
+    let request = &received[0];
+    assert_eq!(
+        request.model,
+        *candidate.model(),
+        "适配器收到的 model 该是候选自己的 id"
+    );
+    assert_eq!(
+        request.messages, messages,
+        "messages 该逐项相符（原样搬运：不重排、不改写）"
+    );
+    assert_eq!(
+        request.max_tokens,
+        Some(37u32),
+        "max_tokens 该是 CallInput 给的那一枚"
+    );
+
+    // 适配器的响应原样交回（不吞、不替换）。
+    assert_eq!(reply.content, "pong", "适配器的响应该原样交回");
+}
+
+/// 四枚失败变体**各自的两半**：`class` 是哪一枚、`source` 仍是给进去的那一枚。
+///
+/// **四臂各写一次、不抽代表**：`into_call_error` 的类别取自 [`classify`] 的手写 `match`，
+/// 每个臂能各自漂移——一条表驱动的循环会把「某一臂被改错」藏在别的臂后面
+/// （与 `each_provider_error_variant_maps_to_its_class` 同一条判据）。
+///
+/// **每条只断它自己那一臂**：`ModelCallError` 不派生 `PartialEq`，故用 `match` + `panic!`；
+/// 而错臂落到 `panic!` 而不是「断言失败」，正是本用例能区分四臂的原因。
+///
+/// **红的条件（档位：取反）**：把某一臂的 `class` 写反（`Protocol → Transient`）
+/// → **只有那一条红**（另三臂照绿）。
+#[tokio::test]
+async fn each_provider_failure_keeps_its_class_and_its_source() {
+    // 一、Transport → Transient。
+    match a_call_failing_with(ProviderError::Transport("连接被重置".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Transient, "Transport 的类别该是 Transient");
+            assert_eq!(
+                source,
+                ProviderError::Transport("连接被重置".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Transport 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 二、Unavailable → Transient。
+    match a_call_failing_with(ProviderError::Unavailable("上游 503".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Transient, "Unavailable 的类别该是 Transient");
+            assert_eq!(
+                source,
+                ProviderError::Unavailable("上游 503".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Unavailable 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 三、Protocol → Permanent。
+    match a_call_failing_with(ProviderError::Protocol("响应不合契约".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Permanent, "Protocol 的类别该是 Permanent");
+            assert_eq!(
+                source,
+                ProviderError::Protocol("响应不合契约".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("Protocol 该走 Provider 那一枚，实际 {other:?}"),
+    }
+
+    // 四、UnknownModel → Permanent。
+    match a_call_failing_with(ProviderError::UnknownModel("登记表里的 id 对不上".into())).await {
+        ModelCallError::Provider { class, source } => {
+            assert_eq!(class, FailureClass::Permanent, "UnknownModel 的类别该是 Permanent");
+            assert_eq!(
+                source,
+                ProviderError::UnknownModel("登记表里的 id 对不上".into()),
+                "source 该是给进去的那一枚，逐字回读"
+            );
+        }
+        other => panic!("UnknownModel 该走 Provider 那一枚，实际 {other:?}"),
+    }
+}
+
+/// 适配器报 `Cancelled` → `ModelCallError::Cancelled { source }`，**不是** `Provider`。
+///
+/// **它是「`call` 与 `call_stream` / `abort` 共用 [`into_call_error`]」这条设计要求的
+/// 第一张照片**（设计 §6.1 的落点段）：`call` 这一侧真的走到了那张表，
+/// 而不是自己映射了一遍——一处映射错（把取消记成一次 `Transient` 失败）会在这里红。
+///
+/// **「那一枚没有 `class` 字段」是本条里的编译期照片**（与
+/// `the_error_type_carries_the_provider_error_verbatim` 里同一形态的那一行同源）：
+/// 下面那枚字面量只给 `source`，`Cancelled` 一旦长出 `class` 字段就编不过。
+///
+/// **红的条件（档位：放宽）**：把 `Cancelled` 归进 `Provider { class: Transient, .. }`
+/// → 本条的 `match` 落到 `panic!` 那一支，红。
+#[tokio::test]
+async fn a_cancelled_provider_error_is_not_a_failure() {
+    match a_call_failing_with(ProviderError::Cancelled("调用方发起的取消".into())).await {
+        ModelCallError::Cancelled { source } => assert_eq!(
+            source,
+            ProviderError::Cancelled("调用方发起的取消".into()),
+            "source 该是给进去的那一枚，逐字回读"
+        ),
+        other => panic!("Cancelled 该走 Cancelled 那一枚（它不是失败），实际 {other:?}"),
+    }
+
+    // 编译期：`Cancelled` 上**没有** `class` 字段。
+    let _cancelled_has_no_class_field = ModelCallError::Cancelled {
+        source: ProviderError::Cancelled("调用方发起的取消".into()),
+    };
+}
+
+/// 截止（设计 §3.5）**两侧对钉**：
+///
+/// - **向一（档位：移除）**：`invoke` **永不返回** → 带 `Some(短截止)` 的调用仍返回
+///   `ModelCallError::Deadline { .. }`；
+/// - **向二（档位：收紧）**：同一个适配器改成「**略早于截止返回**」→ **成功**。
+///
+/// **只钉向一时，一个「永远返回 `Deadline`」的实现全绿**——那正是向二要挡的。
+/// 两向在同一条用例里，是为了让红归因到「截止」这**一样**上，而不是「换了一组夹具」。
+///
+/// **`Deadline { elapsed_ms }` 的数值不断言**：设计 §3.1 末段把口径写死为**实测耗时**
+/// （且写明它今天没有消费方），断一个数值就是钉一次巧合——实测耗时在调度抖动下
+/// 不等于截止值。
+///
+/// **向一必须配合 `timeout` 命令跑**：一个去掉 `timeout` 的实现会让这条用例**挂住**
+/// ——那不是干净的红，故由外层的 `timeout` 把它变成一次有界的失败。
+///
+/// **不用 `tokio::time::pause()` / `advance()`**：那两个要 `tokio` 的 `test-util` feature，
+/// 而多开一个 feature 只为让一条用例跑得快不值当；真时间 + 短截止已经够稳
+/// （两向都不依赖真实时钟的精度，只依赖「短截止内不返回」与「短截止内返回」这两件事）。
+/// **这是一处实现选择，不是判据。**
+#[tokio::test]
+async fn a_call_that_never_returns_hits_the_deadline() {
+    // 向一：永不返回 → 截止触发。
+    let (plan, _handles) = a_plan_over(
+        vec![("m-slow", FakeModel::new().with_invoke(InvokeOutcome::Never))],
+        &RecordingPolicy::new(),
+    )
+    .await;
+    let messages = a_dialog();
+    let (candidate, adapter) = plan.selected();
+    let err = call(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        Some(Duration::from_millis(100)),
+    )
+    .await
+    .expect_err("永不返回的调用该以截止回，不该有响应");
+
+    assert!(
+        matches!(err, ModelCallError::Deadline { .. }),
+        "永不返回 + 有截止 → Deadline，得到 {err:?}"
+    );
+
+    // 向二：略早于截止返回 → 成功（钉住截止不会无故触发）。
+    let (plan2, handles2) = a_plan_over(
+        vec![(
+            "m-quick",
+            FakeModel::new().with_invoke(InvokeOutcome::ReplyAfter(
+                Duration::from_millis(20),
+                a_reply(),
+            )),
+        )],
+        &RecordingPolicy::new(),
+    )
+    .await;
+    let messages2 = a_dialog();
+    let (candidate2, adapter2) = plan2.selected();
+    let reply = call(
+        candidate2,
+        adapter2,
+        CallInput {
+            messages: &messages2,
+            max_tokens: None,
+        },
+        Some(Duration::from_millis(500)),
+    )
+    .await
+    .expect("略早于截止返回的调用该成功——这一向挡住「无脑超时」的实现");
+    assert_eq!(reply.content, "pong", "成功那一向该拿到适配器给的响应");
+    assert_eq!(
+        handle_of(&handles2, "m-quick").invoke_calls(),
+        1,
+        "适配器真的被发起过一次（成功来自适配器，不是别处编出来的）"
+    );
+}
+
+/// 同一个 `CallInput` 下两次连续的 `call`，**各带同一个短截止**，两次**各自**都能完成。
+///
+/// **它钉的是「截止不是被消费一次的共享值」**（设计 §3.5 的「截止只包住一次调用」）：
+/// 一次调用把截止用掉之后，第二次不该继承一个已经过期的截止。
+///
+/// **红的条件（档位：取反）**：把 `deadline` 做成一次性的（例如换算成一个共享的
+/// 剩余时长、第一次调用之后第二次恒超时）→ 第二次红。
+#[tokio::test]
+async fn the_deadline_wraps_one_call_only() {
+    let (plan, handles) = a_plan_over(
+        vec![(
+            "m-twice",
+            FakeModel::new().with_invoke(InvokeOutcome::ReplyAfter(
+                Duration::from_millis(10),
+                a_reply(),
+            )),
+        )],
+        &RecordingPolicy::new(),
+    )
+    .await;
+    let messages = a_dialog();
+    let (candidate, adapter) = plan.selected();
+
+    // 两次各构一枚 `CallInput`：`CallInput` 不派生 `Copy`，而**要钉的正是「两次的截止
+    // 一样、且各自生效」**——载荷逐字相同，差别只在「这是第二次调用」。
+    let first = call(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        Some(Duration::from_millis(500)),
+    )
+    .await;
+    let second = call(
+        candidate,
+        adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        Some(Duration::from_millis(500)),
+    )
+    .await;
+
+    assert!(first.is_ok(), "第一次调用该在截止内完成，得到 {:?}", first.err());
+    assert!(
+        second.is_ok(),
+        "第二次调用该在**同一个**截止内完成（截止不是被第一次用掉的共享值），得到 {:?}",
+        second.err()
+    );
+    assert_eq!(
+        handle_of(&handles, "m-twice").invoke_calls(),
+        2,
+        "两次调用该各发起一次（不是被折成一次）"
+    );
 }
