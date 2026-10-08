@@ -2498,7 +2498,9 @@ async fn the_path_does_not_ask_for_usage() {
 /// 故本条的红取上面那枚可写邻形（日志 `M-B-strong`）。
 ///
 /// **本条跑 ② 这一半是可写红的来源**：只跑 ① 时，上面那枚邻形**只红共用适配器那一条**，
-/// 本条的计数断言**一个能写出来的红都没有**（实测：本用例在 `M-B` 下红，正因为 ② 也跑了）。
+/// 本条的计数断言**一个能写出来的红都没有**——**实测（2026-10-09，隔离版）**：把 ② 那一段
+/// 关掉（`if false`）后再跑 `M-B`，红集**只剩共用适配器那一条**，**本用例 `ok`**
+/// （日志 `M-B-iso-sync-only`，`test result: FAILED. 38 passed; 1 failed`）。
 #[tokio::test]
 async fn the_path_does_not_ask_the_adapter_what_models_it_serves() {
     let (_dir, db) = a_model_db();
