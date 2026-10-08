@@ -112,7 +112,9 @@
 //! # 六、本守卫的射程边界：设计 §1.3 说的是「（及其测试）」，本文件只读源码一份
 //!
 //! 设计 §1.3 的原话是「`crates/continuum-runtime/src/model_call.rs`（及其测试）的源码文本里」。
-//! **本文件只读 `model_call.rs` 这一份**，理由两条：① 本文件的字面量**就是**那几枚拼法
+//! **本节这三条判定只读 `model_call.rs` 这一份**（**订正 2026-10-09**：原写「本文件只读
+//! `model_call.rs` 这一份」——第八节那一族按「`src/` 里只有一处」的射程**走整个 `src/` 目录**，
+//! 故那句话在文件一层已不成立，收窄到本节），理由两条：① 本文件的字面量**就是**那几枚拼法
 //! （三张清单与探针语料），把本文件算进语料就是**拿清单查清单**——它必红，
 //! 而必红的守卫与恒绿的守卫一样读不出信息（这正是「正控制不得自证」要挡的形状）；
 //! ② 派单把语料划在 `model_call.rs` 一份上（Task 4 的 Interfaces：只读该文件）。
@@ -140,6 +142,15 @@
 //! （本 task 的评审实测过这一形状：把 [`NO_POWER_NAMES`] 的一枚拼错，
 //! 全量门下红集为空、退出码 0）。**每一份语料都独立写出**，不从对应的清单里取
 //! ——从清单里取会恒真（清单漏一枚，语料也漏一枚，漏枚这件事永远拍不到）。
+//!
+//! **八、转换点唯一**那一族不在本节，它的判据、被否掉的替代与逃逸面写在
+//! [`CONVERSION_VARIANTS`] 上方那一段节注释里（那里是本文件唯一一处「某一拼法**恰好出现一次**」
+//! 的判据）。它的三条用例是 `the_guard_sees_the_runtime_sources`（**语料的**正控制）、
+//! `the_conversion_probe_pins_the_needles_and_the_code_line_rule`（清单与「代码行」规则的
+//! 独立照片）、`the_conversion_point_is_the_only_one_in_the_crate`（判定本身）。
+//! **它与上面三节读的语料不同**：上面三节只读 `src/model_call.rs` 一份（第六节的射程边界），
+//! 而它按「`src/` 里只有一处」这句话的射程**走整个 `src/` 目录**——故另有一份自己的正控制，
+//! 不共用 `the_guard_sees_the_module`。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -963,5 +974,398 @@ fn the_module_touches_neither_capability_nor_effects_nor_credentials() {
         "零能力／效应／凭据引用（设计 §2.2 第一条）",
         "G 一旦引用了这三者的任何东西，它就有了「可越的权」这个问题的物质基础；\
          本判据把它从一句话变成一条会红的用例。",
+    );
+}
+
+// ===== 八、M-9-4：转换点**唯一**（`into_call_error` 是本 crate 唯一的 `ProviderError` → `ModelCallError` 映射点）
+//
+// 上面三条是「某些拼法**不出现**」；这一条是另一族判据——「某一拼法**恰好出现一次**」。
+// 判据的原话（设计 §6.1 的落点段与 `src/model_call.rs` 的 `into_call_error` 文档）：
+// **`call` / `call_stream` / `abort` 三处共用 `into_call_error`，各自不再自己映射一遍。**
+//
+// ## 为什么行为照片钉不住这句话
+//
+// 三处**各有一条行为照片**（Task 8 两条、Task 9 一条补齐），但它们各自只覆盖**走到的那一格**：
+// 「经 `into_call_error` 得到的类别对不对」。**一个在 `abort` 里另写一遍 `match` 的实现，
+// 只要那一遍抄对了，行为照片照样全绿**——行为面分不出「一处映射」与「三处各映射一遍、
+// 三份恰好一致」。故这一半只能取**源码文本**判据（这正是 M-9-4 记的那条缺口）。
+//
+// ## 判据（实测 2026-10-09，**不是照抄台账**）
+//
+// 台账 M-9-4 写「`ModelCallError::Provider` 在本 crate 的 `src/` 里只有一处构造点」。
+// 本轮**自己在全 `src/` 上实测**：11 份 `.rs` 里，
+//
+// | 拼法 | 代码行上的命中 | 注释里的命中 |
+// |---|---|---|
+// | `ModelCallError::Provider` | **1**（`src/model_call.rs`，`into_call_error` 的 `Some(class)` 那一臂） | 2（同文件的两处 `///`：写「与 `[call]` 那一侧逐字同形」与「构造点只有一处」的那两句） |
+// | `ModelCallError::Cancelled` | **1**（同函数 `None` 那一臂） | 0 |
+// | `into_call_error` | **6**（5 处 `map_err(into_call_error)` ＋ 1 处 `pub fn into_call_error` 定义） | 3（都是 `///`） |
+//
+// 台账那句话**今天成立**——而它是在 Task 8 写的，Task 9 之后代码动过，故本轮重新取了一遍读数。
+//
+// ## 「代码行」的定义，与**被否掉的替代**
+//
+// 命中取在**行首不是 `//`** 的行上（行首只跳空白）。**不用剥注释的扫描器**：
+// 手写词法（行注释 / 块注释（可嵌套）/ 字符串 / 字符字面量 / 生字符串 / 生命周期）**写错时会
+// 多吞代码** ⇒ 一处真构造点被吞掉 ⇒ 守卫**静默变窄**（fail-open）——而本仓在这类静默变窄上
+// 反复付过代价（E 的 Task 3 为此废过两稿；本文件的评审实测过一枚拼错的 needle 让判定
+// 红集为空、退出码 0）。**行首规则的失效方向恰好相反：只会多报，不会漏报。**
+//
+// **为何不会漏报**：一个真构造点必须写在**代码**里，而代码行的行首不可能是 `//`
+// ——`//` 开头的行整行是注释，里面的拼法不是构造点。故这条规则对「第二处构造点」**没有逃逸面**
+// （除下面第四节列的那几条同族逃逸：别名、宏、`include!`）。
+//
+// **据实记它的紧侧**（会**假红**的三种写法）：块注释（`/* … */`，行首不是 `//`）、
+// 行尾注释（`let x = 1; // … ModelCallError::Provider …`）、以及字符串字面量里的拼法，
+// **都会被算进来**。三种今天在 `src/` 里一处都没有（上表实测）；将来若出现，处置是
+// **把那句话挪到 `///` 行上**（`///` 在行首，被排除），**不是把这条规则改宽**。
+//
+// **逃逸面（下界，非穷尽）**：与文件头第四节同族——`use ModelCallError::Provider as P;` 之后写
+// `P { … }`、宏展开、`include!` 拉进来的代码，本判据都**不报**。要钉上界得解析源码（`syn`），
+// 本阶段不做。
+//
+// ## 语料与三件一起断
+//
+// 语料是 `crates/continuum-runtime/src/` 下**全部** `.rs`（**走目录、不写死清单**：
+// 写死清单会让「新加一份 src 文件」静默逃出射程）。读不动 / 空目录 / 空文件**一律直接炸**
+// （照 `read_module` 的处置：静默跳过等于把射程悄悄缩小，而缩小之后它仍然是绿的）。
+// [`CONVERSION_VARIANTS`] 这张两枚的清单由 [`CONVERSION_PROBE_LINES`] 那份**独立写出**的语料
+// 钉住，**三件一起断**（命中数钉漏、逐枚钉多、位置钉对）＋ 枚数单独断一次
+// （形状与上面三条判定同源；理由见 `every_banned_spelling_is_found_in_an_independently_written_probe`）。
+
+/// 判据的两枚拼法：`into_call_error` 两个分支各自构造的那一个变体。
+///
+/// **枚数单独断一次**（[`CONVERSION_PROBE_LINES`] 只覆盖这两枚，第三枚若加进清单而不加进
+/// 探针语料，三件都拍不到它）：见 `the_conversion_probe_pins_the_needles_and_the_code_line_rule`。
+const CONVERSION_VARIANTS: [&str; 2] = [
+    "ModelCallError::Provider",
+    "ModelCallError::Cancelled",
+];
+
+/// `crates/continuum-runtime/src/` 下全部 `.rs` 的 `(相对路径, 全文)`，**按相对路径排序**。
+///
+/// 三处「读不动就炸」，与 [`read_module`] 同源：① 目录读不动；② 文件读不动 / 不是 UTF-8；
+/// ③ **一个 `.rs` 都没找到**（空语料让本节的判定**每一条都恒真**——0 处构造点「恰好一处」是假绿）。
+///
+/// **排序是为了可复现**：`read_dir` 交回的次序不保证，而下面那条判定的位置断言要报文件。
+/// **不写死文件清单**：清单会把新加的 `src/` 文件静默排除在射程之外。
+fn read_runtime_src() -> Vec<(String, String)> {
+    fn collect(dir: &Path, out: &mut Vec<PathBuf>) {
+        let entries = fs::read_dir(dir)
+            .unwrap_or_else(|e| panic!("读不到目录 {}：{e}。**不跳过**——跳过就缩小射程。", dir.display()));
+        for entry in entries {
+            let path = entry
+                .unwrap_or_else(|e| panic!("{}/ 下的目录项读不动：{e}", dir.display()))
+                .path();
+            if path.is_dir() {
+                collect(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut paths = Vec::new();
+    collect(&root, &mut paths);
+    paths.sort();
+    assert!(
+        !paths.is_empty(),
+        "{} 下一个 `.rs` 都没找到。**空语料让本节的判定每一条都恒真**，故这里先红。",
+        root.display()
+    );
+
+    paths
+        .into_iter()
+        .map(|path| {
+            let rel = path
+                .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+                .expect("语料是在 CARGO_MANIFEST_DIR 之下走出来的")
+                .to_string_lossy()
+                .into_owned();
+            let bytes = fs::read(&path).unwrap_or_else(|e| {
+                panic!("读不到源文件 {}：{e}。**不跳过**——读不到语料时下面的判定恒真。", path.display())
+            });
+            let text = String::from_utf8(bytes).unwrap_or_else(|e| {
+                panic!(
+                    "源文件 {} 不是 UTF-8（第 {} 个字节起非法）。**不跳过**——不跳过才谈得上「读全了」。",
+                    path.display(),
+                    e.utf8_error().valid_up_to()
+                )
+            });
+            assert!(
+                !text.is_empty(),
+                "源文件 {} 是空的。空文件让判定对它恒真，故这里先红。",
+                path.display()
+            );
+            (rel, text)
+        })
+        .collect()
+}
+
+/// **代码行**上的词边界命中（`(行号, 拼法)`，按 `(行号, 拼法)` 排序）。
+///
+/// 「代码行」＝**行首（跳过空白）不是 `//`** 的行。定义、判据、被否掉的替代与紧侧都在第八节的
+/// 文件头里——**这里只实现那句话**，不重复论证。
+///
+/// 复用 [`hits`]，故折叠空白与词边界那一层与上面三条判定**同一条路径**：
+/// `ModelCallError::Provider` 不会认领 `ModelCallError::ProviderFactory`（右边是标识符字符）。
+fn code_line_hits(source: &str, needles: &[&'static str]) -> Vec<(usize, &'static str)> {
+    let lines: Vec<&str> = source.lines().collect();
+    hits(source, needles)
+        .into_iter()
+        .filter(|(line, _)| {
+            let text = lines.get(line - 1).copied().unwrap_or_default();
+            !text.trim_start().starts_with("//")
+        })
+        .collect()
+}
+
+/// [`CONVERSION_VARIANTS`] 的**独立探针语料**——**拼法照设计 §6.1 的判据另写一遍，
+/// 不是从清单里取**（从清单里取会恒真：清单漏一枚，语料也漏一枚）。
+///
+/// 十六行，逐行的用途与**本判据在该行上的实际行为**：
+///
+/// | 行 | 内容 | 期望 |
+/// |---|---|---|
+/// | 1 | 说明行（`//` 开头） | — |
+/// | 2 | `fn into_call_error(…)` 定义 | 命中 `into_call_error` |
+/// | 3 | `match classify(&e) {` | — |
+/// | 4 | `Some(class) => ModelCallError::Provider { class, source: e },` | 命中 `ModelCallError::Provider` |
+/// | 5 | `None => ModelCallError::Cancelled { source: e },` | 命中 `ModelCallError::Cancelled` |
+/// | 6–7 | 两个收尾花括号 | — |
+/// | 8 | **`///` 行**里的 `ModelCallError::Provider` | **零命中**（行首是 `//`） |
+/// | 9 | **`//` 行**里的 `ModelCallError::Cancelled` | **零命中**（同上） |
+/// | 10 | **块注释**里的 `ModelCallError::Provider` | **命中**（行首是 `/*`，不是 `//`）——紧侧 |
+/// | 11 | 字符串里的 `http://x` | 零命中（那里面没有本节的拼法） |
+/// | 12 | **生字符串**里的 `ModelCallError::Cancelled` | **命中**（行首是 `let`）——紧侧 |
+/// | 13 | `let c = 'x'; let l: &'static str = "ok";` | 零命中（**生命周期不是字符字面量**，这一行不为下面几行挖坑） |
+/// | 14 | **行尾注释**里的 `ModelCallError::Provider` | **命中**（行首是 `let`）——紧侧 |
+/// | 15–16 | 两处 `map_err(into_call_error)` | 各命中一次 |
+///
+/// 三行「紧侧」是**刻意留在语料里的**：它们把「本判据会多报」这件事拍成照片，
+/// 于是将来真出现一次假红时，**读的人查得到原因**（而不是去改那条规则）。
+const CONVERSION_PROBE_LINES: [&str; 16] = [
+    "// 探针语料：转换点判据的拼法独立写出，不从判定清单里取",
+    "fn into_call_error(e: ProviderError) -> ModelCallError {",
+    "    match classify(&e) {",
+    "        Some(class) => ModelCallError::Provider { class, source: e },",
+    "        None => ModelCallError::Cancelled { source: e },",
+    "    }",
+    "}",
+    "/// 文档注释里的 ModelCallError::Provider 不该被算",
+    "// 行注释里的 ModelCallError::Cancelled 不该被算",
+    "/* 块注释里的 ModelCallError::Provider 会被算——本判据的紧侧 */",
+    "let u = \"http://x\"; let _ = 1;",
+    "let raw = r#\"ModelCallError::Cancelled 在生字符串里\"#;",
+    "let c = 'x'; let l: &'static str = \"ok\";",
+    "let trailing = 1; // 行尾注释里的 ModelCallError::Provider 也会被算——紧侧",
+    "fn caller(a: &A) { a.invoke(r).await.map_err(into_call_error) }",
+    "fn caller2(a: &A) { a.stream(r).await.map_err(into_call_error) }",
+];
+
+/// 转换点探针语料的全文（每行以 `\n` 收尾，故第 n 行的行号就是 n）。
+fn conversion_probe() -> String {
+    let mut text = CONVERSION_PROBE_LINES.join("\n");
+    text.push('\n');
+    text
+}
+
+/// **新判据的正控制：先钉「读到的是这棵树的 `src/`」，再看结论。**
+///
+/// [`read_runtime_src`] 自己会因「空目录 / 空文件 / 读不动」而炸，但**炸不了的那一侧**是
+/// 「读到了一堆别的东西」：数目够、每份都非空，却不是你以为是的那棵树。故这里另断三件：
+/// **份数下界**、**被测的那一份在列表里**、**它的文本里认得出那个函数**。
+///
+/// 三件都不与 [`CONVERSION_VARIANTS`] 有关（**不用清单自证清单**）：份数是走目录走出来的、
+/// 文件名与函数签名是照源码写的。
+#[test]
+fn the_guard_sees_the_runtime_sources() {
+    let sources = read_runtime_src();
+    let names: Vec<&str> = sources.iter().map(|(rel, _)| rel.as_str()).collect();
+
+    assert!(
+        sources.len() >= 11,
+        "`src/` 下读到 {} 份 `.rs`（2026-10-09 实测为 11 份）：{names:?}。\
+         **一份都读不到时下面的判定恒真**，故这条先红。",
+        sources.len()
+    );
+    let model_call = sources
+        .iter()
+        .find(|(rel, _)| rel.ends_with("src/model_call.rs"))
+        .unwrap_or_else(|| panic!("语料里没有 `src/model_call.rs`：{names:?}"));
+    assert!(
+        model_call.1.contains("pub fn into_call_error"),
+        "读到了 {} 份文件，但 `src/model_call.rs` 里找不到 `pub fn into_call_error`——读到的不是这棵树。",
+        sources.len()
+    );
+    assert!(
+        model_call.1.contains("ModelCallError::Provider"),
+        "语料里连被测的那一枚拼法都没有：这一条与它下面那条判定都会恒绿。"
+    );
+}
+
+/// **M-9-4 的判定**：`into_call_error` 是本 crate **唯一**的转换点。
+///
+/// 三件一起断，缺哪一件都留着一种漏法（形状与上面三条判定同源）：
+/// **命中数**（钉「多了一处」）、**逐枚**（钉是哪一枚多了/少了）、**位置报对**（钉报得出文件）。
+/// 另断一次 [`CONVERSION_VARIANTS`] 的枚数与 `into_call_error` 的出现次数
+/// （后者钉「三处真的都走它」：一处改成自己映射而不构造 `Provider`／`Cancelled` 时，
+/// `into_call_error` 的次数会掉——那是这句话的另一半）。
+///
+/// **位置按「文件 + 拼法」断，不钉行号**：`src/` 的行号随上方任何一次编辑漂移，
+/// 而漂移会让这条**假红**（本仓点过名的形状：`c8`/M-8-5）。行号报对那一件由探针语料承担
+/// （那份行号是测试内的字符串，恒稳定）。
+#[test]
+fn the_conversion_point_is_the_only_one_in_the_crate() {
+    let sources = read_runtime_src();
+
+    let mut found: Vec<(String, &'static str)> = Vec::new();
+    let mut converter_hits = 0usize;
+    for (rel, text) in &sources {
+        for (_, needle) in code_line_hits(text, &CONVERSION_VARIANTS) {
+            found.push((rel.clone(), needle));
+        }
+        converter_hits += code_line_hits(text, &["into_call_error"]).len();
+    }
+
+    // 一、命中数（钉「多了一处映射点」）。
+    assert_eq!(
+        found.len(),
+        2,
+        "`src/` 的**代码行**上该恰好有两处变体构造点（`into_call_error` 的两个臂）。\
+         实际 {} 处：{found:?}。**多一处就是三处里有一处自己映射了一遍**——\
+         而行为照片分不出「一处映射」与「三处各映射一遍、三份恰好一致」（第八节）。",
+        found.len()
+    );
+
+    // 二、逐枚，不抽代表。
+    let count_of = |name: &str| found.iter().filter(|(_, n)| *n == name).count();
+    assert_eq!(
+        count_of("ModelCallError::Provider"),
+        1,
+        "`ModelCallError::Provider` 的构造点该恰好一处（`Some(class)` 那一臂）：{found:?}"
+    );
+    assert_eq!(
+        count_of("ModelCallError::Cancelled"),
+        1,
+        "`ModelCallError::Cancelled` 的构造点该恰好一处（`None` 那一臂）：{found:?}"
+    );
+
+    // 三、枚数单独断：第三枚若加进清单而不加进探针语料，上面三件都拍不到它。
+    assert_eq!(
+        CONVERSION_VARIANTS.len(),
+        2,
+        "`into_call_error` 只有两个臂，故清单是**两枚**。多出来的一枚若不在探针语料里，\
+         上面的总数与逐枚断言都不会变红——故枚数单独断一次。今天的清单：{CONVERSION_VARIANTS:?}"
+    );
+
+    // 四、另一半：五处调用点 ＋ 一处定义。掉一处就是有一处不再经它。
+    assert_eq!(
+        converter_hits, 6,
+        "`src/` 的**代码行**上该恰好出现 6 次 `into_call_error`：`call` 两处（`Some`/`None` 两个臂）\
+         ＋ `call_stream` 两处 ＋ `abort` 一处 ＋ 定义一处。实际 {converter_hits} 次。\
+         **少一次就是三处里有一处不再经它**（而它若自己构造了 `Provider`／`Cancelled`，\
+         上面那条会先红；若它自己构造了别的变体，则只有本条报）。"
+    );
+
+    // 五、位置报对：报得出是哪一份文件（**不钉行号**，理由见本条文档）。
+    let where_: Vec<(&str, &str)> = found
+        .iter()
+        .map(|(rel, needle)| (rel.as_str(), *needle))
+        .collect();
+    assert_eq!(
+        where_,
+        vec![
+            ("src/model_call.rs", "ModelCallError::Provider"),
+            ("src/model_call.rs", "ModelCallError::Cancelled"),
+        ],
+        "两处构造点该都在 `src/model_call.rs`（同一个函数里）。实际 {where_:?}"
+    );
+}
+
+/// **[`CONVERSION_VARIANTS`] 自身的照片**：清单里一枚拼错或漏写**不会让上面那条判定变红**，
+/// 只会让它**静默变窄**——此后那个拼法随便写，判定全绿。
+///
+/// 与上面三张清单**同法**：语料**独立写出**（不从清单里取），**三件一起断**
+/// （命中数钉漏、逐枚钉多或错、位置钉对）＋**枚数单独断一次**。
+///
+/// **它另拍一件上面三张清单没有的事**：「代码行」这条规则**自身的效力与紧侧**。
+/// 语料第 8、9 行（`///` 与 `//` 开头的行）里的拼法**必须零命中**——若规则改成
+/// 「不区分注释」，这两行会先红；第 10、12、14 行（块注释 / 生字符串 / 行尾注释）里的拼法
+/// **必须命中**——它们是本判据的紧侧，若哪天换成剥注释的扫描器，这三行会红，
+/// 于是「射程变了」这件事有照片（第八节写了为什么不做那个扫描器）。
+#[test]
+fn the_conversion_probe_pins_the_needles_and_the_code_line_rule() {
+    let probe = conversion_probe();
+    let found = code_line_hits(&probe, &CONVERSION_VARIANTS);
+
+    // 一、命中总数（钉清单**漏**枚）。
+    assert_eq!(
+        found.len(),
+        5,
+        "独立写出来的探针语料里应有 5 处代码行命中：`ModelCallError::Provider` 三处\
+         （第 4 行真构造 ＋ 第 10、14 行两个紧侧）、`ModelCallError::Cancelled` 两处\
+         （第 5 行真构造 ＋ 第 12 行那个紧侧）。实际 {} 处：{found:?}。\
+         **少一处就是清单里漏了一枚（或某枚拼错了）**。",
+        found.len()
+    );
+
+    // 二、逐枚。每枚各写一次，不抽代表。
+    assert_eq!(
+        code_line_hits(&probe, &["ModelCallError::Provider"]).len(),
+        3,
+        "`ModelCallError::Provider` 该命中三处：第 4 行（真构造）、第 10 行（块注释，紧侧）、\
+         第 14 行（行尾注释，紧侧）。整表见下面第三件。"
+    );
+    assert_eq!(
+        code_line_hits(&probe, &["ModelCallError::Cancelled"]).len(),
+        2,
+        "`ModelCallError::Cancelled` 该命中两处：第 5 行（真构造）与第 12 行（生字符串，紧侧）"
+    );
+
+    // 枚数：第三枚不在探针语料里，上面三件都拍不到它。
+    assert_eq!(
+        CONVERSION_VARIANTS.len(),
+        2,
+        "`into_call_error` 只有两个臂，故清单是**两枚**。今天的清单：{CONVERSION_VARIANTS:?}"
+    );
+
+    // 三、位置报对（行号 ＋ 拼法的整表；行号是**报得出红在哪一处**的那一件）。
+    assert_eq!(
+        found,
+        vec![
+            (4, "ModelCallError::Provider"),
+            (5, "ModelCallError::Cancelled"),
+            (10, "ModelCallError::Provider"),
+            (12, "ModelCallError::Cancelled"),
+            (14, "ModelCallError::Provider"),
+        ],
+        "行号或拼法对不上：判定红的时候报不出是哪一处。实际 {found:?}"
+    );
+
+    // 四、「代码行」规则本身：`//` 开头的两行**必须**被排除。
+    let excluded: Vec<usize> = vec![8, 9];
+    for line in excluded {
+        let text = CONVERSION_PROBE_LINES[line - 1].trim_start();
+        assert!(
+            text.starts_with("//"),
+            "第 {line} 行本来该是注释行（用来钉「`//` 开头不算」这一条），实际以 {:?} 开头\
+             ——语料被改过了，本用例的第四件也就失去意义。",
+            &text[..text.len().min(8)]
+        );
+    }
+    assert_eq!(
+        hits(&probe, &CONVERSION_VARIANTS).len() - found.len(),
+        2,
+        "语料里第 8、9 行是 `//` 开头，故「不过滤」与「过滤」的命中数该差 2（8、9 各一处）。\
+         差不是 2 说明语料或规则变了。"
+    );
+
+    // 五、`into_call_error` 那一枚也在语料里被钉住（第 2 行的定义 ＋ 第 15、16 行的两处调用）。
+    assert_eq!(
+        code_line_hits(&probe, &["into_call_error"]).len(),
+        3,
+        "探针语料里该有 3 处 `into_call_error`（第 2 行定义 ＋ 第 15、16 行两处调用）"
     );
 }
