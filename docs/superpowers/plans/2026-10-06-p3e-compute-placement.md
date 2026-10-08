@@ -74,10 +74,35 @@
    今天这一条**只有逐字推演的论证、没有照片**（设计无实现体）——**不跑则 `PlacementRules` 的取值
    可以完全不被读而整套用例全绿**。**实测结果写进交付报告**（哪条断言红、日志路径、变异前后 `sha256`）。
 2. **`ALLOWED` 条目与 workspace `members` 必须同批加**（裁定义务 2）。
-   `crates/continuum-runtime/tests/dependency_direction.rs` 有**双向**断言：
-   「`workspace` 成员 ↔ `ALLOWED`」两条各管一个方向（`:249-262`），
-   且逐对断言是 `assert_eq!(appeared, allowed.contains(&other))`（`:276-281`）——
-   **`ALLOWED` 列了而 `Cargo.toml` 没声明的边同样是红**。故 Task 1 的三处
+   `crates/continuum-runtime/tests/dependency_direction.rs` 的
+   `every_crate_depends_only_on_its_allowed_set` 里有**双向**断言：
+   「`workspace` 成员 ↔ `ALLOWED`」两条各管一个方向，
+   且逐对断言是 `assert_eq!(appeared, allowed.contains(&other))`——
+   **`ALLOWED` 列了而 `Cargo.toml` 没声明的边同样是红**。
+   > **行号只是当时读数，会漂**（2026-10-07 收）：本条原写「`:249-262`」与「`:276-281`」，
+   > 那是 **2026-10-06 定稿时**的读数；**2026-10-07 在 p3e 的 worktree 上实读**（HEAD 含 E 的 Task 1）
+   > 三个锚点分别是 **`:267-272`（「未列入 `ALLOWED`」那条断言，信息在 `:270`）**、
+   > **`:273-278`（「表已过期」那条，信息在 `:276`）**、**`:291-296`（逐对双向的 `assert_eq!`）**。
+   > **±15 的完整分解（2026-10-07，E 的 Task 1 评审查出）**：本行第一版只说「差 6 行」，
+   > **那只解释了 15 行总差里的 6 行**——完整分解是三棵树的实测（`git show <c>:<path>` 逐棵数）：
+   >
+   > | 树 | 「未列入 `ALLOWED`」那处 | 「表已过期」那处 | 逐对 `assert_eq!` |
+   > |---|---|---|---|
+   > | `0e0f253`（295 行）——**本计划与设计引的原值取自这棵树** | `253-256` | `259-262` | `276-281` |
+   > | `ce335dd`（304 行）——**+9** | `262-265` | `268-271` | `285` |
+   > | `c871c08`（310 行）——**再 +6** | `267-272` | `273-278` | `291-296` |
+   >
+   > **即：+15 ＝ +9 ＋ +6**。**那 9 行早于 E 的 Task 1**：`0e0f253` → `ce335dd` 中间是
+   > `a0a8a07`（+5）与 `0b83d81`（+4），二者都不是本子项目的提交；**6 行**才是 E 的 Task 1
+   > （`c871c08` 给这个文件加的正是 6 行）。**本计划与设计两处引的原值恰好对得上 `0e0f253` 那棵树**
+   > ——说明定稿时的读数**取自那棵树，而不是取自定稿提交本身**（定稿提交与它之间已经隔了 9 行）。
+   >
+   > **判据（本条是全仓反复处理的那一类）**：**引用一律按名字／内容（函数名、断言原文），
+   > 行号只作当时读数并标注日期**——凡引行号，写的时候就要预着它会漂；
+   > **一般化后的那一条写在 Global Constraints 第 21 条。**
+   > **本计划其余引 `dependency_direction.rs` 行号的地方（Task 1 的两处、Task 7 一处、
+   > 「关于本计划的代码块」一处）同批按此订正。**
+   故 Task 1 的三处
    （`crates/continuum-node/Cargo.toml` 的 `continuum-artifact` 声明／`Cargo.toml` 的 `members` 行／
    `ALLOWED` 条目）**必须落在同一个 commit 里**，且**两侧都要各拍一次红**（Task 1 Step 1、Step 2）。
 3. **`continuum-model-registry/src/router.rs` 的行号一律「以当时工作树为准」，不写死**（裁定义务 3）。
@@ -176,6 +201,12 @@
     **新增依赖会让 `Cargo.lock` 变化，须一并按显式路径提交锁文件**。
     本计划有**三次**清单改动、**三次**都要提交 `Cargo.lock`：`Cargo.toml`（workspace，Task 1）、
     `crates/continuum-node/Cargo.toml` 的 `trybuild`（Task 2）、同一个文件的 `serde_json`（Task 5）。
+    **`Cargo.lock` 也是「临时改动」的受害者，这一点要写进还原护栏**（2026-10-07，E 的 Task 1 报出）：
+    **凡临时改动会牵动 cargo 解析结果的地方**——workspace `members`、任何 `Cargo.toml` 的依赖声明
+    ——**`trap` 要连 `Cargo.lock` 一起还原**。判据：把 `members` 行临时拿掉，cargo 会重解析并把
+    `continuum-node` 的条目从锁文件里抹掉，而纪律 16 的模板只 `cp` 回那**一个源码文件**；
+    **只还原源码时，「还原后逐字节相同」这句只对部分文件成立**。
+    核对的判据是 `sha256sum Cargo.lock` 在动手前后一致（Task 1 Step 2 的注记里给了同一条）。
     **不修改用户目录的权限位**；不在仓库中写入任何凭据。
 20. **范围与设计一致，不多做不少做。** 明确不做的，逐条列出免得被读成漏项：
     不建 `get(&ComputeNodeId)` / `deregister` / `len` / `is_empty`（零消费方）；
@@ -185,6 +216,78 @@
     不建 Temporary Node 的租约（§287 的 `ComputeNode` 没有租约字段）；
     不新增 `AuditKind` 变体（那等于扩 §313 的必录清单，是规范的事）；
     不落库、不取迁移号；不做分布式执行本身（§343 明写 v0.1 可暂不实现）。
+21. **引用 ＝ 文件 ＋ 定位，是断言的一部分**（2026-10-07，E 的 Task 1 评审查出后立）。
+    **行数是全篇最廉价、最容易被查的那一句，恰恰是它错了最伤**：读者一查所指文件就对不上，
+    **于是要么不再信其余数字，要么干脆不查**。
+    故本计划的一切引用一律给**文件 ＋ 定位**（函数名／用例名／断言原文），
+    **行号只作当时读数**，并**标注它是哪一天、在哪一棵树上取的**；
+    **凡引行号，写的时候就要预着它会漂**（Global Constraints 第 2 条的那张三棵树分解表即是实例：
+    同一批锚点在 `0e0f253`／`ce335dd`／`c871c08` 三棵树上分别是三组数，**+15 ＝ +9 ＋ +6**）。
+    **它与「只读完整日志、不用 `tail`」是同族，不是新判据**：那条说的是「**引用一段输出时，
+    截断过的输出不能作它的证据**」，这条说的是「**引用一个位置时，位置与所指必须对得上**」
+    ——**都是「引用与所指必须对得上」**。
+    **一处实测的来历（供后来者对账，2026-10-07）**：复核本计划那三处行号时手上是两份全量日志
+    （**原话照留**：本行初稿写「一份 1442 行、一份 1502 行」），**两份在全部实质数字上一致**
+    （`113` / `678` / `0` / `0`，逐项相同），**故那一次处置只需改引用、不需要重跑**。
+    **按本仓规矩，这两份日志在 `.tmp/` 下、不进库，不得作为任何结论的唯一来历**——
+    写在这里的只是「当时是怎么判的」，判据本身是前面那几句话。
+    **订正（2026-10-07，按下面第 1 条自己重量过一次）**：**那个「1442」是错的，真实是 1441**——
+    `wc -l .tmp/final-full.log` = **1441**（`68253` 字节，`sha256 8d6297f1…`）；
+    另一份是 `wc -l .tmp/full-test.log` = **1502**（`70953` 字节，`sha256 ad7add0f…`）。
+    **错因见第 1 条**：它是本条判据**自己的反例**。
+
+    **四件事并进本条**（2026-10-07，E 的 Task 1 评审自己撞上本条的反例后补）：
+    1. **数「一个文件有多少行」只许用 `wc -l`**（或 `grep -c ''`、`awk 'END{print NR}'`），
+       **不许用任何会引入 ±1 的中间表示**：`len(open(f).read().split('\n'))`、`len(f.readlines())`、
+       编辑器显示的行号都可能与 `wc -l` 差 1。
+       **本条的第一次使用就栽在这里**：评审者用 `split('\n')` 得 1442，而
+       **同一批输出里 `wc -l` 已经写着 1441**——**文件以换行结尾时 `split` 会多出一个尾部空串，
+       恒等于「真行数 ＋ 1」**（我实测确认：`split('\n')` 对上面两份日志分别给出 **1442** 与 **1503**，
+       两份都以换行结尾）。
+    2. **写下任何行数之前，`wc -l` 实测，并把「量的是哪个路径」一起写**；**附 `sha256`／字节数更好**
+       ——**别人据此可自证「是同一份文件还是另一份」**。本次两边正是靠
+       **`sha256` 前缀 ＋ 字节数 ＋ `mtime` 三项对上**，才判定「**同一份文件、我读错了**」，
+       而不是「**量了不同的东西**」——**这两个结论的处置完全不同**（前者改数，后者查路径）。
+    3. **拒收「转抄来的数」是对的，且这一条也管本计划自己**：本轮协调者把评审者的 1442
+       **转述**给实现者让它落笔，**实现者拒收、自己五法实测 1441、并留退路等对方自证**——
+       **它是对的**。判据：**「转抄的数」与「我自己核过的数」在文档里长得一样，
+       但只有后者能追责**。故**本计划里凡引一个实测值（或一句关于世界状态的断言），
+       要么自己核过（文中写「实测」或给出该值的来历），要么标明「据 X、我未复核」**。
+       **本条已有两个实例，一并记在此处**：①**一个数**——协调者转述评审者的「1442 行」，
+       实现者拒收并实测为 1441（见上）；②**一句话**——2026-10-07 协调者**从本计划 Task 2
+       那一行逐字抄了半句「设计 §9 的标签与它的正文相抵」进一份派单**，而设计早已在 `3a7ddad`
+       订正、相抵不再成立，**是转抄让一句过期的话又漂到了下游一份派单里**
+       （该处原文与来历已留在 Task 2 那一条里）。
+       **两个实例的形态不同（一个是数、一个是关于世界状态的断言），但判据是同一条**：
+       **转抄者对它没有追责能力**；**且第②例说明「过期」有两种**——数会漂，**句子也会过期**
+       （句子过期时锚点照样命中，只能当断言重核一遍）。
+       **第三面（2026-10-07 补）：量的时候对、报的时候已经旧了。**
+       **「我自己量的」还分「量对了」与「量的时候对、报的时候已经旧了」**——
+       **判据：数字与落笔之间若还发生过任何一次写，就必须重取。**
+       **这一面从报告里最看不出来，因为那对数互相自洽**：本次的自报是「+49 / −10，现 1582 行」，
+       **1543 ＋ 49 − 10 ＝ 1582 完全自洽**——**自洽性只证明算术没错，证明不了时机没错**。
+       **实例出处 `bcefaf9`（可查）**：真值是 **+51 / −10、1584 行**
+       （`git diff --numstat 8955017 bcefaf9 -- <本文件>` ＝ 51 / 10；
+       `git show 8955017:<本文件> | wc -l` ＝ 1543、`git show bcefaf9:<本文件> | wc -l` ＝ 1584）。
+       **方法没错**：`--stat` 与 `--numstat` 在**同一个提交**上给的是同一个数（已对过）；
+       错在**量完之后又改了一处**（把「三条断言」订正为「两条断言」并补一行）
+       **然后直接报了量之前的那对数**。**那 2 行的逐笔分解不复原**——中间态从未提交、已不可达，
+       **再往下说就是把一个听起来合理的机制写成来历，那正是本条要挡的毛病**。
+       **前两面与第三面的对照**：**第一面＝转抄**（对该数没有追责能力）；
+       **第二面＝方法有偏**（如 `split('\n')` 的 ±1）；**第三面＝时机陈旧**（方法与数都对，
+       只是报的时候已经不是那个数了）。
+       **与「HEAD 一动就通知下游」互指**：那一条是同一件事在**跨 agent** 上的形态
+       （作者还在改、评审者按旧版判），**本条是它在同一个人的「量 → 报」之间的形态**——
+       **两者都是「读数与它被引用时的世界不是同一个」**。
+       **本计划的自查（2026-10-07）**：文中每个 `file:line`
+       （`artifact.rs` 的 `:5`／`:87-105`／`:100`／`:112`／`:170-181`／`:177-178`、
+       `docs/02-工程.md:262`、`main.rs:83-93`、`continuum-operator/src/registry.rs:11`／`:27`、
+       以及 `dependency_direction.rs` 的全部锚点）**都是我这一手实测的**；
+       `## 遗留` 第一节里那组设计行号（`:796`／`:978`／`:983`／`:520`／`:586`／`:705`／`:692`）
+       是**原报告的读数、已标注「不随设计修订重取」**——**它们是来历，不是本计划对今天世界的断言**。
+    4. **与第 2 条那张 ±15 分解表是同一件事的两面**：那是一张**三棵树**的表，每棵树的读数都必须
+       写明**是哪一棵树**（提交号）——**「量的是哪个路径」在版本维度上的形态就是「量的是哪棵树」**，
+       两条互指。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），
 **命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；临时目录取仓库内的
@@ -197,6 +300,24 @@
 
 本项目的既有事实：**手写的计划代码块错误率很高**，且已确立「**代码块是示意，正文的措辞才是约束**」。
 故本计划只给**类型签名、枚举取值与关键判定**，**不给整段可粘贴实现**。
+
+> **示例命令一律不写死代码树（2026-10-07 收）**：**本计划里的每一条示例命令都在「本 worktree
+> 的根目录」运行，绝对路径由派单给出**。故命令块**不写 `cd <某棵树>`**——它们开头是
+> `TMPDIR="$PWD/.tmp"`（`$PWD` 即你所在的那棵树）或直接是命令本身。
+> **旧话照留**：本计划初稿的每一条命令都写成 **`cd /home/DslsDZC/Continuum && …`**
+> （全文 **21 处**：20 处是这个 `&&` 形式，1 处是 Task 5 Step 5 变异模板里单独一行的
+> `cd /home/DslsDZC/Continuum`；2026-10-07 由我逐处实测后改掉）。
+> **两个读数都留在此处**（**数的语料包含本注自身**，故改完之后那个数会变小，只留一个读数就说不清）：
+> **原有 21 处可执行命令形式**（上段的 20 ＋ 1）；**改掉 21 处**；**改完后命令形式剩 0 处**，
+> 而**本注里另有 3 处「提及」**（两处是上面那句旧话引文的两半、一处是说明里的树名）
+> ——**「提及」不是「可执行的命令」，这两个数不是同一个东西**，故要分开写。
+> **为什么要改（这次的实测）**：**同一份计划的两条流（E 与 F）各自需要不同的树，而计划只有一份**
+> ——`/home/DslsDZC/Continuum` 今天在分支 **`p3f`** 上，E 的实现者在它上面跑就会**跑到 F 的树上**。
+> **覆盖只在我派出派单的那几轮有效**；**照抄计划的后来者（Task 6 的实现者、复审者）没有派单**，
+> 会照抄那 21 处里的任意一处（brief 就是从这份计划生成的：它的 `:157/255/265/289` 四处命令
+> 即由此而来）。
+> **推广**：**凡示例命令，都不写死一棵会被并行的另一条流占用的树**——写「在本 worktree 根运行」，
+> 把绝对路径留给派单。
 
 > **报错码的纪律（本计划一律照此写，2026-10-06 收）**：
 > **「预期报错码」必须来自实跑**——`.stderr` 不会替你报错，**码写错了它照样让用例绿**；
@@ -221,7 +342,9 @@
   `Value` 只是 `artifact.rs:5` 的一条 `use`）——**故写这十个字段的夹具必须自己依赖 `serde_json`**，
   见下条的清单要点与 Task 5 的 Step 1。
 - `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 是
-  `&[(&str, &[&str])]`，**逐对双向断言**（`:276-281`）——**声明的边与表必须精确相等**。
+  `&[(&str, &[&str])]`，**逐对双向断言**（`assert_eq!(appeared, allowed.contains(&other))`；
+  **行号是当时读数**：定稿时 `:276-281`，**2026-10-07 实读 `:291-296`**）
+  ——**声明的边与表必须精确相等**。
 
 **新增 crate 的清单要点**（`crates/continuum-node/Cargo.toml`）：
 `version` / `edition` / `rust-version` 三项用 `workspace = true`（照 `crates/continuum-artifact/Cargo.toml`）；
@@ -282,7 +405,8 @@ crates/continuum-node/                 ← 新建 crate（§7.1）
 - Produces: workspace 成员 `continuum-node`；`ALLOWED` 里的 `("continuum-node", &["continuum-artifact"])`
 
 **为什么 `continuum-artifact` 在**本 task**就登记**（而不是等它的第一个使用点）：`ALLOWED` 的断言是
-**逐对双向**的（`assert_eq!(appeared, allowed.contains(&other))`，`:276-281`），
+**逐对双向**的（`assert_eq!(appeared, allowed.contains(&other))`；**行号是当时读数**：
+定稿时 `:276-281`，2026-10-07 实读 `:291-296`），
 故「表里列了、`Cargo.toml` 没声明」与「声明了、表里没列」**同样是红**。
 三者（crate 的 `Cargo.toml`／workspace 的 `members`／`ALLOWED`）分在三个提交里，
 中间态必然红。**「边由用它的那个 task 登记」这条规矩在这里的落点是「谁引入这个 crate，
@@ -298,19 +422,37 @@ crates/continuum-node/                 ← 新建 crate（§7.1）
 **先不动** `dependency_direction.rs`。跑：
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
 ```
 
 预期：`every_crate_depends_only_on_its_allowed_set` 红，信息为
-「workspace 成员 continuum-node 未列入 ALLOWED，它的依赖方向不会被检查」（该断言的原文，`:253-256`）。
+「workspace 成员 continuum-node 未列入 ALLOWED，它的依赖方向不会被检查」。
+**该断言的定位按内容**（函数名 ＋ 上面那句原文）；**行号只是当时读数**：定稿时写 `:253-256`，
+**2026-10-07 实读为 `:267-272`**（`assert!` 在 `:268-271`，**信息在 `:270`**）。
 **这就是这一侧的照片；先记下它，再进 Step 2。**
 
 - [ ] **Step 2: 拍另一侧的红（`ALLOWED` 列了、`members` 里没有）**
 
 把 `members` 里刚加的那一行**临时去掉**，改成在 `ALLOWED` 里加条目，再跑同一条命令。
-预期：红，信息为「ALLOWED 列出的 continuum-node 不是 workspace 成员：表已过期」（`:259-262`）。
+预期：红，信息为「ALLOWED 列出的 continuum-node 不是 workspace 成员：表已过期」。
+**定位同样按内容**；**行号只是当时读数**：定稿时 `:259-262`，**2026-10-07 实读为 `:273-278`**
+（**信息在 `:276`**）。
 **这一侧不是可有可无的对称**：两条断言各管一个方向，只钉一侧时另一侧的静默漏检不会被发现
 （本项目「守卫须两侧都钉」的同一条）。**记下两次红的原文，然后还原到「两边都有」。**
+
+> **一处实现者实测的副作用，必须知道（2026-10-07，E 的 Task 1 报出）**：
+> **把 `members` 行临时去掉时，cargo 会重新解析 workspace，并把已写进 `Cargo.lock` 的
+> `continuum-node` 条目一并抹掉**——而这个文件**不在 `trap` 的还原范围里**
+> （纪律 16 的模板只 `cp` 回被变异的那**一个源码文件**）。
+> **后果**：还原 `Cargo.toml` 之后，`Cargo.lock` 可能仍是「少了 `continuum-node`」的状态，
+> 于是「还原后与变异前逐字节相同」这句话**只对部分文件成立**——**这一步的诚实做法是把
+> `Cargo.lock` 也一起还原，并核对它与动手前相同**（它本来就在 Step 5 的提交路径里，不是新增文件）。
+> **判据（一般化，写进 Global Constraints 第 19 条）**：**凡临时改动会牵动 cargo 解析结果的地方**
+> （workspace `members`、任何 `Cargo.toml` 的依赖声明），**`trap` 要连 `Cargo.lock` 一起还原**。
+> **一处事实要说清、免得被读成否定**：本计划 Step 4 那句「新增一个**空** crate 也会让
+> `Cargo.lock` 变化」**是真的**——它的为真恰恰体现在这里（`members` 在位时，**一条普通的
+> `cargo test` 就会把那一行写回去**，实现者已用定点实验确认）。**这一条是对那句话的补强，
+> 不是否定它。**
 
 - [ ] **Step 3: 加 `ALLOWED` 条目（逐字照设计 §7.3）**
 
@@ -332,17 +474,21 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 - [ ] **Step 4: 运行，确认绿**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction
 TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 ```
 
 预期：两条用例全绿、0 warning。**顺便实测记下**：新增一个**空** crate 也会让 `Cargo.lock` 变化
 （多一个 `[[package]]`），Step 5 要提交它。
+**这句话的因果，2026-10-07 由 E 的 Task 1 补齐**：变的不只是「多一行」——**`members` 的增删会让
+cargo 重解析并重写这个文件**，故**把 `members` 行临时拿掉时，`Cargo.lock` 里那一条会被抹掉**；
+`trap` 若不还原它，「还原后逐字节相同」就只对部分文件成立（详见 Step 2 的注记与
+Global Constraints 第 19 条）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add Cargo.toml Cargo.lock crates/continuum-node/Cargo.toml crates/continuum-node/src/lib.rs \
         crates/continuum-runtime/tests/dependency_direction.rs
 git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员与依赖边"
@@ -384,8 +530,28 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
   （等价变异体），断言会假绿——这正是「变异须真落到实现体」那条纪律在本 task 的落法。
 - `the_id_is_the_registry_key_and_is_ordered`：`ComputeNodeId` 可比较且**大小有意义**：
   `ComputeNodeId::new("a") < ComputeNodeId::new("b")`，且 `new("a") == new("a")`。
-  **红的条件（档位：取反）**：把 `Ord` 派生成按**长度**或反转（如 `b.0.cmp(&a.0)`）→ 红。
-  **它的消费方是 Task 6 的兜底档**（`a.id().cmp(b.id())`），故这条不是提前铺开的 API。
+  **红的条件（档位：取反）**：把序反写（如 `b.0.cmp(&a.0)`）→ 红。
+  **但那一处必须连 `PartialOrd` 一起反写**（2026-10-07，E 的 Task 2 实现者实测；**本行初稿说窄了**）：
+  `<` 走的是 **`PartialOrd::lt`**，而 `#[derive(PartialOrd)]` 与 `#[derive(Ord)]` 是**两个各自生成的
+  独立派生**——**只反写 `Ord`、保留 `derive(PartialOrd)` 时，本用例**两条**断言
+  （`assert!(… < …)` 与 `assert_eq!(…)`，即 `tests/node.rs` 的
+  `the_id_is_the_registry_key_and_is_ordered` 的**头两条断言**）走的分别是
+  `PartialOrd::lt` 与 `PartialEq::eq`，**都不经 `Ord`**，于是「编得过、全绿」**
+  （**等价变异体**：那一版与本版在任何入参上都不给出不同结果，
+  本 task 里没有一处调 `Ord::cmp`）。**故「删掉 `Ord`」或「只反写 `Ord`」都不是真变异体**；
+  真变异体是**同时反写两个派生**（或把两者都删掉、改成按长度比较）。
+  **来历照留**：本行初稿写「把 `Ord` 派生成按**长度**或反转」——**只点名了 `Ord`**，
+  照它做会得到一次**假绿**（这正是「变异须真落到实现体」那条纪律里的等价变异体一档）。
+  **它的消费方是 Task 6 的兜底档**（`a.id().cmp(b.id())`，那处走 `Ord::cmp`），
+  故这条不是提前铺开的 API；**也正因本 task 还没有 `Ord::cmp` 的消费方，只反写 `Ord` 才无迹可寻**。
+  **订正（2026-10-07，E 的 Task 7 复核实测；旧形照留）**：本行初稿在这两枚断言的括注里写的是
+  「实测 `tests/node.rs:88-89`」。**那串号在今天的工作树上不成立**——实测那两条断言在
+  `:123`／`:124`；`:88`／`:89` 落在同一条用例上方的文档注释里。
+  **位移的来历**：Task 2 的修复轮往那段注释里补了内容，两条断言随之后移，
+  `tests/node.rs:85` 自己就记着这次漂移（「那一稿写 `:88`／`:89`，补完本段后那两条断言落到了别处」）。
+  **处置是换引用方式，不是把数字改成新的数字**：改成用例名 ＋「头两条断言」——
+  与设计侧那条「用例名稳定，插行不改变它」同一条判据。
+  **此处只改引用形式，不改任何判据、用例名或断言的期望。**
 - `the_two_node_classes_are_the_two_the_spec_names`（**纯编译期照片**）：`tests/node.rs` 里写一个
   `fn class_label(c: NodeClass) -> &'static str`，函数体是一个覆盖
   `NodeClass::Personal` 与 `NodeClass::Temporary` **两臂、无通配臂**的 `match`。
@@ -408,19 +574,34 @@ git commit -m "feat(node): 建 continuum-node crate 并登记 workspace 成员�
   **错误码只是预期值，以 `trybuild` 实跑的 `.stderr` 为准**——本项目为「凭记忆写错误码」付过代价
   （D 的计划 §关于代码块那段有记录）。
   **这一份钉的措辞是「写不出字段字面量」，不是「构造不出来」**：`ComputeNode::new` 是 `pub` 的，
-  「crate 外构造不出节点」这句话为假（设计 §9 那一行的**标签**与它的**正文**相抵，见 `## 遗留`）。
+  「crate 外构造不出节点」这句话为假。
+  **订正（2026-10-07）**：本句初稿在末尾写着「（设计 §9 那一行的**标签**与它的**正文**相抵，
+  见 `## 遗留`）」——**那半句是过期引用**：设计已在 `3a7ddad` 把那个标签收到正文的口径
+  （见 `## 遗留` 第一节第 5 条），**「相抵」今天不成立了**（旧话照留在此，来历见下）。
+  **本条要钉的判据一字未变**（措辞取「字段私有」而非「不可外部构造」），变的只是
+  「设计今天还相抵」这个**已经过期的断言**。
+  **这半句的来历（据实记，它与纪律 21 第 3 条同族）**：2026-10-07 协调者**从本计划这一行逐字
+  抄了这半句进一份派单**，被实现者核出它早已修好——**一次转抄把一句过期的话又送到下游**。
+  「转抄的数／话在文档里长得一样，但只有自己核过的能追责」，这是那条判据的**第二个实例**
+  （第一个是 `1442` 那个行数）。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
 ```
 
 预期：**「名字未解析」这一类**（`continuum_node::ComputeNode` 与它的类型尚未存在）。
-**这一处不写死一个码，理由是码取决于测试怎么引用**：`use continuum_node::…` 进来的路径、
-路径限定的调用（`continuum_node::place(…)`）、裸函数名（`place(…)`）在 rustc 下**不是同一个码**，
-而本 task 的测试文件三种写法都会有——**实跑只会给出它当时给出的那些，以那一次的输出为准**。
-（本行初稿把 `E0433` / `E0425` 两个码并排列出，2026-10-06 按「报错码必须来自实跑」的纪律收成这一类说法。）
+**本 task 实得只有一个码：`E0432`（unresolved import）**——2026-10-07 由 E 的 Task 2 实现者实测：
+本 task 的测试里那四个名字**只出现在 `tests/node.rs` 的一条 `use` 上**（`place` 属 Task 5／6，
+本 task 的测试里还没有裸函数名或路径限定的调用），故**没有「三种写法都会有」这回事**
+（**本行初稿说「三种写法都会有」，那是说宽了**——它描述的是本计划**整体的**可能性，
+不是**这个 task** 的实况；旧话照留在此）。
+**类别说法仍然成立**：码取决于**怎么引用**（`use` 进来的路径／路径限定调用／裸函数名在 rustc 下
+不是同一个码），故本行**只写「这一类」、不把码写成断言**；**本 task 的实测值是 `E0432`，
+以实跑为准**。
+（本行更早的初稿把 `E0433` / `E0425` 两个码并排列出，2026-10-06 按「报错码必须来自实跑」的纪律
+收成这一类说法。）
 
 - [ ] **Step 3: 实现**
 
@@ -480,7 +661,7 @@ impl ComputeNode {
 - [ ] **Step 4: 运行，确认 `tests/node.rs` 绿、trybuild 产出 `.stderr`**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node
 ```
 
 **首跑 trybuild 会因缺 `.stderr` 而失败**（它打的是「wip」并写出实际输出）。
@@ -495,13 +676,20 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 
 把 `src/node.rs` 里 `id` 那个字段**临时改成 `pub`**，跑
 `TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test type_level`。
-预期：**红**——样例编过了，与 `.stderr` 不符。**记下日志路径，再还原**（`trap` + 前后 `sha256`，纪律 16）。
+预期：**红**。
+**但红的机制不是「样例编过了」**（**本行初稿就是这么写的，2026-10-07 由 E 的 Task 2 实现者实测订正**）：
+只把 `id` 改成 `pub` 时**其余五个字段仍是私有的**，那份样例如**仍编不过**，
+**红来自 trybuild 的 `.stderr` mismatch**（实际错误与入库的那份 `.stderr` 不一致），
+**不是来自「预期失败、实际编译通过」**。**守卫本身有效**（改一个字段它就能读出来），
+**错的只是这一句对机制的描述**——而机制描述错了，会让人在读日志时找错判据
+（「编过了」与「`.stderr` 不符」在 trybuild 的输出里是两段不同的话）。
+**记下日志路径，再还原**（`trap` + 前后 `sha256`，纪律 16）。
 **这一步是「守卫恒绿」与「守卫有效」的区分点**，不许省。
 
 - [ ] **Step 6: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/Cargo.toml Cargo.lock crates/continuum-node/src/lib.rs \
         crates/continuum-node/src/node.rs crates/continuum-node/tests/node.rs \
         crates/continuum-node/tests/type_level.rs crates/continuum-node/tests/compile_fail
@@ -529,10 +717,22 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
 
 `tests/registry.rs`：
 
-- `registering_two_nodes_keeps_the_registration_order`：登记三枚（id `"c"` / `"a"` / `"b"`，
+- `registering_three_nodes_keeps_the_registration_order`：登记三枚（id `"c"` / `"a"` / `"b"`，
   **故意不是升序**），断言 `nodes()` 的 id 序列**逐项**等于登记序。
-  **红的条件（档位：取反）**：把 `register` 的 `push` 改成 `insert(0, …)`（或让 `nodes()` 返回排序后的
-  副本）→ 红。**登记序不是升序**这一点是承重的：夹具若按升序登记，两种实现不可区分。
+  **红的条件（档位：取反）**：把 `register` 的 `push` 改成 `insert(0, …)`，
+  **或在 `register` 的末尾加一次 `sort_by(id)`**（把登记序改写成 id 序）→ 红。
+  **登记序不是升序**这一点是承重的：夹具若按升序登记，两种实现不可区分。
+  **订正（2026-10-07，E 的 Task 3 实现者报出；旧话照留）**：
+  - **用例名**：本行初稿叫 `registering_**two**_nodes_keeps_the_registration_order`，
+    **「二」与同条正文的「三枚」相抵**（派单要求逐字照用，实现者未改名、实际登记三枚）。
+    已改成 **`…_three_nodes_…`**。**这是本仓那条「用例名也是一种断言——声称的必须与断言实际
+    覆盖的相等」（`6aeb450` 立）的又一个实例**：名字是最持久的一句，断言删改而名字没跟上时，
+    假话就留在名字里。
+  - **变异体形态**：本行初稿还写「（或让 `nodes()` **返回排序后的副本**）→ 红」——**那个形态写不出来**：
+    `nodes()` 的签名是 `&self -> &[ComputeNode]`，**副本活不过返回**（要么改成返回 `Vec`，
+    那就动了签名）。**可表达的等价变异体是在 `register` 里排序**（上面已写成那一形），
+    实现者用它实测，结果与 `insert(0, …)` 一致。**故凡给变异体，必须给一个「在本 API 形态下
+    写得出来」的形态**——写不出来的变异体等于没有变异体，而它看上去与写得出来的那个一模一样。
 - `registering_the_same_id_twice_is_a_named_error`：登记 `a`、`b`，再登记 `a` →
   `Err(NodeRegistryError::Duplicate { id })`，**并断言 `id == ComputeNodeId::new("a")`**
   （两个不同的 id 在场，否则「是哪一枚」的断言恒真——纪律 14）。
@@ -541,7 +741,21 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
   再登记一枚 id 同为 `a` 但 `trust = OutsidePersonalTrustDomain` 的节点 → `Err`，
   **并断言 `nodes()` 仍是两枚、次序不变、且 id 为 `a` 的那一枚的 `trust()` 仍是
   `TrustedPersonal`**（**第一次那枚**）。
-  **红的条件（档位：放宽）**：把判重改成**静默覆盖**（返回 `Ok` 并替换那一枚）→ 三处断言同时红。
+  **红的条件（档位：放宽）**：把判重改成**静默覆盖**（替换那一枚，不返回 `Err`）→ 本条红。
+  **订正（2026-10-07，E 的 Task 3 实现者实测；旧话照留）**：本行初稿写「→ **三处断言同时红**」，
+  **那句不成立**。实现者的 M3b 取的是**「先覆盖、再返回 `Err`」**这一形，实测红点分布是：
+  **只有本用例红，且只红在 `trust()` 那一条断言上**——`expect_err`／`id`（是哪一枚）／枚数／次序
+  **全绿**（因为那一形仍返回 `Err`，也仍不改变枚数与次序）。
+  **这个分布很值钱，两条判据由此成立**：
+  ①**「不静默覆盖」这条判据的照片是唯一的**——**只有本用例能拍到它**；
+  ②**`registering_the_same_id_twice_is_a_named_error` 单独不够**——它只钉「返回了具名 `Err`」，
+  对「覆盖之后再返回 `Err`」这种实现**全绿**（B 的实现阶段查出的 §八.20／§八.23 两处
+  「静默后者胜」正是这个形状）。
+  **另记一句（读这处的人会问）**：本用例的三条断言**不是同一条变异体的三个红点**，
+  而是**一层覆盖另一层**——外层（`Err`）内侧还有「有没有改状态」那一层，
+  **只有最里面那一条（`trust()`）能区分「拒绝」与「先改后拒」**。
+  实现者已按纪律 11 订正了自己文件里的同一句并把错因留在原地；
+  **本计划与当时的派单里也写着那一句，故此处一并订正**。
   **这一条是「不静默覆盖」这条判据唯一的照片**：只断「第二次返回 `Err`」时，
   一个「先覆盖、再返回 `Err`」的实现会绿（B 的实现阶段查出的 §八.20／§八.23 两处「静默后者胜」
   在本仓一律判为留白，设计 §4.1 判据 2）。
@@ -550,9 +764,27 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
   `continuum_artifact`、`Artifact`、`PrivacyClass`。**断言信息里列出命中的行号**
   （否则红的时候读不出是哪一处）；路径用
   `Path::new(env!("CARGO_MANIFEST_DIR")).join("src/registry.rs")`。
-  **以下所有说明一律写在 `tests/registry.rs` 的文件头，一个字都不许写进 `src/registry.rs`**
-  ——守卫匹配的是**那个文件的全文**，**把「本文件不出现 `Artifact`」这句话写进去，
-  守卫会命中自己的注释而变红**（本仓的一个已知坑；2026-10-06 第一轮评审查出本行初稿没说清落点）。
+  **`src/registry.rs` 的正文与注释里都不许出现那三个字面**（`continuum_artifact` /
+  `Artifact` / `PrivacyClass`）——**否则守卫会命中自己的注释**（本仓的一个已知坑；
+  2026-10-06 第一轮评审查出本行初稿没说清落点）。
+  **与守卫无关的说明可以写在那里**：它一样在这份被匹配的语料里，
+  **写之前先自问一句「它含不含那三个字面」**；**守卫不禁止谈论守卫本身**，
+  只禁止那三个拼法出现。**证明力边界、`ALLOWED` 那一层、为什么它只算下界**这几段
+  **写在 `tests/registry.rs` 的文件头更清楚**（它们必然会提到那三个字面）。
+  **订正（2026-10-07，E 的 Task 3 评审查出；旧话照留）**：本行初稿写的是
+  「**以下所有说明一律写在 `tests/registry.rs` 的文件头，一个字都不许写进 `src/registry.rs`**」，
+  **那不是本条的判据**——**它的理由只支持「那三个字面不许出现」，不支持「不许出现任何内容」**。
+  实测（实现者）：`src/registry.rs` 的 `:3-8` 写有 **6 行指向性说明**（点名了两条守卫与测试文件），
+  （**2026-10-07，E 的 Task 7 复核实测**：本行初稿写「**7 行**」，与它自己给出的区间 `:3-8` 相抵
+  ——`3,4,5,6,7,8` 是六行；`git show 011e703:crates/continuum-node/src/registry.rs` 显示该模块
+  **自建立起这段就是六行**，故那个「7」不是某次改动的产物，是落笔时的差一。
+  **判据本身不受影响**：本段要的是「守卫绿」，而下一行的 `grep` **零命中**这一条**成立**
+  ——错的只是那个数。）
+  `grep -nE 'continuum_artifact|Artifact|PrivacyClass'` **零命中**，**守卫保持绿** ⇒
+  **那个风险在这里不存在，这样的写法是合规的**。
+  **要守的是「守卫绿」，不是「一个字都没有」。**
+  **它与本仓今天已立的「作用域要与事实同宽」「必要性理由句要先验证反例对不对」同族**——
+  **这一条是它们在「禁令」上的形态**：**禁令的射程被写宽了**，而它自己的理由只支持窄的那一半。
   **文件头要写清它的证明力边界**（裁定义务 5）：匹配的是**字面拼法**，别名、全限定路径、
   `include!` 都逃逸——**它是下界，不是封闭判定**；**封闭的那一层是 `ALLOWED` 的逐对断言**
   （Task 1；本 crate 整体只允许 `continuum-artifact` 一条边）。
@@ -567,7 +799,7 @@ git commit -m "feat(node): §287 的 ComputeNode 与三个取值类型"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test registry
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test registry
 ```
 
 - [ ] **Step 3: 实现**
@@ -607,7 +839,7 @@ pub enum NodeRegistryError {
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/src/registry.rs crates/continuum-node/src/lib.rs \
         crates/continuum-node/tests/registry.rs
 git commit -m "feat(node): 进程内 Compute Node 注册表与模块面守卫"
@@ -670,7 +902,7 @@ git commit -m "feat(node): 进程内 Compute Node 注册表与模块面守卫"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test rules
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test rules
 ```
 
 - [ ] **Step 3: 实现**
@@ -724,7 +956,7 @@ pub enum RulesError {
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/src/placement.rs crates/continuum-node/src/error.rs \
         crates/continuum-node/src/lib.rs crates/continuum-node/tests/rules.rs
 git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
@@ -820,6 +1052,11 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
   - `four_class_trust_combinations_and_only_one_passes`：全走 `LocalOnly`，`spec_floor` 没动；
   - `an_empty_artifact_set_filters_nothing` 与 `an_empty_artifact_set_returns_the_tiebreak_winner`：
     制品集为空 ⇒ 闸门连一档都不看；
+    > **订正（2026-10-07，E Task 6 实做后）**：`an_empty_artifact_set_returns_the_tiebreak_winner`
+    > **这个名字已不存在**——它被合并进了 `the_id_breaks_ties_when_the_policy_says_equal`
+    > （见 Task 6 那一节末尾的订正）。**按名引一个已被合并掉的用例，会让后来者去 `grep` 一个
+    > 查不到的名字**。本行的判断（「制品集为空 ⇒ 闸门连一档都不看」）**仍然成立**，
+    > 只是那两条路径现在同在一个用例的两条循环元素里。
   - `duplicate_node_ids_are_a_named_error` 与 `an_empty_node_set_is_unplaceable`：期望的 `Err`
     与该变异体同解；
   - **Task 6 的三条**（`the_same_node_set_in_any_order_yields_the_same_node` /
@@ -888,7 +1125,7 @@ git commit -m "feat(node): §94 的隐私×信任表与逐档覆盖判据"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
 ```
 
 - [ ] **Step 3: 实现**
@@ -986,7 +1223,7 @@ pub enum PlacementError {
 - [ ] **Step 4: 运行，确认绿**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
 ```
 
 - [ ] **Step 5: 真跑裁定义务 1 的那条变异体（**本 task 的核心交付物之一**）**
@@ -996,7 +1233,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 换成只算 `spec_floor(level)`**（即：闸门完全不读 `policy.rules()`）。
 
 ```bash
-cd /home/DslsDZC/Continuum
+# 在**本 worktree 的根目录**运行（绝对路径由派单给出；本计划不写死代码树）
 MUT=crates/continuum-node/src/placement.rs
 BAK="$PWD/.tmp/placement.rs.bak"
 LOG="$PWD/.tmp/mut_rules.txt"
@@ -1020,7 +1257,7 @@ TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast 2>&1 | tee
 - [ ] **Step 6: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/Cargo.toml Cargo.lock crates/continuum-node/src/placement.rs \
         crates/continuum-node/src/error.rs crates/continuum-node/src/lib.rs \
         crates/continuum-node/tests/placement.rs
@@ -1034,6 +1271,23 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 **Files:**
 - Modify: `crates/continuum-node/src/placement.rs`（加步骤 4 的排序；`compare` 的兜底档）
 - Modify: `crates/continuum-node/tests/placement.rs`
+- Modify: `crates/continuum-node/src/lib.rs` / `src/node.rs` / `tests/node.rs`
+  （**订正 2026-10-07 补入，来历留此**：本栏原只列前两个文件。实现时改了四处陈述，
+  **而计划里没有任何 task 认领它们**：Task 7 的 Files 是「仅在复核发现缺口时」。
+  **故按「失真的陈述不许留在仓里」就地订正，并把它们认领到本 task。**
+  **但要分清四处的性质——本注初稿写「四处全部被本轮改动证伪」，那句过宽，复审已订正**：
+  - **真被证伪的两处**：`lib.rs` 的「**`place` 今天只落步骤 1–3……不读 `compare`**」——
+    本轮正是去读 `compare`，那句话**定义性地**变假；`tests/node.rs` 的「`Ord` 今天没有照片 /
+    本 crate 内零调用」——**同一原因**（`Ord` 从此有了运行期调用点）。
+  - **另两处是到期的自排期与前向指针，不是被证伪**：`node.rs` 的「消费方是 Task 6」
+    与 `capabilities()` 的「本 task 落地时 E 内部零读取」——它们本就写着「到某时重取」，
+    本轮只是**按期重取**。**把这两处也说成「证伪」，会让后来者以为它们曾是错的。**
+  **实测边界**：四处**全部落在注释/文档**（`//!` 与 `///`），**无一行代码**——
+  这是本条的判据，改到代码就超出「订正失真陈述」的范围了。
+  **由此得一条可搬用的判据**：**一个 task 的 Files 清单只列了「它要改的实现与它的测试」，
+  而「被这次改动证伪的陈述」天然散在邻居文件里**——**清单若不认领它们，就只剩两个坏结局**：
+  要么失真陈述留在仓里，要么实现者越界而没人授权。**每份 Files 清单都该带一句
+  「本轮改动证伪的陈述随本轮订正」**，并**在实做时点名具体是哪几个文件**。）
 
 **Interfaces:**
 - Consumes: Task 5 的 `place` / `PlacementPolicy` / `BaselinePlacementPolicy`
@@ -1091,6 +1345,17 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 - `an_empty_artifact_set_returns_the_tiebreak_winner`（**§9「无制品」那一行的后一半**）：
   `artifacts = []` ＋ **上表那三枚**（**按 `"c"` / `"a"` / `"b"` 的顺序给**）
   ＋ `BaselinePlacementPolicy` → 返回 id 最小的那一枚 `"a"`。
+  > **订正（2026-10-07，E Task 6 实做后）——本条已不再是一个独立用例**：
+  > 实现时实测「**排序那一行**（删掉 `.then_with(|| a.id().cmp(b.id()))`、删掉整个 `sort_by`、
+  > 兜底档取反、`Ord` 改按长度比）的任何变异体**都区分不开**本条与
+  > `the_id_breaks_ties_when_the_policy_says_equal`」，故**按本节末尾预先写下的那条授权合并**：
+  > 本条的路径**逐字**活在 `the_id_breaks_ties_when_the_policy_says_equal` 的**第二条循环元素**里
+  > （`tests/placement.rs`），**名字从文件里消失**。
+  > **但「区分不开」这四个字要收窄（2026-10-07 复审实测）**：评审在交付字节上
+  > **把本条按上面的原文复原成一个独立 `#[test]`**，跑 `M10`（把「空制品集」当成「一律拒」，
+  > 档位**收紧**）——**复原出来的本条红、`the_id_breaks_ties…` 绿** ⇒ **两条是分得开的**。
+  > **准确的结论只到「排序那一行及其同族变异体区分不开」为止**，不是「两条从未分开过」。
+  > **记这一笔是为了后来者**：若将来要为本条找回独立名字，**M10 就是那个能分开它们的变异体**。
   **与 Task 5 的同名用例的分工写明**：那一条钉「不过滤」（单枚节点，Ordering 无关），
   这一条钉「返回的是兜底档选中的那一枚」（多枚节点）。
   **红的条件（档位：移除）**：删掉 `.then_with(|| a.id().cmp(b.id()))` → 稳定排序保留输入序
@@ -1110,7 +1375,7 @@ git commit -m "feat(node): §243 的硬闸门与 place 的失败路径"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-node --test placement
 ```
 
 预期：本 task 新加的四条红（Task 5 的用例**全绿**——步骤 4 只影响多枚可比节点的情形，
@@ -1136,7 +1401,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 600 cargo test -p conti
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-node/src/placement.rs crates/continuum-node/tests/placement.rs
 git commit -m "feat(node): 全序排序与 ComputeNodeId 兜底档"
 ```
@@ -1151,13 +1416,25 @@ git commit -m "feat(node): 全序排序与 ComputeNodeId 兜底档"
 - [ ] **Step 1: 全量验证**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-node --depth 1 --edges all --prefix none
 ```
 
-预期：全绿、0 warning；`cargo tree` 的**直接边恰好是** `continuum-artifact`（＋ `thiserror`，
-以及测试目标下的 `trybuild`）——**实测对照，不据口径断言**。
+预期：全绿、0 warning；`cargo tree` 的**直接边恰好是四条**——[`dependencies`] 里的
+`continuum-artifact` 与 `thiserror`，[`dev-dependencies`] 里的 `trybuild` 与 **`serde_json`**
+（**实测对照，不据口径断言**）。
+> **订正（2026-10-07，E 的 Task 7 复核实测；原稿只列了三条）**：原写「`continuum-artifact`
+> （＋ `thiserror`，以及测试目标下的 `trybuild`）」——**漏了 `serde_json`**，它是 Task 5 登记的
+> dev 依赖（`crates/continuum-node/Cargo.toml` 的 `[dev-dependencies]`）。`--edges all` 把
+> dev 边一并算进来，故实测是**四条**。
+> **下一条是与它同一次复核查出、**没有**照片的一条**：`Cargo.toml` 里 `serde_json` 上面那句
+> 「**只在测试目标里用**：`src/` 里没有一行读它」**没有任何判据钉住**——
+> `ALLOWED` 的内层循环只遍历 **workspace 成员之间的边**，**外部 crate 不在它的射程里**
+> （设计 §7.3 明写），故把 `serde_json` 从 `[dev-dependencies]` 挪进 `[dependencies]`**不会让任何断言变红**。
+> **据实记为无照片，不补用例**（补它要新立一种「源码文本守卫」，本计划没有这个位置）。
+> **这也让上面那句「只在测试目标里用」落进 [[absolute-claims-need-tests]] 那一族**：
+> **注释里的全称断言，要么有对应用例，要么写明它没有。**
 
 > **下面三条 `git diff` 的对照点取「开工时的 HEAD」**（本计划定稿时是 `3a7ddad`）。
 > 开工时若仓库已前进，**把哈希换成实际起点**——判据是「**除本计划的改动之外，这些文件无别的改动**」，
@@ -1166,7 +1443,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-node --depth 1 --edges al
 - [ ] **Step 2: 复核「只登记了自己那一条」（裁定义务 2、4）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff 3a7ddad -- Cargo.toml crates/continuum-runtime/tests/dependency_direction.rs
+git diff 3a7ddad -- Cargo.toml crates/continuum-runtime/tests/dependency_direction.rs
 TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency_direction
 ```
 
@@ -1177,7 +1454,7 @@ TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency
 - [ ] **Step 3: 复核「不落库、不取迁移号」（纪律 11）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff 3a7ddad --stat -- crates/continuum-runtime/src/main.rs crates/continuum-runtime/src/lib.rs
+git diff 3a7ddad --stat -- crates/continuum-runtime/src/main.rs crates/continuum-runtime/src/lib.rs
 git diff 3a7ddad --stat -- crates/continuum-artifact crates/continuum-graph crates/continuum-model-registry
 ```
 
@@ -1189,7 +1466,7 @@ git diff 3a7ddad --stat -- crates/continuum-artifact crates/continuum-graph crat
 - [ ] **Step 4: 通读复核「注册表入度为零」的两层落点**
 
 ```bash
-cd /home/DslsDZC/Continuum && grep -rn "continuum_artifact\|Artifact\|PrivacyClass" crates/continuum-node/src/registry.rs
+grep -rn "continuum_artifact\|Artifact\|PrivacyClass" crates/continuum-node/src/registry.rs
 grep -rn "continuum_model_registry\|continuum-model-registry\|RankedExecutionCandidates\|rank(" crates/continuum-node/src/
 ```
 
@@ -1229,7 +1506,7 @@ grep -rn "continuum_model_registry\|continuum-model-registry\|RankedExecutionCan
 若复核发现了缺口并改了文件，**按实际改动的显式路径逐个 `git add`**——形如：
 
 ```bash
-cd /home/DslsDZC/Continuum && git add crates/continuum-node/src/placement.rs \
+git add crates/continuum-node/src/placement.rs \
         crates/continuum-node/tests/placement.rs
 git commit -m "fix(node): 收尾复核发现的缺口"
 ```
@@ -1415,7 +1692,8 @@ OPEN-007 的赋值与传播；§290 的 Job Capsule 真的把数据限制住了�
 3. **「`ALLOWED` 的条目与 `Cargo.toml` 的声明逐对相等」这一条**，本计划只靠 Task 1 的两侧红
    ＋ Task 7 Step 2 的 `git diff` 复核；**本 crate 没有一条用例能钉住「将来有人给
    `crates/continuum-node/Cargo.toml` 加一条边却不改 `ALLOWED`」**——那条边一旦加上，
-   `every_crate_depends_only_on_its_allowed_set` 会红（`:276-281` 的双向断言），
+   `every_crate_depends_only_on_its_allowed_set` 会红（逐对双向断言；**行号只是当时读数**：
+   定稿时 `:276-281`，2026-10-07 实读 `:291-296`），
    **故它其实是有照片的**，此处记明它的落点在 `continuum-runtime` 的测试里，不在本 crate。
    **收件人：无。**
 

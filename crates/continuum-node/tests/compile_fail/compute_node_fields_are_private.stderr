@@ -1,0 +1,17 @@
+error[E0451]: fields `id`, `class`, `trust`, `capabilities`, `resources` and `availability` of struct `ComputeNode` are private
+  --> tests/compile_fail/compute_node_fields_are_private.rs:17:9
+   |
+16 |     ComputeNode {
+   |     ----------- in this type
+17 |         id: ComputeNodeId::new("n1"),
+   |         ^^ private field
+18 |         class: NodeClass::Personal,
+   |         ^^^^^ private field
+19 |         trust: NodeTrust::TrustedPersonal,
+   |         ^^^^^ private field
+20 |         capabilities: Vec::new(),
+   |         ^^^^^^^^^^^^ private field
+21 |         resources: Vec::new(),
+   |         ^^^^^^^^^ private field
+22 |         availability: Vec::new(),
+   |         ^^^^^^^^^^^^ private field
