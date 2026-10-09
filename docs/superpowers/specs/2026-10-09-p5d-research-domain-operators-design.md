@@ -27,7 +27,7 @@
 
 | 具名义务 | 出处 | 本设计的落点 | 本轮可达的形态 |
 |---|---|---|---|
-| 研究领域的 Operator 集（7 枚，§330 的七步各一枚） | 切分 §五 P5d 行；§330 | §4 | 全量（id、端口类型、`determinism`、`side_effect_class`、backend 候选、逐枚理由） |
+| 研究领域的 Operator 集（7 枚，§330 的七步各一枚） | 切分 §五 P5d 行；§330 | §4 | 全量（id、端口类型、`determinism`、`side_effect_class`、backend 候选、需要解释处的判定理由——§4.4 只写五处） |
 | 算子集在 `OperatorRegistry` 上的登记入口 | 切分 §二「无需重新冻结」段（`Operator` / `OperatorRegistry` 由 P1 落地） | §4.1 | 全量（一枚函数 + 逐枚注册的原子性规则） |
 | `ContradictionCheck` / `CitationVerification` 的证据侧供给 | 切分 §五 P5d 行；P5a 设计 §4.2 与 §14 第 8 条 | §5 | 产出面全量；**两枚 `EvidenceType` 新臂由 P5a 落地**（本块只报出，§5.1） |
 | `SourceSet` 的处置 | P5e 设计 §3.4（`docs/superpowers/specs/2026-10-09-p5e-media-domain-operators-design.md`，按小节引） | §3 | 全量（接受 P5e 的读法，逐条给实测理由与代价） |
@@ -41,7 +41,7 @@
 | 不建的东西 | 归属 / 理由 |
 |---|---|
 | `Evidence` 类型、`EvidenceType` 的臂、`VerificationPolicy`、Requirement Coverage、完成判定 | P5a（切分 §四第 1 条）。本块**不得**定义证据类型、「充分」判据、完成判定。本块对 `EvidenceType` 的需要以**报出**的形态出现（§5.1） |
-| `ArtifactType` 的任何新变体 | P5e（切分 §四第 2 条：只由 P5e 一处扩展）。本块需要的型**全部是既有的**（§3.2） |
+| `ArtifactType` 的任何新变体 | P5e（切分 §四第 2 条：只由 P5e 一处扩展）。本块需要的型只有两枚：`Json`（**既有**）与 `Report`（**P5e 设计 §3.2 清单第 8 行定的新变体**，等 P5e 的枚举改动落地）；两枚都不由本块报出（§3.2） |
 | 方法的登记形态、`MethodRegistry`、`MethodEntry`、`MethodDomain` | P5b（切分 §四第 3 条）。本块只调它的 `bind`（§7） |
 | 节点状态迁移、`Queued → Running`、`OperatorRegistry::resolve` 的调用点、算子的执行 | 第 3 层（切分 §四第 4 条）。本块只**注册**算子 |
 | `execution_policy` 的判定 | P4（切分 §四第 5 条）。本块不碰 `verification_policy`，也不碰 `execution_policy` |
@@ -59,8 +59,8 @@
 
 ## 2.1 crate 与依赖边
 
-本块新建 **一个** crate：`continuum-research`（实测：`grep -rn "continuum-research" . --exclude-dir=.git --exclude-dir=target`
-在本仓**零命中**，名字未占用）。
+本块新建 **一个** crate：`continuum-research`（实测：`grep -rn "continuum-research" crates/ Cargo.toml`
+**零命中**，名字未占用；该串在 `docs/` 下有 8 处命中，**全部落在本设计文档自身**）。
 
 依赖边表（**只登记实际用到的**，切分 §四第 6 条）：
 
@@ -137,7 +137,8 @@ pub fn evidence_from_research_finding(
 这不是遗漏：本块要表达的东西（七枚算子的取值、两处映射）都落在既有类型上，凭空造一枚类型是替规范定一个版本化的外部接口。
 
 **须与 P5e 对照的一处不对称**：P5e 的设计持有三枚类型（`GenerativePermission` / `PermittedGenerativeContent` /
-`MediaError`）与四条判定。两块的差别有来源，不是风格差异：P5e 的 §34 授权判定与
+`MediaError`）与四条判定（P5e 设计 §2.2 的判定清单：§3 的 `ArtifactType` P5 扩展清单、§5.4 的 backend 名单、
+§7 的生成内容授权判定、§4 的 `Checkpointable` 错误类型形状）。两块的差别有来源，不是风格差异：P5e 的 §34 授权判定与
 §5.4 的注册期规则是**媒体域自己新加的**规范要求（§34 逐条点名媒体），研究域没有对应的条文。
 
 ## 2.3 本块的层间位置
@@ -188,8 +189,9 @@ research-evidence-extraction` 三条相邻边的端口因此都是 `Json`，§23
 **若协调者事后裁定 `SourceSet` 该收成一型**，改动是「向 P5e 报出一次枚举变体（按切分 §四第 2 条的『一次改动』惯例）
 ＋ §4.2 三行算子表的端口从 `Json` 改成 `SourceSet`」，本块的判定归属不变。
 
-**本块不按切分 §四第 2 条报出**：那一条要的是「需要**新变体**就报出」，而本块的七枚算子需要的型**全部是既有的**
-（§4.2 的端口一栏逐格可核：只用到 `Json` 与 `Report` 两型，两型都在今天的枚举里或在 P5e §3.2 的清单里）。
+**本块不按切分 §四第 2 条报出**：那一条要的是「需要**新变体**就报出」，而本块的七枚算子需要的型只有两枚
+（§4.2 的端口一栏逐格可核）：`Json` 是**既有**的，`Report` 是 **P5e 设计 §3.2 清单第 8 行**定的新变体、
+**已由 P5e 的清单收下**（只等 P5e 的枚举改动落地）。两枚都不由本块报出。
 报出一个本块并不需要的变体，是发明。
 
 **`Report` 这一型的生产者在本块**：§9 `docs/spec/01-concepts.md:514` 逐字 `Artifact<Report>`，
@@ -203,9 +205,12 @@ research-evidence-extraction` 三条相邻边的端口因此都是 `Json`，§23
 
 ## 4.1 登记形态：`Operator` 照 P1，**交付面是一枚函数不是常量**
 
-§244（`docs/spec/05-normative.md:735-753`）的 `Operator` 八字段由 P1 落地为
-`crates/continuum-operator/src/definition.rs:79-88`：`id` / `version` / `input_schema: Vec<ArtifactType>` /
+§244（`docs/spec/05-normative.md:735-753`）的 `Operator` **七个**字段由 P1 落地为
+`crates/continuum-operator/src/definition.rs:79-88`（字段本体 `:80-87`）：`id` / `version` / `input_schema: Vec<ArtifactType>` /
 `output_schema: Vec<ArtifactType>` / `determinism` / `side_effect_class` / `backend_candidates: Vec<BackendId>`。
+**订正注记**：本设计曾把字段数写成「八」——那个数是**相邻的 §258 `Evidence` 的八字段**
+（`docs/spec/05-normative.md:1076-1088`）串到了 §244 上；§244 正文（`:735-753`）与 `definition.rs:79-88`
+列的都是**七个**。后来者若在别处再见到「`Operator` 八字段」，来历即此处。
 **本块不加字段、不改签名**（切分 §二「无需重新冻结」段）。本块交付的是**内容**：七枚 `Operator` 值的清单与登记入口。
 
 ### 4.1.1 **本仓实测：`Operator` 的清单写不成 `const`**
@@ -215,10 +220,10 @@ P5e 设计 §5.1 把清单定成 `pub const ALL_OPERATORS: [Operator; 17]`，并
 **实测：那个 `const` 编译不过，理由两条，各自独立成立**：
 
 1. `Operator` 的字段含两个 `String`（经 `OperatorId` `crates/continuum-operator/src/definition.rs:24` 与
-   `BackendId` `:66` 各持一个），而 `OperatorId::new`（`:25`）不是 `const fn`；Rust 的 `const` 上下文不能堆分配，
+   `BackendId` `:66` 各持一个），而 `OperatorId::new`（`:27`）不是 `const fn`；Rust 的 `const` 上下文不能堆分配，
    故一个**非空**的 `String` 在 `const` 里造不出来。
 2. **这一条更硬，且不依赖第 1 条**：`Operator` 的 `input_schema` / `output_schema` / `backend_candidates`
-   都是 `Vec`（`:82-83`、`:88`）。`Vec::new()` 是 `const fn`（空 `Vec` 可 const），但**推入元素不是 const 操作**
+   都是 `Vec`（`:82-83`、`:87`）。`Vec::new()` 是 `const fn`（空 `Vec` 可 const），但**推入元素不是 const 操作**
    ⇒ 一个**非空**的 `Vec` 在 `const` 上下文里造不出来，与元素类型无关。
    本块七枚算子的三个 `Vec` **没有一个是空的**（§4.2 逐格可核：`research-question` 的 `input_schema` 为空，
    但它的 `output_schema` 与 `backend_candidates` 都非空）⇒ 七枚**逐一**不可 const。
@@ -303,7 +308,7 @@ P5e 的那个类型承载的是它自己的两条领域规则（§5.4 的注册�
 不是「六枚够不够用」。同理，`Question` 不省略（它常被读成「链条的输入，不是一个步骤」）：
 §330 把它列在 `↓` 之前的第一行，与另外六个同处一张 `SHOULD 拆成` 的清单里。
 
-**据实记一处：七步之间的顺序约束本块不表达。** `Operator` 没有「前驱」字段（`:79-88` 八字段）
+**据实记一处：七步之间的顺序约束本块不表达。** `Operator` 没有「前驱」字段（`:79-88` 七字段）
 ⇒ 「Question 必须在 Search 之前」这件事**在算子定义里写不出来**，它落在图的构造（第 3 层，切分 §四第 4 条）。
 本块能表达的只有端口类型的相容性（§4.5），那是**弱于顺序**的约束：`Json → Json` 的三条边（§4.5 第 2、3、4 行）
 在类型上无法与「把链倒过来接」相区分。**这条缺口与 §3.2 的代价同源**（都出自「不新增变体」），
@@ -321,7 +326,7 @@ P5e 的那个类型承载的是它自己的两条领域规则（§5.4 的注册�
    **这正是它进 §6.1 的照片的那一枚。**
 3. **`side_effect_class` 的判据（本设计定，规范只给一条后果）**：§307（`docs/spec/05-normative.md:2022-2033`）
    给的唯一后果是「非幂等 Effect MUST NOT 直接自动重试」，而 P1 的落地注记同此
-   （`crates/continuum-operator/src/definition.rs:16`）。故本表按**重试安全性**取：
+   （`crates/continuum-operator/src/definition.rs:14`）。故本表按**重试安全性**取：
    - `Pure` = 该算子不接触本进程之外的状态（⇒ 同输入同版本必得同输出）：本块一枚（第 3 行）。
    - `Idempotent` = 该算子接触本进程之外的状态（模型服务、检索服务），故**同输入重跑可能给出不同结果**；
      但它**不改变任何外部状态**，重复执行没有累积后果，故重试是安全的：本块六枚。
@@ -538,8 +543,9 @@ P5e 设计 §5.4 建了一份封闭名单（`local-fs` `ffmpeg` `ffmpeg-scene-de
 
 **「这份名单的家在哪」本块不决定**：它若该只有一处，那处不是本块能给 P5e 定的。
 记为 §10 第 2 条的对账条目（收件人：协调者 + P5e），并指出撞车面：P5c/P5f 若也声明 `Deterministic` 算子，
-会撞同一处。切分 §四第 7 条本身**没有处置这一类判据**（它是以 `can_reuse` 为唯一实例写的，
-而那一条判据是**跨域唯一**的；「逐位可复现的 backend」是**按域不可避免要多份**的），
+会撞同一处。切分 §四第 7 条本身**没有处置这一类判据**（它是以 `can_reuse` 为**第一枚**实例写的；
+它列的实例都是**跨域唯一**型的，末句「本层其余同类落地点一经发现即按本条办」也仍限于「本仓**已落地**的判据」，
+而 P5e §5.4 那一条是**新造**的、按域分份的；「逐位可复现的 backend」是**按域不可避免要多份**的），
 这一条记为 §12 第 3 条。
 
 ## 6.3 本仓已落地的判据：清点与本块的关系
@@ -623,7 +629,7 @@ pub fn bind_research_methods(registry: &mut MethodRegistry) -> Result<(), Method
 | 7 枚 `Operator` | `Operator` 今天**没有持久化路径**：`continuum-operator` 无 `persist.rs`（实测该 crate 的 `src/` 只有 `definition.rs` `registry.rs` `lib.rs`），注册是**装配期在内存里**做的事（`OperatorRegistry` 的 `entries: HashMap`，`registry.rs:16`）。本块照此，不新增存储 |
 | 本块产出的 `Evidence` | 落进 P5a 的表（P5a 设计 §10.2 的四张表，号段 `130`）。本块不写那一行（§5.2 末） |
 | 来源集合 / 抽取结果 / 矛盾结论 / 引文核验结果（四枚 `Json` 制品） | 落进**既有的** `artifact` 表（`crates/continuum-artifact/src/persist.rs:9` 的 `p1_artifact` 迁移）与 `BlobStore`；`artifact_type` 是 `TEXT NOT NULL` 且**无 CHECK 约束**（同文件 `:11`），既有取值 `json` 已够 |
-| 合成产出的 `Report` | 同上（`report` 这一串要等 P5e 的枚举改动落地，`crates/continuum-artifact/src/artifact.rs` 的 `parser` 是唯一产生点） |
+| 合成产出的 `Report` | 同上（`report` 这一串要等 P5e 的枚举改动落地，`crates/continuum-artifact/src/artifact.rs:68` 的 `parse` 今天返回 `None`） |
 | §131 的复用凭据 | `CacheKey`（`crates/continuum-graph/src/reuse.rs:9-12`）今天**也没有存储**，它的存储属 §305 的落点即 P1。本块不替它建表（§6.1） |
 
 ## 8.2 实测占用表（判据在切分 §二第 5 条）
@@ -694,7 +700,7 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 | j | `research-source-set` 的 `backend_candidates == ["builtin"]`（**逐元素断言**，不是「非空」） | §6.2 第 1 条那半句可断言的事实 |
 | k | `cache_key(&research_source_set, h)` 为 `Some`，且四条件齐时 `can_reuse` 为真；**对另外六枚逐枚**断言 `cache_key(..)` 为 `None` | §6.1 的六行**逐行**（不是抽样）：一枚 `Some` + 六枚 `None` |
 | l | §4.5 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的型**，不是「两侧相等」） | §239 的注册期一半（§4.5） |
-| m | 七枚算子的每一个端口类型都在**既有枚举**里可解析（`ArtifactType::parse(..).is_some()` 对每个 `as_str`） | §3.2 的「需要的型全部是既有的」这一断言 |
+| m | 七枚算子的每一个端口类型都在 `ArtifactType` 里可解析（`ArtifactType::parse(..).is_some()` 对每个 `as_str`）——**这条用例要等 P5e 的枚举改动落地后才写得出**（`Report` 不在今日枚举内，§1.2、§3.2、§9.5 第 6 条） | §3.2 的「两枚型中 `Json` 既有、`Report` 由 P5e 的清单收下」这一断言 |
 
 **一条预防**：第 (a)(b)(k) 三条的期望清单**必须手写**。若 (b) 写成遍历 `all_operators()` 再自比，
 它测的是 Rust 的相等性；若 (a) 写成 `all_operators().len()`，它测的是 `len()`；
@@ -737,7 +743,7 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 
 1. **端到端（一个研究 Intent 从 `Queued` 走到某处）**：执行器（第 3 层）未建，
    且切分 §四第 4 条禁止 P5 自建执行路径。本块的全部照片都是**单元与集成层**。
-2. **算子的实现体**：本块的七枚是 `Operator` **值**（八个元数据字段），它们的**执行**不在本层（§1.2）。
+2. **算子的实现体**：本块的七枚是 `Operator` **值**（七个元数据字段），它们的**执行**不在本层（§1.2）。
    故「检索真的返回了什么」「合成真的写了什么」在本块的射程之外——照片覆盖的是**清单与映射**，
    不是**行为**。这一条是 P5 四个算子块共同的形态。
 3. **§305 的复用真的省下了一次重算**：`can_reuse` 今天无生产调用方，`CacheKey` 无存储（§8.1）。
@@ -746,6 +752,10 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    故拍不到「Question 在 Search 之前」。
 5. **`SourceSet` 与抽取结果的内容**：四枚 `Json` 制品的 schema 未定义（§11 第 2 条），
    故拍不到「一份来源集合建得出、读得回」。
+6. **§9.2 第 (m) 条与 §9.4 的照片都要等 P5e 的枚举改动落地后才拍得出**：本设计 §4.2 第 6、7 行的端口引用
+   `ArtifactType::Report`，而该变体不在今日枚举内（§1.2、§3.2），故 `continuum-research` 在 P5e 落地前
+   **编译不过**——§9.2 的 (a)–(m) 与 §9.4 的 `trybuild` 用例都以本 crate 编译通过为前提。
+   (m) 因此不是一条今天可写的用例，而是**等 P5e 枚举改动落地后才能拍的照片**（该条已就地标注）。
 
 ---
 
@@ -773,9 +783,10 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    另：§7 末的「`research-question` 与 `research-synthesis` 无目录可填」是**据实留的形状**，不是漏 bind。
 8. **待与 P5e 对账（`Report` 的生产者）**：§3.2 末。P5e 设计 §5.2 记「`Report` 在媒体块没有生产者」，
    本块的 `research-synthesis` 是它的第一个生产者。两处互指。
-9. **待与 P5e 对账（`ALL_OPERATORS` 的 const 写法）**：§4.1.1 的实测——`Operator` 的清单写不成 `const`，
-   而 P5e 设计 §5.1 把它写成 `pub const ALL_OPERATORS: [Operator; 17]`，且 §12.2 的第 (f)(h) 条与 §12.3
-   都以它为语料。**本条的收件人是 P5e**（它自己的实现任务会当场撞上），本块只提供实测与判据。
+9. **已由 P5e 订正（`ALL_OPERATORS` 的 const 写法）**：§4.1.1 的实测——`Operator` 的清单写不成 `const`
+   （`String` 与非空 `Vec` 都不可在 `const` 上下文构造）——**曾报出给 P5e，P5e 已订正**：`p5e` 分支提交
+   `2543aeb` 把 `pub const ALL_OPERATORS: [Operator; 17]` 改为 **`pub fn all_operators() -> [Operator; 17]`**
+   （数目 17 落在返回类型里，清单个数的改动仍编译期可见）。**本项无待办。**
 10. **待与协调者与装配方对账（本块的条目今天没有生产调用方）**：`all_operators` / `register_research_operators`
     （§4.1）、`bind_research_methods`（§7）、`evidence_from_research_finding`（§5.2），四条。
    **这不是本块的缺口，是第 3 层的**（切分 §四第 4 条禁止 P5 自建执行路径；拍照的限制见 §9.5）。
@@ -814,11 +825,13 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 
 逐条给出实测。**本设计不改切分文档，也不改 P5e 的设计**（切分 §七 与协调纪律）。
 
-1. **⚠️ 切分 §八 把 `SourceSet` 记为「未定义」而没有指出处置方。** 该条逐字是
+1. **⚠️ 切分 §八 记 `SourceSet` 为「未定义」时，那一句本身没有指向承接条款的指针。** 该句逐字是
    「§330 的 `SourceSet` 是否算 Artifact 类型未定义」（`docs/superpowers/specs/2026-10-08-p5-scope-and-split.md`
-   的 §八「`ArtifactType` 的 P5 清单尚无权威来源」那一条）。**它给了缺口，没给落点**。
-   实际给出处置义务的是 P5e 设计 §3.4（「若 P5d 需要它，按切分 §四第 2 条报出」）与本轮的派单。
-   **判据**：**一句「X 未定义」若不带落点，六个块都会读成「不是我的事」**——
+   的 §八「`ArtifactType` 的 P5 清单尚无权威来源」那一条）。**落点确在同段末句**——逐字「**P5e 落地时
+   必须自己定这份清单并写明逐条出处**；本文件不替它定」——**故本条不是「没给落点」**；缺的只是**指针**：
+   `SourceSet` 那句与「需要新变体就报出」的机制（§四第 2 条）之间没有连线。把两者接起来的是
+   P5e 设计 §3.4（「若 P5d 需要它，按切分 §四第 2 条报出」）与本轮的派单。
+   **判据**：**一句「X 未定义」若不带指向承接条款的指针，六个块都会读成「不是我的事」**——
    本轮的接口冻结里恰好有一条（§四第 2 条）能承接它，但那一句里没有指向它的指针。
 2. **⚠️ 切分 §五 P5d 行把 §330 与《总纲》§8.4 并列为主要规范依据，而两处的措辞强弱不同。**
    实测：§330 `docs/spec/05-normative.md:2449` 逐字「研究任务 SHOULD 拆成：」；
@@ -832,7 +845,8 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    （任何域的复用都走同一个 `can_reuse`）。而 P5e 设计 §5.4 新造的那一条（「逐位可复现的 backend」封闭名单）
    是**按域分份**的：媒体域的后端名与研究域的后端名不可能合成一张表，**但两域可以出现同一个后端名**
    （实测：P5e 的名单与 §4.2 第 3 行都用 `builtin`，P5e 的 `transcribe` 候选与 §4.2 第 2 行的角色名也可能重合）。
-   ⇒ **该条的两份判据并存时，失效方向与 §四第 7 条写的一模一样**，而 §四第 7 条的文字（「已落地」＋ 唯一实例）
+   ⇒ **该条的两份判据并存时，失效方向与 §四第 7 条写的一模一样**，而 §四第 7 条的文字（「已落地」＋
+   以 `can_reuse` 为**第一枚**实例；末句「本层其余同类落地点一经发现即按本条办」也仍限于「本仓**已落地**的判据」）
    读起来不覆盖这种情形。本块据它办（§6.2：不建第二份），**并把这一格缺口报出**。
    **判据**：**一条横切约束的实例若都是「跨域唯一」型的，它挡不住「按域分份」型**——
    列约束时要问「反例长什么样」，而不是只列正例。
@@ -842,7 +856,8 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    `const` 给不出，但**返回类型 `[Operator; 7]` 给得出**（§4.1.1）。
    **影响面（实测 P5e 设计里以它为语料的处所）**：§5.1 的常量声明与它的理由段、
    §12.1 的 `ALL_OPERATORS` 守卫、§12.2 的第 (f) 与 (h) 条、§12.3 的「放宽：`ALL_OPERATORS` 少注册一枚（16）」。
-   **收件人：P5e**。
+   **收件人：P5e**。**（订正注记：P5e 已按本条改定——`p5e` 分支 `2543aeb` 改为
+   `pub fn all_operators() -> [Operator; 17]`；见 §10 第 9 条。）**
    **判据**：**引用一条既有约定（「枚举/清单带 `ALL` 常量」）时，要连它的成立条件一起搬**——
    本仓的三处 `ALL`（`ArtifactType` `crates/continuum-artifact/src/artifact.rs:28`、
    `EffectType` `crates/continuum-effect/src/effect.rs:31`、`PrivacyClass` 同 artifact 文件 `:100`）
