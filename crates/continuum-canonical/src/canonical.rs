@@ -23,7 +23,7 @@
 //! 一支是另一支的补集，不是两个可以同时为真也可以同时为假的标志位。
 
 use crate::Mention;
-use crate::ambiguity::ResolutionResult;
+use crate::resolver::ResolutionResult;
 
 /// §2.4 第 1 条（`docs/02-工程.md:130`）的产物：一个和类型，**两支互斥**。
 ///
@@ -52,15 +52,35 @@ pub enum Canonicalized {
 
 /// `Canonical` 支的载荷：**解出来的那些 mention**，按输入次序照录。
 ///
-/// # 为什么今天只有 mention，没有解出的实体
+/// # 为什么只有 mention，没有解出的实体（Task 4 复判后**仍不改**，理由照实记）
 ///
-/// 设计没给它的字段清单（见文件头），而本层今天**手上真有的**只有
-/// `finish` 的入参：mention 与它那一枚 `ResolutionResult`。而本 task 的
-/// `ResolutionResult` 是**前向声明**（见 `ambiguity` 模块的文件头，及本节末的「接缝」），各态**不带载荷**——
-/// 它要带的 `entity: EntityId`（§4.1，`design:387-393`）落在 Task 3 的
-/// `EntityId` 与 Task 4 的解析器之后。故这里今天存不了「mention → 解出的实体」的对应。
-/// **接缝**：Task 4 给四态补上载荷后，本类型应把那一份照录进来（那一处要改的是本类型
-/// 与 [`crate::finish`]，两处）。
+/// Task 2 在这里留过一处接缝：「Task 4 给四态补上载荷后，本类型应把那一份照录进来
+/// （那一处要改的是本类型与 [`crate::finish`]，两处）」。**Task 4 补载荷时复判了它，
+/// 结论是不改**，三条理由：
+///
+/// 1. **没有判据要它**：设计 §3.2（`design:340-354`）只给了「两支互斥」这一条性质，
+///    `CanonicalRepresentation` 的字段清单**全篇没给**（本文件头已实测这一点）。
+///    接缝那一句是 Task 2 的**推测性**承诺（「应」），不是规范要求。
+/// 2. **加了就是一条没有照片的表达力**：本 task 的用例清单里没有任何一条会读
+///    「mention → 解出的实体」这个对应（它的第一个真实消费者在 P4 之后的 Intent Compiler
+///    那一侧），而本仓的口径是**表达力要么有照片、要么先不加**。
+/// 3. **它会改掉一个已经被钉住的读函数**：`mentions()` 现在返回 `&[Mention]`
+///    （`tests/canonical.rs` 有一条断言它等于那两枚 mention）。要同时带上实体，
+///    这个读函数就得换形状（迭代器或平行向量），而**换形状这件事本身没有判据**
+///    ——平行向量还会引入一处可以失步的冗余。
+///
+/// **代价照实写**：今天 `Canonical` 支的载荷说不出「这一枚 mention 解到了哪个实体」，
+/// 故它**不是一个可直接使用的规范化结果**，只是一份「哪些 mention 已经解出」的记录。
+/// 补它的那个 task 应当带一条读它的用例来（那时才有判据）。
+///
+/// # 一处与简报预期的相抵（照实记）
+///
+/// 简报写「本 task 补载荷，即改 `ambiguity.rs` 的定义与 `canonical.rs` 的 `finish` 签名」
+/// （`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:616`）。
+/// **`finish` 的签名本 task 没有改**，也不需要改：`Vec<(Mention, ResolutionResult)>`
+/// 这个入参形状装得下带载荷的四态（载荷在 `ResolutionResult` 里面）。
+/// 唯一的改动是 [`crate::finish`] 里那一处 `match` 从 `Resolved` 写成 `Resolved(_)`
+/// （`ResolutionResult` 有了载荷之后的必然改法，Task 2 已把那处接缝写在 `ambiguity.rs` 文件头）。
 ///
 /// # 不可从外部构造
 ///
@@ -101,10 +121,35 @@ impl CanonicalRepresentation {
 /// §4.1 的三枚——将来加一枚、改一个名，两处得同时改，而**没有任何东西会因此变红**
 /// （本仓「枚举断言须逐项有照片」的同一形状）。故这里直接照收判定结果本身。
 ///
+/// # M-2-3：「`UnresolvedMention` 里装着 `Resolved`」为什么**没有**做成类型上不可表示
+///
 /// **代价照实写**：`ResolutionResult` 里有一枚 `Resolved`，故单看类型，
-/// 「`UnresolvedMention` 里装着一枚 `Resolved`」是写得出来的。这个不变量今天靠
+/// 「`UnresolvedMention` 里装着一枚 `Resolved`」是写得出来的。这个不变量靠
 /// **构造面**守住而不是靠类型：字段私有、`new` 是 `pub(crate)`，全 crate 只有
 /// [`crate::finish`] 造它，而那里**先判过 `Resolved` 才走另一支**。
+///
+/// **Task 4 给四态补上载荷后复判了这一条**（它是 P4 Task 2 查出、裁定写进 Task 4
+/// 的 Files 的那一枚），结论：**不改成类型上不可表示**，理由三条——
+///
+/// 1. **唯一的改法是另立一枚三变体枚举**（`ConfirmRequired` / `Ambiguous` / `Unknown`），
+///    而那正是本节上面刚否掉的那件事：它会在两处各存一份 §4.1 的三枚，
+///    将来加一枚、改一个名要两处同改，而**没有任何东西会因此变红**
+///    （本节上面那段已写明这条）。
+/// 2. **外部的门比 Task 2 时写的那句话更窄**（这一半是 Task 4 补的实测）：
+///    `Resolved` 的载荷类型今天字段是 `pub`（`resolver.rs` 的文件头写了为什么），
+///    故 crate 外**写得出**一枚 `ResolutionResult::Resolved(Resolved { entity, satisfied, candidate_count })`；
+///    但 [`UnresolvedMention::new`] 是 `pub(crate)`，**那枚值进不来**
+///    ——crate 外能做的只有「把一枚 `Resolved` 交给 [`crate::finish`]」，
+///    而 `finish` 会把它归到 `Canonical` 那一支、根本不构造本类型。
+///    **故本不变量今天仍然只由那一处构造面守**，而不是「类型守不住、谁都能破」。
+/// 3. **有一条运行期照片**：`tests/canonical.rs::every_mention_resolved_gives_the_canonical_arm`
+///    断言「每一枚都是 `Resolved` ⟹ 落 `Canonical` 支」——把已解的并进挂起列表的变异体
+///    会红在那一条上（Task 2 的变异轮实测过同一形状）。
+///    **它是运行期照片，不是类型保证**：本条要求的「类型上不可表示」这一侧，
+///    本层**没有做到**，也不假装做到。
+///
+/// **收件人：无需上报**——这一条是「不处置也是处置，写出来即可」（计划
+/// `docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:623-624` 给的两条路里的第二条）。
 #[derive(Debug, Clone)]
 pub struct UnresolvedMention {
     mention: Mention,

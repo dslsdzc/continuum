@@ -6,19 +6,75 @@
 //!
 //! # 这些用例今天钉的是**分支机制**，不是规范化的真实质量
 //!
-//! 真实候选来源今天**零个**（设计 §16 第 5 条，`design:2319-2322`），
+//! 真实候选来源今天**零个**（设计 §16 第 5 条，`design:2331-2334`），
 //! 故下面每一条 `ResolutionResult` 都是**夹具直接给的**——本层今天没有任何东西
 //! 真的去解析一枚 mention。这与设计 §15.2 第 3 条（`design:2264-2266`）写的是同一件事：
 //! 「能拍的只有机制：四个来源接口、闭集不变量、四态分支」。
 
 use continuum_canonical::{
-    Canonicalized, Mention, MentionKind, Now, ResolutionResult, TemporalBinding, detect, finish,
-    normalize, resolve_temporal,
+    Ambiguous, Candidate, Canonicalized, ConfirmRequired, EntityId, Mention, MentionKind, Now,
+    ResolutionResult, Resolved, TemporalBinding, Unknown, UnknownReason, detect, finish, normalize,
+    resolve_temporal,
 };
 
 /// 一枚 UTC 日的毫秒数。本层按**恒定** 86400000 毫秒/日推进（不处理时区与夏令时）——
 /// 这是本层自己标的假设，规范未给日历（见 `src/temporal.rs` 的相应注释）。
 const DAY_MS: i64 = 86_400_000;
+
+/// 夹具：四态的**具体值**。Task 4 给四态补上载荷（`Resolved` / `ConfirmRequired` /
+/// `Ambiguous` / `Unknown`，设计 §4.1 的字段清单）之后，本文件原先直接写
+/// `ResolutionResult::Resolved` 的地方要带上载荷——这批函数就是那一处改动。
+///
+/// **它们不是「另一批用例」**：`finish` 的七条用例对象没变，变的只是四态的构造形态。
+///
+/// **载荷取最小但合法的一份**：`ConfirmRequired` / `Ambiguous` 的 `surviving`
+/// 给**一枚**真实的候选（空向量在语义上不可达——`ConfirmRequired` 是「那个占优候选本身」，
+/// `Ambiguous` 是「至少两个」），而本文件不核这些载荷（那是 `tests/resolver.rs` 的事），
+/// 故只给够用的形状。
+fn fixture_candidate(id: &str) -> Candidate {
+    Candidate {
+        entity_id: EntityId::from_str(id),
+        evidence: vec!["夹具".to_owned()],
+        retrieval_score: None,
+    }
+}
+
+/// 夹具：`Resolved`（唯一合格候选、门槛已过）。
+fn resolved() -> ResolutionResult {
+    ResolutionResult::Resolved(Resolved {
+        entity: EntityId::from_str("entity.resolved"),
+        satisfied: Vec::new(),
+        candidate_count: 1,
+    })
+}
+
+/// 夹具：`ConfirmRequired`（占优候选存在、门槛未过）。
+fn confirm_required() -> ResolutionResult {
+    ResolutionResult::ConfirmRequired(ConfirmRequired {
+        first: EntityId::from_str("entity.first"),
+        surviving: vec![fixture_candidate("entity.first")],
+        candidate_count: 1,
+    })
+}
+
+/// 夹具：`Ambiguous`（多于一个合格）。
+fn ambiguous() -> ResolutionResult {
+    ResolutionResult::Ambiguous(Ambiguous {
+        surviving: vec![
+            fixture_candidate("entity.a"),
+            fixture_candidate("entity.b"),
+        ],
+        candidate_count: 2,
+    })
+}
+
+/// 夹具：`Unknown`（零个合格候选；这里取「候选集为空」那一枚）。
+fn unknown() -> ResolutionResult {
+    ResolutionResult::Unknown(Unknown {
+        reason: UnknownReason::NoCandidate,
+        candidate_count: 0,
+    })
+}
 
 /// 夹具：两枚**真实切出来**的 mention（`请把它和 this 都改掉` → `它`、`this`）。
 ///
@@ -47,7 +103,7 @@ fn every_mention_resolved_gives_the_canonical_arm() {
     let parts: Vec<(Mention, ResolutionResult)> = mentions
         .iter()
         .cloned()
-        .map(|m| (m, ResolutionResult::Resolved))
+        .map(|m| (m, resolved()))
         .collect();
 
     match finish(parts) {
@@ -76,15 +132,23 @@ fn every_mention_resolved_gives_the_canonical_arm() {
 fn one_unresolved_mention_gives_the_needs_resolution_arm_confirm_required() {
     let mentions = two_mentions();
     let parts = vec![
-        (mentions[0].clone(), ResolutionResult::Resolved),
-        (mentions[1].clone(), ResolutionResult::ConfirmRequired),
+        (mentions[0].clone(), resolved()),
+        (mentions[1].clone(), confirm_required()),
     ];
 
     match finish(parts) {
         Canonicalized::NeedsResolution(unresolved) => {
             assert_eq!(unresolved.len(), 1, "列表里只该有那一枚没解的 mention");
             assert_eq!(unresolved[0].mention(), &mentions[1]);
-            assert_eq!(unresolved[0].state(), &ResolutionResult::ConfirmRequired);
+            // **不带 `..` 的臂 + `matches!`**：断言的是「是哪一枚」。
+            // 不写 `assert_eq!(state, &ResolutionResult::ConfirmRequired)`：
+            // `ResolutionResult` 没有 `PartialEq`（`ConfirmRequired` 里装着
+            // `Vec<Candidate>`，而 `Candidate` 没有 `PartialEq`——见 `src/resolver.rs`）。
+            assert!(
+                matches!(unresolved[0].state(), ResolutionResult::ConfirmRequired(_)),
+                "那一枚未解态要恰是 `ConfirmRequired`，实得 {:?}",
+                unresolved[0].state(),
+            );
         }
         canonical => panic!("有一枚 ConfirmRequired，不该落 Canonical 支：{canonical:?}"),
     }
@@ -96,15 +160,19 @@ fn one_unresolved_mention_gives_the_needs_resolution_arm_confirm_required() {
 fn one_unresolved_mention_gives_the_needs_resolution_arm_ambiguous() {
     let mentions = two_mentions();
     let parts = vec![
-        (mentions[0].clone(), ResolutionResult::Resolved),
-        (mentions[1].clone(), ResolutionResult::Ambiguous),
+        (mentions[0].clone(), resolved()),
+        (mentions[1].clone(), ambiguous()),
     ];
 
     match finish(parts) {
         Canonicalized::NeedsResolution(unresolved) => {
             assert_eq!(unresolved.len(), 1, "列表里只该有那一枚没解的 mention");
             assert_eq!(unresolved[0].mention(), &mentions[1]);
-            assert_eq!(unresolved[0].state(), &ResolutionResult::Ambiguous);
+            assert!(
+                matches!(unresolved[0].state(), ResolutionResult::Ambiguous(_)),
+                "那一枚未解态要恰是 `Ambiguous`，实得 {:?}",
+                unresolved[0].state(),
+            );
         }
         canonical => panic!("有一枚 Ambiguous，不该落 Canonical 支：{canonical:?}"),
     }
@@ -116,15 +184,19 @@ fn one_unresolved_mention_gives_the_needs_resolution_arm_ambiguous() {
 fn one_unresolved_mention_gives_the_needs_resolution_arm_unknown() {
     let mentions = two_mentions();
     let parts = vec![
-        (mentions[0].clone(), ResolutionResult::Resolved),
-        (mentions[1].clone(), ResolutionResult::Unknown),
+        (mentions[0].clone(), resolved()),
+        (mentions[1].clone(), unknown()),
     ];
 
     match finish(parts) {
         Canonicalized::NeedsResolution(unresolved) => {
             assert_eq!(unresolved.len(), 1, "列表里只该有那一枚没解的 mention");
             assert_eq!(unresolved[0].mention(), &mentions[1]);
-            assert_eq!(unresolved[0].state(), &ResolutionResult::Unknown);
+            assert!(
+                matches!(unresolved[0].state(), ResolutionResult::Unknown(_)),
+                "那一枚未解态要恰是 `Unknown`，实得 {:?}",
+                unresolved[0].state(),
+            );
         }
         canonical => panic!("有一枚 Unknown，不该落 Canonical 支：{canonical:?}"),
     }
@@ -181,17 +253,17 @@ fn the_two_arms_are_complements() {
         // 零命中 fail-closed 那一侧的形态由 Task 1 的
         // `an_input_without_any_mention_yields_an_empty_vec` 钉住。
         vec![],
-        vec![(mentions[0].clone(), ResolutionResult::Resolved)],
+        vec![(mentions[0].clone(), resolved())],
         vec![
-            (mentions[0].clone(), ResolutionResult::Resolved),
-            (mentions[1].clone(), ResolutionResult::Resolved),
+            (mentions[0].clone(), resolved()),
+            (mentions[1].clone(), resolved()),
         ],
         // 混一枚未解 ⟹ 另一支。
         vec![
-            (mentions[0].clone(), ResolutionResult::Resolved),
-            (mentions[1].clone(), ResolutionResult::Unknown),
+            (mentions[0].clone(), resolved()),
+            (mentions[1].clone(), unknown()),
         ],
-        vec![(mentions[0].clone(), ResolutionResult::Ambiguous)],
+        vec![(mentions[0].clone(), ambiguous())],
     ];
 
     // 两支**都**要被走到——否则下面那句「恰有一支」会被一个恒返回同一支的实现满足。
@@ -284,7 +356,7 @@ fn four_kinds_of_dirty_input_each_yield_one_of_the_two_arms() {
         let all_resolved: Vec<(Mention, ResolutionResult)> = mentions
             .iter()
             .cloned()
-            .map(|m| (m, ResolutionResult::Resolved))
+            .map(|m| (m, resolved()))
             .collect();
         let first = finish(all_resolved);
         assert!(
@@ -296,10 +368,10 @@ fn four_kinds_of_dirty_input_each_yield_one_of_the_two_arms() {
         let mut parts: Vec<(Mention, ResolutionResult)> = mentions
             .iter()
             .cloned()
-            .map(|m| (m, ResolutionResult::Resolved))
+            .map(|m| (m, resolved()))
             .collect();
         let last = parts.len() - 1;
-        parts[last].1 = ResolutionResult::Unknown;
+        parts[last].1 = unknown();
         match finish(parts) {
             Canonicalized::NeedsResolution(unresolved) => {
                 assert_eq!(unresolved.len(), 1, "{why}：只该挂起那一枚");

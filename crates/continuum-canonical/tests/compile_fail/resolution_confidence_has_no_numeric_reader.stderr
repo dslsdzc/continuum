@@ -1,0 +1,11 @@
+error[E0599]: no method named `to_f64` found for struct `ResolutionConfidence` in the current scope
+  --> tests/compile_fail/resolution_confidence_has_no_numeric_reader.rs:19:15
+   |
+19 |     let _ = c.to_f64();
+   |               ^^^^^^ method not found in `ResolutionConfidence`
+
+error[E0599]: no method named `as_probability` found for struct `ResolutionConfidence` in the current scope
+  --> tests/compile_fail/resolution_confidence_has_no_numeric_reader.rs:22:15
+   |
+22 |     let _ = c.as_probability();
+   |               ^^^^^^^^^^^^^^ method not found in `ResolutionConfidence`

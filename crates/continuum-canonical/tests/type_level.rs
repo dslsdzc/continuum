@@ -10,7 +10,7 @@
 //!
 //! # 本目录的样例**逐份点名**（便于对数：这段点名的项数必须等于目录里 `.rs` 的份数）
 //!
-//! `tests/compile_fail/`（**三份**，应编不过）：
+//! `tests/compile_fail/`（**五份**，应编不过）：
 //!
 //! - **`entity_id_has_no_public_literal_construction`** —— `EntityId` 的里子串私有，
 //!   故 crate 外写不出元组构造 `EntityId("x".to_owned())`。它是简报里
@@ -30,8 +30,15 @@
 //!   （`src/canonical.rs`），故 crate 外拼不出结构体字面量。
 //!   这一份是 **Task 2 转来的 P-2-1**（`docs/superpowers/p4-followups.md`）：
 //!   那半张照片要 `trybuild`，而 `trybuild` 这个 dev-dep 是本 task 才引入的。
+//! - **`resolution_confidence_has_no_numeric_reader`** —— `ResolutionConfidence`
+//!   **没有**读者能把它变成一个数：`c.to_f64()` / `c.as_probability()` 编不过。
+//!   它钉的是 §4.4 第 2 条（`design:741-745`）的前半。（Task 4 追加。）
+//! - **`resolution_confidence_cannot_be_built_from_a_score`** ——
+//!   `ResolutionConfidence::from_score(0.9)` 与 `ResolutionConfidence::from(0.9f64)`
+//!   都编不过：两个数**不同轴**（§4.4 第 3 条）。它钉的是那条禁令的构造侧。
+//!   （Task 4 追加。）
 //!
-//! `tests/compile_pass/`（**两份**，**应编得过**，是上面那两份**反例的正控制**）：
+//! `tests/compile_pass/`（**三份**，**应编得过**，是上面那几份**反例的正控制**）：
 //!
 //! - **`entity_id_from_str_is_constructible`** —— `EntityId::from_str` 是公开构造入口，
 //!   crate 外编得过。**没有这一条**，上面第一份样例的绿可以来自「整个 crate 的 API 名字都对不上」
@@ -39,6 +46,10 @@
 //! - **`a_candidate_source_with_only_retrieve`** —— 一个**只实现 `retrieve`** 的实现编得过
 //!   ⇒ `CandidateSource` 的**必需**方法集恰好是那一个。
 //!   这一份是「trait 上多加一个必需方法」那枚变异体的哨兵：加了就会红。
+//! - **`resolution_confidence_meets_is_usable`** —— 门槛判定 `c.meets(&required)`
+//!   公开可用，且两枚值各有公开构造入口。**它是上面两份 `ResolutionConfidence` 反例的
+//!   正控制**：没有它，那两份的绿可以来自「这个名字整个不存在」这类与判据无关的原因。
+//!   （Task 4 追加。）
 //!
 //! # 本 crate 为何有 `tests/compile_pass/`（另两个 crate 没有）
 //!
@@ -79,17 +90,20 @@
 // **公开 API 从 crate 外真的拿得到**那一侧的证据因此不在这里，而在
 // `tests/candidate.rs`（它整份都是 crate 外代码）＋ 两份 `compile_pass` 样例。
 
-/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**三份**。
-const COMPILE_FAIL_SAMPLES: [&str; 3] = [
+/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**五份**。
+const COMPILE_FAIL_SAMPLES: [&str; 5] = [
     "entity_id_has_no_public_literal_construction",
     "candidate_source_has_no_pick_one_method",
     "canonical_representation_is_not_constructible_outside",
+    "resolution_confidence_has_no_numeric_reader",
+    "resolution_confidence_cannot_be_built_from_a_score",
 ];
 
-/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**两份**。
-const COMPILE_PASS_SAMPLES: [&str; 2] = [
+/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**三份**。
+const COMPILE_PASS_SAMPLES: [&str; 3] = [
     "entity_id_from_str_is_constructible",
     "a_candidate_source_with_only_retrieve",
+    "resolution_confidence_meets_is_usable",
 ];
 
 /// 两份清单与它们各自的目录对钉——**加样例时此清单要同步，本用例会告诉你**。

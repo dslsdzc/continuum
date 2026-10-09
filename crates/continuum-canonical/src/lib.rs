@@ -26,6 +26,19 @@
 //! 「crate 外写不出 `EntityId` 的字面量构造」「`CandidateSource` 上没有 `pick_one` 这个口子」
 //! 「crate 外拼不出 `CanonicalRepresentation`」（最后一条是 Task 2 转来的 P-2-1）。
 //!
+//! Task 4 落 §4.1.1 的**显式约束面**（[`ExplicitConstraint`] / [`EntityKind`] /
+//! [`ResolutionScope`] / [`CandidateFacts`] / [`CandidateSet`] / [`satisfies`] /
+//! [`qualifying`]，`explicit` 模块）、§278 四值与 §274 九值的映射
+//! （[`AliasScope`] / [`alias_scope_to_resolution_scope`] / [`resolution_scope_to_alias_scope`]，
+//! `alias` 模块——**这个文件是 Task 7 的家，本 task 只提前落四枚词汇那一半**，
+//! 那处计划次序缺口写在 `alias.rs` 的文件头）、§4.1 的四态与 §4.4 的两个数不同轴
+//! （[`ResolutionResult`] 与四枚载荷 / [`ResolutionConfidence`] / [`RequiredStrength`] /
+//! [`resolve`]，`resolver` 模块）。**`ResolutionResult` 的类型本体从 `ambiguity` 模块搬到了
+//! `resolver`**——Task 2 落的是「是哪一态」那一层，载荷按设计由本 task 补。
+//! 以 `tests/explicit.rs` 与 `tests/resolver.rs` 钉住上面那些判据，
+//! 以 `tests/type_level.rs` 追加的编译失败／通过样例钉住
+//! 「`ResolutionConfidence` 没有能把值变成数的读者」「它不能由分数构造」。
+//!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-node` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
 //!
@@ -38,17 +51,34 @@
 //! 它不能省（那张表要求每个 workspace 成员都在里面），只是今天还没有边。
 //! 反向的 `continuum-semantics ← continuum-canonical` 是**读取方**的边，登记在那一侧。
 
+mod alias;
 mod ambiguity;
 mod canonical;
 mod candidate;
 mod error;
+mod explicit;
 mod surface;
 mod temporal;
+// **`resolver` 是 `pub mod`**（其余模块私有 ＋ 根重导出）：Task 4 的 Interfaces 逐字把入口
+// 写作 `resolver::resolve`（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:636`），
+// 故那个模块本身可从 crate 外按名字取到；其类型仍逐个在根上重导出，
+// 使 `continuum_canonical::ResolutionResult` 与 `continuum_canonical::resolver::ResolutionResult`
+// 是**同一个**类型（不是两份）。
+pub mod resolver;
 
-pub use ambiguity::{ResolutionResult, finish};
+pub use alias::{AliasScope, alias_scope_to_resolution_scope, resolution_scope_to_alias_scope};
+pub use ambiguity::finish;
 pub use canonical::{CanonicalRepresentation, Canonicalized, UnresolvedMention};
 pub use candidate::{Candidate, CandidateSource, CandidateSources, EntityId};
 pub use error::CanonicalError;
+pub use explicit::{
+    CandidateFacts, CandidateSet, EntityKind, ExplicitConstraint, ResolutionScope, qualifying,
+    satisfies,
+};
+pub use resolver::{
+    Ambiguous, ConfirmRequired, RequiredStrength, ResolutionConfidence, ResolutionResult, Resolved,
+    Unknown, UnknownReason, resolve,
+};
 pub use surface::{Mention, MentionKind, Surface, detect, normalize};
 pub use temporal::{Now, TemporalBinding, resolve_temporal};
 
