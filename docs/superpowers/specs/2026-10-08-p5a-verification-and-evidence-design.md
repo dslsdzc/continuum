@@ -219,9 +219,9 @@ OPEN-001 一旦有判据，本设计的翻案是**三处**，且三处都在类�
 
 **证据记录只追加。** `Evidence` 一经写入不改：§241（`docs/spec/05-normative.md:681`）的不可变原则正文说的是 Artifact，但同一条纪律用在这里的理由是具体的——**有效性判定**（§6.4）与**证据**必须是两条记录，否则「验证者改了被验之物」。故 `Evidence` 无更新路径（§10 的表只有 INSERT）。
 
-## 4.2 `EvidenceType`：十一臂，逐臂出处
+## 4.2 `EvidenceType`：十四臂，逐臂出处
 
-§258 的九个例（原文前缀是「Evidence 类型**例如**」）**照录九臂**；§193（`docs/spec/04-method.md:361`）另举六种验证方式，其中两种不在 §258 的表里，**补入二臂**：
+§258 的九个例（原文前缀是「Evidence 类型**例如**」）**照录九臂**；§193（`docs/spec/04-method.md:361`）另举六种验证方式，其中两种不在 §258 的表里，**补入二臂**；另有**三臂由领域算子块报出、本块一次改动落地**（2026-10-10）：P5c 报出的 `ModelReview`（其设计 §5.3），P5d 报出的 `ContradictionCheck` 与 `CitationVerification`（其设计 §5.1）。三臂的出处见下表末三行：
 
 | 臂 | 出处 | 备注 |
 |---|---|---|
@@ -236,12 +236,17 @@ OPEN-001 一旦有判据，本设计的翻案是**三处**，且三处都在类�
 | `HumanConfirmation` | §258 的 `HUMAN_CONFIRMATION` | |
 | `Differential` | §193 的 Differential Testing | **§258 未列** |
 | `Metamorphic` | §193 的 Metamorphic Testing | **§258 未列** |
+| `ModelReview` | §262（`docs/spec/05-normative.md:1176`）的 `independent model verifier`——五级序的第 3 级 | 第 3 级的判定器**存在**于规范，而**前十一臂里没有一枚承载它的产物**（`StaticAnalysis` 指的是静态分析**工具**对源码的判定，生产者与失败模式都不同，P5c 设计 §5.3 第 2 条）。**臂名是本设计的命名，不是规范逐字**：§262 只给级别名，不给证据类型名。`as_str` = `model_review` |
+| `ContradictionCheck` | §330（`docs/spec/05-normative.md:2460`）的步骤名 | 照录规范名（同 §258 九臂的做法）；前十一臂的对象是**制品本身的可观察性质**，没有一枚的语义是「一组断言之间是否互相矛盾」（P5d 设计 §5.1）。`as_str` = `contradiction_check` |
+| `CitationVerification` | §330（`docs/spec/05-normative.md:2464`）的步骤名 | 同上；「一条引文是否被它引的来源支持」也不在前十一臂的语义里（P5d 设计 §5.1）。`as_str` = `citation_verification` |
 
 **为什么是封闭枚举，而不是开放字符串**：`VerificationProfile.required_evidence_types[]`（§261）与产出的证据之间要做**集合包含**判定（§6.2）。若类型是字符串，「必需类型齐了吗」就退化成字符串比较——两边各写各的拼法即静默漏判，而且漏判的方向是「以为齐了」。封闭枚举把这条判定变成编译期穷尽的 `match`。
 
-**为什么是这十一臂、不是九臂、也不是更多**：取「§258 的九臂 ＋ §193 里 §258 未列的两臂」= **§258 与 §193 两处提到过的证据产物的并集**，这是「不发明」口径下能确定的最大集合；**`§191` 的五个检查与 `§265` 的 mutation 不进本枚举**，理由：规范把这两者写成对**已有**证据的作用（前者判测试证据是否有效、后者说「test evidence strength ↓」），不是新的证据。**「只有这十一臂」这句话本设计不写**：§258 的九臂前缀是「例如」，§193 的六种方式之外规范没有穷尽声明，故此处只能说「已实测的出处有上表十一行」。**P5d（CitationVerification，§330）与 P5f（§326 的 mask 外像素判定）是否需要各自的臂，见 §14 第 2、3 条**——若需要，由它们向本块报出，本块一次改动落地（同 `ArtifactType`／P5e 的约定）。
+**为什么是这十四臂、不是九臂、也不是更多**：取「§258 的九臂 ＋ §193 里 §258 未列的两臂 ＋ §262/§330 报出的三臂」。**口径分两段，据实分清**：前十一臂是**「§258 与 §193 两处提到过的证据产物的并集」**，是「不发明」口径下能确定的最大集合；后三臂**不是同一种出处**——它们是领域算子块的**供给方报出**（切分 §四第 1 条：证据类型是 P5a 的，四块不得自加），依据是「规范承认该判定存在（§262 第 3 级、§330 两步骤），而既有臂无承载物」，故这三臂是**为已存在的判定补类型**，不是从规范正文里逐字取到的枚举项。**`§191` 的五个检查与 `§265` 的 mutation 不进本枚举**，理由：规范把这两者写成对**已有**证据的作用（前者判测试证据是否有效、后者说「test evidence strength ↓」），不是新的证据。**「只有这十四臂」这句话本设计不写**：§258 的九臂前缀是「例如」，§193 的六种方式之外规范没有穷尽声明，§262/§330 两处也不构成穷尽声明，故此处只能说「已实测的出处有上表十四行」。**P5f 的 `§326` mask 外像素判定不再向本块要臂**：P5f 设计 §7.1 答复「`VisualCheck` ＋ `MetadataCheck` 够用，不请求新臂」，本块照此收（该答复见 §14 第 3 条）。
 
 `EvidenceType` 与 `ArtifactType` 一样带 `ALL` 常量与 `as_str` / `parse`，`ALL` 的完整性由「数目断言 + 两个穷尽 `match`」把关（与 `crates/continuum-artifact/src/artifact.rs:28-35`、`:47`、`:68` 同形）。
+
+**这次 11 → 14 的代价（据实写，不写成「无代价」）**：`EvidenceType` 是 `Evidence` 的一部分，而《工程》§9.4（`docs/02-工程.md:633`）把「执行层 → 跨领域　Evidence 数据模型」列为**载荷较重的跨层接口**之一——改动会波及多层。本次加三臂，受影响的是**执行层与长期循环两侧对 `EvidenceType` 的穷尽 `match`**：两侧各要新增三条臂，漏一条即在编译期或运行期出缺口（本设计的两个穷尽 `match` 靠编译器强制，但那两侧的 `match` 不在本块内）。**这不是「加三行枚举」的量**：它是那条跨层接口的一次形状变更。
 
 ## 4.3 三处需要解释的形状
 
@@ -338,10 +343,10 @@ impl Evidence {
 
 | 拒绝条件 | 判据 |
 |---|---|
-| `evidence_type` ∈ {`MetadataCheck`, `Benchmark`, `Test`, `Fuzz`, `Property`, `FormalProof`, `StaticAnalysis`, `Differential`, `Metamorphic`, `VisualCheck`} 且 `artifact_refs` 为空 | 这十型的判定都要读某个制品（§29 的 4K 例子读的正是 resolution metadata）。空引用意味着判定方没有可读之物，而**判定方「无物可读」必须走到 `Unknown`，不能走到 `Pass`**（§7.5）。把这一条放在构造点，是为了不让「无物可读」悄悄变成一次空判。**例外是 `HumanConfirmation`**（§258 的 `HUMAN_CONFIRMATION`）：人的确认不需要制品，故不受此条约束——上表逐型列出，就是为了让「哪几型需要制品」这件事有一个穷尽的落点 |
+| `evidence_type` ∈ {`MetadataCheck`, `Benchmark`, `Test`, `Fuzz`, `Property`, `FormalProof`, `StaticAnalysis`, `Differential`, `Metamorphic`, `VisualCheck`, `ModelReview`, `ContradictionCheck`, `CitationVerification`} 且 `artifact_refs` 为空 | 这十三型的判定都要读某个制品（§29 的 4K 例子读的正是 resolution metadata；`ModelReview` 读被审查的制品、`ContradictionCheck` / `CitationVerification` 读抽取结果与 `Report`）。空引用意味着判定方没有可读之物，而**判定方「无物可读」必须走到 `Unknown`，不能走到 `Pass`**（§7.5）。把这一条放在构造点，是为了不让「无物可读」悄悄变成一次空判。**例外是 `HumanConfirmation`**（§258 的 `HUMAN_CONFIRMATION`）：人的确认不需要制品，故不受此条约束——上表逐型列出，就是为了让「哪几型需要制品」这件事有一个穷尽的落点 |
 | `evidence_type = HumanConfirmation` 且 `producer != Human` | §258 的类型名与生产者不匹配；放过去会让「谁确认的」不可判 |
 
-上表的第一条**对 `evidence_type` 做穷尽 `match`**（无通配臂）：十一臂里哪几型需要制品、哪一型不需要，是逐臂写死的，因此 `EvidenceType` 加一臂时这条规则**编译期**被强制重新决定——不会出现「新臂悄悄落进『不需要制品』那一支」。
+上表的第一条**对 `evidence_type` 做穷尽 `match`**（无通配臂）：十四臂里哪几型需要制品、哪一型不需要，是逐臂写死的，因此 `EvidenceType` 加一臂时这条规则**编译期**被强制重新决定——不会出现「新臂悄悄落进『不需要制品』那一支」。**2026-10-10 加的三臂（`ModelReview` / `ContradictionCheck` / `CitationVerification`）逐臂作出的决定是「需要制品」**：三枚算子都要读被审查或被核验的制品，故并入上表第一条的集合；这一条与 P5d 设计 §5.1 第 3 条的要求一致。
 
 **它不检查什么（据实列出）**：`claim` 的内容、`strength` 的值、`scope` 的值、`artifact_refs` 里制品是否存在（那要查库，是 `load_artifact` 的事，见 §10）、生产者的节点是否真属该图。最后一条在 §7.4 的输入装配处检查（那里才有「受验节点」这个上下文）。
 
@@ -907,7 +912,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 ## 12.1 两侧守卫与逐项照片（判定侧 19 条 + 结构侧 4 条）
 
-**枚举逐臂**（每臂一条往返 + 数目断言；`ALL` 的完整性由「数目断言 + 穷尽 `match`」把关，与 `crates/continuum-artifact/tests/artifact_type.rs:23` 同形）：`EvidenceType`（11 臂）、`VerifierLevel`（5 臂）、`Conjunct`（10 臂）、`TestValidityCheck`（5 臂）、`CheckVerdict`（3 臂）、`CoverageVerdict` + `IncompleteReason`（2+2 臂）、`Validity`（3 臂）、`VerifierVerdict` / `VerdictAggregate`（3/5 臂）、`BlindVerdict`（3 臂）、`CompletionVerdict`（2 臂）、`IndependenceVerdict`（3 臂）、`AdversaryOutcome`（2 臂）。
+**枚举逐臂**（每臂一条往返 + 数目断言；`ALL` 的完整性由「数目断言 + 穷尽 `match`」把关，与 `crates/continuum-artifact/tests/artifact_type.rs:23` 同形）：`EvidenceType`（14 臂）、`VerifierLevel`（5 臂）、`Conjunct`（10 臂）、`TestValidityCheck`（5 臂）、`CheckVerdict`（3 臂）、`CoverageVerdict` + `IncompleteReason`（2+2 臂）、`Validity`（3 臂）、`VerifierVerdict` / `VerdictAggregate`（3/5 臂）、`BlindVerdict`（3 臂）、`CompletionVerdict`（2 臂）、`IndependenceVerdict`（3 臂）、`AdversaryOutcome`（2 臂）。
 
 **这份清单要求「每一枚枚举的每一臂」都有数目断言**：`BlindVerdict` / `CompletionVerdict` / `AdversaryOutcome` 三枚早先漏在清单外（它们的臂数没有数目断言），现补入——漏一枚枚举即漏「臂数漂移」这一整类回归。
 
@@ -993,8 +998,8 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 1. **待与 P4（语义层）对账**：本设计假设 `RequirementId` 由 P4 的 `continuum-semantics` 提供（§4.3.1）、`ContractView` 的字段名与 §224 一致（§6.1）、`ContractSatisfied` 与「`Intent.completion_predicate` 有无内容」以**值**进入 `CompletionInput`（§8.4）。依据是切分 §二末「与 P4 的接口面**照设计写，不照实现写**」，本设计据此读 P4 设计 §7.1 / §7.2 / §16（`:999`、`:1018`、`:2321`）。**P4 的设计若再改，由本块的一方复核并订正，不由 P4 替它改**（切分原话）。
    另：`Blocked` / `Undetermined` 如何升 `Decision`（§7.5、§8.2）落在 P4 的 Decision 面上，本块只给返回值形状。
-2. **待与 P5c（代码领域算子）对账**：本设计假设「测试是否通过」由**制品**承载（§8.3 第 6 项），故需要一个 `TestResult` 制品的 payload 约定。**若 P5c 把结果放在别处（或需要一枚新的 `EvidenceType` 臂），须向本块报出**（§4.2：证据类型是 P5a 的，四块不得自加）。`§193` 的 Differential / Metamorphic 两臂已在本设计里预置，P5c 若无对应实现须说明。
-3. **待与 P5f（图像领域算子）与 P5e（媒体）对账**：§326/§168 的「mask 外像素差被确定性检出」是 §262 第 1 级的一个实例：**插槽与「无物可读 ⇒ `Unknown`」的规则在本块（§7.5），比较器在 P5f**。另：`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用，若不够须向本块报出。
+2. **与 P5c（代码领域算子）的对账（已答，2026-10-10）**：本设计假设「测试是否通过」由**制品**承载（§8.3 第 6 项），故需要一个 `TestResult` 制品的 payload 约定。**P5c 设计 §5.4 答：承载处取 `TestResult` 制品，与假设一致，不改**（`Test` 臂照用，不需新臂）。**P5c 另报出一枚新臂 `ModelReview`**（其设计 §5.3：两枚审查算子 `code-spec-review` / `code-quality-review` 的产物无臂可落），本块已收下并落地（§4.2 末三行）。`§193` 的 Differential / Metamorphic 两臂：**P5c 答复本轮在本域无生产者**（其设计 §5.3 末），本块不据此删臂（枚举归 P5a）。
+3. **与 P5f（图像领域算子）与 P5e（媒体）的对账（P5f 已答，2026-10-10）**：§326/§168 的「mask 外像素差被确定性检出」是 §262 第 1 级的一个实例：**插槽与「无物可读 ⇒ `Unknown`」的规则在本块（§7.5），比较器在 P5f**。另：`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用——**P5f 设计 §7.1 答：够，不请求新臂**（`VisualCheck` 覆 §5.3 的像素比较与 §168 的 Alpha / 色彩空间那一项，`MetadataCheck` 覆 §168 的分辨率那一项，`Benchmark` 不用）。故本块不为 §326 加臂。
 4. **待与 P3d（模型注册表与 Router）对账**：本设计假设「独立 verifier」「跨 family verifier」的判据可由**候选的身份**判出，而今天 `ExecutionProfile.model` / `.provider` 是裸 `String`（`crates/continuum-graph/src/execution.rs:21-22`），**family 的判据不存在**，故 §7.6 明写本块不实现第 4 级的 family 判定。另：Verifier 选定级别之后，「级别内具体选哪个 backend」是否走 §250 的 Router，**本设计假设不走**（装配方直接给候选），这一条要与 P3d 对账。
 5. **待与 P2（边界层）对账**：`mandatory_effects_completed` 以**值**传入（§8.4）。本设计假设这个值由装配方从 Effect Journal（§268）读出；**本块不登记到 `continuum-effect` 的边**（§2.1）。值的类型与产生点须与 P2 对账。
 6. **待与 P1（执行层）对账**：三条。
@@ -1002,7 +1007,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
    (ii) `EdgeKind::Evidence` 的边**是否需要可寻址的身份**：§10.2 第 3 条的不变量今天只能以「写行时核对」实现，因为 `adfir_edge` 无主键、且 `Edge` 要求两个端口（`crates/continuum-graph/src/edge.rs:47-54`）而验证关系不天然有端口。
    (iii) **执行器的路由**：`state.rs:30-31` 允许 `Verifying → Completed`，而本块不产出许可它的判定（§8.2）。故 `Blocked` / `Undetermined` 各自路由到哪里（节点 `FAILED`？重试？升 `Decision`？），须由 P1／执行器／协调者指认。
 7. **待与 P5b（执行方法库）对账**：§90（`docs/spec/02-positioning.md:949`）允许插件扩展 **Verifier backend**——而「Verifier backend 的登记形态」与 P5b 的「方法登记形态」是不是同一件事，本设计**不决定**（切分 §四第 3 条禁止在 P5b 过审前自造方法登记形态）。本设计只假设：候选以 `Vec<AvailableVerifier>` **值**传入（§7.2）。
-8. **待与 P5d（研究领域算子）对账**：§330 的 `CitationVerification` 与 `ContradictionCheck` 是本块证据侧的两个供给方（切分 §五 P5d 行）。本设计假设它们的产物能落进现有的十一臂；**若 `CitationVerification` 需要自己的臂，须向本块报出**（§4.2）。
+8. **与 P5d（研究领域算子）的对账（已答，2026-10-10）**：§330 的 `CitationVerification` 与 `ContradictionCheck` 是本块证据侧的两个供给方（切分 §五 P5d 行）。**P5d 设计 §5.1 报出两枚各自的臂**（`ContradictionCheck` 出处 §330 `:2460`、`CitationVerification` 出处 §330 `:2464`），本块已收下并一次改动落地（§4.2 末两行，两臂均并入「需要制品」那一支）。**P5d 的两枚证据判不出极性**（其设计 §5.1 末：`Evidence` 无结果位），与本块 §8.3 第 6 项的缺口同源、互为指针。
 9. **待与 P6 与协调者对账（迁移号段 + 工具结果的两个消费者）**：P6 的切分 §四第 2 条与第 4 条都明写「待与 P5 那轮对账」。(i) 号段：本块取 `130`（§10.1），P5 其余五块与 P6 的档须统一划。(ii) §89 的工具结果有两个消费者（§279 的 Compiler 与 §89 的 Evidence 转换）：本设计假设两者**不共享 wrapper**，本块只为证据侧提供 `Evidence::from_tool_result`（§4.4）。
 10. **待与装配方（`continuum-runtime`）对账**：`runtime_migrations()`（`crates/continuum-runtime/src/main.rs:98`）要加本块的一行（§2.1）；`p5a_verify_migrations()` 的名字与返回类型照既有八处的形状。
 
