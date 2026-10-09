@@ -286,13 +286,13 @@ P5e 的那个类型承载的是它自己的两条领域规则（§5.4 的注册�
 
 | # | id | input_schema | output_schema | determinism | side_effect_class | backend 候选 | §330 步骤（出处） |
 |---|---|---|---|---|---|---|---|
-| 1 | `research-question` | `[]` | `[Json]` | `NonDeterministic` | `Idempotent` | `primary-model` | `Question`（`:2452`） |
-| 2 | `research-search` | `[Json]` | `[Json]` | `NonDeterministic` | `Idempotent` | `retrieval-backend` | `Search`（`:2454`） |
+| 1 | `research-question` | `[]` | `[Json]` | `NonDeterministic` | `Pure` | `primary-model` | `Question`（`:2452`） |
+| 2 | `research-search` | `[Json]` | `[Json]` | `NonDeterministic` | `Pure` | `retrieval-backend` | `Search`（`:2454`） |
 | 3 | `research-source-set` | `[Json]` | `[Json]` | `Deterministic` | `Pure` | `builtin` | `SourceSet`（`:2456`） |
-| 4 | `research-evidence-extraction` | `[Json]` | `[Json]` | `NonDeterministic` | `Idempotent` | `primary-model` | `EvidenceExtraction`（`:2458`） |
-| 5 | `research-contradiction-check` | `[Json]` | `[Json]` | `NonDeterministic` | `Idempotent` | `primary-model` | `ContradictionCheck`（`:2460`） |
-| 6 | `research-synthesis` | `[Json]` | `[Report]` | `NonDeterministic` | `Idempotent` | `primary-model` | `Synthesis`（`:2462`） |
-| 7 | `research-citation-verification` | `[Report, Json]` | `[Json]` | `NonDeterministic` | `Idempotent` | `primary-model` `retrieval-backend` | `CitationVerification`（`:2464`） |
+| 4 | `research-evidence-extraction` | `[Json]` | `[Json]` | `NonDeterministic` | `Pure` | `primary-model` | `EvidenceExtraction`（`:2458`） |
+| 5 | `research-contradiction-check` | `[Json]` | `[Json]` | `NonDeterministic` | `Pure` | `primary-model` | `ContradictionCheck`（`:2460`） |
+| 6 | `research-synthesis` | `[Json]` | `[Report]` | `NonDeterministic` | `Pure` | `primary-model` | `Synthesis`（`:2462`） |
+| 7 | `research-citation-verification` | `[Report, Json]` | `[Json]` | `NonDeterministic` | `Pure` | `primary-model` `retrieval-backend` | `CitationVerification`（`:2464`） |
 
 七枚的 `version` 一律 `OperatorVersion::new(1)`。
 
@@ -326,19 +326,27 @@ P5e 的那个类型承载的是它自己的两条领域规则（§5.4 的注册�
    （`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:382`）——零个输入在类型里可表达
    （`Vec<ArtifactType>` 允许空），一个无来源的输入不可表达。
 2. **只有 `research-source-set` 是 `Deterministic`**：它是纯算法（去重、记录来源身份与取回时刻），
-   不接触本进程之外的状态，故「同输入 + 同版本 ⇒ 同输出」成立。其余六枚都经模型或检索服务。
+   不读也不写本进程之外的可变来源，故「同输入 + 同版本 ⇒ 同输出」成立。其余六枚都经模型或检索服务。
    **这正是它进 §6.1 的照片的那一枚。**
-3. **`side_effect_class` 的判据（本设计定，规范只给一条后果）**：§307（`docs/spec/05-normative.md:2022-2033`）
+3. **`side_effect_class` 的判据（2026-10-10 由协调者裁定统一，见本条末）**：§307（`docs/spec/05-normative.md:2033`）
    给的唯一后果是「非幂等 Effect MUST NOT 直接自动重试」，而 P1 的落地注记同此
-   （`crates/continuum-operator/src/definition.rs:14`）。故本表按**重试安全性**取：
-   - `Pure` = 该算子不接触本进程之外的状态（⇒ 同输入同版本必得同输出）：本块一枚（第 3 行）。
-   - `Idempotent` = 该算子接触本进程之外的状态（模型服务、检索服务），故**同输入重跑可能给出不同结果**；
-     但它**不改变任何外部状态**，重复执行没有累积后果，故重试是安全的：本块六枚。
-   - `NonIdempotent` = 重复执行会留下外部后果（§307 点名的那一类）：本块**零枚**。
+   （`crates/continuum-operator/src/definition.rs:14`）。**裁定的口径**：本字段判的是
+   **算子对外部世界的持久改变**，**不是「是否接触外部服务」**——两者是正交的两件事，重试安全性是它的后果，
+   不是它的定义。依据三处（逐处实测）：§307 把该字段作为**重试策略的输入**；
+   `docs/spec/01-concepts.md:379-380` 的默认可自动执行清单里 `external_side_effect = none` 与
+   `network_transfer <= threshold` 是**两项并列**（网络传输是预算维度，不属外部副作用）；
+   §334（`docs/spec/05-normative.md:2528`）又把「无外部副作用」与「低成本／可逆／短时间」并列。故本表按
+   **有无对外部世界的持久改变**取：
+   - `Pure` = 该算子**不对外部世界产生持久改变**。**模型调用与检索调用属这一类**：它们读远端，但只产出本仓制品、
+     不改远端状态，网络传输记在预算维度（§333 的 `network_transfer`），故取 `Pure`：本块**七枚**。
+     `NonDeterministic` 与 `Pure` **自洽**——`determinism` 与 `side_effect_class` 是两个正交字段。
+   - `Idempotent` = 该算子**对外部世界产生持久改变，但重复执行无累积后果**（重跑安全）：本块**零枚**。
+   - `NonIdempotent` = 重复执行**会留下累积的外部后果**（§307 点名的那一类）：本块**零枚**。
 4. **没有一枚是 `NonIdempotent`，理由不是「研究任务都安全」**：判据是**有没有外部后果**。
    本块七枚只有读（检索是只读、模型调用是只读、写作只产出本仓制品），没有一枚发送、发布、扣费、删除远端
    ——`crates/continuum-effect/src/effect.rs:16-23` 的 `EffectType` 六臂（`SendEmail` / `PushBranch` /
-   `Publish` / `DeleteRemote` / `Charge` / `Deploy`）与本块七枚**无一对得上**。
+   `Publish` / `DeleteRemote` / `Charge` / `Deploy`）与本块七枚**无一对得上**。**同一条判据也说明七枚都取 `Pure`**：
+   既无 §307 意义上的外部后果，也无持久的外部改变。
 5. **backend 候选每枚只给一枚或两枚，且名字是本设计定的**：§245 `:756` 只给「同一个 Operator MAY 有多个 backend」
    与一个例子（`:761-764` 的 `Transcribe` 三候选），**规范全量里没有一处给过研究域的后端名**。
    故本表的多候选只出现在有结构理由的两处：第 7 行（引文核验既读被引来源、又判「来源是否支持该断言」，
@@ -348,11 +356,12 @@ P5e 的那个类型承载的是它自己的两条领域规则（§5.4 的注册�
    后者是「做检索的后端」。两者都不是某个具体产品名，理由同 §4.4 第 5 条的第一句——规范没给名字，
    给具体产品名会让一次后端替换变成一次枚举改动。
 
-**`side_effect_class` 与 P5e 的取值口径不同，据实记在此处**：P5e 设计 §5.2 对经模型的算子取 `Pure`
-（例如 `narrative-plan`：`NonDeterministic` + `Pure`），本表对经模型的算子取 `Idempotent`。
-**同一个字段在两个块里按两套口径取值**是「同一件事两个词汇表」的一种，**收件人见 §10 第 6 条**。
-本块**不改成 P5e 的口径**：本块的口径（按重试安全性、按是否接触进程外状态）有 §307 的后果可指，
-而「经模型的算子算不算 `Pure`」按 P5e 的口径给不出判据。**这是本块的读法，不是规范断言。**
+**`side_effect_class` 的口径来源与裁定（2026-10-10）**：同一字段在本次统一前有两套口径——P5e 设计 §5.2
+对经模型的算子取 `Pure`（例如 `narrative-plan`：`NonDeterministic` + `Pure`），而本表订正前取 `Idempotent`。
+**协调者裁定以「对外部世界的持久改变」为准**（三处依据见 §4.4 第 3 条）：把「接触进程外状态」当成副作用的读法被否，
+故本表六枚经模型／检索的算子改为 `Pure`，**与 P5e 的那份一致**——依裁定后的 P5e 设计 §5.2 是对照。
+**订正前的读法来历留在此处**：本表原按「重试安全性、按是否接触进程外状态」取值，产出六枚 `Idempotent`
+（第 1、2、4、5、6、7 行），该读法已废；本块的「零枚 `NonIdempotent`」一条不受影响（它的判据是「有没有外部后果」）。
 
 ## 4.5 端口类型与连接边
 
@@ -780,9 +789,9 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    与 P5a 设计 §8.3 第 6 项是同一处缺口的两半，两处互指。
 5. **待与 P5a 对账（两枚判定算子的 §262 级别）**：§5.3。本块**不声明**级别；
    若协调者判该声明，须给出「级别由谁持有」的裁定（P5e 设计 §13 第 5 条 (ii) 记的是同一处未决）。
-6. **待与 P5e 与协调者对账（`side_effect_class` 的口径）**：§4.4 末。同一个字段在两个块里按两套口径取值
-   （经模型的算子在 P5e 的表里是 `Pure`，在本块是 `Idempotent`）。**同一个字段有两套口径**是
-   「同一件事两个词汇表」的一种；本块给出自己的口径与它的依据（§307 的重试后果），并**请协调者裁定取哪一套**。
+6. **（已关闭，2026-10-10）与 P5e 与协调者对账（`side_effect_class` 的口径）**：§4.4 末。原记「同一个字段在两块按两套
+   口径取值」。**协调者裁定以「对外部世界的持久改变」为准**，本块六枚经模型／检索的算子已由 `Idempotent` 改为 `Pure`
+   （§4.4 第 3 条给依据），与 P5e 设计 §5.2 一致。本条保留「那次两套口径曾存在」这一事实。
 7. **待与 P5b 对账**：§7 的四条 `bind` 是本块填的；`realized_by` 的文本弱引用**没有编译期照片**
    （P5b 设计 §3.2 末），本块的补件是 §9.2 第 (f) 条那条运行期用例。
    另：§7 末的「`research-question` 与 `research-synthesis` 无目录可填」是**据实留的形状**，不是漏 bind。
@@ -820,8 +829,9 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 5. **`research-question` 与 `research-synthesis` 在 §187 的 `research/` 里没有对应方法**（§7 末）。
    **缺的是「§330 的 `Synthesis` 该不该有一条方法名」这一步。收件人：规范维护者 + 协调者。**
 6. **两枚判定算子的 §262 级别未声明**（§5.3）。**缺的是「verifier 候选的级别由谁持有」这一步。收件人：P5a + 装配方。**
-7. **本块的 backend 名（`primary-model` / `retrieval-backend` / `builtin`）与 `side_effect_class` 的取值口径
-   都是本设计定的**（§4.4 第 3、5 条），规范无来源。**缺的是「研究域的后端分类」这一步。收件人：规范维护者。**
+7. **本块的 backend 名（`primary-model` / `retrieval-backend` / `builtin`）是本设计定的**（§4.4 第 5 条），
+   规范无来源。**缺的是「研究域的后端分类」这一步。收件人：规范维护者。**
+   （`side_effect_class` 的取值口径不再是本设计自定的一项：2026-10-10 已由协调者裁定统一，见 §4.4 第 3 条。）
 8. **本块的四条 `pub` 项今天都没有生产调用方**（§10 第 10 条）。**这不是本块的缺口，是第 3 层的。**
 
 ---
