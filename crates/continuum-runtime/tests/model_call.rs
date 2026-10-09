@@ -2740,7 +2740,7 @@ async fn the_three_negative_methods_share_one_adapter_and_the_positive_path_stil
 // ② 整条路径**一行库都不写**（§9，**否定式照片**）；③ 可达性的**正面照片**：一条 `active`
 // 的模型真的成为 `CallPlan::selected()`；④ `Degraded` **原样带过**（§4.4 第 2 条，两侧对钉）。
 //
-// **简报列的第五条（「`plan_candidates` 到交进 `rank` 的 `availability` 的 id 集合双向相等」）
+// **简报列的第 3 条（「`plan_candidates` 到交进 `rank` 的 `availability` 的 id 集合双向相等」）
 // 本节不另立用例，据实记理由**（简报自己给的处置是「若三处观测点的变异完全等价，据实合并成一条
 // 并记在报告里——不为了凑三处而留两条等价用例」）：实测（2026-10-09）它与 Task 7 的
 // `the_request_reaching_the_policy_carries_the_candidates_availability`
@@ -2750,6 +2750,11 @@ async fn the_three_negative_methods_share_one_adapter_and_the_positive_path_stil
 // 两者断的是同一句话（`asked == candidate_ids`），换一组 id 不产生新的判别力。
 // Brief 里「前两条的夹具里候选集是全集」那个区分**实测不成立**。详情与实测见 task-11 报告
 // （`M6` 那一枚变异体同时红两者，日志 `.tmp/t11-M6.log`）。
+//
+// **订正（2026-10-09 修复轮）**：本节初稿把这一条写成「**简报列的第五条**」——**它是第 3 条**
+// （简报的用例清单与计划 Task 11 同序，计划里各条落在 `docs/superpowers/plans/2026-10-06-p3g-model-calling-path.md`
+// 的 `:1388` `rank_is_never_called…`／`:1414` `the_path_writes_nothing…`／`:1426` 本条／
+// `:1435` `a_routable_model…`／`:1440` `the_degraded_candidate…`），**旧话照留在此**。
 
 /// **与驱动同形的组合**：① `plan_candidates` 的 `Err` 由 `?` 短路，成功才走到 ② `select`。
 ///
@@ -2935,11 +2940,19 @@ async fn rank_is_never_called_when_no_candidate_survives() {
 /// 本节的任务标题就是「可达性与射程边界」，
 /// 而 §4.5 那张表把这一枚标成「**可达**，且是主要失败路径之一」——故在此补上。
 ///
-/// # 它和上一条的区别不是「同一件事换个入口」，是**两个不同的读数**
+/// # 它和上一条的区别：**进入 ② 可证**（落点不同），但**这一枚 `Err` 是谁报的，构造性不可分**
 ///
-/// 上一条：`select` 根本没被调到（短路的落点在 ①）；本条：`select` 走到了底
-/// （`snapshot` 逐候选问过 `health()`、`rank` 被调到），而 `rank` 在把 `Unavailable` 滤完之后
-/// 报出同一枚 `Err`。**两者在错误值上一样、在「谁报的」上不同**，而这正是这条来路要断的东西。
+/// 上一条：`select` 根本没被调到（短路的落点在 ①）；本条：**进入了 ②**——`snapshot` 逐候选问过
+/// `health()`（见下 `health_calls() == 1` 那个锚），故「什么都没跑」被排除。
+///
+/// **但「这一枚 `Err` 是 `rank` 报的、还是『`select` 自己短路』」在本条上分不开**（2026-10-09
+/// 修复轮实测）：本条唯一能算「读到过 `rank`」的证据是 `captured_availability().is_empty()`，
+/// 而它对「`rank` 被调到、把两条都滤光」与「`select` 自己短路、**根本没调** `rank`」**给同一个
+/// 读数（空）**——**构造性不可分**（理由见下 `captured_availability` 那一格）。
+/// **故本条不为此补断言**：补了也不可分。
+///
+/// **订正（2026-10-09 修复轮）**：本节初稿的小标题是「……是**两个不同的读数**」，且写「本条：
+/// `select` 走到了底（…… `rank` 被调到）」——**后半句说大了**（两种实现同一个读数）；旧话照留在此。
 ///
 /// # 非空锚（两处，缺一不可）
 ///
@@ -2947,9 +2960,14 @@ async fn rank_is_never_called_when_no_candidate_survives() {
 ///   故「也是 `NoEligibleCandidate`」不是「什么都没跑」；
 /// - `captured_availability().is_empty()`：`rank` 里那次 `evaluate` **在可用性过滤之后**
 ///   （`router.rs:546-550`：`Unavailable` 走 `continue`，打分在它下面），故全被滤掉时
-///   策略一次都不被问到。**这一条同时是「`rank` 被调到」与「策略被问到」分得开的照片**——
-///   简报第 1 条那句「`rank` 一次都没被调用」若被读成「策略一次都没被问到」，两件事在
-///   空候选集上恰好同真，在这里则**分道扬镳**（`rank` 被调了、策略没被问）。
+///   策略一次都不被问到。**这一枚锚钉的是「策略一次都没被问到」，不是「`rank` 被调到」**——
+///   `evaluate` 没被调到，`captured_availability` 就为空；而「`rank` 被调到但把两条都滤光」
+///   与「`select` 自己短路、根本没调 `rank`」**这一枚读数是同一个（空）**，故它**分不开**这两者。
+///   **「`rank` 被调到」在本条上构造性不可观察**（理由见上一节），**不为此补断言**。
+///
+///   **订正（2026-10-09 修复轮）**：本格初稿写「**这一条同时是「`rank` 被调到」与「策略被问到」
+///   分得开的照片**……在这里则**分道扬镳**（`rank` 被调了、策略没被问）」——**那句话是假的**
+///   （两种实现同一个读数）；旧话照留在此。
 ///
 /// # 红的条件（档位：收紧）
 ///
@@ -3003,7 +3021,7 @@ async fn an_all_unavailable_candidate_set_is_no_eligible_candidate() {
     assert_eq!(b.health_calls(), 1, "同上：第二条候选各问一次");
     assert!(
         policy.captured_availability().is_empty(),
-        "`rank` 被调到了，而策略一次都没被问到——打分在可用性过滤之后，全滤光就到不了 `evaluate`"
+        "策略一次都没被问到——打分在可用性过滤之后，全滤光就到不了 `evaluate`（而 `rank` 是否被调到，本条构造性不可分）"
     );
 }
 
@@ -3315,8 +3333,18 @@ async fn a_routable_model_does_come_out_as_the_selected_candidate() {
 /// # `Degraded` 该不该降权，规范未给判据——故这里钉的**不是**「不该降权」
 ///
 /// **降权是 [`RankingPolicy`] 的事**（打分是策略给的，基线不读健康度），G 手里根本没有分数。
-/// 故 G 这一侧能拿出的证据只能是「**原样带过**」——**「`Degraded` 该不该降权」这件事在
-/// 本设计里没有收件人**，据实记（简报让留给「## 遗留」的收件人，落在台账里）。
+/// 故 G 这一侧能拿出的证据只能是「**原样带过**」。
+///
+/// **收件人：规范维护者；G 侧＝退，G 能给的证据只有「原样带过」**——三处现成裁定同指一处
+/// （都在版控里，`grep` 得到）：计划的 Task 11 本行自己就指向落点
+/// （`docs/superpowers/plans/2026-10-06-p3g-model-calling-path.md:1445`「见 `## 遗留` 的收件人」），
+/// 同一计划 `## 遗留` §五具名「**收件人：规范维护者。**」（同文件 `:1692-1701`），
+/// 设计 §13 处置「§11 第 24 条」那一行也具名「收件人规范维护者」并裁「**退**」
+/// （`docs/superpowers/specs/2026-10-06-p3g-model-calling-path-design.md:1050`）。
+///
+/// **订正（2026-10-09 修复轮）**：本段初稿写「**「`Degraded` 该不该降权」这件事在本设计里
+/// 没有收件人**，据实记（简报让留给「## 遗留」的收件人，落在台账里）」——**那句话是假的**
+/// （上述三处都具名收件人）；**旧话照留在此**，来历见 task-11 修复轮报告。
 ///
 /// # 红的条件（档位：收紧）
 ///
