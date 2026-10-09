@@ -36,6 +36,7 @@
 | `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表 | **共写**，同上。`workspace_crates()` 从 workspace 定义派生（`crates/continuum-runtime/tests/dependency_direction.rs:234`），故新增 crate 会**先让该门变红**再被 `ALLOWED` 补齐——这是刻意的，不要靠「先不加 member」绕过。 |
 | `crates/continuum-artifact/src/artifact.rs` 的 `ArtifactType` | **共写，但只由 P5e 一处改**。见 §四第 2 条。 |
 | `crates/continuum-graph/src/node.rs` 的 `verification_policy: Value` | **P5a**（今天 `Value`，`:19` 的注记写明「结构保存，判定属 P5」）。该文件属 P1，故是共写。 |
+| `crates/continuum-operator/src/definition.rs` 的 `Checkpointable` | **共写，但只由 P5e 一处改**（§二第 4 条把它的错误类型指给 P5e）。**本表原先漏了它**——`Checkpointable` 的接口在 `:92-96`（两个方法今天返回 `Result<_, String>`），而它的错误类型**只能**定义在同一个 crate：落 `continuum-media`（第 8 层）会让第 3 层 `use` 第 8 层，即 §9.1 `:588`「依赖方向单向，无环」所说的 2-环。**故这是一处必然发生却被漏掉的共写**（2026-10-09 补入，P5e 的设计查出）。 |
 
 ---
 
@@ -145,10 +146,16 @@ P5 的四个领域算子块**都只经 `Operator` / `OperatorRegistry` 与第 3 
    分两次改动会在两次之间留下一棵编译不过的树，且两次都要改同一个数目断言。
    **一次改动要同时碰这几处**（2026-10-08 实测）：
    （a）`crates/continuum-artifact/src/artifact.rs` 的枚举本体（`:14-21`）；
-   （b）同文件的 `ALL`（`:28-35`）——**它带数目字面量 `[ArtifactType; 6]`**；
+   （b）同文件的 `ALL`（`:28`）——**它带数目字面量 `[ArtifactType; 6]`**；
+   **以及它上面 `:24` 那条注记**（正文写着「**全部六型**」——**只改代码不改它，那句话就成假**）；
    （c）同文件的 `as_str`（`:47`）与 `parse`（`:68`）——两个穷尽 `match`，无通配臂，加型时编译失败；
    （d）`crates/continuum-artifact/tests/artifact_type.rs` 的数目断言
    （`:23` 的 `assert_eq!(ArtifactType::ALL.len(), 6, ...)`）。
+   （e）`crates/continuum-port/tests/compatibility.rs:47` 的 `six_types_round_trip_through_serde`
+   ——**它的函数体（`:49-54`）手工列了六型**，加型之后它**照旧编译、照旧通过**，
+   故**本清单里只有这一处不会报警**（2026-10-09 补入，P5e 的设计查出）。
+   **本清单的失效方向**：前四处加型即编译不过或断言红，**唯有 (e) 无声**——
+   **一处「不报警」的遗漏，比四处会红的更能躲过一轮**（列这类清单时按「会不会红」排序，会漏掉沉默的那些）。
    **不改但要重跑**的两处：`crates/continuum-artifact/src/persist.rs:164` 与
    `crates/continuum-graph/src/persist.rs:410` 的两个 `parse_type` / `parse_artifact_type`
    ——它们委托到 `ArtifactType::parse`（唯一产生点），故不含自己的表；
@@ -170,6 +177,13 @@ P5 的四个领域算子块**都只经 `Operator` / `OperatorRegistry` 与第 3 
    的注记是「判定属 P4」，P4 的设计已给出它的判据。P5 只碰 `verification_policy`（`:20`）。
 6. **依赖边只登记实际用到的**（`ALLOWED` 与实际依赖**精确一致**，断言是逐对 `assert_eq!`）；
    P2b 曾为此删过两条零使用的边。六个新 crate 的条目一并按这条办。
+7. **判据只许有一处：凡本仓已落地的判据，四个算子块不得另建第二份。** 本条的第一枚实例是**复用判据**——
+   §305 的三项条件（`input_hash` 未变、`operator_version` 未变、`contract` 未受影响）**已由 P1 落地**
+   （`crates/continuum-graph/src/reuse.rs:29` 的 `can_reuse`），故 **P5e 不得另写一个「原素材未变 ⇒ 复用」的函数**，
+   只**让本领域算子满足该判据的前提**。
+   **失效方向**：两份判据并存且各有用例、各自都绿时，**失配是「一套说能复用、另一套说不能」**——
+   而这种不一致**不会在任何一条用例里显形**。
+   （**2026-10-09 补入，P5e 的设计查出**。本层其余同类落地点一经发现即按本条办；发现一处、登记一处。）
 
 ---
 
@@ -187,7 +201,18 @@ P5 的四个领域算子块**都只经 `Operator` / `OperatorRegistry` 与第 3 
 | **P5b** 执行方法库 | 把「这一类任务怎样做得可靠」从 ADFIR 的图结构里分出来（§187：ADFIR 决定做什么、Execution Method 决定怎样做得可靠）——定方法的登记形态与按领域选取的入口，并为四个领域各建一份方法目录 | 方法登记与选取的接口（先冻，见 §四第 3 条） | §186 §187；工程 §8.1 第 10 行、§8.3；总纲 §8.1 |
 | **P5c** 代码领域算子 | 把代码任务的执行链（L2 隔离工作区上的规划 → 拆任务 → 实现 → 规格审查 → 质量审查 → 验证，《总纲》§8.3）落成一组可注册的 Operator：各步的端口类型、determinism、side_effect_class、backend 候选，并让每步产出 P5a 的 Evidence | 本领域的 Operator 集与它在 P5b 目录里的条目 | §16 §186 §244 §245 §239；工程 §8.1 第 11 行；总纲 §8.3 |
 | **P5d** 研究领域算子 | 把 §330 的七步链（Question → Search → SourceSet → EvidenceExtraction → ContradictionCheck → Synthesis → CitationVerification）落成一组可注册的 Operator；其中 `ContradictionCheck` 与 `CitationVerification` 是给 P5a 的证据侧供给 | 本领域的 Operator 集与它在 P5b 目录里的条目 | §330；工程 §8.1 第 12 行；总纲 §8.4 |
-| **P5e** 媒体领域算子 | 把 §32 的剪辑链与 §328 的七种标准 Artifact 落成 Operator 集与 Artifact 类型，含 Timeline 的 Artifact 形态（§329）、Derived Artifact 在原素材未变时的复用（§131）、以及生成内容必须单独授权（§34）；**并一次性落地 `ArtifactType` 的 P5 扩展清单**（§四第 2 条） | 本领域的 Operator 集；`ArtifactType` 的 P5 新变体（唯一落地点）；`Checkpointable` 的错误类型（§二第 4 条） | §328 §329 §32 §33 §34 §131 §308 §239；工程 §8.1 第 13 行；总纲 §8.5 |
+| **P5e** 媒体领域算子 | 把 §32 的剪辑链与 §328 的七种标准 Artifact 落成 Operator 集与 Artifact 类型，含 Timeline 的 Artifact 形态（§329）、Derived Artifact 在原素材未变时的复用（§305，见下方的补记二）、以及生成内容必须单独授权（§34）；**并一次性落地 `ArtifactType` 的 P5 扩展清单**（§四第 2 条） | 本领域的 Operator 集；`ArtifactType` 的 P5 新变体（唯一落地点）；`Checkpointable` 的错误类型（§二第 4 条） | §328 §329 §32 §33 §34 §305 §308 §239 §9 §10；工程 §8.1 第 13 行；总纲 §8.5 |
+> **补记一（2026-10-09 补入，P5e 的设计查出）**：**本行与 §四第 2 条原先都没提两份最重要的清单**——
+> **§9 Typed Artifact**（`docs/spec/01-concepts.md:496-514`，逐行十二个名字，`:498` 明写「领域差异主要通过 Artifact 类型表达」）
+> 与 **§10 Domain Operator**（同文件 `:536-560`，逐行给出三枚现成的媒体算子签名：
+> `ShotDetect(Video) -> ShotSet`（`:541`）、`Transcribe(Audio) -> Transcript`（`:543`）、`ComposeTimeline(...) -> Timeline`（`:545`））。
+> §八 `:272-275` 说「本清单尚无权威来源」时举了四处，**漏了 §9 这一处**——而它正是 `Mesh` 与 `Report` 的**唯一**出处。
+> **判据**：**列「权威来源」时漏掉最完整的那一份，比列错更坏**——后来者会照那几处拼出来的并集去定清单，从此不再去找第五处。
+> **补记二（同日）**：**§131 不是复用判据，是一张派生产物的种类清单**（`docs/spec/02-positioning.md:1949`，列 `Transcript`/`ShotIndex`/`FaceIndex`/`AudioFeatures`/`Embeddings`）。
+> **复用的条件是 §305**（`docs/spec/05-normative.md:1986-1998`：`input_hash` 未变、`operator_version` 未变、`contract` 未受影响），
+> 而**它已由 P1 落地**——`crates/continuum-graph/src/reuse.rs:29` 的 `can_reuse` 就是那三项的判据。
+> ⇒ **P5e 不得另建第二份复用判据**，本块只**让本领域算子满足该判据的前提**。
+> **失效方向**：两套判据并存时，**失配是「一套说能复用、另一套说不能」**，而两套都各有用例、都绿。
 | **P5f** 图像领域算子 | 把 §323–§327 的两种原生操作落成 Operator 集——完整生成与局部修改**分作两个算子**（§161 明写「不能统一成一个 `image_tool(prompt)`」）、编辑区域的四种表示（Point 必须解析成语义区域，§325）、`outside_mask_change = FORBIDDEN` 的确定性强制作（§326），以及每次编辑产生新 Artifact 的谱系（§327） | 本领域的 Operator 集；**不拥有** `ArtifactType` 的改动（向 P5e 报出）。
 **订正（2026-10-09，P5b 的设计查出）：本行原先还写「与它在 P5b 目录里的条目」——那句没有对应物**：
 §187 的四个目录里**没有图像那一档**（详见 §八那条「`image/` 没有目录」）。**P5f 今天没有目录可填。** | §323–§327；§161–§168（`docs/spec/03-product-drive.md:568-830`）；工程 §8.1 第 14 行；总纲 §8.6 |
