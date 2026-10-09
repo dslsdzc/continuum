@@ -177,7 +177,13 @@ P5 的四个领域算子块**都只经 `Operator` / `OperatorRegistry` 与第 3 
 
 | 子项目 | 一句话范围 | 它拥有 / 产出的接口 | 主要规范依据 |
 |---|---|---|---|
-| **P5a** 验证与证据判定 | 把节点输出转成 `Evidence`，按每项 REQUIRED 建证据集合并判定覆盖是否完整，按任务取得 `VerificationProfile`、按 §262 的五级序选 Verifier 并限定它的输入（不含 Worker 的完成声明与完整推理），最后按 §266 判定 Intent 是否可以完成——它是 §342 第 5、10 条不变量的执行点 | 冻结 `Evidence`、`VerificationPolicy`、Requirement Coverage 与 Completion Predicate 的判定面；把 `Node.verification_policy` 从 `Value` 定型 | §258 §259 §260 §261 §262 §263 §264 §265 §266 §188–§195 §215 §89 §29；工程 §8.1 前九行、§8.2–§8.4；总纲 §8.2 |
+| **P5a** 验证与证据判定 | 把节点输出转成 `Evidence`，按每项 REQUIRED 建证据集合并判定覆盖是否完整，按任务取得 `VerificationProfile`、按 §262 的五级序选 Verifier 并限定它的输入（不含 Worker 的完成声明与完整推理），最后按 §266 判定 Intent 是否可以完成——它是 §342 第 5、10 条不变量的执行点 | 冻结 `Evidence`、`VerificationPolicy`、Requirement Coverage 与 Completion Predicate 的判定面。
+> **订正（2026-10-09，P5a 的订正轮查出本行与本文档 §二第 2 条相抵）**：本行原写「**把 `Node.verification_policy`
+> 从 `Value` 定型**」——**而 §二第 2 条（`:74`／`:77`）已写明字段类型**不动**、定型落在消费侧，
+> 只改 `crates/continuum-graph/src/node.rs:19` 一行注记**。**同一份文档里一处说改、一处说不改。**
+> **以 §二第 2 条为准**（那里写了理由：给字段定型会造出 `执行层 (3) ↔ 跨领域 (8)` 的 2-环）。
+> **判据**：**一句话的摘要（本行的「它拥有/产出」栏）与它的正文（§二）相抵时，以正文为准**——
+> **而摘要之所以会漂，是因为它是在正文定稿**之前**写的**。**这张表的每一行都该被当成**摘要**读，不是当成判据读。** | §258 §259 §260 §261 §262 §263 §264 §265 §266 §188–§195 §215 §89 §29；工程 §8.1 前九行、§8.2–§8.4；总纲 §8.2 |
 | **P5b** 执行方法库 | 把「这一类任务怎样做得可靠」从 ADFIR 的图结构里分出来（§187：ADFIR 决定做什么、Execution Method 决定怎样做得可靠）——定方法的登记形态与按领域选取的入口，并为四个领域各建一份方法目录 | 方法登记与选取的接口（先冻，见 §四第 3 条） | §186 §187；工程 §8.1 第 10 行、§8.3；总纲 §8.1 |
 | **P5c** 代码领域算子 | 把代码任务的执行链（L2 隔离工作区上的规划 → 拆任务 → 实现 → 规格审查 → 质量审查 → 验证，《总纲》§8.3）落成一组可注册的 Operator：各步的端口类型、determinism、side_effect_class、backend 候选，并让每步产出 P5a 的 Evidence | 本领域的 Operator 集与它在 P5b 目录里的条目 | §16 §186 §244 §245 §239；工程 §8.1 第 11 行；总纲 §8.3 |
 | **P5d** 研究领域算子 | 把 §330 的七步链（Question → Search → SourceSet → EvidenceExtraction → ContradictionCheck → Synthesis → CitationVerification）落成一组可注册的 Operator；其中 `ContradictionCheck` 与 `CitationVerification` 是给 P5a 的证据侧供给 | 本领域的 Operator 集与它在 P5b 目录里的条目 | §330；工程 §8.1 第 12 行；总纲 §8.4 |

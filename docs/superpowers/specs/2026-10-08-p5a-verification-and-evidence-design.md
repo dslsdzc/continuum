@@ -68,7 +68,7 @@
 | 被依赖 | 用到什么（逐项实测） |
 |---|---|
 | `continuum-artifact` | `Artifact` / `ArtifactId` / `ArtifactType`：`Evidence.artifact_refs`（§4.1）与 §266 的 `artifact_exists`（§8.3）；内容与隐私不入判定 |
-| `continuum-events` | `EventType::VerificationFailed`（`crates/continuum-events/src/event.rs:24`）——本块是它的**第一个产生点**（实测：该型今天**零个写入方**；提到它的只有 `event.rs` 的定义/枚举表与 `crates/continuum-events/tests/event_envelope.rs:18` 的一条往返用例） |
+| `continuum-events` | `EventType::VerificationFailed`（`crates/continuum-events/src/event.rs:25`）——本块是它的**第一个产生点**（实测：该型今天**零个写入方**；提到它的只有 `event.rs` 的定义/枚举表与 `crates/continuum-events/tests/event_envelope.rs:18` 的一条往返用例） |
 | `continuum-graph` | `NodeId`（生产者与受验节点的身份）、`Node` / `AdfirGraph`（§266 的 `artifact_exists` 与 `EdgeKind::Evidence` 的核对）、`ExecutionProfile`（§7.3 的 Worker 身份） |
 | `continuum-operator` | `BackendId`（§7.2 的候选 backend、§4.3 的 `EvidenceProducer`） |
 | `continuum-persist` | `Tx` / `Migration` / `PersistError`（§10） |
@@ -96,12 +96,16 @@
 EvidenceId  EvidenceType  EvidenceSubject  Claim  EvidenceProducer
 EvidenceStrength  EvidenceScope  Evidence  Validity  TestValidityCheck
 CheckVerdict  TestValidity
-VerificationProfile  CoverageVerdict  IncompleteReason  RequirementCoverage
+VerificationPolicy  VerificationProfile  CoverageVerdict  IncompleteReason  RequirementCoverage
 VerifierLevel  AvailableVerifier  VerifierSelection
-VerifierVerdict  VerdictSet  VerdictAggregate
+VerifierVerdict  VerdictAggregate  IndependenceVerdict
 BlindVerdict  WorkerCompletionDeclaration  InitialVerifierInput  PostBlindVerifierInput
-Conjunct  CompletionVerdict  AdversaryOutcome  VerifyError
+Conjunct  CompletionVerdict  CompletionInput  AdversaryOutcome  VerifyError
 ```
+
+**这份清单是本块的定义面，不是「本块用到的类型」的清单**：判定的输入与输出形状若由本块定义，就登记在此——`VerificationPolicy`（§5.1 定义、§7.2 消费）、`IndependenceVerdict`（§7.5 定义、§7.3 与 §8.4 消费）、`CompletionInput`（§8.4 定义、§12.1 (q) 用）三枚因此在此，**它们是另外四块照本清单接线的合同的一部分**。
+
+**一枚早先列在这里的死条目已删**：`VerdictSet`。实测全文除本清单外**零命中**——没有定义、没有一处判定面用它；本块做聚合的是 `VerdictAggregate`（§7.5、§8.3 第 5 项、§8.4）。此处留一句，是为免下一轮再照旧清单补一枚同名类型。
 
 **判定**（本块是它们的唯一落点）：
 
@@ -125,12 +129,12 @@ Conjunct  CompletionVerdict  AdversaryOutcome  VerifyError
 
 **理由（两条，按分量）**：
 
-1. **定型在字段上会造出一条反向边。** `VerificationPolicy` 若定义在 `continuum-verify`（第 8 层），则 `continuum-graph` 要 `use` 它，即 `跨领域 (8) ← 执行层 (3)`——而 §9.1 给的是 `执行层 (3) → 跨领域 (8)`（`docs/02-工程.md:573-586` 的图；`:588` 明写「依赖方向单向，无环」：跨领域依赖执行层）。两处并存即第 3 层与第 8 层之间的 2-环，与 §9.1 的「依赖方向单向，无环」直接相抵。若把 `VerificationPolicy` 连同它要用的 `EvidenceType` / `VerifierLevel` 一并下放到执行层，则 §二第 1 条「`Evidence` 的持有方是 P5a」当场不成立——**两个方向的代价都落在同一条规则上，而那条规则是规范给的**。
+1. **定型在字段上会造出一条反向边。** `VerificationPolicy` 若定义在 `continuum-verify`（第 8 层），则 `continuum-graph` 要 `use` 它，即 `跨领域 (8) ← 执行层 (3)`——而 §9.1 给的是 `执行层 (3) → 跨领域 (8)`（`docs/02-工程.md:573-586` 的图；`:588` 明写「依赖方向单向，无环」：跨领域依赖执行层）。两处并存即第 3 层与第 8 层之间的 2-环，与 §9.1 的「依赖方向单向，无环」直接相抵。若把 `VerificationPolicy` 连同它要用的 `EvidenceType` / `VerifierLevel` 一并下放到执行层，则 §二第 1 条「`Evidence` 的持有方是 P5a」当场不成立——**两个方向的代价都落在同一条规则上，而那条规则是规范给的**。**这一侧的代价据实说小**：定型落消费侧之后，本块只有**一个**解析点（§5.1 的 `from_value`），§7.2 的 `select_verifier` 收的是解析后的 `&VerificationPolicy`，故「N 个消费者各解析一遍」并不成立；真正的消费者是**装配方**（写这个 `Value` 的人），而今天**没有任何产生点写它**（`Node::new` 置 `Value::Null`，`crates/continuum-graph/src/node.rs:34`）。代价落在「解析必须收敛在一处、且非空不认识的策略取 `Err`」（§5.1 的两侧），不是分散在各处的解析成本。
 2. **同一份文件、相邻一行已有先例。** `execution_policy`（`:18`，注记 `:17`「判定属 P4」）在 P4 的设计里正是这么处置的：P4 设计 §1.2.4 的表第三行明写「图的 `Node.execution_policy` 与 `Node.constraints` 以 `&str` / `serde_json::Value` 原样传入，本层不 `use continuum_graph`」，并给出「本层不登记任何指向执行层／资源层／边界层的 `Cargo.toml` 依赖边；凡跨层的输入，一律以『值』由装配方传入」（P4 设计 §1.2.3，`:99-104`）。两个相邻字段取两种形状，会让「同一件事两个词汇表」以**同一份文件的相邻两行**的形式出现。
 
 **替代方案与被否的理由（留档）**：把字段改成 `VerificationPolicy` 并让它定义在 `continuum-graph`（即类型随字段下放到执行层）。这条**能编过**、也不造反向边，代价是 §262 的五级序与 §258 的证据类型这两套验证词汇的**权威**从跨领域层移到执行层，而 §236（`docs/spec/05-normative.md:558`）对本字段只有字段名、没有词汇表——把词汇表放在执行层，等于让第 3 层替第 8 层决定了它要判什么。**本设计不取这条**，但把它写在此处：若协调者要取它，改动是「本节的裁定 + §5.1 的位置 + §7.1 的 `VerifierLevel` 位置」三处，判定的归属不变。
 
-**一条请求（收件人：P1 的设计）**：`Node.verification_policy` 与 `Node.constraints` 一样，今天在 `node.rs` 上没有说「谁是它的读者」。本设计要求在 `:19` 的注记里补出读者的名字。这是一行文档改动，不涉及类型。
+**这一行改动的归属是唯一的**：它与 §2.1 的共写文件表第 4 行（`crates/continuum-graph/src/node.rs`，「**只改 `:19` 的注记一行**，不改字段类型」）是**同一条**，也与 §14 第 6 条 (i) 互为指针；本块需读 `Node`，本来就依赖 `continuum-graph`，故这一行由**本块**改，**不再单列一条对 P1 的请求**。要补的内容是：`Node.verification_policy` 与 `Node.constraints` 一样，今天在 `node.rs` 上没有说「谁是它的读者」，故 `:19` 的注记里一并写出读者的名字。这是一行文档改动，不涉及类型。
 
 ## 2.4 本块的层间位置
 
@@ -185,6 +189,14 @@ OPEN-001 一旦有判据，本设计的翻案是**三处**，且三处都在类�
 3. `Conjunct::AllRequiredRequirementsVerified` 的判定函数从「恒 `Undetermined`」改为读新判据。
 
 **在那之前，任何一处出现「先按某个阈值放行」的实现，都是在本块内绕过 §342 第 5、10 条**——上表三处就是它的检查点。
+
+## 3.5 一处规范正文的相抵：§189 直接要求「判断证据是否充分」
+
+**据实记录**：§189（`docs/spec/04-method.md:210`「Test Evidence」）的四阶段表里，`Verification` 一行逐字是「判断证据是否充分」（`:242-243`）。这一句正落在本设计 §3.2 裁定**不判**的那件事上，而 §189 出现在本设计自己的「规范依据」行（`:9` 的 `§188–§195`）所覆盖的区间内——**它是规范正文里直接要求判充分的那一句**，比 `ENG-004` / `OPEN-001`（两处都只是登记缺口）更直接。
+
+本设计**不执行该句**，理由即 §3.1 的构造性论证（OPEN-001 缺「充分」的判据）。**这与 §13 末记录的那处相抵同形**（§8.3 的依赖行缺 Contract，与 §263/§8.2 相抵）：都是「规范正文的一句与本设计的裁定相抵」，两处都**不改规范、也不假装没看见**，各记一条。§3.1 只列了 `ENG-004` / `OPEN-001` / §259 / §342 第 5 条，漏了这一句；本段补上。
+
+**另一种读法（据实列出）**：§189 的 `Verification → 判断证据是否充分` 也可以读作**对四个阶段职责的描述**，而不是**对本块的一条 MUST**——该表通篇没有 MUST/SHOULD。若规范维护者取这一读法，本条相抵即消解；本设计不替它取。**收件人：规范维护者 + 协调者**（§15 第 17 条）。
 
 ---
 
@@ -486,6 +498,16 @@ pub enum Validity { Valid, Invalid, Unknown }
 
 **为什么有效性是独立的记录而不是 `Evidence` 的一个字段**：§4.1 已述——验证者不能改被验之物。
 
+## 6.5 取得（§8.3 `Test Validity Verifier ← 测试代码 + Requirement`）：**只定义判定与消费点，不建产生者**
+
+**事实**：《工程》§8.3（`docs/02-工程.md:523`）给 Test Validity Verifier 的输入面逐字是 `Test Validity Verifier ← 测试代码 + Requirement`；而本设计冻结的是它的**产出**（`TestValidity`，§6.4）与聚合规则，**「测试代码」在本设计里零命中**（实测：`docs/superpowers/specs/` 与 `docs/spec/` 下唯一一处 `测试代码` 是 `2026-10-05-p3f-tool-call-path-design.md:642`，与验证无关）。§191（`docs/spec/04-method.md:298`）只列五个检查名，**没有**规定执行者与触发点。
+
+**本设计的处置（与 §5.3 对 `VerificationProfile` 的处置同形）**：
+
+1. **不建产生者。** 「谁跑这五个检查、什么时候跑」规范未给；在未给期间造一个，等于替 §191 选了一条它没写的执行路径（切分 §四第 4 条也禁止 P5 自建执行路径）。
+2. **只定义消费点**：`coverage`（§6.1）与 `counts`（§6.3）只读 `&[TestValidity]`，由装配方以**值**传入（P4 设计 §1.2.3 的规则）。`TestValidity` 的构造点只做形状校验（`checks` 五臂齐，§6.4），不产生判定。
+3. **输入面记缺口**：规范给的输入是「测试代码」，而本设计里测试的载体是 `Evidence<Test>`（§4.4 的唯一产生点）——「测试代码」（源码）**没有**落到本块的载体。**这一条不能就近决定**：把 `Evidence<Test>` 当作「测试代码」，等于替 §191 决定它的输入是什么。见 §15 第 16 条。
+
 ---
 
 # 7. Verifier 选择与隔离（§262 §263 §29 §120 §121 §123）
@@ -602,6 +624,8 @@ pub struct PostBlindVerifierInput {
 2. **`PostBlindVerifierInput` 不能先于盲判存在**——构造点的参数是 `BlindVerdict`。照片：同上，写 `PostBlindVerifierInput::new(declaration)`，编不过。
 3. **受验节点自己产的证据进不了初判输入**——`assemble` 返回 `Err(EvidenceFromVerifiedNode { .. })`。照片：一条正例（别的节点产的证据 ⇒ `Ok`）与一条反例（受验节点产的 ⇒ `Err`），**两侧都拍**。
 
+**第 3 条超出 §263 的文本，代价据实记在此处**：§263 的 SHOULD 逐字只点名两样——「完整 Worker reasoning」与「Worker 自己的完成声明」（`docs/spec/05-normative.md:1185`）——它**没有**说受验节点自己产的 `Evidence` 要排除。本设计第 3 条比它更严（fail-closed）。**代价**：一条叶子节点的证据若**只能**由它自己产出，则 `assemble` 返回 `Err`，该轮**装不出初判输入** ⇒ 判定不得产出（`Err` 直接冒泡为 `VerifyError`），节点在该轮完不成。本设计接受这个代价，理由是另一侧更坏：允许自产证据进初判输入，等于让受验者自证，§263 的隔离在同一节点内失效。**第 3 条的正例（n 用例）有一个前提**：图上有别的节点产同类证据——本条不退化为「一律 `Err`」靠的是这个前提，而**无别的节点时**它的形态是「初判输入不可装配」，与本设计其余 fail-closed 侧同向（不静默放行），不是未定义。
+
 **残余，据实记录**：`Claim` 是自由文本（§4.3.2），协议上仍可以把一段推理写进 `claim`。第 1 条保证的是「结构里没有那个位置」，不是「内容里没有那句话」。**这是缺口**，见 §15 第 2 条。
 
 ## 7.5 判定结果的形状（§123 §121）
@@ -617,8 +641,13 @@ pub enum VerifierVerdict {
     Unknown { reason: Claim },
 }
 
+/// 一轮里全部 verifier 判定的聚合。**五臂的判据互斥且有序**，
+/// 声明序即优先序——`AdjudicationRequired` 优先于 `Failed`（理由见本节下段）。
 pub enum VerdictAggregate {
-    /// 至少一条 `Fail`。
+    /// §121：同时存在 `Pass` 与 `Fail`。**不得多数投票**（§121 原文）。
+    /// **优先级最高**：只要同时出现 `Pass` 与 `Fail`，即取本臂，不取 `Failed`。
+    AdjudicationRequired,
+    /// 至少一条 `Fail` **且无 `Pass`**。
     Failed,
     /// 无 `Fail`、无 `Pass`（全是 `Unknown`）。
     Unknown,
@@ -626,12 +655,28 @@ pub enum VerdictAggregate {
     PassedWithUnknown,
     /// 全部 `Pass`。
     Passed,
-    /// §121：同时存在 `Pass` 与 `Fail`。**不得多数投票**（§121 原文）。
-    AdjudicationRequired,
 }
 
 pub enum IndependenceVerdict { Independent, NotIndependent, NotEstablished }
+
+/// §29 的 `blind verification`（`docs/spec/01-concepts.md:1264-1266`：
+/// 「先进行 blind verification。之后才比较 Worker reasoning summary。」）的结论。
+/// **臂与 `VerifierVerdict` 逐臂同形**，单独命名的理由只有一条：
+/// `PostBlindVerifierInput`（§7.4）要的是**盲判这一轮**的结论，而不是任何一轮 verifier 的结论——
+/// 两者在类型上分开，「先盲判、后比较」的构造顺序才可检查（§7.4 第 2 条）。
+///
+/// **臂从哪来**：规范**未给** `BlindVerdict` 的臂（§29 只规定顺序，未规定结论的形态）。
+/// 本设计取「与 `VerifierVerdict` 同形的三臂」，唯一构造点是
+/// `BlindVerdict::from(VerifierVerdict)`——盲判即 Verifier 在看不到 Worker 完成声明
+/// 与推理时的判定，本设计不为它新增判定语义。
+pub enum BlindVerdict {
+    Pass,
+    Fail { reason: Claim },
+    Unknown { reason: Claim },
+}
 ```
+
+**`VerdictAggregate` 的臂为何要有优先序**：早先 `Failed` 写成「至少一条 `Fail`」，而 `Pass ∧ Fail` 同时满足「至少一条 `Fail`」与「同时存在 `Pass` 与 `Fail`」两条——**两臂判据互相覆盖、无优先级**，实现者按臂的次序写 `match` 会得到两种结果之一。现把 `Failed` 收窄为「至少一条 `Fail` **且无 `Pass`**」，两臂即互斥。取 `AdjudicationRequired` 优先（而不是反过来把 `Pass ∧ Fail` 判成 `Failed`）的理由：§121 对这一形态的处理是「进入 Adjudication，不得多数投票」，取 `AdjudicationRequired` 才让调用方看到它需要裁决；取 `Failed` 会把一个需要裁决的形态压成一次普通失败。§12.1 (p) 的照片钉的就是这一侧。**两臂对 §8.3 第 5 项同效**（都不满足 `NoBlockingVerificationFailure`），故这个次序不动完成判定的结果，只动返回给调用方的变体。
 
 **§121 的处置**：本块只做**检测**（`Pass ∧ Fail ⇒ AdjudicationRequired`），**不选**四种补救里的任何一种（运行额外确定性检查 / 增加第三 verifier / 降低 confidence / 请求用户决定）——§121 用的是「可能」。选一种就是发明；故把 `AdjudicationRequired` 作为返回值交给调用方，由其升 `Decision`（那属 P4 的 Decision 面，§14 第 1 条）。
 
@@ -659,10 +704,10 @@ pub enum IndependenceVerdict { Independent, NotIndependent, NotEstablished }
 
 | 两条名字 | 合成一项的理由 |
 |---|---|
-| §266 `all_required_requirements_verified` ≈ §195 `requirement_coverage_sufficient` | 判据同一：每一项 REQUIRED 的覆盖判定（§6.2）。两个名字一件事，留两个即「同一件事两个词汇表」 |
-| §266 `contract_satisfied` ≈ §195 `task_contract_satisfied` | 同上，判据同一：§225 的 Constraint Validator 的结论 |
+| §266 `all_required_requirements_verified` ≈ §195 `requirement_coverage_sufficient` | **同义性本设计未论证**：前者可读作「每项 REQUIRED 都拿到了 verifier 的判定」，后者是 OPEN-001 缺的那件「充分」，两者**不是显然同一件事**。合并之所以安全，只在**方向**上成立：合并后的臂 `AllRequiredRequirementsVerified` 恒 `Undetermined`（§3.4 第 3 条），故即便两者本非同义，合并也不会把任何一项放行——**这是 fail-closed 的方向，不是同义性论证** |
+| §266 `contract_satisfied` ≈ §195 `task_contract_satisfied` | 判据同一：§225 的 Constraint Validator 的结论（这一条是**同义**，两者都指向同一处结论） |
 
-**若协调者要它们分开**，改动是枚举加两臂 + 两个判定函数各自接一条输入；判定的归属不变。
+**若协调者要它们分开**，改动是枚举加两臂 + 两个判定函数各自接一条输入；判定的归属不变。**第一对与第二对的证据强度不同**：第二对有「同一处结论」这一条可指，第一对只有 fail-closed 的方向——分开第一对时，`requirement_coverage_sufficient` 仍缺判据（是 OPEN-001 那件），加臂也只是多一枚恒 `Undetermined` 的臂。
 
 十个臂（`Conjunct`）：
 
@@ -713,7 +758,9 @@ pub enum CompletionVerdict {
 | 7 | `ApplicablePropertiesHold` | 不可 | 同上，且「applicable」的判据（§195 的限定词）未给 | P5c + 规范维护者 |
 | 8 | `ApplicableFuzzBudgetComplete` | 不可 | `fuzz_budget` 的量纲（§5.2） | 规范维护者（§15 第 3 条） |
 | 9 | `ApplicableMutationQualitySufficient` | 不可 | `mutation_score` 的量纲与 `mutation_threshold` 的比较规则（§9.2） | 规范维护者（§15 第 3 条） |
-| 10 | `IndependentVerificationPass` | **可判** | —— 判据：`VerifierSelection.independence != NotEstablished` ∧ 该 verifier 的 `VerdictAggregate` 是 `Passed`/`PassedWithUnknown`（§7.5） | —— |
+| 10 | `IndependentVerificationPass` | **可判**（独立性未确立的一值不可判） | 判据（`IndependenceVerdict` 三臂各有落点）：`Independent` ∧ 该 verifier 的 `VerdictAggregate ∈ {Passed, PassedWithUnknown}` ⇒ **真**；`NotIndependent` ⇒ **假**；`NotEstablished` ⇒ **不可判**（`Undetermined`），**不得写成假**——见本节下段 | —— |
+
+**第 10 项的 `NotEstablished` 一臂：不可判，不是判为假。** 早先这一项的判据写成 `independence != NotEstablished ∧ …`，当独立性为 `NotEstablished`（§7.3 明写这是 `independent_verifier_required == false` 时**保留候选并标注**的那个状态）时给出 `false` ⇒ `Blocked { failing: [IndependentVerificationPass] }`——**这正是 §8.4 刚刚警告过的「把『没判』写成『判为假』，会让调用方去查一个不存在的失败」**，且与本设计自己的纪律相抵。今按同一条纪律处置：`NotEstablished` ⇒ `Undetermined`（第 10 项列入 `undecidable`），与 §8.4 那四项 `Option` 的 `None` 同法。**两侧都 fail-closed**（既不完成、也不谎报失败），照片见 §12.1 (s)。
 
 **另有第十一项，不是合取项但同等效力**（§8.4 的第 6 条输入）：`Intent.completion_predicate` 的声明值。
 
@@ -731,6 +778,8 @@ pub struct CompletionInput {
     pub contract_satisfied: Option<bool>,
     pub mandatory_effects_completed: Option<bool>,
     /// 第 5、10 项：§7 的判定产出。
+    /// `independence == NotEstablished` ⇒ 第 10 项**不可判**（列入 `undecidable`），**不是为假**——
+    /// 与下面四项 `Option` 的 `None` 同一条纪律（见本节末「`Option<bool>` 而不是 `bool`」）。
     pub verifier_verdicts: VerdictAggregate,
     pub independence: IndependenceVerdict,
     /// 第 6–9 项：以值传入（装配方从制品与预算面读出）。`None` = 未给出 ⇒ 不可判。
@@ -829,7 +878,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 ## 10.3 事件与事务
 
-- **`EventType::VerificationFailed`**（`crates/continuum-events/src/event.rs:24`）的第一个产生点：`VerdictAggregate ∈ {Failed, AdjudicationRequired}` 时写一条，payload 含逐项状态。**状态写入与事件写在同一事务**（P1 的 `apply_transition` 形状，`crates/continuum-graph/src/transition_tx.rs`）。
+- **`EventType::VerificationFailed`**（`crates/continuum-events/src/event.rs:25`）的第一个产生点：`VerdictAggregate ∈ {Failed, AdjudicationRequired}` 时写一条，payload 含逐项状态。**状态写入与事件写在同一事务**（P1 的 `apply_transition` 形状，`crates/continuum-graph/src/transition_tx.rs`）。
 - **不写 `IntentCompleted`**：本块不产生「完成」（§8.2），故那个事件类型在本轮仍无产生点。**据实记录**：`crates/continuum-persist/src/tx.rs:369` 有一处按 `IntentCompleted` 判 `saw_skip` 的分支，本设计不改它、也不知道它是否有活路径（那是 P0/P2b 的面）。
 - **不写审计**：§313 的必录清单里没有验证类事件（`crates/continuum-events/src/audit.rs:18-34` 的 `AuditKind` 八项），故本块不新增 `AuditKind`。
 
@@ -856,9 +905,11 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 # 12. 测试策略与照片
 
-## 12.1 两侧守卫与逐项照片（判定侧 18 条 + 结构侧 4 条）
+## 12.1 两侧守卫与逐项照片（判定侧 19 条 + 结构侧 4 条）
 
-**枚举逐臂**（每臂一条往返 + 数目断言；`ALL` 的完整性由「数目断言 + 穷尽 `match`」把关，与 `crates/continuum-artifact/tests/artifact_type.rs:23` 同形）：`EvidenceType`（11 臂）、`VerifierLevel`（5 臂）、`Conjunct`（10 臂）、`TestValidityCheck`（5 臂）、`CheckVerdict`（3 臂）、`CoverageVerdict` + `IncompleteReason`（2+2 臂）、`Validity`（3 臂）、`VerifierVerdict` / `VerdictAggregate`（3/5 臂）、`IndependenceVerdict`（3 臂）。
+**枚举逐臂**（每臂一条往返 + 数目断言；`ALL` 的完整性由「数目断言 + 穷尽 `match`」把关，与 `crates/continuum-artifact/tests/artifact_type.rs:23` 同形）：`EvidenceType`（11 臂）、`VerifierLevel`（5 臂）、`Conjunct`（10 臂）、`TestValidityCheck`（5 臂）、`CheckVerdict`（3 臂）、`CoverageVerdict` + `IncompleteReason`（2+2 臂）、`Validity`（3 臂）、`VerifierVerdict` / `VerdictAggregate`（3/5 臂）、`BlindVerdict`（3 臂）、`CompletionVerdict`（2 臂）、`IndependenceVerdict`（3 臂）、`AdversaryOutcome`（2 臂）。
+
+**这份清单要求「每一枚枚举的每一臂」都有数目断言**：`BlindVerdict` / `CompletionVerdict` / `AdversaryOutcome` 三枚早先漏在清单外（它们的臂数没有数目断言），现补入——漏一枚枚举即漏「臂数漂移」这一整类回归。
 
 **判定侧**（逐条都是「正例 + 反例」成对，缺一条即不算钉住）：
 
@@ -882,6 +933,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 | p | `Pass ∧ Fail` ⇒ `AdjudicationRequired`（**不是**多数票、不是 `Passed`） | §121 |
 | q | `CompletionInput` 四项 `Option` 为 `None` ⇒ `Undecidable{undecidable: [...4 项...]}`；为 `Some(false)` ⇒ `Blocked{failing: [...4 项...]}` | §8.4 的 `None` vs `false`，**两侧都钉** |
 | r | 有内容的 `declared_completion_predicate` ⇒ 追加一项不可判；空/缺 ⇒ 不追加 | §8.4 第 6 条输入，两侧 |
+| s | `independence = NotEstablished` ⇒ 第 10 项列入 `undecidable`（**不是** `Blocked`）；`NotIndependent` ⇒ `Blocked{failing: [IndependentVerificationPass]}` | §8.3 第 10 项的三臂，**两侧都钉**（「没判」与「判为假」不可互写） |
 
 ## 12.2 变异预告（谁红）
 
@@ -895,6 +947,8 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 | **收紧**：`Unknown` 的检查结果算作不计数（第 5 条计数规则取反） | b 只在「证据里有 `Unknown` 有效性」的语料上红 ⇒ **该用例须备一份这样的语料**，否则此档不红 = 缺用例 | a、c |
 | **移除**：`MissingRequiredTypes` 这一臂从判定里删掉 | c | d、a、b |
 | **移除**：`assemble` 里那条「受验节点自己产的证据」检查 | m | n（n 是它的反向对照，**应当仍绿**） |
+| **取反**：`judge_completion` 把 `independence == NotEstablished` 当作 `NotIndependent`（「没判」写成「判为假」） | s 的第一个子例（`NotEstablished ⇒ undecidable`，被写成 `Blocked`） | s 的第二个子例（`NotIndependent ⇒ Blocked` 不受影响）、q（`Option` 四项的 `None`/`false` 是另一条纪律）、其余全部 |
+| **取反**：`VerdictAggregate` 的 `AdjudicationRequired` 与 `Failed` 次序互换（`Pass ∧ Fail` 落到 `Failed`） | p | 其余全部（**这一档若不红，说明 p 只拍了单项 Fail**） |
 
 **一条预防**：`k` 的期望值必须手写；若写成 `contract.requirements.len()`，则它测的是 Rust 的 `len()`，恒真——**语料从被测清单里取就是恒真的假照片**（本仓已有此判据）。
 
@@ -937,7 +991,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 以下每条都是**本设计假设了别的块的某枚形状**之处。逐条写清「假设了什么」与「为什么必须假设」。
 
-1. **待与 P4（语义层）对账**：本设计假设 `RequirementId` 由 P4 的 `continuum-semantics` 提供（§4.3.1）、`ContractView` 的字段名与 §224 一致（§6.1）、`ContractSatisfied` 与「`Intent.completion_predicate` 有无内容」以**值**进入 `CompletionInput`（§8.4）。依据是切分 §二末「与 P4 的接口面**照设计写，不照实现写**」（`:82-88`），本设计据此读 P4 设计 §7.1 / §7.2 / §16（`:999`、`:1018`、`:2318`）。**P4 的设计若再改，由本块的一方复核并订正，不由 P4 替它改**（切分原话）。
+1. **待与 P4（语义层）对账**：本设计假设 `RequirementId` 由 P4 的 `continuum-semantics` 提供（§4.3.1）、`ContractView` 的字段名与 §224 一致（§6.1）、`ContractSatisfied` 与「`Intent.completion_predicate` 有无内容」以**值**进入 `CompletionInput`（§8.4）。依据是切分 §二末「与 P4 的接口面**照设计写，不照实现写**」（`:82-88`），本设计据此读 P4 设计 §7.1 / §7.2 / §16（`:999`、`:1018`、`:2321`）。**P4 的设计若再改，由本块的一方复核并订正，不由 P4 替它改**（切分原话）。
    另：`Blocked` / `Undetermined` 如何升 `Decision`（§7.5、§8.2）落在 P4 的 Decision 面上，本块只给返回值形状。
 2. **待与 P5c（代码领域算子）对账**：本设计假设「测试是否通过」由**制品**承载（§8.3 第 6 项），故需要一个 `TestResult` 制品的 payload 约定。**若 P5c 把结果放在别处（或需要一枚新的 `EvidenceType` 臂），须向本块报出**（§4.2：证据类型是 P5a 的，四块不得自加）。`§193` 的 Differential / Metamorphic 两臂已在本设计里预置，P5c 若无对应实现须说明。
 3. **待与 P5f（图像领域算子）与 P5e（媒体）对账**：§326/§168 的「mask 外像素差被确定性检出」是 §262 第 1 级的一个实例：**插槽与「无物可读 ⇒ `Unknown`」的规则在本块（§7.5），比较器在 P5f**。另：`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用，若不够须向本块报出。
@@ -973,3 +1027,6 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 13. **`C3`「§263 vs §340」**（§7.6）：本设计按「§340 属计划审查段、不约束验证侧」读，故不实现「优先更强模型」。**这是一条读法**，若协调者不认，须给出「更强」的判据与它的持有方。**收件人：协调者 + P3d。**
 14. **「测试是否通过」的承载处未定义**（§8.3 第 6 项）：`Evidence` 无 outcome 字段（§258）、`Artifact.metadata` 无 schema（第 9 条）。**缺的是「谁写、写在哪一列」这一步。收件人：P5c + 协调者。**
 15. **本块的判定今天没有生产调用方**（§12.4 第 1 条）：执行器未建。**这不是本块的缺口，是第 3 层的**；据实记录以免被读成「忘了接线」（P1 设计 §18 已有同形的一条）。
+16. **`Test Validity Verifier` 的产生者与输入面未定义**（§6.5）：§8.3 的依赖行逐字给 `Test Validity Verifier ← 测试代码 + Requirement`（`docs/02-工程.md:523`），而「测试代码」在本设计里零命中；§191（`docs/spec/04-method.md:298`）只给五个检查名，未给执行者与触发点。本设计只冻结产出（`TestValidity`，§6.4）与消费点（`counts`，§6.3）。**缺的是「谁跑这五个检查、输入取自哪里（源码／制品／`Evidence<Test>`）」这一步。收件人：规范维护者 + P5a 的下一轮。**
+17. **§189 的 `Verification → 判断证据是否充分` 与本设计「不判充分」相抵**（§3.5）：这是规范正文里**直接要求判充分**的那一句（`docs/spec/04-method.md:210`，表 `:242-243`），且落在本设计的「规范依据」区间内。本设计不执行，理由见 §3.1；另一种读法（对阶段的描述、非对本块的 MUST）已列出。**缺的是「§189 是对本块的 MUST 还是对阶段的描述」这一步的裁定。收件人：规范维护者 + 协调者。**
+18. **P5c–P5f 的六行共写今天无人认领**（§2.1 的共写文件表）：`Cargo.toml` 的 `[workspace] members` 与 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`）各需六行（P5a–P5f 各一），而 **P5c/P5d/P5e/P5f 的设计今天在 `docs/superpowers/specs/` 下不存在**（实测目录：该目录只有 P5a、P5b 与两份切分），故「六行由谁加齐」在本轮无人接。**缺的是「一次加齐还是逐块各加自己一行、由谁在哪一步做」这一步。收件人：协调者（在 P5b–P5f 各自的实现计划派单时定）。**
