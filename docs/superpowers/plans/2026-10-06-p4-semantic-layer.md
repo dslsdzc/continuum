@@ -543,12 +543,25 @@ git commit -m "feat(canonical): Canonicalized 两支互斥、Temporal Resolver �
 - `a_candidate_source_can_only_return_a_set`：§197 的分工（候选生成负责高召回，**不直接决定最终语义**）。
   **照片机制（写死）**：**trybuild 正例**——写一个只实现 `retrieve` 的 `CandidateSource` 实现，编译通过；
   **trybuild 反例**——调用一个不存在的方法（如 `source.pick_one(&m)`，返回单实体那个）编译不过（`.stderr` 实跑）。
-  **并写明这条守卫的限度**：它钉的是「本层不为单实体定义方法」，**不钉**「实现者内部返回唯一候选」——后者由 Task 5 的四条断言钉。
+  **并写明这条守卫的限度（订正 2026-10-10，Task 3 的评审查出）**：它钉的是「**本层没有 `pick_one` 这个口子**」——
+  **钉的是一个名字，不是一个性质**。**限度的内容要写两条**：
+  ① **不钉「别的名字的单实体方法」**：名字是开放集，`trybuild` 枚举不完——
+     给 trait 加一个形如 `fn pick(&self, m: &Mention) -> Candidate { self.retrieve(m).into_iter().next().unwrap() }`
+     的方法，**任何一份样例都不会红**；这半边由「**不内置任何来源、也不提供默认实现**」对冲。
+  ② 不钉「实现者内部返回唯一候选」——后者由 Task 5 的四条断言钉。
+  **原稿写「它钉的是『本层不为单实体定义方法』」——那句话超出了照片的射程**
+  （本仓「绝对措辞须有用例」那一族的又一实例：句子是真的意图，但没有任何一份样例能把它证伪）。
+  **不要为补满它加样例**：名字取不完，加了仍只是「钉住一个名字」。
 - `the_candidate_records_exactly_the_three_fields_of_272`：字段清单逐项，机制 = `let Candidate { entity_id, evidence, retrieval_score } = c;`
   **不带 `..`**（任一侧加字段即**编译不过**）。字段名照 §272：`entity_id` / `evidence[]` / `retrieval_score?`。
   **明写**：这是**编译期**照片，运行期无照片（纯数据声明）。
 - `a_score_is_optional_and_absent_is_not_zero`：`retrieval_score: Option<f64>`——**缺席与 `Some(0.0)` 可区分**，
-  两条（`None` 一条、`Some(0.0)` 一条，断言读回各自是哪一枚）。红条件：把 `Option` 换成默认 `0.0`（**移除档**）。
+  两条（`None` 一条、`Some(0.0)` 一条，断言读回各自是哪一枚）。
+  **本条没有运行期红条件**（**订正 2026-10-10，Task 3 实现期实测、评审核实**）：
+  原稿写「红条件：把 `Option` 换成默认 `0.0`（**移除档**）」——**实测那枚变异体产出的是 `could not compile`**
+  （`E0308`×7 ＋ `E0599 is_none`×2），**按本仓纪律「变异导致编译失败不算红」**，故它不是运行期观测。
+  ⇒ **这条性质今天只有编译期照片，力量来自类型、不来自断言**；用例注释里照实写明。
+  **不要为它发明运行期行为**：加一条「读回再判一次」的 helper 只会造出**等价变异体**（本仓已有的另一种假绿）。
 
 - [ ] **Step 2: 运行，确认失败**
 
