@@ -36,7 +36,7 @@
 | Derived Artifact 的复用（§131） | 切分 §五 P5e 行；§8.3 的「媒体衍生 Artifact」行 | §6 | **不建第二份判据**；本块的兑现是让本领域算子满足 P1 已落地的判据的前提 |
 | 生成内容必须单独授权（§34） | 切分 §五 P5e 行 | §7 | 授权臂全量；**调用点不在本块**（切分 §四第 4 条） |
 | Timeline 的 Artifact 形态（§329） | 切分 §五 P5e 行 | §8 | 形状落点全量；**字段级 schema 不定义**（缺口见 §14 第 4 条） |
-| 只产出 Evidence、只消费判定 | 切分 §四第 1 条（`:138-141`） | §9 | 产出走 P5a 的 `Evidence::from_tool_result`；不新建证据类型 |
+| 只产出 Evidence、只消费判定 | 切分 §四第 1 条（`:138-141`） | §9 | 产出经 §9.2 的领域包装走到 P5a 的 `Evidence::from_tool_result`（唯一构造点）；不新建证据类型 |
 | 与 P5b 方法库的接缝 | P5b 设计第六节（`docs/superpowers/specs/2026-10-08-p5b-execution-method-library-design.md:371-390`） | §10 | 四条 `video/` 方法的 `realized_by` 逐条填出 |
 | 迁移号段 | 切分 §二第 5 条（`:93-99`） | §11 | **本块零迁移**；附实测空档表 |
 
@@ -71,7 +71,7 @@
 |---|---|---|
 | `continuum-artifact` | `ArtifactType`（§3 的清单落在这里，本块经它声明端口类型）、`ArtifactId`（§9.2 的证据产出） | 普通 |
 | `continuum-operator` | `Operator` / `OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` / `BackendId` / `OperatorRegistry` / `OperatorError` / `Checkpointable` / `CheckpointError`（§4 的类型落在这个 crate 里） | 普通 |
-| `continuum-method` | `MethodRegistry::bind`（P5b 设计 `:291` 明写四块**只经 `bind` 填内容**） | 普通 |
+| `continuum-method` | `MethodRegistry::bind`（P5b 设计 `:291` 明写四块**只经 `bind` 填内容**；P5b 设计 `:375` 要求每块对其领域目录里**每一条**已 seed 的 id 调用一次 `bind(id, &[...])`，故调用方是本块的登记代码，不是用例） | 普通 |
 | `continuum-verify` | `Evidence` / `EvidenceType` / `EvidenceProducer` / `EvidenceSubject` / `Claim` / `EvidenceStrength` / `EvidenceScope` / `Evidence::from_tool_result` / `VerifyError`（切分 §四第 1 条：四块**只产出**证据） | 普通 |
 | `continuum-graph` | `can_reuse` / `cache_key` / `CacheKey`（§6.2 的照片：核本块声明的 `determinism` 真能让 §305 的判据成立） | **dev 边** |
 
@@ -89,19 +89,28 @@
 - **不登记 `continuum-events`**：本块不写事件（§11）。
 - **不登记 `continuum-policy` / `continuum-capability`**：§34 的授权旗标以**值**从 Contract 传入（§7.2），本块不查策略引擎、不取 Capability Token。
 
-**dev 边为什么登记而普通边不登记**：`dependency_direction.rs` 的 `cargo tree` 带 `--edges all`
+**dev 边为什么也要登记**：`dependency_direction.rs` 的 `cargo tree` 带 `--edges all`
 （`crates/continuum-runtime/tests/dependency_direction.rs:274`），dev 边与普通边一视同仁。
 本仓已有同形的先例：`continuum-provider` 那一行注记明写「Task 4 起加上 persist：**dev 边**」
-（同文件 `:32-34`）。§6.2 的照片需要 `can_reuse`，故登记 dev 边；生产代码不调它。
+（同文件 `:32-34`）。
 
-**共写文件**（切分 §一共写文件表 `:33-38`）：
+**边别按「谁在用」判，两处判法同一条**（零使用的边即假边，反之：生产代码用到的边即普通边）：
+
+- `continuum-graph` 是 **dev 边**：生产代码不调它；用到它的是 §6.2 的照片（§12.2 第 (r) 条对
+  `can_reuse` / `cache_key` 的断言），那是用例。
+- `continuum-method` 是**普通边**：四条 `bind` 由本块的登记代码调用（§1.2 表第 2 行逐字
+  「本块只调它的 `bind`」；§10 的四条 `realized_by` 是本块填的）。它**不是**「只在用例里出现」——
+  §12.2 第 (s) 条那条运行期用例只是 `realized_by` 文本弱引用的补件（§10 末），不是 `bind` 的使用点。
+
+**共写文件**（切分 §一共写文件表 `:33-38` 给的是**四处**：`Cargo.toml`、`dependency_direction.rs`、
+`artifact.rs`、`node.rs`。下表是本块的那部分，**另含切分未登记的四行**，逐行注明来历）：
 
 | 文件 | 本块的改动 | 说明 |
 |---|---|---|
 | `Cargo.toml` 的 `[workspace] members` | 加一行 `crates/continuum-media` | 切分建议由先落地者一次加齐六行；本块**只加自己这一行** |
-| `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-media", &[…4 项…])` | 新 crate 会先让该门变红再被补齐（`:288` 的用例），这是刻意的 |
+| `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-media", &["continuum-artifact", "continuum-graph", "continuum-method", "continuum-operator", "continuum-verify"])`——**五项**，与 §2.1 边表的五行逐行对应（含 `continuum-graph` 的 dev 边，理由见上） | 新 crate 会先让该门变红再被补齐（`:288` 的用例），这是刻意的；数组按字母序 |
 | `crates/continuum-artifact/src/artifact.rs` | §3.5 的 (a)(b)(c) 三处 | 切分 §一 `:37` 登记为「共写，但只由 P5e 一处改」 |
-| `crates/continuum-artifact/tests/artifact_type.rs` | §3.5 的 (d) | 同上 |
+| `crates/continuum-artifact/tests/artifact_type.rs` | §3.5 的 (d) | 切分 §四第 2 条的 (d)（`:150-151` 逐字点名该文件的 `:23`）；**切分 §一 的共写表里没有这一行**，故在此补记 |
 | `crates/continuum-port/tests/compatibility.rs` | §3.5 的 (e) | **切分 §四第 2 条的清单漏了这一处** |
 | `crates/continuum-operator/src/definition.rs` | §4 的两行签名 + 新类型 | **切分 §一 的共写表没有这一行**，见 §15 第 2 条 |
 | `crates/continuum-operator/src/lib.rs` | §4.4 的 re-export 两枚 | 同上 |
@@ -137,15 +146,22 @@ CheckpointError   CheckpointOwner
 §9.1（`docs/02-工程.md:570-586` 的图，读法在 `:561-567`，`:588` 逐字「依赖方向单向，无环。」）
 里与本块有关的两条，按「被依赖者 → 依赖者」读：
 
-- `执行层 (3) → 跨领域 (8)`：§2.1 的边表全是它的实例（`continuum-media` 依赖 `continuum-operator` 与 `continuum-graph`）。
+- `执行层 (3) → 跨领域 (8)`：§2.1 的边表**五行**全是它的实例（例如 `continuum-media` 依赖
+  `continuum-operator`、`continuum-graph`；五行对应 §3.1 的执行层组件与 §8.1 的跨领域组件）。
   `execution_policy` / `verification_policy` 的定型落在消费侧而不是字段上，也是同一条的后果
   （切分 §二第 2 条的裁定段 `:72-84`；本块不重复它）。
 - `跨领域 (8) → 长期循环 (7)`：本块**不接**这一条——本块不产出 `value + evidence + last_verified`
   （§232 的 `ProductReadiness` 属长期循环）。本块的产物注册进 `OperatorRegistry`，不写长期循环的表。
 
-本块与 P5a（同层）之间有一条层内边 `continuum-media → continuum-verify`。同层边在本仓有先例
-（`docs/02-工程.md:577` 的补记行：`continuum-secrets → continuum-capability` 已在用），且它是单向的：
-`continuum-verify` 不依赖任何 P5 领域算子块（P5a 设计 §2.1 的边表里没有它们）。
+本块与 P5a（同层）之间有一条层内边 `continuum-media → continuum-verify`。**层内边在本仓有同形的处置**：
+`continuum-provider → continuum-capability`（资源层内的「接口 → 能力类型」）就被登记为层内边
+（`crates/continuum-runtime/tests/dependency_direction.rs:30` 的注记，与 P3c 设计 §4.1 订正段
+`docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md:336` 逐字「层内边」）。
+本条边是单向的：`continuum-verify` 不依赖任何 P5 领域算子块（P5a 设计 §2.1 的边表里没有它们）。
+
+**原先此处引的先例已换掉**：原引 `docs/02-工程.md:577` 的补记行 `continuum-secrets → continuum-capability`。
+实测那一行是 `资源层 (4) ──→ 边界层 (5)` 的**跨层**边（编号与行文都在 `docs/02-工程.md:577`），
+不是层内边，故不足以做「同层边有先例」的论据。
 
 ---
 
@@ -177,13 +193,13 @@ CheckpointError   CheckpointOwner
 | 10 | `SubtitleTrack` | `subtitle_track` | `docs/spec/05-normative.md:2418`（§328） |
 | 11 | `Render` | `render` | `docs/spec/05-normative.md:2419`（§328） |
 
-加型后 `ALL` 是 `[ArtifactType; 17]`。**串名沿用本文件既有的约定**（`:9` 的注记：小写、多词以 `_` 连接），
+加型后 `ALL` 是 `[ArtifactType; 17]`。**串名沿用本文件既有的约定**（`:37` 的注记：小写、多词以 `_` 连接），
 两个多词型因此是 `shot_set` / `subtitle_track`；`artifact_type.rs:32-35` 的既有断言正是这条约定的守卫。
 
 `§239` 的七例里 `SourceTree` / `Patch` / `TestResult` 三例已在枚举内；`§9` 的十二例里
 `Text` / `SourceTree` / `Patch` / `TestResult` 四例已在枚举内；`§328` 的七例**全部**不在枚举内。
 故并集是 15 个名字，其中 4 个已有 ⇒ **11 枚新变体**。`Json` / `Blob` 两型不在三份清单里，
-它们由 P1 引入（P1 设计 `:154-162` 的枚举），本块**保留不动**。
+它们由 P1 引入（P1 设计 `:156-163` 的枚举；`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md`），本块**保留不动**。
 
 **§239 那一句的后果必须写出来**：§239 `:640` 逐字是「每个 Node input/output MUST 有明确类型」，
 `:654` 逐字是「运行时 MUST 拒绝不兼容连接」。该节的例子里有 `Artifact<Image>`（`:645`）与 `Artifact<Scene>`（`:651`），
@@ -258,7 +274,7 @@ CheckpointError   CheckpointOwner
 使下一次加型不必再改名字）。**这里不是「照既有写法补 11 行」：手工清单在这里已经证明过它会漂**
 ——它与 `ALL` 是两个各自维护的清单，而 `ALL` 有守卫、它没有。
 
-**不改但要重跑的三处（切分给两处，实测第三处一并核）**：
+**不改但要重跑的三处（切分 `:152-155` 三处全列，第三处 `compatible` 在 `:155`）**：
 
 | 项 | 位置（实测） | 为什么不改 | 重跑要看什么 |
 |---|---|---|---|
@@ -274,7 +290,7 @@ CheckpointError   CheckpointOwner
 **(g) 一处本设计不改、但会随加型而静默变旧的文本**：`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:573`
 逐字写「ArtifactType 集合 本子项目取六种。P5 引入媒体类型时为编译期可见的破坏性变更。」。
 它是 P1 设计对**P1 交付物**的历史陈述（该句后半句预言的正是本块的改动），本设计**不改别人的文件**，
-只在此处记下它，收件人见 §14 第 10 条。
+只在此处记下它，收件人见 §13 第 9 条。
 
 ## 3.6 「一次改动」在本轮的排布下**不可能在设计期成立**
 
@@ -461,10 +477,48 @@ pub enum CheckpointError {
 /// 本领域 17 枚算子的全集。顺序即 §5.2 表的行序。
 pub const ALL_OPERATORS: [Operator; 17];   // 不变量：id 逐枚不同、version 均为 1
 
-/// 把全集注册进给定注册表。
-/// 返回 `Duplicate` 时不静默跳过：一枚媒体算子与既有算子同 (id, version) 是注册期的错误。
-pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), MediaError>;
+/// 把给定的一批算子注册进给定注册表（`&ALL_OPERATORS` 是常规实参）。
+/// **先核后写**：先逐枚核 §5.4 的声明，全部通过后再逐枚注册；任一枚不成即返回 `Err`，
+/// 此时注册表的内容与调用前逐枚相同（不留半注册）。
+/// 一枚媒体算子与既有算子同 (id, version) 是注册期的错误，**不静默跳过**。
+/// **参数带一批算子**（不是只吃 `ALL_OPERATORS`）：§5.4 那条规则要能对**任意** `Operator` 触发，
+/// §12.2 第 (i) 条才写得出来。
+pub fn register_media_operators(
+    registry: &mut OperatorRegistry,
+    operators: &[Operator],
+) -> Result<(), MediaError>;
 ```
+
+`MediaError` 的形状（§2.2 列出的本块三枚类型之一）。三臂，逐臂给出**判定的持有者**：
+
+```
+#[derive(Debug, thiserror::Error)]
+pub enum MediaError {
+    /// §5.4 的注册期规则不成立：声明 `Deterministic` 的算子混进了名单外的 backend。
+    /// 判定的持有者在本块（§5.4）。
+    #[error("算子 {operator} 的候选 backend {backend} 不在逐位可复现名单内（§5.4）")]
+    UnverifiableDeterminism { operator: OperatorId, backend: BackendId },
+
+    /// 注册表拒绝（同 (id, version) 已存在）。判定的持有者是 P1（见下段）。
+    #[error(transparent)]
+    Registry(#[from] OperatorError),
+
+    /// §34 的生成授权判定不成立：该算子所需的那一枚旗标未在 Contract 里声明为真（§7.2）。
+    #[error("算子 {operator:?} 未获 {required:?} 授权（§34）")]
+    NotPermitted {
+        operator: OperatorId,
+        required: GenerativePermission,
+    },
+}
+```
+
+**`Registry` 这一臂为什么是包装而不是同名臂**：`(id, version)` 撞车的判定**已经有一枚臂**
+（`crates/continuum-operator/src/registry.rs:11` 的 `OperatorError::Duplicate`，判定在 `:24-34` 的
+`OperatorRegistry::register`），本块再立一枚
+`MediaError::Duplicate` 就是「注册表里有没有这个算子」的第二套词汇表。**这里不是「照
+`CheckpointError` 的做法把注册期错误并进本型」**：§4.3 的 `CheckpointError` 与 `OperatorError`
+**分得开**，因为两者的判定不同（一个是「这一次检查点/恢复为什么不成」，一个是注册期查重）；
+本臂的判定与 `OperatorError::Duplicate` **是同一件事**，故只带出来、不重述。
 
 `ALL_OPERATORS` 是**常量不是构造函数**：本仓的既有约定是「枚举/清单带 `ALL` 常量 + 数目断言」
 （`crates/continuum-artifact/src/artifact.rs:28`、`crates/continuum-effect/src/effect.rs:31` 的 `EffectType::ALL`），
@@ -474,7 +528,8 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 
 出处列的口径：**算子名与端口类型** 尽量照录规范，**`determinism` / `side_effect_class` / backend 候选**
 在规范未给处由本设计定，并逐行标出「定」字。§245 `:761-764` 给了 `Transcribe` 的三个 backend 名，
-§10（`docs/spec/01-concepts.md:554-560`）给了 FFmpeg / Blender / Git 一类的 lowering 例子——**这两处是照录**。
+§10（`docs/spec/01-concepts.md:554-572` 的 lowering 段：`FFmpeg` `:559`、`Blender` `:563`、`Git` `:567`、
+`GPU backend` `:571`）给了后端 lowering 的例子——**这两处是照录**。
 
 | # | id | input_schema | output_schema | determinism | side_effect_class | backend 候选 | 出处 |
 |---|---|---|---|---|---|---|---|
@@ -485,7 +540,7 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 | 5 | `audio-analysis` | `[Audio]` | `[Json]` | `Deterministic` | `Pure` | `librosa` `essentia` | §32 `:1372`；§33 `:1409`「beat map」 |
 | 6 | `vision-analysis` | `[Video, ShotSet]` | `[Json]` | `NonDeterministic` | `Pure` | `local-vision-model` `cloud-vision-model` | §32 `:1374`；§33 `:1407-1408` |
 | 7 | `metadata-analysis` | `[Video, Audio]` | `[Json]` | `Deterministic` | `Pure` | `ffprobe` | §33 `:1410` |
-| 8 | `narrative-plan` | `[ShotSet, Transcript, Json]` | `[Json]` | `NonDeterministic` | `Pure` | `primary-model` | §32 `:1376`；§31（`docs/spec/01-concepts.md:1330-1356`） |
+| 8 | `narrative-plan` | `[ShotSet, Transcript, Json]` | `[Json]` | `NonDeterministic` | `Pure` | `primary-model` | §32 `:1376` |
 | 9 | `timeline-compose` | `[Json, ShotSet, Audio]` | `[Timeline]` | `Deterministic` | `Pure` | `builtin` | §10 `:545`；§32 `:1378`；§329 |
 | 10 | `effects-subtitle` | `[Timeline]` | `[Timeline, SubtitleTrack]` | `Deterministic` | `Pure` | `ffmpeg-filtergraph` | §32 `:1380`；§328 `:2418` |
 | 11 | `render` | `[Timeline]` | `[Render]` | `Deterministic` | `Idempotent` | `ffmpeg` | §32 `:1382`；§328 `:2419` |
@@ -495,6 +550,11 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 | 15 | `frame-interpolation` | `[Video]` | `[Video]` | `NonDeterministic` | `NonIdempotent` | `interpolation-backend` | §34 `:1427` |
 | 16 | `verify-deterministic` | `[Render, Timeline]` | `[Json]` | `Deterministic` | `Pure` | `builtin` | §32 `:1384` |
 | 17 | `verify-multimodal` | `[Render, Transcript, SubtitleTrack]` | `[Json]` | `NonDeterministic` | `Pure` | `independent-model` | §32 `:1386` |
+
+**第 8 行的出处栏原先还引了 §31**（`docs/spec/01-concepts.md:1330-1356`）。实测该节逐行给的是
+「主模型为纯文本时 Runtime 可以自动增加 Image / Vision / Audio / Video / 3D Model」——是**模型增补**，
+没有算子名、没有端口类型，不符本表出处栏「算子名与端口类型尽量照录规范」的口径（本节开头那段），
+故删去；该行的 `NonDeterministic` 仍由 §32 `:1376` 的 Narrative Planning 与 `primary-model` 候选支持。
 
 **逐枚的判定理由（只写需要解释的，七枚）**：
 
@@ -529,9 +589,54 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 
 ## 5.3 端口类型与 `compatible`
 
-本块的每一对相邻算子，其 `output_schema` 与下游的 `input_schema` 相交非空——这是 §239 `:654`
-「运行时 MUST 拒绝不兼容连接」在**注册期**可检查的那一半。判据（实现计划的用例，§12.2 第 (t) 条）：
-把 §5.2 表里的 17 行与它们之间的边逐条列出，**逐边断言 `ArtifactType` 相等**。
+**先定关系**：上游算子的 `output_schema` 与下游算子的 `input_schema` **相交非空**——这是 §239 `:654`
+「运行时 MUST 拒绝不兼容连接」在**注册期**可检查的那一半。
+
+**本节原先的两句相抵，择一为准，两句的来历都留在下面**：
+
+- 原先第一句写「本块的**每一对相邻算子**，其 `output_schema` 与下游的 `input_schema` 相交非空」。
+  「相邻」若按 §32 的**步骤序**读，这句为假：§32 是 11 步的**步骤序**，不是数据依赖序。逐对实测，
+  四对相邻步骤相交为**空**——`shot-detect`（出 `[ShotSet]`）→ `transcribe`（入 `[Audio]`）、
+  `transcribe`（出 `[Transcript]`）→ `audio-analysis`（入 `[Audio]`）、
+  `audio-analysis`（出 `[Json]`）→ `vision-analysis`（入 `[Video, ShotSet]`）、
+  `verify-deterministic`（出 `[Json]`）→ `verify-multimodal`（入 `[Render, Transcript, SubtitleTrack]`）。
+- 原先第二句写「把 §5.2 表里的 17 行与它们之间的边逐条列出，**逐边断言 `ArtifactType` 相等**」。
+  这与 §5.2 的表相抵：多数相邻算子的 schema 只相交、不相等（例如 `media-import` 出 `[Video, Audio]`，
+  而 `proxy-build` 只入 `[Video]`；`effects-subtitle` 出 `[Timeline, SubtitleTrack]`，而 `render` 只入 `[Timeline]`）。
+
+**以「数据依赖边 ＋ 相交非空」为准**（「相等」那一条删去，理由即上一条）。
+
+**边表**（§12.2 第 (t) 条的语料）。每行给「下游算子 ← 输入的来源」，括号里是**交集中的那一型**：
+
+| 下游算子 | 输入的来源（交集中的那一型） | 依据 |
+|---|---|---|
+| `media-import` | 无输入（外部素材，§5.2 第 1 行） | §5.2 第 1 行 |
+| `proxy-build` | `media-import`（`Video`） | §33 `:1404` |
+| `shot-detect` | `media-import`（`Video`） | §32 `:1366`→`:1368` |
+| `transcribe` | `media-import`（`Audio`） | §32 `:1370`（ASR 读素材音轨，不经镜头切分） |
+| `audio-analysis` | `media-import`（`Audio`） | §32 `:1372` |
+| `vision-analysis` | `media-import`（`Video`）、`shot-detect`（`ShotSet`） | §32 `:1374`；§33 `:1407-1408` |
+| `metadata-analysis` | `media-import`（`Video`） | §33 `:1410` |
+| `narrative-plan` | `shot-detect`（`ShotSet`）、`transcribe`（`Transcript`）、`vision-analysis`（`Json`） | §32 `:1376`；§5.2 第 8 行的 `input_schema` |
+| `timeline-compose` | `narrative-plan`（`Json`）、`shot-detect`（`ShotSet`）、`media-import`（`Audio`） | §32 `:1378`；§5.2 第 9 行的 `input_schema` |
+| `effects-subtitle` | `timeline-compose`（`Timeline`） | §32 `:1380` |
+| `render` | `effects-subtitle`（`Timeline`） | §32 `:1382` |
+| `generate-broll` | `timeline-compose`（`Timeline`） | §5.2 第 12 行 |
+| `generate-voice` | `transcribe`（`Transcript`） | §34 `:1425`；§5.2 第 13 行 |
+| `generate-music` | `narrative-plan`（`Json`） | §5.2 第 14 行 |
+| `frame-interpolation` | `media-import`（`Video`） | §5.2 第 15 行 |
+| `verify-deterministic` | `render`（`Render`）、`timeline-compose`（`Timeline`） | §32 `:1384`；`Timeline` 那一支是本设计的判定（§8 末） |
+| `verify-multimodal` | `render`（`Render`）、`transcribe`（`Transcript`）、`effects-subtitle`（`SubtitleTrack`） | §32 `:1386`；§5.2 第 17 行的 `input_schema` |
+
+**依据栏的读法**：写 §32/§33/§34 的，出处是规范正文的步骤名；写「§5.2 第 N 行」的，出处是
+**该行的 `input_schema` 与全表 `output_schema` 的对应**（即本设计的判定，规范未给边）。
+
+**判据（§12.2 第 (t) 条）**：逐行断言下游 `input_schema` 的**每一个型**都能在该行列出的上游里找到，
+且所引的那一枚的 `output_schema` 含该型。断言的对象是「交集中的那一型」，不是「两侧相等」。
+
+**本表不是全图**：它只列 §32 的剪辑链、§33 的预处理、§34 的四枚生成算子与链尾两枚 verifier 的
+输入来源。两枚生成算子的产物回流进 `timeline-compose` 之类的**其他**边属装配方的图构造，
+不在本块的声明范围内（§1.2：本块只**注册**算子，不建执行路径）。
 
 与 P1 的分工：`compatible`（`crates/continuum-port/src/port.rs:94`）判**端口连接**的兼容性，属 P1；
 本块只保证自己声明的 `input_schema` / `output_schema` 取值正确。
@@ -548,9 +653,10 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 
 - 本块持有一份**「逐位可复现的 backend」名单**（封闭表，内容是本设计定的）：
   `local-fs` `ffmpeg` `ffmpeg-scene-detect` `ffmpeg-filtergraph` `ffprobe` `pyscenedetect` `librosa` `essentia` `builtin`。
-- **注册期规则**：`ALL_OPERATORS` 里 `determinism == Deterministic` 的每一枚，其 `backend_candidates`
-  **逐个**必须在该名单内；否则 `register_media_operators` 返回
-  `MediaError::UnverifiableDeterminism { operator, backend }`。
+- **注册期规则**：传给 `register_media_operators` 的每一枚 `determinism == Deterministic` 的算子，
+  其 `backend_candidates` **逐个**必须在该名单内；否则该函数返回
+  `MediaError::UnverifiableDeterminism { operator, backend }`（§5.1 的三臂之一），
+  且**在写注册表之前**返回，不留下半注册。
 - **偏离最显然写法处**：最显然的写法是给 `render` 的候选里放一个硬件编码器（性能更好）。
   **这里不是那样：因为硬件编码器的输出不保证与软件编码器逐位一致**，混入即让该算子的 `Deterministic`
   声明为假，而那条声明的消费者是 §305 的复用。代价是硬件加速不可用——**这是性能代价，不是正确性代价**，
@@ -588,7 +694,8 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 - §305（`docs/spec/05-normative.md:1986-1998`）给的是同一条的三条件形式：
   `input_hash unchanged` / `operator_version unchanged` / `contract unaffected` ⇒ `Runtime MAY 直接复用 Artifact`。
 - **它已经落地**：`crates/continuum-graph/src/reuse.rs` 的 `CacheKey`（`:9-12`）、`cache_key`（`:16-24`）
-  与 `can_reuse`（`:29-47`），带七条用例（`crates/continuum-graph/tests/reuse.rs:23-94`）。
+  与 `can_reuse`（`:29-47`），带八条用例（`crates/continuum-graph/tests/reuse.rs:23-94`，
+  `#[test]` 在 `:23` `:29` `:38` `:50` `:60` `:70` `:80` `:90`）。
   `cache_key` 对 `NonDeterministic` 的算子返回 `None`（`:22`）——这是 ENG-002 的裁定，
   即「非确定算子的输出不写缓存键，因此永远不满足复用前提」。
 
@@ -601,7 +708,7 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 
 §131 的兑现**不是**一个函数，而是**本领域算子的 `determinism` 声明**。判据（照片，§12.2 第 (r) 条）：
 
-| 算子 | §131 里它产的派生产物 | 本块的 `determinism` | `cache_key` 的结果 |
+| 算子 | 它产的派生产物（出处见格内） | 本块的 `determinism` | `cache_key` 的结果 |
 |---|---|---|---|
 | `shot-detect` | `ShotIndex`（`:1956`） | `Deterministic` | `Some(..)` |
 | `audio-analysis` | `AudioFeatures`（`:1958`）、`beat map`（§33 `:1409`） | `Deterministic` | `Some(..)` |
@@ -609,6 +716,11 @@ pub fn register_media_operators(registry: &mut OperatorRegistry) -> Result<(), M
 | `transcribe` | `Transcript`（`:1955`） | `NonDeterministic` | `None` |
 | `vision-analysis` | `FaceIndex`（`:1957`）、`Embeddings`（`:1959`） | `NonDeterministic` | `None` |
 | `proxy-build` | `建立 proxy`（§33 `:1404`） | `Deterministic` | `Some(..)` |
+
+**表头原先写「§131 里它产的派生产物」，而表里有两行不是 §131 的条目**：`proxy-build`（`建立 proxy`）
+与 `metadata-analysis`（`metadata analysis`）出自身为**§33 的步骤**（`:1404` / `:1410`）。§131
+（`docs/spec/02-positioning.md:1954-1959`）只列 Video / Transcript / ShotIndex / FaceIndex / AudioFeatures /
+Embeddings。表头据此改为此形，两行的出处照实留在格里，不并进 §131 的清单。
 
 **`FaceIndex` / `AudioFeatures` / `Embeddings` 三者的 Artifact 类型**：§131 的五个名字里，
 只有 `Transcript` 与 `ShotIndex`（= `ShotSet`）在 §3.2 的清单内有对应变体；
@@ -682,7 +794,8 @@ pub struct PermittedGenerativeContent { /* ... */ }
 pub fn required_permission(operator: &OperatorId) -> Option<GenerativePermission>;
 
 /// §34「系统不得擅自使用生成内容替换原始素材」的判定点。
-/// 未声明 ⇒ 未授权（fail-closed）。
+/// 未声明 ⇒ 未授权（fail-closed），返回 `MediaError::NotPermitted { operator, required }`
+/// （§5.1 的三臂之一，`required` 取 `required_permission` 给出的那一枚）。
 pub fn authorize_generative(
     operator: &OperatorId,
     granted: &PermittedGenerativeContent,
@@ -774,23 +887,43 @@ P5a 设计 §14 第 3 条（`docs/superpowers/specs/2026-10-08-p5a-verification-
 ## 9.2 产出的形状：一律 `Unattached`
 
 ```
-/// 把一个媒体算子节点在时刻 `occurred_at` 的输出转成 `Evidence`（§89）。
-/// **唯一产生点是 P5a 的 `Evidence::from_tool_result`，本函数只是它的领域包装。**
+/// 把一个媒体算子节点的输出转成 `Evidence`（§89）。
+/// **唯一产生点是 P5a 的 `Evidence::from_tool_result`（P5a 设计 §4.4），本函数只是它的领域包装**：
+/// 它固定的只有一件事——`subject` 取 `EvidenceSubject::Unattached`。
 pub fn evidence_from_media_output(
-    producer: NodeId,
-    backend: BackendId,
+    id: EvidenceId,
     evidence_type: EvidenceType,
     claim: Claim,
+    producer: EvidenceProducer,
     artifact_refs: Vec<ArtifactId>,
-    occurred_at: i64,
+    strength: EvidenceStrength,
+    scope: EvidenceScope,
 ) -> Result<Evidence, VerifyError>;
 ```
 
-- **`EvidenceSubject` 取 `Unattached`**，不是 `Requirement(..)`。理由借 P5a 设计 §4.3.1 自己的那条：
+- **签名与 `from_tool_result` 逐项对齐。** 上列七项就是 P5a 那个构造点的八个参数**减去**本函数固定的
+  `subject`（P5a 设计 `:324-333` 的签名：`id` / `evidence_type` / `subject` / `claim` / `producer` /
+  `artifact_refs` / `strength` / `scope`）。`id` / `strength` / `scope` **必须由调用方给**，本块不代它
+  取值（§2.2：证据的充分性判定不属本块）。**这里不是「只收五项的瘦包装」：那样 `id` / `strength` /
+  `scope` 就没有供上的位置，而 `from_tool_result` 要求调用方给出它们——包装要么漏参编不过，
+  要么就得就地造值，那就成了 `Evidence` 的第二个产生点，把 P5a 设计 §4.4 的「唯一产生点」当场破掉。**
+- **`subject` 取 `Unattached`**，不是 `Requirement(..)`。理由借 P5a 设计 §4.3.1 自己的那条：
   「证据先于归属存在：工具节点产出一条证据时，它可能还不知道（或不该由它决定）面向哪条 Requirement」。
   附带的一个后果是**本块不需要 `RequirementId`**（属 P4 的 `continuum-semantics`，该 crate 今天不存在），
   故 §2.1 的边表里没有它。
-- **`occurred_at` 与 `NodeId` 由调用方给**：本块不查图（不登记 `continuum-graph` 的普通边）。
+- **`producer` 由调用方以值给**，取 `EvidenceProducer::Node { node, backend }`（P5a 设计 §4.3.3 的两臂）。
+  **这里不是「收 `NodeId` + `BackendId` 再就地拼出 `EvidenceProducer::Node`」：`NodeId` 定义在
+  `continuum-graph`（`crates/continuum-graph/src/ids.rs:40`，经 `crates/continuum-graph/src/lib.rs:22`
+  re-export），`pub fn` 的签名里点名它就把该依赖从 **dev 边**升成普通边，而本块的生产代码不查图
+  （§2.1 第 5 行：那条边是 dev 边，只有 §6.2 的照片用它）。**
+  **据实记一处：本函数拦不住 `EvidenceProducer::Human`**——两臂的搭配由 P5a 的构造点判（P5a 设计 §4.4
+  只拦「`HumanConfirmation` 与 `producer != Human`」这一对），故「本块的产出都是 `Node`」这一句是
+  **声明级**的，不是类型级的。收成类型级要本块自己写一遍那两臂的搭配判定，那是把 P5a 的判据抄成
+  第二份（§2.2 的「本块不持有的判定」），故不取。
+- **时刻不在本函数的签名里。** `Evidence` **没有时间字段**——P5a 设计 §4.1 逐字段照 §258 的八字段，
+  无一是时刻。P5a 的 `occurred_at` 是 `evidence` **表**的一列（P5a 设计 §10.2），由写入那一行证据的
+  落库方给，不是 `from_tool_result` 的参数；本块零迁移、不写那一行（§11）。**原先那一版收
+  `occurred_at: i64`**，它与构造点对不上（`from_tool_result` 无此参数），故删。
 - **本块不判定任何东西**：`evidence_from_media_output` 只做形状转换，不判「这条证据够不够」。
   「充分」的判据不存在（OPEN-001，P5a 设计 §3 的处置）——本块**不绕开也不补**。
 
@@ -888,7 +1021,9 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
   `140`（P5 六块按 P3 的先例后延：P5a `130`、P5b `140`、P5c `150`、P5d `160`、P5e `170`、P5f `180`，P6 `190`）
   ——**这是建议不是裁定**，六块与 P6 的档由协调者统一划（切分 §二第 5 条 `:97`）。
 
-**收件人：协调者**（§14 第 8 条）。
+**收件人：协调者**。**这一节只是一句注记，不另开对账条目**：本块零迁移故无号可占，
+号段怎么划与本块无关（原先在 §13 与 §14 各开过一条「迁移号段」的对账项，已删——
+本块不参与那件事，开条目是替别人的事记账）。
 
 ---
 
@@ -912,11 +1047,11 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 | c | 新型写入 `artifact_type` 列再读回，得到同一型 | 落库往返（§3.5 的「不改但要重跑」） |
 | d | 改过的 `crates/continuum-port/tests/compatibility.rs:47` 用例改为**遍历 `ArtifactType::ALL`**，逐型断言 serde 往返（17 型，不是 6 型） | §3.5 的 (e)（本块改的唯一一处**不会自己变红**的遗漏） |
 | e | `shot_set` / `subtitle_track` 两个多词串的往返 | 多词型的编码（唯一两条带 `_` 的新串） |
-| f | `register_media_operators` 注册 17 枚后，逐枚 `resolve` 成功 | 注册的正例 |
-| g | 同一注册表注册两次 ⇒ `Err(Duplicate)`（**不是**静默覆盖） | 注册的反例 |
+| f | 以 `&ALL_OPERATORS` 调 `register_media_operators` 注册 17 枚后，逐枚 `resolve` 成功 | 注册的正例 |
+| g | 同一注册表注册两次 ⇒ `Err(MediaError::Registry(OperatorError::Duplicate { .. }))`（**不是**静默覆盖） | 注册的反例（§5.1：那一臂是 P1 的判定，本型只带出来） |
 | h | `Deterministic` 的每一枚算子，其每个 backend 都在 §5.4 的名单内 | §5.4 的规则（正例） |
-| i | 造一枚 `Deterministic` 但候选含名单外 backend 的算子 ⇒ `Err(UnverifiableDeterminism)` | **fail-open 的那一侧**（§5.4） |
-| j | 未授权 `Broll` 时 `authorize_generative` ⇒ `Err` | §34（反例侧） |
+| i | 造一枚 `Deterministic` 但候选含名单外 backend 的算子，以它连同若干合法算子调 `register_media_operators` ⇒ `Err(MediaError::UnverifiableDeterminism { .. })`，**且注册表内容与调用前逐枚相同**（先核后写，不留半注册） | **fail-open 的那一侧**（§5.4）；「注册表未变」那一半钉的是同一条规则的**写入面** |
+| j | 未授权 `Broll` 时 `authorize_generative` ⇒ `Err(MediaError::NotPermitted { .. })` | §34（反例侧） |
 | k | 授权 `Broll` 时 ⇒ `Ok` | 上一条的**另一侧**（否则 j 可由「一律 Err」满足） |
 | l | `required_permission` 对四枚生成算子各返回**对应的**那一枚（逐枚断言是哪一枚，不是「是 `Some`」） | §7.2 的映射（**枚举断言逐项有照片**：四臂各一条） |
 | m | `required_permission` 对一枚非生成算子返回 `None` | 上一条的**另一侧** |
@@ -924,9 +1059,9 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 | o | `checkpoint()` 有进度 ⇒ `Ok`；`restore` 后状态与存前一致 | §4.5 判据 1 的正例 |
 | p | 无进度 ⇒ `Err(NothingToCheckpoint)` | §4.5 判据 1 的反例 |
 | q | 另一版本的检查点 ⇒ `Err(RestoreRejected)`，**且算子状态与调用前逐字段相同** | §4.5 判据 2（两侧：错误类型 + 半恢复） |
-| r | `/305` 的照片：`shot-detect` / `audio-analysis` / `metadata-analysis` / `proxy-build` 四枚 的 `cache_key` 为 `Some`，且四条件齐时 `can_reuse` 为真；`transcribe` / `vision-analysis` 两枚为 `None` | §6.2 的六行**逐行**（不是抽样） |
+| r | §305 的照片：`shot-detect` / `audio-analysis` / `metadata-analysis` / `proxy-build` 四枚 的 `cache_key` 为 `Some`，且四条件齐时 `can_reuse` 为真；`transcribe` / `vision-analysis` 两枚为 `None` | §6.2 的六行**逐行**（不是抽样） |
 | s | 四条 `video/` 方法的 `realized_by` **逐条非空**，且每个串 `OperatorRegistry::resolve` 成功 | §10（P5b 设计 §4.5 交办的判据）+ 「绑的是不是对的算子」的前半 |
-| t | §32 链上相邻算子的端口类型逐边相等（§5.3 的 17 行边） | §239 的注册期一半 |
+| t | §5.3 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的那一型**，不是「两侧相等」） | §239 的注册期一半（§5.3） |
 
 **一条预防**：第 (a) 与 (f) 的期望清单**必须手写**。若 (a) 写成遍历 `ArtifactType::ALL`，
 它测的是「`ALL` 与 `parse` 一致」——那正是 `ALL` 的既有守卫，**而「11 枚新型在不在 `ALL` 里」不会被它测到**；
@@ -939,7 +1074,8 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 | 变异 | 该红 | 不该红 |
 |---|---|---|
 | **取反**：`authorize_generative` 改成「未声明 ⇒ 放行」 | j | k（授权那一侧不受影响）、l、m |
-| **取反**：§5.4 的名单判定改成恒真 | i | h（名单内的候选仍然通过） |
+| **取反**：§5.4 的名单判定改成恒真 | i 的第一个子例 | h（名单内的候选仍然通过） |
+| **取反**：`register_media_operators` 改成边核边写（先注册前几枚，遇到违规才返回） | i 的第二个子例（注册表内容与调用前不同） | h、f（合法批次两侧都绿） |
 | **移除**：`RestoreRejected` 的身份比对删掉（一律 `Ok`） | q 的第一个子例 | o、p（有进度/无进度与身份无关）、r 全组 |
 | **收紧**：`required_permission` 对四枚生成算子**都**返回 `Broll` | l 的后三条 | j、k、m（它们不看具体是哪一枚） |
 | **取反**：`transcribe` 的 `determinism` 改成 `Deterministic` | r 的第二组（`cache_key` 由 `None` 变 `Some`）；**同时该轮 h 会红**（`local-whisper` 等三个候选不在 §5.4 的名单里） | r 的第一组、i |
@@ -950,12 +1086,20 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 
 本仓已有 `trybuild` 的既有做法（`crates/continuum-connector/Cargo.toml:53` 与其 `tests/type_level.rs`
 的 `compile_fail`；`continuum-workspace` / `continuum-secrets` / `continuum-model-registry` /
-`continuum-capability` / `continuum-node` 同样登记了它）。本块用两条：
+`continuum-capability` / `continuum-node` 同样登记了它）。**本块用两条，两条都钉本块自己的结构**：
 
-1. `Operator { .. , determinism: Determinism::Deterministic }` 的构造**不带 `backend_candidates`** ⇒ 编不过
-   （§244 的字段齐备由结构保证）。
+1. `Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）在 `continuum-media` 里编不过
+   ⇒ 本块**没有** `Evidence` 的第二条产生路径，产出只能经 `evidence_from_media_output` 走到 P5a 的
+   `from_tool_result`（§9.2）。这是 P5a 设计 §4.4「唯一产生点」在本块的**使用侧**照片。
 2. `EvidenceSubject::Requirement(..)` 在 `continuum-media` 里构造 ⇒ 编不过（§9.2 的「本块不构造
-   Requirement 归属」是结构事实：本块不依赖 `continuum-semantics`，那个类型在它的名字空间里不存在）。
+   Requirement 归属」）。**这一条的成立依赖 P5a 不 re-export `RequirementId`**——该类型的归属 P5a
+   自记未定（P5a 设计 §4.3.1：「落地时以 P4 的 `RequirementId` 为准」），故它是一条**对别人块形状的
+   假设**，按本文件第 15-17 行的纪律记为对账条目（§13 第 5 条 (iii)）。
+
+**原先列在这里的第一条已移出本块的照片清单**：原写「`Operator { .. , determinism: Deterministic }`
+的构造不带 `backend_candidates` ⇒ 编不过」。那是 P1 的 `Operator`
+（`crates/continuum-operator/src/definition.rs:78-88`，七个 pub 字段、无 `Default`）的**结构事实**，
+不是本块造出来的照片——本块只是照它构造 `ALL_OPERATORS`，故不计入本块的照片。
 
 ## 12.5 拍不出照片的地方
 
@@ -977,14 +1121,16 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 
 以下每条都是**本设计假设了别的块的某枚形状**或**发现某处无归属**之处。
 
-1. **待与协调者（执行路径的落点）对账 —— 三处合并为一条**：本块有两处「有判定、无调用点」，
-   加上切分 §八 `:279-281` 已有的那一处，同源：
+1. **登记（不是裁定请求）：三处「有判定、无调用点」合并为一条，落点都在第 3 层的执行器**。
+   本块有两处「有判定、无调用点」，加上切分 §八 `:279-281` 已有的那一处，同源：
    (i) `checkpoint()` / `restore()`（§4.5）：属第 3 层的恢复路径（§311 / §312 那一组）；
    (ii) `authorize_generative`（§7.3）：属 `Queued → Running` 的前置判定；
    (iii) `OperatorRegistry::resolve` 的调用点（切分 §八 `:279-281`；P1 设计 §18 `:576-580` 逐字
    「执行器就位后，`Queued → Running` 是它唯一的合法落点」）。
    **三处都在同一处落点**（`Queued → Running`）。本块不自建（切分 §四第 4 条），
-   也不把三处各自记一次。**收件人：协调者**。
+   也不把三处各自记一次。**收件人：第 3 层的执行器**（谁建执行路径谁承接这三处；协调者转）。
+   **这一条不是待裁定的事**——落点已由切分 §四第 4 条与 P1 设计 §18 `:576-580` 定死，
+   本块只是在册子上把三处并成一笔。
 2. **待与 P1 对账**：三条。
    (i) `CheckpointError` 与 `CheckpointOwner` 落在 `crates/continuum-operator/src/definition.rs`，
    并改 `:95` / `:96` 两行签名（§4.2、§4.4）——**这是本块对 P1 文件的改动**，切分 §一 的共写表未登记它（§15 第 2 条）。
@@ -999,11 +1145,16 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 4. **待与规范维护者对账（§8）**：§329 的六个字段没有类型、没有引用关系、`audio_mix` 无表示。
    **缺的是「Timeline 六个字段的类型与互引」这一步**。与 P5a 设计 §15 第 9 条（`Artifact.metadata` 的 schema）
    是同一处缺口的两半，两处互指。
-5. **待与 P5a 对账**（两条，互指）：
+5. **待与 P5a 对账**（三条）：
    (i) 本块答复 P5a 设计 §14 第 3 条的询问：`VisualCheck` 够用，**不请求新臂**（§9.1），
    但「`VisualCheck` 这个名字对跨模态检查偏窄」记在 §9.1 末。
    (ii) 两枚验证算子的 §262 级别声明（§5.5：第 1 级与第 3 级）由本块给出，
    **装配方以值构造 `AvailableVerifier`**（P5a 设计 §7.2）。「这一对应由谁持有」未定。
+   (iii) **本块假设 `RequirementId` 在 `continuum-verify` 的名字空间里不可命名**：§12.4 第 2 条的
+   `compile_fail` 用例（在 `continuum-media` 里写 `EvidenceSubject::Requirement(..)` 编不过）靠它成立。
+   而 P5a 设计 §4.3.1 记的是该类型「以**值**承载它…落地时以 P4 的 `RequirementId` 为准」，**归属未定**。
+   若 P5a 的下一轮把 `RequirementId` re-export 出来（或本块按 P4 的类型名可命名它），那条用例当场不成立，
+   须换掉（判据仍在：本块不构造 `Requirement` 归属，只是照片从「编译不过」变成别的形式）。
 6. **待与 P5a 与协调者对账（检查点的身份约束）**：`RestoreRejected` 的判据要求检查点**自带身份**，
    而 `type Checkpoint`（`crates/continuum-operator/src/definition.rs:93`）今天只有 `Send + Sync` 约束。
    加一条身份约束改的是 trait 的**关联类型**，不在切分 §二第 4 条给本块的范围内（§4.6）。
@@ -1011,12 +1162,10 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
    (i) §5.4 的「逐位可复现的 backend」名单——规范没有一处给 backend 的确定性；
    (ii) §6.2 的 `FaceIndex` / `AudioFeatures` / `Embeddings` → `Json` 的映射——三者不在任何一份 Artifact 类型清单里。
    两处都是**本设计定的封闭表**，规范无来源。
-8. **待与协调者对账（迁移号段）**：本块零迁移、不占档（§11.3）；六块与 P6 的档须统一划（切分 §二第 5 条 `:97`）。
-   实测空档：`140`–`190`（§11.2）。
-9. **待与 P5b 对账**：§10 的四条 `bind` 是本块填的；`realized_by` 的文本弱引用**没有编译期照片**
+8. **待与 P5b 对账**：§10 的四条 `bind` 是本块填的；`realized_by` 的文本弱引用**没有编译期照片**
    （P5b 设计 §3.2 末已写明），本块的补件是 §12.2 第 (s) 条那条运行期用例。
    另：§10 末的「§33 的七枚预处理算子无目录可填」是**据实留的形状**，不是漏 bind。
-10. **待与协调者对账（P1 设计的一处会变旧的文本）**：`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:573`
+9. **待与协调者对账（P1 设计的一处会变旧的文本）**：`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:573`
     逐字「ArtifactType 集合 本子项目取六种。P5 引入媒体类型时为编译期可见的破坏性变更。」。
     本块不改别人的文件（§3.5 的 (g)），**收件人：协调者**（决定要不要在该文件里补一句指向本设计）。
 
@@ -1040,14 +1189,12 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
    **缺的是「检查点写在哪里、谁写、怎么判损坏」这一步。收件人：规范维护者 + 第 3 层。**
 7. **§5.4 的 backend 名单与 §6.2 的 `Json` 映射都是本设计定的封闭表，规范无来源**（§13 第 7 条）。
    **收件人：规范维护者。**
-8. **本块零迁移，故不占档**（§11.3）；若实现期确需落库，按「未占用」现取。
-   **收件人：协调者**（统一划六块与 P6 的档）。
-9. **§32 链尾两步的 §262 级别是本块的声明**（§5.5）。**缺的是「verifier 候选的级别由谁持有」这一步。
+8. **§32 链尾两步的 §262 级别是本块的声明**（§5.5）。**缺的是「verifier 候选的级别由谁持有」这一步。
    收件人：P5a + 装配方。**
-10. **本块的注册入口与两处判定今天都没有生产调用方**（§12.5）：`register_media_operators`、
-    `authorize_generative`、`checkpoint()` / `restore()`、`evidence_from_media_output` 四者。
-    **这不是本块的缺口，是第 3 层的**
-    （切分 §四第 4 条禁止 P5 自建执行路径；P1 设计 §18 已有同形的一条）。
+9. **本块的注册入口、两处判定与一处产出包装今天都没有生产调用方**：`register_media_operators`、
+   `authorize_generative`、`checkpoint()` / `restore()`（§4.5、§7.3）、`evidence_from_media_output`
+   四者。**这不是本块的缺口，是第 3 层的**
+   （切分 §四第 4 条禁止 P5 自建执行路径；P1 设计 §18 已有同形的一条；拍照的限制见 §12.5）。
 
 ---
 
