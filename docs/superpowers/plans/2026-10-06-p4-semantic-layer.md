@@ -825,6 +825,14 @@ git commit -m "feat(canonical): 显式约束与满足判据、四态与两个数
   读成「检索器交出的那一集」则 §4.6 的注入**破了 A**；读成「解析器实际工作的那一集」则**注入后 A 恒真**、
   解析器可以自造任何实体而 A 永不响。故 A 拿的必须是**前者**。
 - `assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved`（**fail-open 侧**）：
+  > **本条读载荷的方式（2026-10-10 补入，Task 4 的订正轮查出；与本计划 Task 6 那条同源、处置相同）**：
+  > Task 4 已把四支载荷的**字段转私有**（不变量：只有 `resolve` 产出 `ResolutionResult`），故**本 task 的用例
+  > ——它们住在 `tests/resolver.rs`（crate 外）——一律经只读访问器读**（`Resolved::entity` / `Ambiguous::surviving` /
+  > `Unknown::reason` / `candidate_count` 等，共十枚），**不许写按名解构**（`Unknown { reason, .. }`）
+  > **或结构体字面量**（`Unknown { reason: … }`）——**crate 外写不出**。
+  > **本 task 正文里凡写 `Unknown { reason: AllCandidatesRejected }` 一类，一律读作「经访问器读回来的那个值等于它」**，
+  > **不是**要你写那种 pattern。判据同本计划对 `Remaining` 的处置（`:2135-2136`）：**「字段私有」与「crate 外按名解构」不能同真**。
+
   **逐候选 N 条**——构造 N 个候选，每个恰好违反一条**不同的**显式约束；N 次结果的**每一次**都断言
   **不是 `Resolved`**，且**逐次断言**是 `Unknown { reason: AllCandidatesRejected }`（该候选是唯一候选且不合格）
   还是 `ConfirmRequired`。红条件：把「全部候选都不合格」也判成 `Resolved`（**放宽档**）。
@@ -885,6 +893,15 @@ git commit -m "feat(canonical): §4.2 的四条断言（A/B/C/D）与两侧守�
 **Interfaces:**
 - Consumes: Task 4 的 `RequiredStrength` / `ResolutionResult` / `CandidateSet` / `ExplicitConstraint`、Task 3 的 `Candidate`
 - Produces: `continuum_canonical::{ResolutionRisk, ExplicitBinding, BindingSource}`、`binding::apply`（注入点）
+
+> **本条读载荷的方式（2026-10-10 补入，Task 4 的订正轮查出）**：Task 4 已把四支载荷的**字段转私有**
+> （不变量：只有 `resolve` 产出 `ResolutionResult`），故**本 task 的用例——它们住在 `tests/resolver.rs`（crate 外）——
+> 一律经只读访问器读**（`Resolved::entity` / `Ambiguous::surviving` / `Unknown::reason` / `candidate_count` 等，共十枚），
+> **不许写按名解构**（`Unknown { reason, .. }`）**或结构体字面量**（`Unknown { reason: … }`）——**crate 外写不出**。
+> 本 task 正文里凡出现 `Unknown { reason: AllCandidatesRejected }` 一类的写法，**一律读作「断言经访问器读回来的那个值等于它」**，
+> **不是**要你写那种 pattern。
+> **判据同 Task 19 那处（`:2135-2136` 对 `Remaining` 的处置）**：**「字段私有」与「crate 外按名解构」不能同真**——
+> 该计划两处遇到同一形状，处置也同一：**读走访问器**。
 
 - [ ] **Step 1: 写用例**
 
