@@ -95,7 +95,7 @@ D 的 Task 14 Step 1 已把它交付：`crates/continuum-model-registry/src/pers
   开工前先核：
 
 ```bash
-cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/continuum-runtime/src/tool_call.rs
+ls crates/continuum-runtime/src/error.rs crates/continuum-runtime/src/tool_call.rs
 ```
 
   两者都在 → Task 1 只**增补**。任一不在 → **停下报协调者**（记在 `## 遗留` 的同名条）。
@@ -118,6 +118,18 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
 ---
 
 ## Global Constraints
+
+- **示例命令一律不写死代码树；一律在你自己的 worktree 根下跑，本仓的绝对路径由派单给。**
+  > **订正（2026-10-09，G Task 12 派单前实测；同 E 计划 `7625bdf` 的那一处）**：
+  > **本计划的示例命令原先一律以 `cd /home/DslsDZC/Continuum && …` 开头，共 27 处。**
+  > **而 G 跑在 `.worktrees/p3g` 工作树里**——故照抄那串会让命令**跑在主检出上**，
+  > 读到的是 **`main` 分支那棵树**的读数，**而不是被审的那棵**。
+  > **其中一处尤其危险**：`cd /home/DslsDZC/Continuum && git add <显式路径>`
+  > ——**那会在主检出里暂存文件**（本子项目已出过一次「编辑落在主检出而不是工作树」）。
+  > **旧形逐字留档于此**（它们不是笔误，是**写计划时的假设已经过期**）：
+  > `cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout … cargo test …`。
+  > **判据**：**计划里的示例命令若是「先切到某棵树再跑」，那棵树的路径就是一条会过期的假设**——
+  > **而它过期时不会报错，只会让读数指向另一棵树。**
 
 - 工具链固定 rustc 1.95.0 / cargo 1.95.0，edition 2024。
 - **依赖方向禁止反向。本计划不新增任何 workspace 成员之间的依赖边**：`continuum-runtime` 的 `ALLOWED` 条目
@@ -185,7 +197,7 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
    报告里逐轮附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径」。
    模板（`MUT` 是改的文件、`BAK` 是备份）：
    ```bash
-   cd /home/DslsDZC/Continuum
+   # 在你自己的 worktree 根下跑（本仓的绝对路径由派单给）
    before=$(sha256sum "$MUT" | cut -d' ' -f1)
    cp "$MUT" "$BAK"
    trap 'cp "$BAK" "$MUT"; echo "已还原"' EXIT INT TERM
@@ -368,7 +380,7 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 预期：**「名字未解析」这一类**编译错误（`ModelCallError`、`classify` 尚未存在）。
@@ -428,7 +440,7 @@ pub fn into_call_error(e: ProviderError) -> ModelCallError;
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/src/error.rs \
         crates/continuum-runtime/src/lib.rs crates/continuum-runtime/tests/model_call.rs
 git commit -m "feat(runtime): G 的错误类型与模型侧失败分类"
@@ -496,7 +508,7 @@ git commit -m "feat(runtime): G 的错误类型与模型侧失败分类"
 - [ ] **Step 3: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 4: 实现夹具**
@@ -517,7 +529,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 - [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/Cargo.toml crates/continuum-runtime/tests/common/mod.rs \
         crates/continuum-runtime/tests/model_call.rs Cargo.lock
 git commit -m "test(runtime): 假模型适配器夹具（C 侧那份的第二份副本）"
@@ -571,7 +583,7 @@ git commit -m "test(runtime): 假模型适配器夹具（C 侧那份的第二份
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -693,7 +705,7 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
 - [ ] **Step 2: 运行，确认通过（这是本 task 的正常态）**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_discipline
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_discipline
 ```
 
 - [ ] **Step 3: 做一次「守卫会红」的实测（内容不提交）**
@@ -705,7 +717,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call_discipline.rs
 git commit -m "test(runtime): 模型调用路径的三条模块面守卫"
 ```
@@ -761,7 +773,7 @@ git commit -m "test(runtime): 模型调用路径的三条模块面守卫"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_face
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_face
 ```
 
 预期：第一份**本来就该通过**（`InvokeRequest` 已存在）；第二份**因 `ModelProvider` 未导入 /
@@ -777,7 +789,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 - [ ] **Step 3: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照片"
 ```
@@ -885,7 +897,7 @@ git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照�
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -910,7 +922,7 @@ pub fn plan_candidates(tx: &Tx<'_>, registry: &ProviderRegistry)
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs
 git commit -m "feat(runtime): 候选集的构造（同步段）"
 ```
@@ -987,7 +999,7 @@ git commit -m "feat(runtime): 候选集的构造（同步段）"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -1032,7 +1044,7 @@ pub async fn select(candidates: Vec<Candidate>, input: RouteInput,
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs
 git commit -m "feat(runtime): 调 rank 并成对带出适配器句柄"
 ```
@@ -1099,7 +1111,7 @@ git commit -m "feat(runtime): 调 rank 并成对带出适配器句柄"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 登记 `tokio` 的 `time` feature**
@@ -1163,7 +1175,7 @@ pub struct CallInput<'a> {
 - [ ] **Step 6: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add Cargo.toml Cargo.lock crates/continuum-runtime/src/model_call.rs \
         crates/continuum-runtime/tests/model_call.rs crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "feat(runtime): 发起模型调用与截止"
@@ -1252,7 +1264,7 @@ git commit -m "feat(runtime): 发起模型调用与截止"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -1284,7 +1296,7 @@ pub async fn abort(adapter: &Arc<dyn ModelProvider>, stream: &ModelStream)
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs \
         crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "feat(runtime): 流式调用与中止入口"
@@ -1360,13 +1372,13 @@ git commit -m "feat(runtime): 流式调用与中止入口"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call.rs
 git commit -m "test(runtime): 不调 usage / list_models / describe_model 的否定式照片"
 ```
@@ -1453,13 +1465,13 @@ git commit -m "test(runtime): 不调 usage / list_models / describe_model 的否
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call.rs
 git commit -m "test(runtime): 不写库、可达性与射程边界"
 ```
@@ -1474,7 +1486,7 @@ git commit -m "test(runtime): 不写库、可达性与射程边界"
 - [ ] **Step 1: 全量验证**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-runtime --depth 1 --edges all --prefix none
 ```
@@ -1485,7 +1497,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-runtime --depth 1 --edges
 - [ ] **Step 2: 复核「G 不加任何边」（本计划唯一的 `ALLOWED` 判据）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff --stat -- crates/continuum-runtime/tests/dependency_direction.rs
+git diff --stat -- crates/continuum-runtime/tests/dependency_direction.rs
 TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency_direction
 ```
 
@@ -1496,7 +1508,7 @@ TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency
 - [ ] **Step 3: 通读复核「这条路径上没有强制点」的三条落点**
 
 ```bash
-cd /home/DslsDZC/Continuum && grep -rn "AuthorizedTool\|ToolProvider\|invoke_tool\|authorize" crates/continuum-runtime/src/model_call.rs
+grep -rn "AuthorizedTool\|ToolProvider\|invoke_tool\|authorize" crates/continuum-runtime/src/model_call.rs
 grep -rn "continuum_capability\|continuum_effect\|continuum_secrets\|AuthorizedEffect\|EffectJournal" crates/continuum-runtime/src/model_call.rs
 grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 ```
@@ -1546,7 +1558,7 @@ grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 - [ ] **Step 6: 提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && git add <本 task 改动的显式路径>
+git add <本 task 改动的显式路径>
 git commit -m "docs(runtime): P3 子项目 G 的收尾与复核"
 ```
 
