@@ -244,6 +244,7 @@ dependencies = [
  "continuum-sandbox",
  "continuum-secrets",
  "continuum-workspace",
+ "futures-core",
  "serde_json",
  "tempfile",
  "thiserror",

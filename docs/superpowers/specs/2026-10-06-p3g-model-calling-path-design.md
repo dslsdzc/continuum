@@ -84,6 +84,13 @@ D 到 Task 9），故 §4 的两处接口请求**此刻改最便宜**。
 - **它的逃逸面与 C 那条同形，两侧都写明**：它匹配的是**字面拼法**，故 `use … as` 别名、全限定路径、
   以及「把工具路径的代码 `include!` 进来」都不命中。**归一化之后它仍是一个下界，不是封闭判定**——
   与 C §4.1 末段的处置相同（那边的上界要 `syn`，本阶段不做）。
+  > **订正（2026-10-08，G Task 4 实测：本段的逃逸面清单对本 needle 集不成立）**：
+  > 本处五枚 needle 是**单 token 标识符**（`AuthorizedTool` / `AuthorizedToolInvocation` /
+  > `ToolProvider` / `invoke_tool` / `authorize`）。**`use … as` 别名与全限定路径都必须把原拼法写出来
+  > ⇒ 它们命中，不是逃逸。** 那三条逃逸面**出自 C**，那边的 needle 是 `impl ModelProvider for`
+  > 这种**多 token 短语**——别名与换序才会改变文本。**同一个词在两种 needle 下含义相反。**
+  > **真正的逃逸面（据实测改写，不穷尽）**：他处写出后经 `crate::` 拐弯引用、`include!`、
+  > 宏展开、**清单外的同义名字**。**只有前两条与新清单绑定；后两条是「下界」本身的限度。**
 - **为什么值得有这条守卫**：这不是洁癖。混称已经发生过三次（裁决 §一.1 记「四份设计混称过」，
   `p3bcdf-followups.md` §六.4 记协调者的派单措辞是漂移源），而**「同一件事两个词汇表」在本项目一贯
   判为 Critical**。守卫逮住的是最便宜的那一类复发。
@@ -190,8 +197,26 @@ pub fn plan_candidates(tx: &Tx<'_>, registry: &ProviderRegistry)
     -> Result<Vec<Candidate>, ModelCallError>;
 
 // ② 异步段：取可用性快照 → 组装请求 → 调 rank，并把**句柄与排序结果成对带出**。**不收 `Tx`**（§3.4）。
-pub async fn select(candidates: Vec<Candidate>, input: RouteInput, policy: &dyn RankingPolicy)
+pub async fn select(candidates: Vec<Candidate>, input: RouteInput,
+                    policy: &(dyn RankingPolicy + Sync))
     -> Result<CallPlan, ModelCallError>;
+
+// ⚠️ **本代码块在 2026-10-08 改过两处，都在 `select` 的 `policy` 参数上**。
+//    **第一处**：由 `&dyn RankingPolicy` 改为 `&(dyn RankingPolicy + Sync)`。
+//    **原文与本块的正文相抵**——本设计 §3.4 与 §11 要求那条 future 是 `Send`
+//    （§3.4 末段那句 `fn assert_send<T: Send>(_: &T) {}`，与 §11 表里「`Tx` 不跨 `await`」
+//    那一行的判据），而 `select` 在 `snapshot(..).await` **之后**才用 `policy`，
+//    `&T: Send` 要 `T: Sync`；D 的 `RankingPolicy`
+//    （`crates/continuum-model-registry/src/router.rs`）**没有超界**，故原写法编不过
+//    （G 的 Task 8 实测 `E0277: dyn RankingPolicy cannot be shared between threads safely`）。
+//    **改的是代码块，不是正文**：正文那条判据（future 必须 `Send`）是约束，代码块只是它的一种示意写法。
+//    具体类型会自动 coerce，故调用点一处未改。
+//    **第二处**：第一处当时写成了 `+ Send + Sync`，**`+ Send` 是多余的**。
+//    实测（G 的 Task 8 评审）`&(dyn RankingPolicy + Sync)` 就够——整 crate 的目标全编过；
+//    而 `+ Send` **单独不够**（只写它、不写 `Sync`，仍编不过）。**界取最小的那个就够了**：
+//    多写一个 auto trait 会给每一个调用方加一条本设计给不出判据的要求。
+//    **本条的两处引用按内容写、不写行号**——本文件自己在上方插过行，写行号的引用会随下一次
+//    编辑一起漂（G 的 Task 8 评审实测到过同一个失效模式，`p3g-followups.md` 的 M-8-5）。
 
 // ③ 异步段：对**一个候选**发起调用。**不收 `Tx`**；**也不收 `ModelId`**（§2.2）；
 //    句柄是**显式的一枚入参**——`ExecutionCandidate` 里没有它（D 的类型不含适配器）。
@@ -327,7 +352,10 @@ G 只能把一个适配器的健康度**原样摊给它服务的每个模型**�
 是 `describe_model(&ModelId)`，它返回的是 `ModelDescriptor`（`:21-27`）、**不含健康度**——它能给的最多是
 某个按模型的 `Err`，而 `Unavailable` 这个变体在本仓已被另一件事占用（C §5.1 记的既有夹具：
 `crates/continuum-provider/tests/fake_provider.rs:106` 把「无此工具」这个**永久性配置缺陷**报成
-`Unavailable`），故它**不是可靠的可用性信号**。记在 §14 第 2 条（收件人：C 的设计 + 规范维护者）。
+`Unavailable`；**订正 2026-10-07（G Task 1 实测，原引坐标照留）**：该坐标**已不成立**——工具侧夹具已搬走，
+`fake_provider.rs` 现存 104 行、只剩 `FakeConnector`。实读的新坐标（p3g 树 `404c464`）是
+**`crates/continuum-provider/tests/common/mod.rs:177`**，`FakeTool::describe_tool` 的 `.ok_or_else`），
+故它**不是可靠的可用性信号**。记在 §14 第 2 条（收件人：C 的设计 + 规范维护者）。
 （**措辞射程**：带模型的不止它一个——`InvokeRequest` 里也有 `ModelId`
 （`crates/continuum-core/src/model.rs:44-48`），`invoke` 和 `stream` 都收它。本条要说的是
 **按 id 询问状态**这件事只有 `describe_model` 一个方法，故措辞收窄到「以 `&ModelId` 为入参」。）
@@ -619,7 +647,9 @@ C §5.1 拒绝把这张映射写成**边界上的**函数，理由之一是「�
 
 **一处已记在 C 侧的反例**（G 的分类表在模型路径上带着它）：既有夹具把**永久性配置缺陷**
 （「这个 provider 没有这个工具」）报成 `Unavailable`（`crates/continuum-provider/tests/fake_provider.rs:106`，
-C §5.1 记录了它）——若模型侧的真实适配器也这样用 `Unavailable`，那张表会把一次配置缺陷分成 `Transient`。
+C §5.1 记录了它；**订正 2026-10-07（G Task 1 实测，原引坐标照留）**：该坐标**已不成立**——工具侧夹具已搬走，
+`fake_provider.rs` 现存 104 行、只剩 `FakeConnector`，实读的新坐标（p3g 树 `404c464`）是
+**`crates/continuum-provider/tests/common/mod.rs:177`**）——若模型侧的真实适配器也这样用 `Unavailable`，那张表会把一次配置缺陷分成 `Transient`。
 **这不是本设计能修的**（修它在适配器），故它在此处是一条**已知的射程边界**，不是漏项。
 
 ## 6.3 产物今天没有消费方——据实记，不声称它驱动了重试
@@ -786,7 +816,11 @@ G 没有可半写的副作用，而这条断言把它钉成事实而不是声明
 
 1. **G 是 Runtime 的一条路径**（§1.2，总纲 §1）。F 的归属与它同源、同址。
 2. **`continuum-runtime` 的 `ALLOWED` 条目已含 G 需要的全部 crate**（实读
-   `crates/continuum-runtime/tests/dependency_direction.rs:164-179`）：
+   `crates/continuum-runtime/tests/dependency_direction.rs` 的 `("continuum-runtime", &[…])` 那一条
+   ——**订正 2026-10-09 合入前终审实测**：本行原引 `:164-179`，而那个区间**不承载**下面这几个 crate
+   （`graph`(`:180`)／`model-registry`(`:181`)／`persist`(`:182`)／`provider`(`:183`) 全在区间之外）；
+   该条目实际在 **`:172-189`**（键在 `:173`），与本设计 §10.3 末段自己写的读数一致。
+   **行号只作当时读数**）：
    `continuum-provider`（注册表与适配器句柄）、`continuum-model-registry`（候选集与 `rank`）、
    `continuum-persist`（`Tx`）、`continuum-core`（`ModelId` / `InvokeRequest` / `ProviderError` /
    `ProviderHealth`）、`continuum-graph`（`FailureClass`）。
@@ -829,10 +863,14 @@ G 没有可半写的副作用，而这条断言把它钉成事实而不是声明
 **一条 G 侧的守卫（可写，且它的逃逸面要一并写明）**：断言
 `crates/continuum-runtime/src/model_call.rs` 的源码文本里不出现任何
 `continuum-adapter`、`DeepSeek`、`OpenAi`、`Anthropic` 之类的实现 crate / 实现类型名。
-**它的证明力有边界**：匹配的是**字面拼法**，别名与全限定路径逃逸——与 C §4.1 末段那条同形，
-**是下界不是封闭判定**。**更硬的一层其实已经有了**：若 G 真想持有一个实现类型，它必须依赖那个
+**它的证明力有边界**：匹配的是**字面拼法**——与 C §4.1 末段那条同形，**是下界不是封闭判定**。
+**（订正 2026-10-08，G Task 4 实测：本句原写「别名与全限定路径逃逸」，对这一类单 token needle 为假
+——它们必须写出原拼法，故命中。见 §1.3 那条订正。）** **更硬的一层其实已经有了**：若 G 真想持有一个实现类型，它必须依赖那个
 crate，而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的条目里没有它而红
-（`crates/continuum-runtime/tests/dependency_direction.rs:246`，逐对 `assert_eq!` 在 `:276-281`）。
+（**订正 2026-10-08，G Task 4 实测：原文引 `dependency_direction.rs:246` 与逐对断言 `:276-281`；
+现为 `:255`（用例）与 `:285-290`（逐对断言；**订正 2026-10-08，G Task 4 评审实测：本行初写 `:285-289`，
+那个区间少了闭括号那一行——`assert_eq!` 从 `:285` 到 `:290`**），runtime 条目在 `:172-189`**——
+**本计划与设计里凡是给这个文件的行号，都要按当时实测重取**）。
 
 ---
 
@@ -843,7 +881,10 @@ crate，而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的�
 `tests/common/mod.rs` 里那个 `FakeModel` 的第二份副本，两份不合并**（`p3bcdf-followups.md` §七.8：
 「两份各有其用」）。它需要 `continuum-runtime` 的 **dev 依赖** `async-trait` 与 `futures-core`
 （后者用于自写单分片流；判据同 `crates/continuum-provider/tests/fake_provider.rs:17-19` 的注释：
-`stream::iter` 属 `futures-util`，本仓不用它）。**订正**：本行初稿写「`async-trait`（F 已按 F8 加）」
+`stream::iter` 属 `futures-util`，本仓不用它；**订正 2026-10-07（G Task 1 实测，原引坐标照留）**：
+`fake_provider.rs:17-19` **已不成立**（该区间现存 `FakeConnector::descriptor` 的函数体，不是注释），
+那条注释随 `OnceStream` 搬进了 **`crates/continuum-provider/tests/common/mod.rs:31-32`**，实读，p3g 树 `404c464`）。
+**订正**：本行初稿写「`async-trait`（F 已按 F8 加）」
 ——**那个「已」也是假的**（同 §10.2）：F 尚未落地，故那两条 dev 边的登记方是**先落地的那一方**；
 G 若先落地就自己登记，F 若先落地就核一遍。
 
@@ -1013,7 +1054,7 @@ G 侧的元素类型就是 `RoutableModel`（字段私有、唯一构造点）�
 | §11 第 24 条（`:1361-1364`） | `ProviderHealth::Degraded` 的降权判据规范未给；收件人规范维护者 | **退**：降权是**排序策略**的事（D 的 `RankingPolicy`），G 不排序；但 G 是 `availability` 的**唯一生产方**，故**「这条判据缺了会让 G 送出的 `Degraded` 在 D 的基线里不产生任何效果」**据实记在此处，续指规范维护者 |
 | §7.1（`:1044-1055`） | 「失败检测与升级触发……那是**子项目 G**的活」 | **收一半、退一半**（§6.4）：收分类、退升级触发（三条判据） |
 | §6.3（`:978-1007`） | `ExecutionProfile.cost_budget` 的类型收紧未做；收件人协调者 + 语义层 | **退**：`cost_budget` 不是 G 的字段（G 只碰 `timeout_ms`，且是以值，§3.5） |
-| 计划 `## 遗留`（`:1576-1591`） | `BudgetView` 的 `None` ≠ `Some(0)` 谁守；**收件人：驱动侧的投影实现与子项目 G** | **接**（§8.2），两向对钉 |
+| 计划 `## 遗留`（`:1586-1601`；旧读 `:1576-1591`） | `BudgetView` 的 `None` ≠ `Some(0)` 谁守；**收件人：驱动侧的投影实现与子项目 G** | **接**（§8.2），两向对钉 |
 | §11 第 4、6、7、8、9、10、11、14、16、17、19、21 条 | 规范级未决（§84 的语义 / `Cost`·`Latency` 的复用 / 三处画像清单 / 子维度分层 / `failure_modes` 词表 / §19 阈值 / §249 迁移关系 / 迁移号 / 初步画像 / `version` vs `time_range` / 上下文长度 / `Tier 1 Low`） | **退（逐条一句）**：这些的收件人是**规范维护者 / 复审者 / 协调者 / D 的实现者**，**没有一条落在模型调用路径上**——G 不读画像字段、不打分、不管迁移。**本子项目一条都不发明** |
 
 **记录为「不经手」的 4 条**（收件人不是 G，我看过并判过它们不归 G）：

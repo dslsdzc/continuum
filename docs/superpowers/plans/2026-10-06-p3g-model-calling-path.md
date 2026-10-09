@@ -95,7 +95,7 @@ D 的 Task 14 Step 1 已把它交付：`crates/continuum-model-registry/src/pers
   开工前先核：
 
 ```bash
-cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/continuum-runtime/src/tool_call.rs
+ls crates/continuum-runtime/src/error.rs crates/continuum-runtime/src/tool_call.rs
 ```
 
   两者都在 → Task 1 只**增补**。任一不在 → **停下报协调者**（记在 `## 遗留` 的同名条）。
@@ -119,9 +119,24 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
 
 ## Global Constraints
 
+- **示例命令一律不写死代码树；一律在你自己的 worktree 根下跑，本仓的绝对路径由派单给。**
+  > **订正（2026-10-09，G Task 12 派单前实测；同 E 计划 `7625bdf` 的那一处）**：
+  > **本计划的示例命令原先一律以 `cd /home/DslsDZC/Continuum && …` 开头，共 27 处。**
+  > **而 G 跑在 `.worktrees/p3g` 工作树里**——故照抄那串会让命令**跑在主检出上**，
+  > 读到的是 **`main` 分支那棵树**的读数，**而不是被审的那棵**。
+  > **其中一处尤其危险**：`cd /home/DslsDZC/Continuum && git add <显式路径>`
+  > ——**那会在主检出里暂存文件**（本子项目已出过一次「编辑落在主检出而不是工作树」）。
+  > **旧形逐字留档于此**（它们不是笔误，是**写计划时的假设已经过期**）：
+  > `cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout … cargo test …`。
+  > **判据**：**计划里的示例命令若是「先切到某棵树再跑」，那棵树的路径就是一条会过期的假设**——
+  > **而它过期时不会报错，只会让读数指向另一棵树。**
+
 - 工具链固定 rustc 1.95.0 / cargo 1.95.0，edition 2024。
 - **依赖方向禁止反向。本计划不新增任何 workspace 成员之间的依赖边**：`continuum-runtime` 的 `ALLOWED` 条目
-  已含 G 需要的全部 crate（实读 `crates/continuum-runtime/tests/dependency_direction.rs:164-179`：
+  已含 G 需要的全部 crate（实读 `crates/continuum-runtime/tests/dependency_direction.rs` 的
+  `("continuum-runtime", &[…])` 那一条——**订正 2026-10-09 合入前终审实测**：原文引 `:164-179`，
+  而那个区间**不承载**下面这几个 crate（`graph`／`model-registry`／`persist`／`provider` 都在区间之外）；
+  该条目实际在 `:172-189`（键在 `:173`）。**行号只作当时读数，按内容定位**：
   `continuum-provider` / `continuum-model-registry` / `continuum-persist` / `continuum-core` / `continuum-graph`）。
   `ALLOWED` **一字不改**，`crates/continuum-runtime/Cargo.toml` 的 `[dependencies]` **一条不加**。
   本计划只改 **dev-dependencies**（`async-trait`、`futures-core`）与 **workspace 的 `tokio` feature**（加 `time`）——
@@ -157,6 +172,21 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
 
 ### 三条已付过代价的纪律
 
+0. **写红条件前，先填一格「落点签名」（订正 2026-10-09，G Task 11 评审提出并给出六例佐证）**。
+   **本计划在这一段上付过六次代价**（M-8-3／M-9-1／M-9-2／Task 10 用例 2／Task 11 第 2 条／Task 11 第 3 条）——
+   **六次都是同一形状：红条件写在计划里，而那一枚在本层造不出来。** 而先前的补救口径
+   「**写红条件前先问一句『那一处够得着吗』**」**不够**，**因为它在层③有歧义**：
+   「改签名之后就够得着」也答「够得着」。
+   **换成机械判据**：**每条红条件后面附一格「落点签名」——把 Interfaces 的实参表抄过来**，然后问三件：
+   - **① 那一处有没有句柄？**（例如 `call` 没有 `Tx`／没有 `Db` ⇒ 靠写库去红的变异体**落不了笔**）
+   - **② 那一处是同步还是 async？**（拿 async 的东西去红同步函数 ⇒ 层③）
+   - **③ 返回类型对得上吗？**（`InvokeResponse` 变不出 `ModelStream` ⇒ 层③）
+   **三问任一为「否」，该变异体就不是层①/②，而是层③**——**写不出来，或只能靠改签名／改依赖表来表达，
+   而那时唯一可观察者是调用侧编译失败、按纪律不算红**。
+   **这条比「再问一句」可执行，且能一次挡住整族。**
+   **另记一条同族的机制**（评审查出）：**红光「挂住」也不算红**——例如让 `Tx::begin` 阻塞在连接的
+   `MutexGuard` 上，那是 hang 不是 red（本仓已分过这两种）。
+
 1. **变异必须在全量 `cargo test --workspace --no-fail-fast` 下得出否定结论**（「不变红」）；
    正向的「变红」跑全量是加分。**变异的三条失效形态都要防**：
    (a) **锚点不唯一** → 变异没落到实现体却报 GREEN；
@@ -170,7 +200,7 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
    报告里逐轮附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径」。
    模板（`MUT` 是改的文件、`BAK` 是备份）：
    ```bash
-   cd /home/DslsDZC/Continuum
+   # 在你自己的 worktree 根下跑（本仓的绝对路径由派单给）
    before=$(sha256sum "$MUT" | cut -d' ' -f1)
    cp "$MUT" "$BAK"
    trap 'cp "$BAK" "$MUT"; echo "已还原"' EXIT INT TERM
@@ -179,6 +209,20 @@ cd /home/DslsDZC/Continuum && ls crates/continuum-runtime/src/error.rs crates/co
    # …读 $LOG 判红…
    ```
    **`trap` 那一行不许省**——本条是这一轮唯一一次事故的直接产物。
+   > **订正（2026-10-07，G Task 6 修复轮实测：护栏本身失效过一次）**：
+   > 那一轮实现者的**通用平台脚本用了 `cp --preserve=mtime`**，而**本机的 `cp` 不认这个参数**
+   > ⇒ **备份压根没建成**，于是 `trap` 的还原也失败，**变异跑完源文件仍是变异版**。
+   > 它是靠「**变异前哈希 ≠ 还原后哈希**」这两个数对不上才发现的，然后反向改回那一处、核回 `e0279d25…` 复原。
+   > **两条要写进模板**：
+   > - **基线副本一律用不带任何 `--preserve`／`-p` 的 `cp`**——**mtime 不由 `cp` 管，交给 `touch`**
+   >   （`touch` 是给 cargo 用的，不是给备份用的；`cp -p` 在这里既无用又可能不被支持）。
+   >   **更稳的一条**：**备份建成后立刻核一次 `[ -s "$BAK" ] && diff -q "$MUT" "$BAK"`**——
+   >   **备份没建成时，`trap` 不会报错，它只是还原了一个空文件或什么也没做**。
+   > - **「变异前哈希」与「还原后哈希」必须同框打印**（`echo "$before vs $(sha256sum "$MUT" | cut -d' ' -f1)"`）——
+   >   **本轮正是这两个数不一致才暴露了护栏失败**；分成两处写在报告的不同小节里，就看不出来了。
+   > **判据（可搬用）**：**一个「还原护栏」的失效是静默的**——**它失败时不会报错，只会留下一份被改过的源码，
+   > 而下一轮的读数会建在它上面。故护栏必须自证**：**备份建成了没有**、**还原后与变异前是不是同一个值**，
+   > 这两件都要当场打印，不能只写在报告里。
 3. **凡注释写绝对措辞，必须有对应用例**；写不出的就改成名副其实的说法，或**明写它为什么没有照片**。
    **枚举式绝对断言须逐项有照片**——「五个变体逐项」的每条臂各要一条照片，不抽代表。
    **断言的作用域要与事实同宽**：「整张表的唯一 X」≠「某个字段的唯一 X」（这一轮已两次栽在这里）；
@@ -266,7 +310,11 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
 **Files:**
 - Modify: `crates/continuum-runtime/src/error.rs`（**由 F 创建**，本 task 只增补）
 - Modify: `crates/continuum-runtime/src/lib.rs`
-- Create: `crates/continuum-runtime/src/model_call.rs`（本 task 只放类型与转换，不含四段流程）
+- Create: `crates/continuum-runtime/src/model_call.rs`（本 task 只放**两个函数** `classify` / `into_call_error`，不含四段流程）
+  **订正（2026-10-07，G Task 1 实测；原话照留）**：原话写「本 task 只放**类型与转换**」——这读起来像
+  **类型也落在 `model_call.rs`**，**是错的**：**类型 `ModelCallError` 落 `crates/continuum-runtime/src/error.rs`**
+  （设计 §10.2 点名「G 向 `error.rs` 增补 `ModelCallError`」），`model_call.rs` 只放 `classify` 与
+  `into_call_error` 两个函数。实测实现即如此落的（`crates/continuum-runtime/src/model_call.rs`）。
 - Create: `crates/continuum-runtime/tests/model_call.rs`
 
 **Interfaces:**
@@ -290,11 +338,41 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
   `Cancelled` 得 `None`、`Transport` 得 `Some(..)`。
   **只钉一侧是 fail-open 的那一侧**：一个「什么都返回 `Some(Transient)`」的实现会让
   「四个失败臂各得类别」全绿，**只有这一条会红**。依据是设计 §6.1「它是调用方自己发的取消，不是失败」。
-  **红的条件（档位：放宽）**：把 `Cancelled` 也归成 `Transient` → 这条红，其余四条不红。
+  **订正（2026-10-07，G Task 1 实测；原话照留）**：上面那句「**只有这一条会红**」**不成立**——
+  只要用例一按本 brief 写了第五条（`Cancelled` → `None`），**用例一自己也会红**：
+  M2（把 `Cancelled` 也归成 `Transient`）实测的 red **同时**落在
+  `tests/model_call.rs:38`（用例一：`left: Some(Transient)` / `right: None`）
+  与 `tests/model_call.rs:57`（用例二）。
+  **本条真实的必要性**：它钉的是 **`Cancelled` 得 `None` 与 `Transport` 得 `Some(..)` 这一对镜像**
+  ——M2 实测红在 `tests/model_call.rs:57`、M3（「一律返回 `None`」）实测红在 `tests/model_call.rs:61`，
+  **两向互为镜像、各挡一侧**。**与用例一的分工**：用例一逐变体把每一枚 `ProviderError` 映射到的像钉死
+  （枚举式绝对断言，五臂各一张照片）；本条则把**同一对入参上「取消」与「失败」的对照**钉死——
+  用例一给的是「每一枚各自的像」，本条给的是「这两枚必须在同一次转换里分道」。
+  **用例本身保留不动。**
+  **红的条件（档位：放宽）**：把 `Cancelled` 也归成 `Transient` → 本条红（`tests/model_call.rs:57`）；
+  用例一内**只有 `Cancelled` 那一臂**红、四条失败臂不红，且**用例三也红**（`tests/model_call.rs:141`）。
+  **一条一般化判据**：**「必要性理由句写错」与「这条用例该不该留」是两件事**——
+  理由句被实测证伪时，要订正的是理由句，不是删掉用例。
 - `the_error_type_carries_the_provider_error_verbatim`：`ModelCallError::Provider { class, source }` 的
   `source` 是**给进去的那一枚**（逐变体各断一次：五个 `ProviderError` 各构一个 `ModelCallError`）。
   **`Cancelled` 走 `ModelCallError::Cancelled`，且那一枚不带 `class` 字段**。
   **红的条件（档位：取反）**：把 `Provider` 的两个字段写反（`class` / `source` 互换）→ 红。
+  **订正（2026-10-07，G Task 1 实测；原话照留）**：上面这句红条件**不可实现**，有两种读法、**两种都不成立**：
+  (a) 真去互换两个字段的值——`class: FailureClass` 与 `source: ProviderError` **不同型**，**写反根本编不过**，
+  产出的不是红用例而是编译错误；(b) 读成「对调两个具名字段的**声明次序**」——那是**等价变异体**
+  （具名字段与次序无关），**照样全绿**，不红。
+  **可表达的真变异体（各把红单独落在本条用例上，实测）**：
+  - **M4（档位：取反）**：`classify` 的 `source` 处换成**一枚钉死的常数**（不再逐字回读入参）→
+    本条红在 `tests/model_call.rs:84`（「`source` 该是给进去的那一枚，逐字回读」，`left: Unavailable("钉死的常数")`
+    / `right: Transport("连接被重置")`），另两条用例**仍全绿**。
+  - **M5（档位：放宽）**：把 `Cancelled` 那一支**改投 `Provider`** → 本条红在 `tests/model_call.rs:141`
+    （「`Cancelled` 该走 `Cancelled` 那一枚，实际 `Provider { class: Unknown, source: Cancelled(..) }`」），
+    另两条用例**仍全绿**。
+  实测日志：`.tmp/mut-m4_source_not_verbatim.log`、`.tmp/mut-m5_cancelled_routed_to_provider.log`
+  （汇总 `.tmp/mutations-summary.log`）。
+  **一般化判据**：**「互换两字段」只在两个字段同型时才是可观察变异——而它看上去与真变异体一模一样。**
+  写红条件前先问「这两枚值的类型相同吗」；不同型时的「互换」是编译错误，同型但具名时的「对调次序」是等价变异体，
+  两者都长得像一条真变异体。
   **这条是「错误类型不压平」的照片**：设计 §6.1 明写 `Routing` 要**带出 D 的错**、`Provider` 要**带出类别**，
   两者都不是「一枚同名的变体」。
 
@@ -305,7 +383,7 @@ G 不加任何边）、`crates/continuum-runtime/src/main.rs`（G 不建表、�
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 预期：**「名字未解析」这一类**编译错误（`ModelCallError`、`classify` 尚未存在）。
@@ -345,6 +423,11 @@ pub fn into_call_error(e: ProviderError) -> ModelCallError;
   `Transport` 在一个适配器上可能是瞬时的、在另一个上可能是永久的，故这张表**是否为真本子项目答不出**）。
 - **已知射程边界，据实记**：既有夹具把**永久性配置缺陷**（「这个 provider 没有这个工具」）报成
   `Unavailable`（`crates/continuum-provider/tests/fake_provider.rs:106`，C §5.1 记录了它）——
+  **订正（2026-10-07，G Task 1 实测；原引坐标照留）**：上面这处 `fake_provider.rs:106` **已不成立**——
+  工具侧夹具在该文件之后被搬走，`fake_provider.rs` 现存 **104 行**、只剩 `FakeConnector`（`:13`／`:16`），
+  行 `:106` 根本不存在。**实读的新坐标**（p3g 树，commit `404c464`）：
+  **`crates/continuum-provider/tests/common/mod.rs:177`**（`FakeTool::describe_tool` 里的
+  `.ok_or_else(|| ProviderError::Unavailable(..))`；该文件 `:120-122` 的文档注释记了这条来由）。
   若模型侧的真实适配器也这样用，那张表会把一次配置缺陷分成 `Transient`。**修它在适配器，不在这里。**
 - **`FailureClass::Resource` 这一格无输入**：`ProviderError` 没有「限流 / 配额耗尽」的变体
   （C §12 第 7 条）。**G 不擅自扩 `continuum-core` 的取值域**——那是 §315 的接口类型。
@@ -360,7 +443,7 @@ pub fn into_call_error(e: ProviderError) -> ModelCallError;
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/src/error.rs \
         crates/continuum-runtime/src/lib.rs crates/continuum-runtime/tests/model_call.rs
 git commit -m "feat(runtime): G 的错误类型与模型侧失败分类"
@@ -390,11 +473,17 @@ git commit -m "feat(runtime): G 的错误类型与模型侧失败分类"
 `crates/continuum-runtime/Cargo.toml` 的 `[dev-dependencies]` 加：
 
 - `async-trait`：`ModelProvider` 是 `#[async_trait]` 的 trait，夹具实现它必须同法标注
-  （`continuum-provider` 自己的 `tests/fake_provider.rs` 就是这么写的）。**F 的 Task 2 也会加它**——
+  （`continuum-provider` 自己的 `tests/fake_provider.rs` 就是这么写的——**本处仍成立**
+  （2026-10-07 实读，p3g 树 `404c464`）：该文件仍在，且仍在 `:15-16` 以 `#[async_trait]`
+  实现 `Connector`（`FakeConnector`，`:13`），这处引据不受同批坐标搬迁影响）。**F 的 Task 2 也会加它**——
   两处是同一条边的两个使用者，**谁先落地谁登记**，后到的那个核一遍即可（不是重复登记）。
 - `futures-core`：手写单分片流要它的 `Stream` trait 与 `Pin`。
   **不用 `futures-util`**（`stream::iter` 在它里面，本仓不用它，判据同
   `crates/continuum-provider/tests/fake_provider.rs:17-19` 的注释）。
+  **订正（2026-10-07，G Task 1 实测；原引坐标照留）**：原引的 `fake_provider.rs:17-19` **已不成立**
+  （该区间现存的是 `FakeConnector::descriptor` 的函数体，不是注释）。那条「`futures-core` 只给 trait、
+  `stream::iter` 属 `futures-util`」的注释随 `OnceStream` 一起搬进了
+  **`crates/continuum-provider/tests/common/mod.rs:31-32`**（实读，p3g 树 `404c464`）。
 
 **两者都是外部 crate，`ALLOWED` 不动。** `dev-dependencies` 的边**也在** `ALLOWED` 的覆盖范围内
 （`every_crate_depends_only_on_its_allowed_set` 跑 `cargo tree --edges all`），但那张表只断言
@@ -422,7 +511,7 @@ git commit -m "feat(runtime): G 的错误类型与模型侧失败分类"
 - [ ] **Step 3: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 4: 实现夹具**
@@ -435,11 +524,15 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 
 **单分片流**照 `crates/continuum-provider/tests/fake_provider.rs:19-29` 的 `OnceStream` 形状
 （`futures-core` 只给 trait，`stream::iter` 属 `futures-util`）。
+**订正（2026-10-07，G Task 1 实测；原引坐标照留）**：原引的 `fake_provider.rs:19-29` **已不成立**——
+`fake_provider.rs` 现存 104 行且**不含 `OnceStream`**（`grep -n OnceStream` 零命中）。实读的新坐标
+（p3g 树 `404c464`）：**`crates/continuum-provider/tests/common/mod.rs:33-41`**（`OnceStream` 的
+定义与其 `Stream` impl；`:35` 为 `impl Stream for OnceStream`）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/Cargo.toml crates/continuum-runtime/tests/common/mod.rs \
         crates/continuum-runtime/tests/model_call.rs Cargo.lock
 git commit -m "test(runtime): 假模型适配器夹具（C 侧那份的第二份副本）"
@@ -478,7 +571,13 @@ git commit -m "test(runtime): 假模型适配器夹具（C 侧那份的第二份
   ——**G 不在这一层做任何二次裁剪**（设计 §4.4 第 2 条：只过滤 `Unavailable` 是 `rank` 的事，
   `Degraded` 与 `Healthy` 之间没有判据）。
   **两侧对钉**：改配 `Degraded` → 快照里是 `Degraded`（**不是被丢掉、也不是被升格成 `Healthy`**）。
-  **红的条件（档位：放宽）**：在快照里就把 `Unavailable` 滤掉（丢掉该候选）→ 这条与上一条同时红。
+  **红的条件（档位：收紧）**：在快照里就把 `Unavailable` 滤掉（丢掉该候选）→ 这条与上一条同时红。
+  > **订正（2026-10-07，G Task 6 评审发现两处标签不自洽，协调者裁定）**：本行初稿标的是**「放宽」**。
+  > **它与上一条（`the_snapshot_is_as_long_as_the_candidate_set`，标「收紧」）做的是同一类事**——
+  > 两条的变异体都是「**加一条过滤、丢条目**」（一个是「只对 `Healthy` 的候选给条目」，
+  > 一个是「把 `Unavailable` 滤掉」），**却一个标收紧一个标放宽**。
+  > 按本仓口径（**加过滤 ＝ 收紧；去掉一个过滤的效果 ＝ 放宽**——后者的实例见 E 那边标「放宽」的
+  > 「滤掉之后若为空就退回未过滤的集合」），**两枚都是「收紧」**。**故本行改为「收紧」。**
 
 **一条刻意不写的用例**：探活**并发与否**。设计 §3.3 明写「是否并发探活**不影响可观察结果**」
 （`rank` 只按 id 查条目，对次序无判据），故它是实现选择、**没有照片**——本计划不规定，
@@ -487,7 +586,7 @@ git commit -m "test(runtime): 假模型适配器夹具（C 侧那份的第二份
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -542,6 +641,13 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
 > **这一组守卫挡的是设计 §1.3 与 §10.3 的三条判据**，而它们**没有任何运行期形态**：
 > 混称是**文本**上的事，不是行为上的事。**它们各有明确的逃逸面，两条都要写明**——
 > 匹配的是**字面拼法**，故 `use … as` 别名、全限定路径、`include!` 都逃逸；
+> **订正（2026-10-08，G Task 4 实测：本行抄 C 的那三条逃逸面，对本 needle 集不成立）**：
+> 本处五枚 needle 是**单 token 标识符**（`AuthorizedTool` / `AuthorizedToolInvocation` /
+> `ToolProvider` / `invoke_tool` / `authorize`），**`use … as` 别名与全限定路径都必须把原拼法写出来
+> ⇒ 它们命中，不是逃逸**。（那三条逃逸面出自 **C**，那边的 needle 是
+> `impl ModelProvider for` 这种**多 token 短语**——别名与换序才会改变文本。**同一个词在两种 needle 下含义相反。**）
+> **真正的逃逸面（据实测改写，不穷尽）**：**他处写出后经 `crate::` 拐弯引用**、**`include!`**、
+> **宏展开**、**清单外的同义名字**。**这四条里只有前两条与新清单绑定，后两条是「下界」本身的限度。**
 > **归一化之后它仍是一个下界，不是封闭判定**（与 C §4.1 末段的处置相同，上界要 `syn`，本阶段不做）。
 
 - [ ] **Step 1: 写用例**
@@ -565,7 +671,9 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
   `continuum-adapter` / `continuum_adapter` / `DeepSeek` / `OpenAi` / `Anthropic`。
   **更硬的一层其实已经有了**（设计 §10.3）：若 G 真想持有实现类型，它必须依赖那个 crate，
   而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的条目里没有它而红
-  （`crates/continuum-runtime/tests/dependency_direction.rs:246`，逐对 `assert_eq!` 在 `:276-281`）。
+  （`crates/continuum-runtime/tests/dependency_direction.rs:255`，逐对 `assert_eq!` 在 `:285-290`
+  ——**订正 2026-10-09 合入前终审实测**：原文引 `:246` 与 `:276-281` 是过期读数，
+  与设计 §10.3 那处订正块一致；**行号只作当时读数，按内容引用例名**）。
   **这一句写进文件头**：本守卫是下界，上界那条边由 `dependency_direction.rs` 兜住。
 - `the_module_touches_neither_capability_nor_effects_nor_credentials`（设计 §2.2 第一条：
   **「它没有可越的权」**）：同法，文本里**不出现**这些 **crate 路径与类型名**：
@@ -582,12 +690,19 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
      逐个核在 G 侧的落点。
   2. **`ALLOWED` 挡不住它，据实写明**：`continuum-runtime` 的条目**本来就含**这三个 crate
      （F 在用），故多引一个**不会**让任何依赖断言变红。**这条守卫是本判据唯一的结构性落点**。
-  3. **它是下界**：匹配的是字面拼法，三种换写法（别名、全限定路径、`include!`）逃逸，**没有照片**。
+  3. **它是下界**：匹配的是字面拼法。**逃逸面按上面的订正读**（别名与全限定路径**不**逃逸；
+     真正的逃逸面是「他处写出后经 `crate::` 拐弯引用 / `include!` / 宏展开 / 清单外的同义名字」），**没有照片**。
 
   **红的条件（档位：取反）**：在 `model_call.rs` 里加一行 `use continuum_capability::AuthorizedTool;`
   即红。**实测这一步要真做一次**（照 C 的 Task 8 Step 2 的做法）：临时加进去、跑、**确认它红且报出行号**、
   再删掉，**日志路径留在报告里**——**「守卫恒绿」与「守卫有效」必须能被区分**。
   **这一次的临时内容故意用两个空格或一个 tab 的变体**，这样这一次红**同时**是空白归一化生效的照片。
+  > **订正（2026-10-08，G Task 4 实测：本句为假）**：**M4 那枚变异体**（把 `normalize` 换成恒等函数）
+  > 下，**三条判定逐条仍绿**，只有归一化自身的照片红。**成因**：**三张清单里没有一枚 needle 含内部空白**，
+  > 而匹配用**词边界**——**折与不折，命中集完全相同**；上面那次临时内容红的只是「**拼法出现了**」。
+  > **故归一化在本文件上不承重**：它留着只是**照 C 的形状**、**为将来 needle 改成多 token 短语预留**。
+  > **这是本仓点过名的形状**：**一个机制有照片、但没有任何判定依赖它**——
+  > **它的照片会绿，而它若坏了也照样绿**（除非那条照片自己的变异体来红）。**据实写明，不假装它在承重。**
 
   **反向的边界也要写**：这条守卫**不禁止注释里用中文说「能力」**（那不是一个标识符），
   也不禁止 `ModelCallError` 里出现 `FailureClass`（那是 `continuum-graph`，不在三个强制点的任何一条上）。
@@ -595,7 +710,7 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
 - [ ] **Step 2: 运行，确认通过（这是本 task 的正常态）**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_discipline
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_discipline
 ```
 
 - [ ] **Step 3: 做一次「守卫会红」的实测（内容不提交）**
@@ -607,7 +722,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call_discipline.rs
 git commit -m "test(runtime): 模型调用路径的三条模块面守卫"
 ```
@@ -650,13 +765,20 @@ git commit -m "test(runtime): 模型调用路径的三条模块面守卫"
   「`ModelProvider` 上不存在一个 `authorize` 方法」这一侧**本阶段没有照片**——
   要它需要 trybuild 与一份样例，而 `ModelProvider` 是 **C 的 trait**（不是 G 的），
   它的面在 C 的计划里管；**本计划不为别人的 trait 新增一条 dev 依赖**。
-- `the_async_segments_future_is_send`（设计 §3.4，**本 task 只放占位，实体在 Task 10**）：
+- `the_async_segments_future_is_send`（设计 §3.4，**本 task 只放占位，实体在 Task 8**）：
   **本 task 不写它**（`select` / `call` 尚不存在），记此以免被当成漏项。
+  > **订正（2026-10-08，G Task 5 实测：本行原写「实体在 Task 10」，与本计划自己相抵）**：
+  > **Task 8 那一节的 `Files:` 就明写着**「Modify: `crates/continuum-runtime/tests/model_call_face.rs`
+  > （**Task 5 的占位，此处补实体**）」，且 Task 8 的 Step 5 里就列着这条用例。
+  > **Task 10 是另一件事**（`usage()` / `list_models()` / `describe_model()` 的否定式照片）。
+  > **判据**：**一个交叉引用若与它所指那一节的 `Files:` / `Interfaces:` 相抵，以后者为准**——
+  > **因为 `Files:` 是那一节的执行面，而交叉引用只是一句话**。
+  > **这条我（协调者）也照错抄进了派单**——**交叉引用的错会被下游原样复制**。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_face
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call_face
 ```
 
 预期：第一份**本来就该通过**（`InvokeRequest` 已存在）；第二份**因 `ModelProvider` 未导入 /
@@ -672,7 +794,7 @@ cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p conti
 - [ ] **Step 3: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照片"
 ```
@@ -723,8 +845,15 @@ git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照�
     （`only_the_six_routable_states_pass_the_gate`）；G 只钉**与 §3.2 相异的那一格**（`stale`），
     **不重跑十态**（唯一入口原则，设计 §11 末的刻意不重复 (a)）。
   - `a_model_with_no_adapter_is_not_a_candidate`：登记 + 画像 + 过闸门，但注册表里没有它 → 不进。
-    **红的条件（档位：放宽）**：把 `Err(RegistryError::NotFound { .. })` 那一臂改成 `?`（让它向上传播）→
-    用例断言的是「`Ok` 且候选集里没有它、其余仍在」→ 红。
+    **红的条件（订正 2026-10-07，G Task 6 评审实测）**：
+    - **本行初稿给的那一枚编不过**——「把 `Err(RegistryError::NotFound { .. })` 那一臂改成 `?`」
+      报 **`error[E0277]`**：**`From<RegistryError>` 没有为 `ModelCallError` 实现**，故 `?` 用不了。
+    - **改用「收紧」档**（计划原写「放宽」也是错的）：让那一臂**对「无适配器」直接返回一个 `Err`**
+      ⇒ 用例断言的是「`Ok` 且候选集里没有它、其余仍在」→ 红。**实测红。**
+    - **而「放宽」那一档是写得出来的，只是当时是等价变异体**：评审写的 `T64-relax`
+      （**借用上一枚候选的句柄**）**编得过、全量门下 112 ok / 0 FAILED**——成因是
+      `list_registered` 的 **`ORDER BY id ASC`** 让夹具里无适配器的 `m-lonely` 排在前面。
+      **故「写不出来」与「写出来是等价的」是两条结论，不要混。**
 - 「无适配器即不是候选」**两侧对钉**（设计 §3.2 的丢弃规则）：
   - 向一：只在 D 的表里、注册表里没有 → **不进候选集**；**若它是唯一候选 → 整批返回
     `Err(ModelCallError::Routing(RoutingError::NoEligibleCandidate))`**（断言是哪一枚）。
@@ -735,14 +864,29 @@ git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照�
   假适配器的 `list_models()` 返回一个**不在 D 的表里**的 id；断言**候选集的 id 集合 ⊆
   `list_registered(tx)` 的 id 集合**，且**候选集 id 两两不同**（用计数断言，不用「看起来没有」）。
   **这一条同时是 `DuplicateModelCandidate` 在 G 路径上不可达的照片**（`id` 是 `model_registry` 的主键列）。
-  **红的条件（档位：放宽）**：把候选集的 id 来源从 `list_registered` 换成适配器的 `list_models()` →
-  那个多出来的 id 出现在候选集里，红。
+  **红的条件（订正 2026-10-07，G Task 6 评审实测；本行初稿给的那一枚编不过）**：
+  - **本行初稿**：「把候选集的 id 来源从 `list_registered` 换成适配器的 `list_models()`」
+    ⇒ **编不过**：`error[E0728]: await is only allowed inside async functions and blocks`
+    （`ModelProvider::list_models` 是 **async**，而 `plan_candidates` 是**同步**的）。
+  - **本条的两条结构断言里，「两两不同」那一半写得出来**：评审写的 `T66-distinctness`
+    （**把 `list_registered` 的结果复制一份**）**在全量门下红 7 条**，**含本条**。
+    **「`⊆` 那一半没有可写的变异体」才是真的**——实读：`ModelProfile::try_new` 是 `pub(crate)`、
+    `model_profile.id REFERENCES model_registry(id)`、`PRAGMA foreign_keys=ON`、注册表无枚举入口，
+    **故表外的 id 进不来**（**这是推理，不是穷举**，评审已据实这样标注）。
+  - **另据实记一条覆盖缺口（评审 I1）**：**本条在「候选集恒空」的实现下整条绿**——
+    三条断言在空集上**全空真**，`.expect` 拿到的是 `Ok(vec![])`。**修复轮已给它加非空锚。**
 - `an_empty_candidate_set_is_no_eligible_candidate`：**两个来路各一条**——
   (a) 一个适配器都没登记（或一个模型都没登记）；(b) 全部被闸门挡下。
   **各断言是哪一枚 `Err`**（`ModelCallError::Routing(RoutingError::NoEligibleCandidate)`），
   **且断言 `rank` 一次都没被调用**（用一个会 panic 的 `RankingPolicy` 作证：它若被调到，用例以 panic 失败）。
-  **后一半是本条唯一的承重部分**：只断 `Err` 的话，一个「装作没候选、其实调了 rank」的实现会全绿。
-  **红的条件（档位：移除）**：把空判定的短路删掉（照常调 `rank`）→ 那条 panic 策略被调到，红。
+  **后一半（「`rank` 一次都没被调用」）在本 task 造不出来（订正 2026-10-07，G Task 6 评审实测）**：
+  **`plan_candidates` 的参数表里没有 `&dyn RankingPolicy`**（实读 `src/model_call.rs` 的签名）——
+  **这是类型上做不到，不是有规则在挡**。**故本行初稿称它是「本条唯一的承重部分」是派错了地方。**
+  > **协调者裁定（2026-10-07）：这一半落到 Task 11**（标题正是「**可达性与射程边界**」，
+  > 且它硬依赖 Task 7，是本计划里唯一能端到端看到 `rank` 被不被调的地方）。
+  > **Task 7 不做**：`select` 永远收不到空 `Vec`——空集在 `plan_candidates` 就短路了。
+  > **全计划里这一句只在本处出现过一次**，没有第二落点——**这正是它被派错却没被发现的原因。**
+  **红的那一半本 task 仍留**：**红的条件（档位：移除）**：把空判定的短路删掉（照常往下走）→ 红。
 - `a_storage_failure_is_reported_as_storage_and_leaves_nothing_behind`：**失败路径**——
   在**一个不带 `p3d_model_migrations()` 的库**上跑 `plan_candidates`（`list_registered` 必然抛真实的库错误，
   造法照 `crates/continuum-workspace/src/gate.rs:2514-2536` 的三行：`Db::open_with(&path, Vec::new())`）。
@@ -758,7 +902,7 @@ git commit -m "test(runtime): 模型侧请求面没有授权位的编译期照�
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -783,7 +927,7 @@ pub fn plan_candidates(tx: &Tx<'_>, registry: &ProviderRegistry)
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs
 git commit -m "feat(runtime): 候选集的构造（同步段）"
 ```
@@ -822,7 +966,17 @@ git commit -m "feat(runtime): 候选集的构造（同步段）"
   `availability` 的 id 集合 **== 候选集的 id 集合**（**集合相等，不是 `len` 相等**）。
   这是设计 §4.5 里 `UnknownAvailability` 在 G 路径上**不可达**的那条构造性断言
   （另一半在 Task 3 的 `the_snapshot_is_as_long_as_the_candidate_set`）。
-  **红的条件（档位：收紧）**：在组装请求时只把 `Healthy` 的条目放进 `availability` → 集合不等，红。
+  **红的条件（档位：收紧）**：在组装请求时只把 `Healthy` 的条目放进 `availability` → **本条红**。
+  > **订正（2026-10-08，G Task 7 评审实测：本行初稿把机制写错了）**。初稿写「→ **集合不等，红**」，
+  > **实测不是**：那一枚（记作 **M1a**）红在 **`select(...).expect(...)`** 上——两个 panic 点
+  > （`tests/model_call.rs` 的 `.expect`）报 `Routing(UnknownAvailability { … })`，
+  > **而那条集合相等断言根本没被求值**。成因：**D 在 `rank` 里对 `UnknownAvailability` 是 fail-closed**
+  > （D 设计 §5.3），故请求里的条目先少了一枚、`rank` 就先返回 `Err` 了。
+  > **要红在集合断言上，得另做一枚隔离版（M1b）**：**多塞一条表外条目**——
+  > 它让 `rank` 收下请求，于是红**恰好落在**那条集合相等 `assert_eq!` 上
+  > （消息逐字：`候选 {"m-a","m-b","m-c"}，请求里 {"ghost-not-a-candidate",…}`）。
+  > **故本行钉的东西由 `M1b` 提供，不由 `M1a`**——**「别处先红」不等于「这条断言有照片」**。
+  > **判据（本轮又一次付代价的）**：**报「某枚变异体让某条断言红」之前，看红的**位置**是不是那条断言**。
 - `a_probed_health_actually_reaches_the_ranking`（设计 §11）：假适配器配 `Unavailable` →
   该模型**不被选中**；**两侧对钉**：改回 `Healthy` → 它**回到输出**（且成为 `selected()`）。
   **只钉向一时，一个「永远返回空候选集」的实现全绿**。
@@ -850,7 +1004,7 @@ git commit -m "feat(runtime): 候选集的构造（同步段）"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -877,9 +1031,16 @@ impl CallPlan {
 }
 
 /// ② 异步段：取可用性快照 → 组装 `RoutingRequest` → 调 `rank`。**不收 `Tx`**（设计 §3.4）。
-pub async fn select(candidates: Vec<Candidate>, input: RouteInput, policy: &dyn RankingPolicy)
+pub async fn select(candidates: Vec<Candidate>, input: RouteInput,
+                    policy: &(dyn RankingPolicy + Sync))
     -> Result<CallPlan, ModelCallError>;
 ```
+
+> **订正（2026-10-09，G Task 9 评审查出本块一直没跟上）**：本块的参数原写 `&dyn RankingPolicy`（无界），
+> **而那条 future 必须是 `Send`**（设计 §3.4／§11）——`select` 在 `snapshot(..).await` **之后**才用 `policy`，
+> `&T: Send` 要 `T: Sync`，而 D 的 `RankingPolicy` 没有超界，**故原写法编不过**（Task 8 实测 `E0277`）。
+> 设计与实现都已改成 `+ Sync`（**不是 `+ Send + Sync`**：评审实测 `+ Sync` 单独就够，
+> `+ Send` 多余——`&(dyn RankingPolicy + Send)` 单独反而不够）。**本块是最后一处没改的**。
 
 **G 在这一段里不做任何二次裁剪**（设计 §4.4 第 2 条）：`Degraded` / `Healthy` 都照原样送进
 `availability`，**不因健康度做任何判断**——那会是在 D 已写死的地方加第二个判据。
@@ -888,7 +1049,7 @@ pub async fn select(candidates: Vec<Candidate>, input: RouteInput, policy: &dyn 
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs
 git commit -m "feat(runtime): 调 rank 并成对带出适配器句柄"
 ```
@@ -902,6 +1063,13 @@ git commit -m "feat(runtime): 调 rank 并成对带出适配器句柄"
 - Modify: `Cargo.toml`（workspace：`tokio` 的 features 加 `"time"`）
 - Modify: `crates/continuum-runtime/tests/model_call.rs`
 - Modify: `crates/continuum-runtime/tests/model_call_face.rs`（Task 5 的占位，此处补实体）
+  > **本 task 顺带要订正的三处（2026-10-08，G Task 5 评审列出，在此托管）**：
+  > 1. **该文件里对**本计划**的行号引用全部漂移了**——它们在 `2c35f8e` 时实测全对，
+  >    而**协调者的 `608327e` 往本计划插进一段订正后，五处引用一起漂**。
+  >    **判据**：**一个文件引用另一个文件的行号时，后者的编辑者不会知道**——
+  >    故要么按内容引，要么**在下一次改动那个文件时重取一遍**（本行就是「下一次」）。
+  > 2. 该文件 `:88` 引「计划 `:405-409`」，而它要引的那句（D 的 Task 9）**实测在 `:410-411`**。
+  > 3. 该文件文件头 `:7` 写「本文件的**三条**用例」，**实际只有 2 条 `#[test]`**（第三条是编译期形态、不是 `#[test]`）。
 
 **Interfaces:**
 - Consumes: Task 7 的 `CallPlan`；Task 1 的 `into_call_error`；
@@ -948,7 +1116,7 @@ git commit -m "feat(runtime): 调 rank 并成对带出适配器句柄"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 登记 `tokio` 的 `time` feature**
@@ -1012,7 +1180,7 @@ pub struct CallInput<'a> {
 - [ ] **Step 6: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add Cargo.toml Cargo.lock crates/continuum-runtime/src/model_call.rs \
         crates/continuum-runtime/tests/model_call.rs crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "feat(runtime): 发起模型调用与截止"
@@ -1025,6 +1193,21 @@ git commit -m "feat(runtime): 发起模型调用与截止"
 **Files:**
 - Modify: `crates/continuum-runtime/src/model_call.rs`
 - Modify: `crates/continuum-runtime/tests/model_call.rs`
+- Modify: `crates/continuum-runtime/tests/model_call_face.rs`
+  （**订正 2026-10-08，G Task 8 评审发现：本行原缺，而缺了它会静默丢一件事**）
+  > **交回本 task 的一行**：Task 8 那条 `assert_send` 用例今天只断言了**两枚 future**
+  > （`select` 与 `call`）——**`call_stream` 是第三枚，它今天还不存在**。
+  > **故 Task 9 要往「同一个 probe 函数」里加一行**，别另起一个。
+  > **交接现在存在于两处，别让它们只活在别处**：该文件头的第四节
+  > （`tests/model_call_face.rs` 的「一条据实记的边界：`call_stream` 今天不在这条用例里」）
+  > 与 `docs/superpowers/p3g-followups.md` 的 **M-8-1**。
+  > **判据**：**跨 task 的交接若只写在被交出去那个文件里，派单时就会丢**——
+  > **派 Task 9 的人的 brief 是按本 task 一节切的，切不到别的文件里去。**
+  > **故本 task 的 `git add` 也要跟着加这个文件**（见本节 Step 末的提交命令）。
+  > **同一族另有一例**，派 Task 11 时要先想清楚：本计划 Task 11 的
+  > `the_path_writes_nothing_to_the_database` 红条件写「在 `call` 里插 `tx.execute(...)`」，
+  > **而交付的 `call` 没有 `Tx`**——**那条变异也只能以改签名表达**（与 Task 8 的
+  > `the_deadline_wraps_one_call_only` 同形：**唯一可观察者是调用侧编译失败，而按纪律那不算红**）。
 
 **Interfaces:**
 - Consumes: Task 8 的 `CallInput`；**既有的** `continuum_core::model::{ModelStream, CallId}`
@@ -1042,7 +1225,13 @@ git commit -m "feat(runtime): 发起模型调用与截止"
   「`abort` 真的取消了那一条流」这件事就无从谈起。
 - `dropping_a_stream_does_not_cancel`（设计 §3.5，**否定式照片，两侧对钉的向一**）：
   发起一次流式调用、**丢弃** `ModelStream`、再断言假适配器记录的 `cancel` **为空**。
-  **红的条件（档位：放宽）**：在 `ModelStream` 的 `Drop` 里调 `cancel` → 红。
+  **红的条件（档位：放宽；**订正 2026-10-09，G Task 9 评审逐条实测**）**：
+  **本行初稿写「在 `ModelStream` 的 `Drop` 里调 `cancel` → 红」，而那枚变异体在本 crate 里写不出来**——
+  `ModelStream` 是 **C 的类型**，`impl Drop for ModelStream` 实测报 **`E0117`（孤儿规则）＋ `E0120`**；
+  绕开它要 G 自己包一层 `Stream` 实现，**而 `Stream` 是 `futures_core` 的 trait、在本 crate 里只挂 dev 依赖**
+  （lib 里实现不了）。**故取它的可写邻形**：「**在 `call_stream` 里建立流之后顺手取消一次**」→ **红三条**
+  （本条 ＋ 两条 `abort` 计数条；**注意**：多列 `a_stream_call_...` 的 `stream_calls() == 1` 是错的，
+  那一条**要让 `stream` 被调两次**才红）。**用例本身照留**——它是那张否定式照片的落点。
   **为什么这一向必须单独钉**：「取消经 `CallId` 走 `cancel()`，**不经流的 drop**」是
   `ModelStream` 的文档已经写死的契约（`crates/continuum-core/src/model.rs:89-92`）。
   一个「drop 即取消」的实现在**适配器侧什么也没做**（drop 不产生任何远端动作），
@@ -1057,7 +1246,13 @@ git commit -m "feat(runtime): 发起模型调用与截止"
   （「这个 `CallId` 已完成」不算错），`abort` 返回 `Ok(())`。
   **设计 §3.5：取消的语义是幂等、尽力而为**——**一次取消与一次完成天然竞态**，
   故 G 的中止入口不把「这个 `CallId` 已完成」判成错误。
-  **红的条件（档位：收紧）**：在 `abort` 里对「已完成」的 `CallId` 直接返回一个 `Err` → 红。
+  **红的条件（档位：收紧；**订正 2026-10-09，G Task 9 评审实测**）**：
+  **本行初稿写「对『已完成』的 `CallId` 直接返回一个 `Err`」，而那在 G 手里表达不出来**——
+  G **没有任何「这条流已完成」的读数**：`ModelStream` 只有 `call` 与 `chunks`（`chunks` 要 `Pin<&mut>` 才推得动，
+  而 `abort` 收的是 `&ModelStream`），`cancel` 的返回值也不带状态。
+  **故只能写成「在 `Ok` 路径上返 `Err`」**，**实测红两条**（本条 ＋ `aborting_a_stream_calls_cancel_with_the_streams_own_call_id`）。
+  **据实记它的强度**：它是「**G 不在 `Ok` 路径上自行合成 `Err`**」的**回归护栏**，
+  **不是能把「已完成／未完成」分开的判别式**（**但它不是空转用例**——那一枚挡得住）。
   **注意这一条钉的是 G 侧的判定，不是适配器的行为**：假适配器返回 `Ok`，
   而 G **不得**在它返回 `Ok` 之后自行合成一个 `Err`。
 - `each_provider_failure_on_abort_keeps_its_class`：`cancel` 返回 `Transport` → `abort` 返回
@@ -1074,7 +1269,7 @@ git commit -m "feat(runtime): 发起模型调用与截止"
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 实现**
@@ -1106,8 +1301,9 @@ pub async fn abort(adapter: &Arc<dyn ModelProvider>, stream: &ModelStream)
 - [ ] **Step 4: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
-git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+git add crates/continuum-runtime/src/model_call.rs crates/continuum-runtime/tests/model_call.rs \
+        crates/continuum-runtime/tests/model_call_face.rs
 git commit -m "feat(runtime): 流式调用与中止入口"
 ```
 
@@ -1124,9 +1320,18 @@ git commit -m "feat(runtime): 流式调用与中止入口"
 
 > **否定式照片在本仓是被接受的**（`docs/superpowers/p3bcdf-followups.md` §四.4：
 > 「F 的 P-19 是断言行数为 0，B 的『不写审计』照片是表行数不变。**别再把否定命题当作『没有照片』而跳过**」）。
-> 本 task 的三条与 **Task 4** 的模块面守卫互补：Task 4 钉**文本里不出现**，
-> 本 task 钉**行为上真的没调**——两者**不是同一件事的两个照片**，因为「写了这个方法名」与
-> 「调了它」可以各自发生（例如经 `#[allow(dead_code)]` 的辅助函数）。
+> 本 task 的三条钉的是**行为上真的没调**（调用计数为 0）。
+>
+> **订正（2026-10-09，G Task 10 实现者实测：本段原写的一句与交付物无对应物）**：
+> 本段原先接着写「**本 task 的三条与 Task 4 的模块面守卫互补：Task 4 钉文本里不出现**」——
+> **那句为假**：`crates/continuum-runtime/tests/model_call_discipline.rs` 的三张清单是
+> `TOOL_PATH_NAMES`(5) / `ADAPTER_NAMES`(5) / `NO_POWER_NAMES`(11)，
+> **`usage` / `list_models` / `describe_model` 各零命中**，设计 §11 也没有「文本里不出现这三个方法名」那一格。
+> **故「Task 4 钉了那三个名字」不存在**，那句「互补」在交付物里**没有对应物**。
+> **本 task 因此不为它写一条源文本守卫**（它在本 task 的 Files 之外、也无判据）。
+> **判据（可搬用）**：**「与另一处的守卫互补」这句话，必须在那一处真的找得到那条守卫**——
+> **否则它写的是一种关系，而关系的一头不存在。** 本段原句是**设计者凭印象写的**，
+> 而它**读起来像已经核对过**。
 
 - [ ] **Step 1: 写用例**
 
@@ -1142,7 +1347,13 @@ git commit -m "feat(runtime): 流式调用与中止入口"
   **一个不在 D 的表里的 id**；断言**候选集不变**（与 Task 6 的
   `the_candidate_set_comes_only_from_the_registry_table` 同一份夹具），**且 `list_models` 计数为 0**。
   **判据**（设计 §3.2）：登记是**路由**的权威、`list_*` 是**描述**的权威，G 要的是路由事实。
-  **红的条件（档位：放宽）**：把候选集的 id 来源换成 `list_models()` → 计数变 1 且候选集多出那个 id，红。
+  **红的条件（**订正 2026-10-09，G Task 10 实测：本行初稿那一枚属「层③」**）**：
+  初稿写「把候选集的 id 来源换成 `list_models()` → 计数变 1 且候选集多出那个 id，红」——
+  **而它在类型上写不出来**：`plan_candidates` 是**同步**函数、`list_models()` 是 **async**，
+  要它成型**得改签名**；`--no-run` 实测报 **28 个编译错误，全在调用侧**，
+  **而按纪律「变异导致编译失败」不算红**。**另有一重不可达**：`ProviderRegistry` 今天**没有同步的适配器枚举**。
+  **故取可写邻形**（实测红；具体写法与红集见 G 的台账 M-10-x 与 task-10 报告）。
+  **这一族在本分支已出现四次**（M-8-3／M-9-1／M-9-2／本条）：**红条件写在计划里，而那一枚在本层写不出来。**
 - `the_path_does_not_ask_for_model_descriptions`：假适配器的 `describe_model()` 返回
   `Err(ProviderError::Unavailable(…))` → 正常路径照过，**计数为 0**。
   **判据**（设计 §4.3）：描述是 `ModelDescriptor`、可用性是 `ProviderHealth`，**两个方法、两个类型、两件事**
@@ -1153,19 +1364,26 @@ git commit -m "feat(runtime): 流式调用与中止入口"
   两条都**不受那三个 `Err` 影响**（成功的那条 `Ok`、失败的那条是**它自己那个**类别）。
   **红的条件（档位：取反）**：让三个 `Err` 中的任何一个污染路径（例如把 `describe_model` 的 `Err`
   当成 `health` 的读数）→ 那两条的红/绿状态改变即红。
-  **这条是三条否定式照片的「正控制」**：没有它，一个「整个 `select` 永远返回 `Err`」的实现
-  也会让上面三条全绿（它们只要求「照过」，而一个恒错的实现也「没调那三个方法」）。
+  **这条是三条否定式照片的「正控制」**。
+  > **订正（2026-10-09，G Task 10 实测：本段原有半句与实测相抵）**。原写：
+  > 「没有它，一个『整个 `select` 永远返回 `Err`』的实现**也会让上面三条全绿**」——
+  > **半句为假**：**用例 1 与 3 各自带 `expect(Ok)`**（`a_plan_over` 也带 `expect`），
+  > **恒错的实现会先在那几处炸**，不会「全绿」。
+  > **本条真正的独立增量是**：**失败路径的类别是它自己那一枚**——
+  > 即「三个 `Err` 里的任何一个**被当成另一个的读数**」这件**污染**，只有本条挡得住。
+  > **判据**：**给一条用例写「没有它，就会怎样」时，那个「怎样」要真在别的用例上成立**——
+  > **否则它是在描述一个不存在的漏洞。** 交付用例的注释按实测成立的那句写。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call.rs
 git commit -m "test(runtime): 不调 usage / list_models / describe_model 的否定式照片"
 ```
@@ -1184,6 +1402,32 @@ git commit -m "test(runtime): 不调 usage / list_models / describe_model 的否
 
 - [ ] **Step 1: 写用例**
 
+- **`rank_is_never_called_when_no_candidate_survives`**（**订正 2026-10-07 新增，协调者裁定**）：
+  **「`rank` 一次都没被调用」的照片落在这里**——它原在 Task 6 的
+  `an_empty_candidate_set_is_no_eligible_candidate` 一条里，**而那里造不出来**
+  （`plan_candidates` 的参数表没有 `&dyn RankingPolicy`；**类型上做不到，不是有规则在挡**）。
+  本 task 是本计划里**唯一能端到端看到 `rank` 被不被调**的地方（硬依赖 Task 7），
+  **且标题正是「可达性与射程边界」**。
+  **构造**：用**一个会 panic 的 `RankingPolicy` 作证**——让它成为走到 `select` 时的实参，
+  再让候选集**一个都不剩**（两个来路各一条：一个适配器都没登记；或全部被闸门挡下），
+  于是流程在 `plan_candidates` 就短路、**根本走不到 `select`**。**它若被调到，用例以 panic 失败。**
+  **红的条件（**订正 2026-10-09，G Task 11 评审实测：本行初稿那一枚是等价变异体，且本条的判别力为零增量**）**：
+  **本行初稿写「把 `plan_candidates` 的空判定短路删掉 → 那条 panic 策略被调到，红」。实测不是**——
+  删掉之后**那条例用仍 `ok`**，红的是 **Task 6 的两条**；机制：**D 的 `rank` 在空列表上先短路再轮到策略**
+  （`crates/continuum-model-registry/src/router.rs` 的空判定在 `evaluate` 之前），故 `select(空, …)` 报的 `Err`
+  与 ① **逐字节同一枚**。
+  **更硬的结论（评审给的构造性判据）**：**任何可写变异体都红不出「空候选集下 `rank` 不被调」**——
+  候选集空 ⇒ 交给 `rank` 的模型列表空 ⇒ **`rank` 先短路，策略碰不到**；
+  **能让策略被碰到的变异体，都使候选集不再为空**（评审自造的 M7 即此：panic 策略真被调到、红在别处，
+  但红它的是**候选集非空**的情形）。
+  **故本条的独有构造（组合形状 ＋ panic 策略）判别力是零增量**——**它是与 Task 6 判别力重叠的回归护栏，
+  不是把那一枚分开的判别式。**（六枚里确有一枚能红它：替换那枚 `Err`；但它红在与 Task 6 **同一条 `matches!`** 上。）
+  **原红条件照留**（档位：移除）：把 `plan_candidates` 的空判定短路删掉（让它照常返回空集、
+  一路走到 `select`）→ 那条 panic 策略被调到，红。
+  **这一条为什么必须存在**：只断 `Err` 的话，**一个「装作没候选、其实调了 rank」的实现会全绿**。
+  **它与 Task 6 那一侧的分工写明**：Task 6 只留「报哪一枚 `Err`」，
+  **而 Task 6 那条用例本身还有一个覆盖缺口**（评审 I1：**三条断言在空集上全空真**，
+  一个「候选集恒空」的实现让它整条绿）——**那一侧由修复轮加非空锚**，与本条不是同一件事。
 - `the_path_writes_nothing_to_the_database`（设计 §9，**否定式照片**）：
   跑通**一条成功路径与一条失败路径**，断言 `events` / `audit_log` / `node_attempt` /
   `model_registry` / `model_profile` 五张表的行数**逐表不变**。
@@ -1226,13 +1470,13 @@ git commit -m "test(runtime): 不调 usage / list_models / describe_model 的否
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
+TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test model_call
 ```
 
 - [ ] **Step 3: 运行全部测试并提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 git add crates/continuum-runtime/tests/model_call.rs
 git commit -m "test(runtime): 不写库、可达性与射程边界"
 ```
@@ -1247,7 +1491,7 @@ git commit -m "test(runtime): 不写库、可达性与射程边界"
 - [ ] **Step 1: 全量验证**
 
 ```bash
-cd /home/DslsDZC/Continuum && TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
+TMPDIR="$PWD/.tmp" timeout 1500 cargo test --workspace --no-fail-fast
 TMPDIR="$PWD/.tmp" timeout 900 cargo build --workspace --all-targets
 TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-runtime --depth 1 --edges all --prefix none
 ```
@@ -1255,10 +1499,21 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-runtime --depth 1 --edges
 预期：全绿、0 warning；`cargo tree` 的**直接边**与开工前**逐项相同**
 （本计划不加任何 workspace 成员之间的边）。**实测对照，不据口径断言**。
 
+> **订正（2026-10-09，G Task 12 复核实测；原话照留）**：上面那半句按字面**为假**——
+> 本计划**确实加了两条直接边**，只是它们都是**外部 crate 的 dev 边**：
+> `crates/continuum-runtime/Cargo.toml` 的 `[dev-dependencies]` 加了 `async-trait` 与 `futures-core`，
+> 另把 workspace 的 `tokio` 加了 `time` feature（都在 `Cargo.toml` 的 Global Constraints 里写明）。
+> **它真正要判的那件事是括号里那一句——「不加任何 workspace 成员之间的边」**，而那一半实测成立：
+> `ALLOWED` 一字未改（Step 2 的 `git diff` 无输出），且 `every_crate_depends_only_on_its_allowed_set`
+> 逐对断言 `cargo tree --depth 1 --edges all` 的内部直接边与 `ALLOWED` 相等（绿）——
+> 那一条是**两侧**的（表里多的、crate 真依赖却没登记的，都红）。
+> **判据**：内部边由那条用例逐对钉住，外部 dev 边**不进 `ALLOWED`**（那张表只列 workspace 成员），
+> 故「与开工前逐项相同」这句话只在**内部边**这一层成立，字面读法（连外部边也算）不成立。
+
 - [ ] **Step 2: 复核「G 不加任何边」（本计划唯一的 `ALLOWED` 判据）**
 
 ```bash
-cd /home/DslsDZC/Continuum && git diff --stat -- crates/continuum-runtime/tests/dependency_direction.rs
+git diff --stat -- crates/continuum-runtime/tests/dependency_direction.rs
 TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency_direction
 ```
 
@@ -1269,7 +1524,7 @@ TMPDIR="$PWD/.tmp" timeout 300 cargo test -p continuum-runtime --test dependency
 - [ ] **Step 3: 通读复核「这条路径上没有强制点」的三条落点**
 
 ```bash
-cd /home/DslsDZC/Continuum && grep -rn "AuthorizedTool\|ToolProvider\|invoke_tool\|authorize" crates/continuum-runtime/src/model_call.rs
+grep -rn "AuthorizedTool\|ToolProvider\|invoke_tool\|authorize" crates/continuum-runtime/src/model_call.rs
 grep -rn "continuum_capability\|continuum_effect\|continuum_secrets\|AuthorizedEffect\|EffectJournal" crates/continuum-runtime/src/model_call.rs
 grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 ```
@@ -1293,12 +1548,30 @@ grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 | §3.2 G 不调 `list_models()` | Task 10 的第二条（**否定式**，计数为 0） |
 | §3.3 快照逐候选、原样摊给每个模型 | Task 3 四条（含 `Unavailable` 原样带过） |
 | §3.4 `Tx` 不跨 `await` | Task 8 Step 5 的 `assert_send`（**编译期**，红形态就是编译失败） |
-| §3.5 截止两侧 + 只包住一次调用 | Task 8 的 `a_call_that_never_returns_hits_the_deadline` 两向 + `the_deadline_wraps_one_call_only` |
+| §3.5 截止两侧 + 只包住一次调用 | Task 8 的 `a_call_that_never_returns_hits_the_deadline` 两向 + `the_deadline_wraps_one_call_only`。
+  **订正（2026-10-09，G Task 9 评审实测）：本格原先读起来像「§3.5 的截止面已覆盖」，而 `call_stream` 那一侧是零覆盖**——
+  **把 `Some(limit)` 那整臂删掉，35 条全绿**（三个调用点全传 `None`；`StreamOutcome` 也没有 `Never`／`ReplyAfter` 一类的可配面）。
+  **故本格只覆盖 `call` 那一侧。** `call_stream` 的截止**记在 `docs/superpowers/p3g-followups.md` 的 M-9-7**
+  （具名缺口；**收件人已于 2026-10-09 的 Task 12 对账改为具名「协调者」、并写明「在哪一步做」**——原文写的是「下一轮补这条用例的人」，那是一个角色、不是收件人），
+  **本格不得被读成「两侧都覆盖了」**。
+  **订正（2026-10-09，G Task 12 复核）：本格后半「只包住一次调用」的那一枚
+  `the_deadline_wraps_one_call_only` 是回归护栏、不是判别式**——它今天钉的是
+  「两次调用各成功 ＋ 适配器被调两次」（`tests/model_call.rs:1830`，实测；旧读 `:1821`），
+  而能把它与「截止被做成一次性的共享值」分开的那枚变异体**只能在改签名的前提下表达**
+  （`&mut Option<Duration>` ＋ `.take()`：`src/` 编得过、调用侧五处 `E0308` 编不过），
+  按本仓纪律「调用侧编译失败不算红」⇒ **没有判别式**（台账 **M-8-3**）。
+  **故本格后半不得被读成「有一个能把『一次一处』与『一次性共享』分开的判别式」。**
+  **再订正（2026-10-09 合入前终审；这一处推广本轮未做构造性证明）**：上面「没有判别式」**是一条全称**，
+  而 M-8-3 实测的只是**一种**编码（`&mut Option<Duration>` ＋ `.take()`）。一个用**进程内共享状态**
+  （如 `static`）承载「一次性截止」的写法**不改进程外签名**，据终审推断它会红掉
+  `the_deadline_wraps_one_call_only` 的第二次调用 ⇒ **本格的严格读法是「M-8-3 否掉的那一种编码造不出
+  判别式」，不是「不存在任何判别式」**（方向安全：低估守卫强度，不是高估）。 |
+| §3.5 截止（`call_stream` 侧） | **无照片**——见上一格的订正与本计划台账 M-9-7。**本行是「找不到证据的不得标注为覆盖」的一个实例** |
 | §3.5 「丢弃流不是取消」两侧 | Task 9 的 `dropping_a_stream_does_not_cancel` 与 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id` |
-| §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 + Task 11 的三处（**若等价则据实合并**） |
-| §4.5 `NotRoutable` / `DuplicateModelCandidate` / `UnknownAvailability` 不可达 | 前者**构造性**（D 的样例，G 不重钉）；后者 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table`；第三 Task 11 的一一对应 |
+| §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 的**两处**。**订正（2026-10-09，G Task 12 复核）**：本格原写「Task 3 + Task 7 + Task 11 的三处」——**而计划 Task 11 那一条（`the_manager_of_the_availability_is_one_to_one_with_the_candidates`）实测与 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability` 同处代码、同形状入参、同一句断言（`asked == candidate_ids`），据实合并、未交付**（台账 **M-11-3**；交付文件的节头 `tests/model_call.rs:2752-2766`（旧读 `:2743-2757`）记了理由与 `M6` 那枚变异体的实测）。**故「Task 11 的那一处」今天不存在**——它**不是丢掉了一个观测点，是那一个观测点本来就是等价的第二个落点**，覆盖不受影响。 |
+| §4.5 `NotRoutable` / `DuplicateModelCandidate` / `UnknownAvailability` 不可达 | 前者**构造性**（D 的样例，G 不重钉）；中者 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table`；**第三（`UnknownAvailability`）走 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability`**——**订正（2026-10-09，G Task 12 复核）**：原写「第三 Task 11 的一一对应」，**而 Task 11 那一条按 M-11-3 合并、今天在交付树里不存在**（同上一格）。 |
 | §5 G 不调 `usage()` | Task 10 的第一条（**否定式**） |
-| §6.1 五变体分类表 | Task 1 的四条（逐臂）+ Task 8 的四条（分类落到错误类型上） |
+| §6.1 五变体分类表 | Task 1 的**三条**用例（其中一条把五个变体**逐臂**钉死）+ Task 8 的四条（分类落到错误类型上）。**订正（2026-10-09，G Task 12 复核；原写「Task 1 的四条」）**：这是**手数的数**（本仓点过名的形状）——实测 Task 1 交付**三条**（`tests/model_call.rs:50`／`:102`／`:128`，本计划的 Task 1 一节也列三条），**五变体的覆盖不受影响**（那一条用例在**一条用例内**逐臂断言五枚） |
 | §8.2 `None` ≠ `Some(0)` 两向 | Task 7 的 `the_budget_reaches_the_policy_verbatim_both_ways` |
 | §9 记录面两处都空 | Task 11 的五张表行数不变（**否定式**） |
 | §1.3 用词纪律 | Task 4 的第三条守卫（**下界**，逃逸面写在文件头） |
@@ -1314,7 +1587,7 @@ grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 - [ ] **Step 6: 提交**
 
 ```bash
-cd /home/DslsDZC/Continuum && git add <本 task 改动的显式路径>
+git add <本 task 改动的显式路径>
 git commit -m "docs(runtime): P3 子项目 G 的收尾与复核"
 ```
 
@@ -1423,7 +1696,13 @@ Deadline 的 elapsed_ms 口径           **→ 已回写设计 §3.1 末段**：
   Task 5 钉住的是「`InvokeRequest` 放不下一个授权位」（强制点 (1) 在模型侧的落点）。
   强制点 (2)（`AuthorizedEffect`）与 (3)（逐枚签发的凭据）在 G 侧**没有照片，也不可能有**：
   G 既不做副作用、也不取凭据，故**没有可观察的行为面**——它们的证据是
-  **Task 4 的第四条模块面守卫（零引用）**，而那是一条**下界**。
+  **Task 4 的 `the_module_touches_neither_capability_nor_effects_nor_credentials`（零引用）**，
+  而那是一条**下界**。
+  **订正（2026-10-09，G Task 12 复核；原写「Task 4 的第四条模块面守卫」）**：那个序数**数不到**——
+  Task 4 的三条判据守卫按本计划 Task 4 Step 1 的**条目次序**是
+  第三条＝用词纪律（§1.3）、第四条＝中立性（§10.3）、第五条＝本条（零引用），
+  而按「三条判据守卫」数它又是第三条；**两种数法下「第四条」都不是它**。
+  **故按内容引、不再写序数**（本仓成例：改了上文，序数就会漂）。
 
 ### 四、设计 §14 的 15 条：本计划一条都不接，收件人照原文
 
@@ -1475,4 +1754,25 @@ Degraded 的降权判据                D §11 第 24 条 + 本设计 §13.2 的
                                   G 落地时**只核不改**（Task 12 Step 2 的那条 `git diff` 就是这次核对）。
                                   同理 `runtime → continuum-core` 与 `runtime → continuum-model-registry`
                                   也各自有了真使用点。**收件人：无（据实记，供后来者对账）。**
+                                  **订正（2026-10-09，G Task 12 复核实测；原话照留）**：上面
+                                  「F 是第一个（工具侧）」与「G 是第二个」**都测不成立**——
+                                  在 G 的分叉点 `9254108` 上 `git grep -n continuum_provider
+                                  9254108 -- crates/continuum-runtime/` **零命中**（F 的工具侧
+                                  `src/tool_call.rs` 用的是 `continuum_capability` / `continuum_effect`
+                                  / `continuum_policy`，**不引 `continuum_provider`**），故
+                                  **G 是这条边在 runtime 里的第一个使用点，不是第二个**。
+                                  `runtime → continuum-core` 同理：分叉点上 runtime 侧零引用，
+                                  首个引用是 G 的 `src/error.rs` 与 `src/model_call.rs`。
+                                  **对账结论不变**（`ALLOWED` 本来就含这两条，无登记动作要补），
+                                  改的只是「谁是第一个用的人」这一句事实。
+                                  **再订正（2026-10-09，合入前终审复核实测；上面那段订正的原话照留）**：
+                                  上面那段订正**本身为假**——它把**分叉点**当成了**合入目标**来读数。
+                                  实测：`git merge-base --is-ancestor 9288a98 9254108` **非 0**
+                                  （`9288a98` 是 F 并入 `main` 的那次合并，**F 的合并不在分叉点上**）；
+                                  而在合入目标 `main` 上 `git grep -n continuum_provider main --
+                                  crates/continuum-runtime/` 命中 `src/error.rs:26`、`src/tool_call.rs:45`、
+                                  `src/tool_cmd.rs:31` ⇒ **`main` 上 F 早已在用这条边**。故最上面
+                                  「F 是第一个（工具侧）、G 是第二个」**成立**（设计 §10.1 判据 3 的原话是对的）。
+                                  **成因**：「开工前的状态」被默认成了「合入目标的状态」——
+                                  有别的分支先合入时，两者不是一回事。**读数的树要说清：分叉点 ≠ `main`。**
 ```

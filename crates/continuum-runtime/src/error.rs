@@ -1,4 +1,11 @@
-//! `task` 子命令失败的原因。
+//! Runtime 的两个错误类型：工具调用路径的 [`TaskError`]，与模型调用路径的
+//! [`ModelCallError`]。
+//!
+//! **两个类型同处一个文件是有意的**（设计 §10.2 把 `ModelCallError` 的落点定在这里）：
+//! 本文件是 F 与 G 两个子项目共写的文件，G 只**增补**，不动 F 已放进去的 `TaskError`。
+//! 两者不是「同一件事两个类型」——它们各自对应一条路径的失败面，且**互不包装**。
+//!
+//! # `TaskError`
 //!
 //! **本类型原先定义在 bin 的 `task_cmd.rs` 里**，Task 2 把它整块移进 lib：工具调用路径
 //! 是一个 **lib** 函数（设计 §6.4），而它要返回同一批失败——共享函数在 bin ⇒ lib 调不到；
@@ -20,8 +27,15 @@
 //! （那是 [`ToolCallError::Unregistered`]，包装而不另起词汇），也不加「裁决为 `Deny`」
 //! 这类重复 [`crate::tool_call::mints`] 既有判断的变体。
 
+// 合 `p3g` 到 `main` 时的并集（2026-10-09）：两侧各加了导入——
+// F 加的是 `CapabilityError` 与 `ToolId`（它的包装变体要用），
+// G 加的是 `ProviderError`／`FailureClass`／`RoutingError`（`ModelCallError` 要用）。
+// **整取任一侧都会丢掉对方的那几个变体**，故此处手工取并集。
 use continuum_capability::CapabilityError;
+use continuum_core::ProviderError;
 use continuum_core::tool::ToolId;
+use continuum_graph::failure::FailureClass;
+use continuum_model_registry::RoutingError;
 use continuum_persist::PersistError;
 use continuum_provider::ToolCallError;
 use continuum_sandbox::SandboxError;
@@ -144,4 +158,59 @@ pub enum TaskError {
     /// 与变体两件事各一枚变异体，见那条用例的文档）。
     #[error("工具 {} 自报失败", tool.as_str())]
     ToolReportedError { tool: ToolId },
+}
+
+/// G 这一侧的失败面。**五枚逐条对应设计 §6.1 的表**。
+///
+/// **它不压平上游的错**：`Routing` 带出 D 的错、`Provider` 带出类别，两者都不是
+/// 「一枚同名的变体」——那会是同一件事两个类型（本仓一贯判为缺陷的形状）。
+/// 照片在 `tests/model_call.rs` 的 `the_error_type_carries_the_provider_error_verbatim`
+/// （逐变体回读 `source`，`Cancelled` 单独一枚且不带类别）。
+///
+/// **分类与转换不在这里**：那张表与 `ProviderError` → 本类型的转换在
+/// [`crate::model_call`]——本文件是 F 与 G 共写的，误改的形状是两边在同一段文字上
+/// 各改各的，故 G 的增量落在不与 F 共写的模块里。
+///
+/// **两个派生是随本文件的约定，不是随手加的**：`Debug` 是本 crate 的用例需要的
+/// （`tests/model_call.rs` 里用 `{other:?}` 打印未预期的变体）；`Error` 与同文件的
+/// `TaskError` 派生的是同一个 `#[derive(Debug, Error)]`。
+///
+/// **本文件里见到的写法是这两种**：`TaskError` 的**那五个 `#[from]` 变体**都是元组变体，
+/// 它的**具名 `source` 字段**不写属性（`Context { source: Box<TaskError> }`）。
+/// 本类型照同一个形状落：`Routing` / `Storage` 这两个元组变体**手写 `#[source]`**
+/// （本类型不为这两个错误提供 `From` 转换），`Provider` / `Cancelled` 的 `source` 字段
+/// **不写属性**，`Deadline` 没有来源字段、也不写。
+#[derive(Debug, Error)]
+pub enum ModelCallError {
+    /// D 的排序失败。**带出 D 的错，不压平成一枚同名的变体**——那会是同一件事两个类型。
+    /// 从 G 这条路径到得了的只有 `NoEligibleCandidate`，其余三枚的可达性逐条记在设计 §4.5。
+    ///
+    /// **那句可达性今天没有照片**：`Routing` 在本 task 里还没有产生方（候选集的四段流程
+    /// 由后续 task 落地），故「其余三枚到不了」要等实现成形才拍得到——设计 §11 把
+    /// 那三处的照片列在 Task 11，本 task 只定形状。
+    #[error("模型排序失败：{0}")]
+    Routing(#[source] RoutingError),
+    /// D 的表读失败（`list_registered` / `load_profile`）。
+    #[error("模型登记表读取失败：{0}")]
+    Storage(#[source] PersistError),
+    /// 这一次调用在截止内没有完成（设计 §3.5）。
+    ///
+    /// **纯数据变体**：从构造到读回之间没有本 crate 的代码，故本 task 不为它写运行期断言
+    /// （照设计 §12 的同一裁决；它的照片随 `call` 的截止用例一起落地）。
+    #[error("模型调用在 {elapsed_ms} ms 内没有完成")]
+    Deadline { elapsed_ms: u64 },
+    /// 适配器调用失败，**带出它的类别**。
+    #[error("模型适配器调用失败（{class:?}）：{source}")]
+    Provider {
+        class: FailureClass,
+        source: ProviderError,
+    },
+    /// 调用方发起的取消（来源是 `ProviderError::Cancelled`）。**它不是失败，故不带类别**。
+    ///
+    /// **不带 `class` 不是一个字段的取舍**：它是「一次正常中止不会被记成一次失败」
+    /// 这条判据在类型上的落点——若这里也带 `class`，调用方会在一个没有失败的地方
+    /// 读到 `FailureClass`。照片是编译期的：`tests/model_call.rs` 里那枚只给 `source`
+    /// 的字面量，`Cancelled` 一旦多出 `class` 字段就编不过。
+    #[error("模型调用被调用方取消：{source}")]
+    Cancelled { source: ProviderError },
 }
