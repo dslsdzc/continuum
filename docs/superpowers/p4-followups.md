@@ -114,7 +114,34 @@
 ## Task 4（显式约束与「满足」判据、Reference Resolver 四态、两个数不同轴）
 
 实现 `6a74078`（父 `c490263`）；**评审后订正 `e28dcfd`**（本轮，裁决一／二／四／五改代码与注释，
-裁决三／六只在本节记账）。
+裁决三／六只在本节记账）。**复评判词 Approved。**
+
+### 本 task 闭合的几条（供终审不必重做）
+
+- **一、`ResolutionResult` 四支载荷字段转私有** —— 简报自相矛盾：Step 1 要求 crate 外逐支穷尽解构（要字段可命名），
+  Step 3 的代码块要求字段私有（禁止它）。**裁定取「两条都满足」的第三条路**：字段私有 ＋ 三条字段清单用例搬进
+  `src/resolver.rs` 的 `#[cfg(test)]`（**照片不丢**：字段增删仍撞 `E0027`／`E0063`）＋ **补十枚只读访问器**
+  （**读的口子必须留在 crate 外**——计划的 Task 5 节逐字要求读 `Resolved.entity` / `candidate_count` /
+  `Ambiguous.surviving` / `Unknown.reason`）＋ 新增 `compile_fail` 样例钉「crate 外构造不出」（**四支逐支各一段 `E0451`**）。
+  **两半都钉住了**：把某字段改回 `pub` 会让新反例的 `.stderr` 不符；加字段会让解构红。
+- **二、两处注释把照片指到了不存在的地方** —— `tests/explicit.rs` 原说「`exhaustive` 那个 `match` 穷尽」，
+  而 `exhaustive` 里**没有 `match`**；真照片在 `src/alias.rs:96-101`。已改指，并把误名 `exhaustive` 收窄为 `mapped`。
+- **三、`CanonicalRepresentation` 的接缝** —— 记 **P-4-1**（见上）：判为**正当偏离**（它是 Task 2 自己留的**推测性**承诺、
+  设计没给字段清单、今天没有任何用例读它），但**它只留在一处文件头注释里会被读成「已经能用了」**——
+  `Canonical` 支的载荷**说不出「这一枚 mention 解到了哪个实体」**。归属：**第一个真实消费者**（在 P4 之后）。
+- **四、一句自指的可核事实写假了** —— `tests/resolver.rs` 原写「全文 `grep 'unwrap'` 零命中（这一句是本文件的可核事实）」，
+  实测 6 处命中全在注释里、**包括它自己**。已改为「去掉注释之后零命中」并**不写数值**。
+- **五、一条用例名偏宽** —— **用例名也是一种断言**（Task 3 上已按这条改过一次文件名）；已收窄。
+- **六、本 task 自补的公开面无竞争** —— Task 6 的 Produces 是 `{ResolutionRisk, ExplicitBinding, BindingSource}` ＋
+  `binding.apply`，`RequiredStrength` 出现在它的 **Consumes** 行；**已记入本节**，免得下一轮重问。
+
+### 一处**前向**不一致（复评查出，本轮已在计划里补上）
+
+订正后载荷字段私有，而**计划的 Task 5／Task 6 仍用「按名解构」写载荷断言**
+（`Unknown { reason: AllCandidatesRejected }`），两 task 的用例都住在 `tests/`（crate 外）——
+**那种 pattern 字段私有后在 crate 外写不出**。访问器已在故判据不丢，缺的是口径没写在那两节里。
+**已在计划 Task 5 与 Task 6 各补一条**（写明「读走只读访问器，按名解构／结构体字面量在 crate 外写不出」），
+判据同本计划对 `Remaining` 的既有处置（`:2135-2136`）。**否则按 task 切出的 brief 会把 pattern 原样带给实现者。**
 
 ### 本 task 自补的公开面（本轮新记，收件人：评审与 Task 6）
 
