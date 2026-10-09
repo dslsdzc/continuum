@@ -59,18 +59,23 @@
 
 ## 2.1 crate 与依赖边
 
-本块新建 **一个** crate：`continuum-image`（实测：`grep -rn "continuum-image" --exclude-dir=.git .` 在**全仓零命中**，名字未占用）。
+本块新建 **一个** crate：`continuum-image`（实测：`grep -rn "continuum-image" crates/ Cargo.toml` **零命中**，名字未占用。**命令与范围要写准**：不加限定时 `grep -rn "continuum-image" --exclude-dir=.git .` 有 6 处命中，**全部落在本设计自身**——零命中类判据要先问「本仓的哪条规矩会往那个语料里加字」，此处正是设计文档自己加的字，故范围取到 `crates/` 与根 `Cargo.toml`，读的人重跑才能得到同一个结果）。
 
 依赖边表（**只登记实际用到的**，切分 §四第 6 条）：
 
 | 被依赖 | 用到什么（逐项实测） | 边别 |
 |---|---|---|
-| `continuum-artifact` | `ArtifactType`（§3.2 的端口类型取它）、`ArtifactId`（§6.1 的谱系与 §7 的证据产出的 `artifact_refs`）、`BlobStore` /`ContentHash`（§5 的两个确定性函数读像素） | 普通 |
+| `continuum-artifact` | `ArtifactType`（§3.2 的端口类型取它）、`ArtifactId`（§4.1 的 `EditRegion` 与 §4.2 的 `source`、§6.1 的谱系） | 普通 |
 | `continuum-operator` | `Operator` / `OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` / `BackendId` / `OperatorRegistry` / `OperatorError`（§3.1 的登记入口） | 普通 |
-| `continuum-verify` | `Evidence` / `EvidenceType` / `EvidenceProducer` / `EvidenceSubject` / `Claim` / `EvidenceStrength` / `EvidenceScope` / `Evidence::from_tool_result` / `VerifyError`（切分 §四第 1 条：四块**只产出**证据；本块**直接调构造点**，不写包装，§7.2） | 普通 |
+| `continuum-verify` | `Evidence`（§11.4 第 2 条的 `trybuild` 用例：`Evidence { .. }` 与 `Evidence::default()` 在本 crate 里编不过） | **dev 边** |
 | `continuum-graph` | `can_reuse` / `cache_key` / `CacheKey`（§11.2 第 (o)、(p) 两条的照片：核本块声明的 `determinism` 真能让 §305 的判据成立或按预期不成立） | **dev 边** |
 
-`continuum-verify` 是 P5a 新建的 crate，今天在 `crates/` 下不存在（实测：`crates/` 下无该目录）。本块依赖它，不构成环：P5a 的依赖边表（其设计 §2.1）里没有任何 P5 领域算子块。
+**两处订正，逐条留下原先那处说的是什么与为什么以现说为准**：
+
+- **`continuum-artifact` 那一行的「用到什么」栏原先写的是「`BlobStore` / `ContentHash`（§5 的两个确定性函数读像素）」，已删。** §5.2 的两个确定性函数收 `&Raster`（§3.1），**读写落盘是调用方的事**，§5 全节一处不用 `BlobStore`／`ContentHash`。同一行原先附在 `ArtifactId` 后的「§7 的证据产出的 `artifact_refs`」也一并撤去——§7.2 明写本块不提供证据面那一层的函数。**以 §3.1／§5.2 为准的理由**：切分 §四第 6 条要求这一栏与实际用量精确一致，而这一栏正是 `ALLOWED` 那一行的依据；原先的理由把「掩码落在既有的 `Blob` 落盘路径上」（§10.1，那是 P1 的路径、不是本块的调用）读成了「本块调 `BlobStore`」。**边本身保留**：`ArtifactType` 与 `ArtifactId` 都在本块的公开签名上。
+- **`continuum-verify` 那一行的边别原先是「普通」，已改为「dev 边」。** 原先的理由是「本块**直接调构造点**，不写包装」；而 §7.2 明写**本块不提供这一层的函数**（「本块与 P5a 之间的实际数据流」那一段）——证据由**宿主（第 3 层）的执行代码**调 `from_tool_result` 构造。故本 crate 的生产代码对这枚 crate **零调用**，唯一使用点是 §11.4 第 2 条的 `trybuild` 用例，按本条表下「边别按『谁在用』判」的口径即 **dev 边**。**以 §7.2 为准的理由**：§3.1 的 `ImageError` 三臂无一来自该 crate，§7.3 明写本块不调用 P5a 的判定；「直接调」那句只在「不经域包装」这个意义上成立（§7.2 已改写这句话）。
+
+`continuum-verify` 是 P5a 新建的 crate，今天在 `crates/` 下不存在（实测：`crates/` 下无该目录）。本块以 dev 边依赖它，不构成环：P5a 的依赖边表（其设计 §2.1）里没有任何 P5 领域算子块。
 
 **不登记**的边，逐条给理由（零使用的边即假边，P2b 为此删过两条）：
 
@@ -83,7 +88,7 @@
 
 **dev 边为什么也要登记**：`dependency_direction.rs` 的 `cargo tree` 带 `--edges all`（`crates/continuum-runtime/tests/dependency_direction.rs:270` 的 `cargo_tree_direct` 实参里有 `--edges`），dev 边与普通边一视同仁。本仓已有同形的先例：`continuum-provider` 那一行注记明写「Task 4 起加上 persist：**dev 边**」（同文件 `:32-34`）。
 
-**边别按「谁在用」判**：`continuum-graph` 是 **dev 边**——生产代码不调它；用到它的是 §11.2 第 (o)、(p) 两条的照片（对 `can_reuse` / `cache_key` 的断言），那是用例。
+**边别按「谁在用」判**：本块有**两条 dev 边**，判据同形——生产代码不调它们，用到它们的是用例。`continuum-graph`：§11.2 第 (o)、(p) 两条的照片（对 `can_reuse` / `cache_key` 的断言）。`continuum-verify`：§11.4 第 2 条的 `trybuild` 用例（`Evidence` 在本 crate 里造不出）。**按同一口径，本块的另外两条边（`continuum-artifact`、`continuum-operator`）是普通边**——它们的类型在本块的公开签名上。
 
 **外部依赖不进 `ALLOWED`**（该表断言的是 workspace 成员之间的边，`crates/continuum-runtime/tests/dependency_direction.rs:200-204` 的口径）：本块的 `ImageError`（§3.1）用 `thiserror` 派生 `Error` 与 `Display`，与 `crates/continuum-operator/Cargo.toml:11` 的既有用法同形。是否需要 `serde` 由实现计划定，本设计不预设。
 
@@ -92,7 +97,7 @@
 | 文件 | 本块的改动 | 说明 |
 |---|---|---|
 | `Cargo.toml` 的 `[workspace] members` | 加一行 `crates/continuum-image` | 切分建议由先落地者一次加齐六行；本块**只加自己这一行** |
-| `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-image", &["continuum-artifact", "continuum-graph", "continuum-operator", "continuum-verify"])`——**四项**，与 §2.1 边表的四行逐行对应（含 `continuum-graph` 的 dev 边） | 新 crate 会先让该门变红再被补齐（`:288` 的用例），这是刻意的；数组按字母序 |
+| `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-image", &["continuum-artifact", "continuum-graph", "continuum-operator", "continuum-verify"])`——**四项**，与 §2.1 边表的四行逐行对应（含 `continuum-graph` 与 `continuum-verify` 两条 dev 边；dev 边也进这张表，理由见 §2.1 的「dev 边为什么也要登记」） | 新 crate 会先让该门变红再被补齐（`:288` 的用例），这是刻意的；数组按字母序 |
 
 **本块不碰切分 §一 共写表里的另外三处**（`artifact.rs` / `node.rs` / `crates/continuum-operator/src/definition.rs`）：本块不加 `ArtifactType` 变体（§1.2）、不改 `Node` 的任何一行（不碰 `verification_policy` 也不碰 `execution_policy`）、不改 `Checkpointable`（其错误类型归 P5e，切分 §二第 4 条）。**这是本块与 P5e 在共写表上的第二处实质差别**，据实列出以免下一轮照 P5e 的行数去猜。
 
@@ -104,7 +109,7 @@
 EditRegionKind   EditRegion   EditMask   Raster   RegionDetector   ImageError
 ```
 
-其中 `Raster` 是 §5 的两个确定性函数（合成与比较）的像素载体，其字段与「为什么是本块定的」见 §5.2；`RegionDetector` 是 §4.2 的 `resolve_edit_region` 收的那个**接口**——本块定义它，其实现在 backend 一侧（第 3 层选定的后端）。另有**两枚常量**（不是类型）：`ALL_OPERATORS: [Operator; 5]` 与 `V01_OPERATOR_IDS: [&str; 1]`（§9），它们承载的是 P1 的 `Operator`。**本块不新造算子类型**——§3.1 的登记形态照 P1。
+其中 `Raster` 是 §5 的两个确定性函数（合成与比较）的**图像**像素载体，其字段与「为什么是本块定的」见 §5.2；`EditMask`（§4.1）是同一对函数的**掩码**载体——单通道位图，故它与 `Raster` 不是同一型；`RegionDetector` 是 §4.2 的 `resolve_edit_region` 收的那个**接口**——本块定义它，其实现在 backend 一侧（第 3 层选定的后端）。另有**两枚常量**（不是类型）：`ALL_OPERATORS: [Operator; 5]` 与 `V01_OPERATOR_IDS: [&str; 1]`（§9），它们承载的是 P1 的 `Operator`。**本块不新造算子类型**——§3.1 的登记形态照 P1。
 
 **判定**（本块是它们的唯一落点）：
 
@@ -119,12 +124,12 @@ EditRegionKind   EditRegion   EditMask   Raster   RegionDetector   ImageError
 
 ## 2.3 本块的层间位置
 
-§9.1（`docs/02-工程.md:568-587` 的图：与本块有关的两行是 `:574` 的 `└──→ 跨领域 (8)` 与 `:585` 的 `跨领域 (8) ──→ 长期循环 (7)`；箭头的读法在 `:563-567`；`:588` 逐字「依赖方向单向，无环。」）里与本块有关的两条，按「被依赖者 → 依赖者」读：
+§9.1（`docs/02-工程.md:569-586` 的图：与本块有关的两行是 `:575` 的 `└──→ 跨领域 (8)` 与 `:585` 的 `跨领域 (8) ──→ 长期循环 (7)`；箭头的读法在 `:563-567`；`:588` 逐字「依赖方向单向，无环。」）里与本块有关的两条，按「被依赖者 → 依赖者」读：
 
 - `执行层 (3) → 跨领域 (8)`：§2.1 的边表**四行**全是它的实例。`execution_policy` / `verification_policy` 的定型落在消费侧而不是字段上，也是同一条的后果（切分 §二第 2 条的裁定段；本块不重复它）。
 - `跨领域 (8) → 长期循环 (7)`：本块**不接**这一条——本块不产出 `value + evidence + last_verified`（§232 的 `ProductReadiness` 属长期循环）。本块的产物注册进 `OperatorRegistry`，不写长期循环的表。
 
-本块与 P5a（同层）之间有一条层内边 `continuum-image → continuum-verify`。**层内边在本仓有同形的处置**：`continuum-provider → continuum-capability`（资源层内的「接口 → 能力类型」）被登记为层内边（`crates/continuum-runtime/tests/dependency_direction.rs:30` 的注记）。本条边是单向的：P5a 的依赖边表里没有任何 P5 领域算子块。
+本块与 P5a（同层）之间有一条层内边 `continuum-image → continuum-verify`，**边别是 dev 边**（§2.1：本 crate 的生产代码对它零调用，用到它的是 §11.4 第 2 条的 `trybuild` 用例）。**层内边在本仓有同形的处置**：`continuum-provider → continuum-capability`（资源层内的「接口 → 能力类型」）被登记为层内边（`crates/continuum-runtime/tests/dependency_direction.rs:30` 的注记）。本条边是单向的：P5a 的依赖边表里没有任何 P5 领域算子块。
 
 **本块的接口面与《工程》§8.3 的那一行对齐**：`领域算子 ← 第 3 层 Operator 注册表 ＋ 第 4 层 Router`（`docs/02-工程.md:527`）。本条是**跨层**目标（第 8 层行指向第 3 层），故本块与第 3 层之间的两条边（注册表、Router）是**其上行**，不是新边（切分 §三 已记「P5 的四个领域算子块都只经 `Operator` / `OperatorRegistry` 与第 3 层相接，不新开跨层边」）。
 
@@ -134,7 +139,9 @@ EditRegionKind   EditRegion   EditMask   Raster   RegionDetector   ImageError
 
 ## 3.1 登记形态：照 P1，不自造
 
-§244（`docs/spec/05-normative.md:735-753`）的 `Operator` 八字段由 P1 落地为 `crates/continuum-operator/src/definition.rs:79-88`：`id` / `version` / `input_schema: Vec<ArtifactType>` / `output_schema: Vec<ArtifactType>` / `determinism` / `side_effect_class` / `backend_candidates: Vec<BackendId>`。**本块不加字段、不改签名**（切分 §二「无需重新冻结」段）。本块交付的是**内容**：五枚 `Operator` 值的清单与它们的注册入口。
+§244（`docs/spec/05-normative.md:735-753`）的 `Operator` **七个**字段由 P1 落地为 `crates/continuum-operator/src/definition.rs:79-88`：`id` / `version` / `input_schema: Vec<ArtifactType>` / `output_schema: Vec<ArtifactType>` / `determinism` / `side_effect_class` / `backend_candidates: Vec<BackendId>`。**本块不加字段、不改签名**（切分 §二「无需重新冻结」段）。本块交付的是**内容**：五枚 `Operator` 值的清单与它们的注册入口。
+
+**上面这个「七」是订正过的**：本句原写「`Operator` **八**字段」。**「八」的来历**：相邻条款 §258（`docs/spec/05-normative.md:1073-1088`）的 `Evidence` 是八个字段（`id` / `type` / `subject` / `claim` / `producer` / `artifact_refs[]` / `strength` / `scope`），本设计早前把那一条款的字段数记到了 `Operator` 上（同一形状的错在 P5e 与 P5d 的设计里各有一份）。**实测两个计数**：§244 `:735-753` 的围栏块逐行数出七个；P1 的 struct `crates/continuum-operator/src/definition.rs:79-88` 也是七个 pub 字段（本设计 §11.4 末的一段本就写作「七个 pub 字段」）——**同一份文档里两处相抵，以实测的七为准**。
 
 注册入口的形状照 `OperatorRegistry`（`crates/continuum-operator/src/registry.rs:19-48`）：
 
@@ -148,7 +155,9 @@ pub const ALL_OPERATORS: [Operator; 5];
 pub const V01_OPERATOR_IDS: [&str; 1] = ["generate-image"];
 
 /// 把给定的一批算子注册进给定注册表（`&ALL_OPERATORS` 是常规实参）。
-/// **先核后写**：先逐枚核 §3.5 的前提，全部通过后再逐枚注册；任一枚不成即返回 `Err`，
+/// **先查重后写**：先逐枚核「注册表里是否已有同 (id, version)」（判定在 P1 的
+/// `OperatorRegistry::register`，`crates/continuum-operator/src/registry.rs:24-34`），
+/// 全部通过后再逐枚注册；任一枚被拒即返回 `Err`，
 /// 此时注册表的内容与调用前逐枚相同（不留半注册）。
 /// 一枚图像算子与既有算子同 (id, version) 是注册期的错误，**不静默跳过**。
 /// **参数带一批算子**（不是只吃 `ALL_OPERATORS`）：§9 的批次边界要能按 §343 换，
@@ -158,6 +167,8 @@ pub fn register_image_operators(
     operators: &[Operator],
 ) -> Result<(), ImageError>;
 ```
+
+**「先查重后写」这一句也是订正过的**：原先的注写的是「**先核后写**：先逐枚核 §3.5 的前提，全部通过后再逐枚注册」。**§3.5 自述本块没有那条注册期前提**（两枚 `Deterministic` 算子的候选集合是单元集，「名单内／名单外」在本块没有可触发的形态），故「先核」的内容落不下来。**以查重为准的理由**：§11.2 第 (c2) 条要拍的正是「不留半注册」，而它是查重（`crates/continuum-operator/src/registry.rs:24-34` 的 `contains_key`）与写入（`:32` 的 `insert`）之间的**次序**——核的东西只能是注册表现状，不可能是 §3.5 那条本块没有的规则。
 
 `ImageError` 的形状（§2.2 列出的本块六枚类型之一）。三臂，逐臂给出**判定的持有者**：
 
@@ -176,20 +187,28 @@ pub enum ImageError {
     #[error("区域 {region:?} 解析不出语义编辑区域（§325）")]
     RegionUnresolved { region: EditRegionKind },
 
-    /// §326：掩码的像素尺寸与源图不一致，硬合成无定义。判定的持有者在本块（§5.2）。
-    #[error("掩码 {mask:?} 与源图尺寸不一致（§326）")]
-    MaskMismatch { mask: (u32, u32), source: (u32, u32) },
+    /// §326：参与逐点运算的像素载体形状不一致——逐点合成与比较无定义。
+    /// 判定的持有者在本块（§5.2 的 `composite_masked`、§5.3 的 `outside_mask_difference`）。
+    #[error("像素载体形状不一致：{left:?} 与 {right:?}（§326）")]
+    ShapeMismatch {
+        /// `(宽, 高, 通道数)`。掩码是单通道位图（§4.1），**没有色彩通道这一维**，
+        /// 故掩码那一侧的第三分量是 `None`——两个形状比较时，`None` 的分量不参与。
+        left: (u32, u32, Option<u8>),
+        right: (u32, u32, Option<u8>),
+    },
 }
 ```
 
-**两枚新类型对派生的要求，逐条写明**：`EditRegionKind` 要 `derive(Debug)`（`{region:?}` 要求）；`MaskMismatch` 的两个字段取 `(u32, u32)` 元组，`{:?}` 只要求 `Debug`，**故本块不必为它们写 `Display`**——与 P5e 为其错误类型补 `BackendId` 的 `Display`（其设计 §4.4）情形不同：那一处的格式串用的是 `{backend}`，而本块的两处都用 `{:?}`。
+**本臂的名字与字段是订正过的**：原先叫 `MaskMismatch { mask: (u32, u32), source: (u32, u32) }`，只表达「掩码与源图尺寸不一致」，且 §5.2 只钉了这一对前置条件。**订正的两处**：名字改成 `ShapeMismatch`，因为 §5.2、§5.3 要拦的不止掩码与源图（还有 `generated`↔`source`、`source`↔`result` 两对，见 §5.2、§5.3）；字段从 `(u32, u32)` 扩为 `(u32, u32, Option<u8>)`，因为**通道数也要拦**（逐点复制与逐点比较都要求两侧逐像素一一对应），而掩码那一侧没有通道这一维——`Option` 正是这个事实，不是占位。
+
+**两枚新类型对派生的要求，逐条写明**：`EditRegionKind` 要 `derive(Debug)`（`{region:?}` 要求）；`ShapeMismatch` 的两个字段取 `(u32, u32, Option<u8>)` 元组，`{:?}` 只要求 `Debug`，**故本块不必为它们写 `Display`**——与 P5e 为其错误类型补 `BackendId` 的 `Display`（其设计 §4.4）情形不同：那一处的格式串用的是 `{backend}`，而本块的两处都用 `{:?}`。
 
 **三臂各自的判据（为什么是这三臂、不是两臂、不是四臂）**：
 
 - `Registry` 的存在理由是**不由本块重述 P1 的判定**（理由见上）。**这里不是「照 `CheckpointError` 的做法把注册期错误并进本型」**：P5e 的 `CheckpointError` 与 `OperatorError` **分得开**（一个是「这一次检查点/恢复为什么不成」，一个是注册期查重），而本臂的判定与 `OperatorError::Duplicate` 是同一件事。
-- `RegionUnresolved` 与 `MaskMismatch` 是**两个不同的处置**：前者是「这次解析没找到区域」（Point 点空处、SemanticObject 名不副实），后者是「区域找到了，但它的位图与源图不是同一坐标系」。它们的**调用方**也不同（前者在 `resolve_edit_region` 的四个臂上，后者在 `composite_masked` 的入口）。合成一臂会让调用方分不清该重试解析还是该重跑检测。
+- `RegionUnresolved` 与 `ShapeMismatch` 是**两个不同的处置**：前者是「这次解析没找到区域」（Point 点空处、SemanticObject 名不副实），后者是「区域／补丁找到了，但两张位图不是同一坐标系（或通道数不同）」。它们的**调用方**也不同（前者在 `resolve_edit_region` 的四个臂上，后者在两个确定性函数的入口）。合成一臂会让调用方分不清该重试解析还是该重跑检测。
 - **不给「backend 不支持掩码编辑」留臂**：那是一个**声明面**的事（`backend_candidates` 的取值），不是一次调用的失败；§3.5 的「被否决的更显然写法」段说明本块为什么不给它编一张名单。
-- **不给 IO 臂**：本块的两个确定性函数收 `&Raster`（§5.2），**读写落盘是调用方的事**（`BlobStore` 在 `continuum-artifact`，`crates/continuum-artifact/src/blobstore.rs:70` 的 `put` / `:99` 的 `get`）。放一个 IO 臂就要求本块规定像素的存储形态，而规范没有给。
+- **不给 IO 臂**：本块的两个确定性函数收 `&Raster`（§5.2），**读写落盘是调用方的事**（`BlobStore` 在 `continuum-artifact`，`crates/continuum-artifact/src/blobstore.rs:70` 的 `put` / `:99` 的 `get`）。放一个 IO 臂就要求本块规定像素的存储形态，而规范没有给。**这一条对本块全节成立**：`resolve_edit_region`（§4.2）不落盘——`Box` 支投影出的掩码以位图形式返回（§4.1 的 `EditMask`），把它变成 `ArtifactType::Blob` 制品要经 `BlobStore::put`，那是调用方的事。故 §2.1 的边表里**没有** `BlobStore`／`ContentHash`。
 
 ## 3.2 五枚算子
 
@@ -207,7 +226,7 @@ pub enum ImageError {
 
 **逐枚的判定理由（只写需要解释的，五枚）**：
 
-1. **`generate-image` 的 `input_schema` 是 `[Image]` 而不是 `[]`**。§162 `:603` 的 `reference_artifacts` 与 §323 `:2321` 的 `references[]` 是**制品**，故它们是输入端口；「从零生成」（§161 `:584`）的那一次只是**没有接参考制品**（节点上没有那个输入端口），不是「该算子不接受制品」。**这里不是「照 P5e 的 `media-import` 取 `[]`」**：`media-import` 的输入是**外部素材**（不是上游制品），本算子的参考制品是上游制品。`input_schema` 是**类型**集合、不是**元数**（实测：`Operator.input_schema` / `output_schema` 在 `crates/` 下的**非测试**命中只有 `crates/continuum-operator/src/definition.rs:82-83` 两行声明——**没有一处读它们来派生端口**；端口在 `Node.inputs` / `Node.outputs` 上，`crates/continuum-graph/src/node.rs:13-14`）。故取 `[Image]` **不会**凭空多出一条 DATA 边。
+1. **`generate-image` 的 `input_schema` 是 `[Image]` 而不是 `[]`**。§162 `:603` 的 `reference_artifacts` 与 §323 `:2321` 的 `references[]` 是**制品**，故它们是输入端口；「从零生成」（§161 `:584`）的那一次只是**没有接参考制品**（节点上没有那个输入端口），不是「该算子不接受制品」。**这里不是「照 P5e 的 `media-import` 取 `[]`」**：`media-import` 的输入是**外部素材**（不是上游制品），本算子的参考制品是上游制品。`input_schema` 是**类型**集合、不是**元数**（实测：把 `input_schema` / `output_schema` 读作 **`continuum-operator` 的 `Operator` 的那两个字段**时，`crates/` 下的**非测试**命中只有 `crates/continuum-operator/src/definition.rs:82-83` 两行声明——**没有一处读它们来派生端口**；端口在 `Node.inputs` / `Node.outputs` 上，`crates/continuum-graph/src/node.rs:13-14`）。**这个限定要写出来，否则它是一句过宽的全称**：裸标识符 `input_schema` 在别处另有非测试命中，而那些是同名的**另一个字段**（型为 `Value`，是 MCP 工具的参数 schema，与 `Operator` 的端口无关）——`crates/continuum-capability/src/tool.rs:44` / `:45` / `:82` / `:83` / `:86` / `:87`、`crates/continuum-capability/src/persist.rs:59` / `:60`、`crates/continuum-core/src/tool.rs:22`（测试侧另有 `crates/continuum-capability/tests/` 与 `continuum-graph/tests/` 等多处）。故取 `[Image]` **不会**凭空多出一条 DATA 边。
 2. **`detect-edit-region` 的 `output_schema` 是 `[Blob]` 而不是 `[Image]`**。掩码是**单通道位图**，不是彩色图像；记成 `Image` 会让读它的人按图像的色彩空间 / Alpha 约定去读，而 §168 `:826` 的另一条检查恰好是「Alpha / 色彩空间是否异常」——两者会被同一型名混起来。`Blob` 已在枚举里（`crates/continuum-artifact/src/artifact.rs:20`），**故本块不向 P5e 要新变体**。**掩码的编码格式本设计不定义**（缺口见 §13 第 5 条）。
 3. **第 1、3 行是 `NonDeterministic`**：它们都经生成后端（图像生成模型 / inpainting 模型），同输入同 prompt **不保证逐位相同**——§327 `:2396-2402` 的谱系里每一步记 `seed`（§167 `:803`）本身即「同 prompt 可以是另一张图」的承认。
 4. **第 2 行是 `NonDeterministic`**：Object / Region Detection（§164 `:684`）是模型步，不是算法步。**这是本设计的判定**。
@@ -217,6 +236,8 @@ pub enum ImageError {
 
 **五枚都不含「参考物是文本」的情况**：§162 `:603` / §323 `:2321` 的 `reference_artifacts` / `references[]` 未给类型，本设计取 `Image`（图像域内，参考物是图像）。若实际需要 `Text` 参考（如文字描述作为参考制品），那是**输入面的加宽**，走 §12 第 5 条报出——**本设计不预先收它**。
 
+**§323/§324 的五个非制品条目住在哪（落点声明）**：规范在这两条里给了五个**不是制品**的字段——§323 的 `prompt` / `dimensions` / `constraints`（`docs/spec/05-normative.md:2316-2331`）与 §324 的 `instruction` / `preserve_outside_region`（`:2335-2345`）。**它们的落点是节点参数**（`Node` 的参数字段），理由与 §10.1 表里区域表示那一条同源：它们描述「这一次编辑要什么」，不是上游产出的制品，故**不进 `input_schema`**（`input_schema` 是 `Vec<ArtifactType>`，只能装制品类型）；而 `resolve_edit_region` 的入参（§4.2）与 `composite_masked` 的调用点都由这些参数供给。**本块不定义它们的名字、类型或存储**：`Node` 的参数字段 schema 规范未给，`Node` 也不在本块的共写表里（§2.1 末）——**这是一处缺口**（§13 第 11 条、§12 第 5 条 (iv)），收件人：规范维护者。**边界写清**：本块只声明「它们住在节点参数上、不进本块的任何类型」，**不替它们定形状**；`preserve_outside_region` 在本设计里只作为条件被引用（§5.4、§12 第 2 条），本块不为它写解析或校验。
+
 ## 3.3 「分作两个算子」的读法：**否决合并**，不是「全域恰好两枚」
 
 §161 `:570-576` 的原话是「图像系统不应该统一成一个 `image_tool(prompt)`；至少应该区分两种原生操作」——**「至少」**。切分 §五 P5f 行的「分作两个算子」是这条的转述，它否决的是**合并**。
@@ -225,7 +246,7 @@ pub enum ImageError {
 
 **为什么局部修改落成两枚而不是一枚（这是本节的裁定，理由三条，按分量排）**：
 
-1. **§165 的流程把 Hard Composite 画成独立一步**（`:720-731`：`Original Image → Region Mask → Generative Inpainting → Generated Patch → Hard Composite → Final Image`），且 §326 `:2378-2386` 逐字把它写成 **Runtime** 的动作（「若 backend 会重生成整张图：**Runtime SHOULD 使用** generated patch + hard composite 保持 mask 外原像素」）。
+1. **§165 的流程把 Hard Composite 画成独立一步**（`:720-731`：`Original Image → Region Mask → Generative Inpainting → Generated Patch → Hard Composite → Final Image`），且 §326 `:2378-2388` 逐字把它写成 **Runtime** 的动作（「若 backend 会重生成整张图：**Runtime SHOULD 使用** generated patch + hard composite 保持 mask 外原像素」）。
 2. **§326 的条件挂在 backend 上，而 backend 是 Router 在运行期选的**（§245 `:756`）。「若…会重生成整张图」这个条件**在注册期不可知**，故它只能由**图上的步骤**表达——即「那一步可以被插进去」。
 3. **合成藏进算子里，§326 的 SHOULD 就没有落点**。**这里不是「把 Composite 藏进 `local-generative-edit` 内部」：那样 `preserve_outside_region = true`（§324 `:2343`）的兑现只剩下后置检测（§5.3 的比较器），即「检出不合法」而不是「使之合法」；而 §326 给的是后者的路。**
 
@@ -246,6 +267,8 @@ pub enum ImageError {
 | `verify-outside-mask` | `hard-composite`（`Image`）、上游源图（`Image`）、`detect-edit-region`（`Blob`） | §168 `:832`（`outside-mask pixel difference` 要比的是**原图**与**结果图**） |
 
 **依据栏的读法**：写 §164/§165/§168/§326 的，出处是规范正文的步骤名；写「§3.2 第 N 行」的，出处是**该行的端口类型与全表的对应**（即本设计的判定，规范未给边）。**这张表不是全图**：它只列 §164/§165 那一串与链尾检查器；本块只**注册**算子，不建执行路径（切分 §四第 4 条）。
+
+**这张表里的型是端口上的制品类型，不是本块函数的参数型**：`detect-edit-region` 的端口是 `Blob`（掩码制品），而 `composite_masked` / `outside_mask_difference` 收的是 `&EditMask`（位图，§4.1）——由掩码制品到 `EditMask` 的那一步（读 `BlobStore` 成位图）**是调用方的事**（§3.1 的「不给 IO 臂」）。这与 §5.2 的两个函数收 `&Raster` 而同表里写着 `Image` 是同一件事。
 
 **本块不向 P5e 报出任何变体**（§1.2 的那一行，此处给出判据）：五枚算子的端口只用到**两枚已在枚举里的型**——`Image`（P5e 的 §3.2 清单第 1 行，本块消费）与 `Blob`（`crates/continuum-artifact/src/artifact.rs:20`，P1 既有）。**清单为空**是实测结论，不是「暂时没想到」。
 
@@ -289,26 +312,33 @@ pub enum ImageError {
 pub enum EditRegionKind { Point, Box, Mask, SemanticObject }
 
 pub enum EditRegion {
-    /// §163 :626-652：坐标归一化 `x, y ∈ [0, 1]`（实测该两句在 :648），避免与分辨率绑定。
+    /// §163 :626-652：坐标归一化 `x, y ∈ [0, 1]`（实测该两句在 :648-649），避免与分辨率绑定。
     Point(NormalizedAnchor),
     /// §166 :749 的 Bounding Box。同样归一化。
     Box(NormalizedBox),
-    /// §166 :750 的 Brush Mask：调用方已给出掩码位图。
-    Mask(ArtifactId),
+    /// §166 :750 的 Brush Mask：调用方已给出掩码位图（§166 :750 逐字如此），
+    /// 故本支带的是**已经解析好的位图**，不是制品 id。
+    Mask(EditMask),
     /// §166 :751 的 Semantic Object：以名字指一个对象（如 §166 :769 的「左边这个人」）。
     SemanticObject(SemanticObjectRef),
 }
 
 /// §166 :775 的 `EditMask`：四种表示解析后的共同产物。
+/// **带的是掩码位图本身，不是指向掩码制品的 id**：`Box` 支的掩码由 §4.2 投影得出，
+/// 那一刻仓里还没有它的制品；把它变成 `ArtifactType::Blob` 制品要经 `BlobStore::put`，
+/// 而本块不做 IO（§3.1）。故此型自持位图，调用方要落盘时自己落。
 pub struct EditMask {
-    /// 掩码位图的制品（`ArtifactType::Blob`，§3.2 第 2 行）。
-    pub artifact: ArtifactId,
     pub width: u32,
     pub height: u32,
+    /// **单通道位图**（§3.2 第 2 行：掩码不是彩色图像），长度 `width * height`；
+    /// 故本型没有 `channels` 字段——`Raster`（§5.2）有，因为它是图像。
+    pub pixels: Vec<u8>,
 }
 ```
 
-`EditMask` 为什么带 `width` / `height`（而不是只带制品 id）：§326 `:2382-2388` 的硬合成要求掩码与源图**同一坐标系**，而「分辨率是否保持」是 §168 `:825` 的一条检查。掩码自己的尺寸在产出它的那一刻是已知的（第 2 行的算子），故它随掩码一起给；**源图的尺寸不在本型里**——它要读 `Artifact.metadata`，而那份 schema 规范未给（§13 第 5 条，与 P5a 设计 §15 第 9 条、P5e 设计 §14 第 4 条互指）。
+**`EditMask` 的形状是订正过的，原先那处说的是什么、为什么以现说为准**：原先是 `pub struct EditMask { artifact: ArtifactId, width: u32, height: u32 }`，即「掩码的**制品 id** 加尺寸」。**它与订正前的 §4.2 签名相抵**：`resolve_edit_region` 原先收 `&EditRegion`、`&ArtifactId`、`&RegionDetector`，不拿 `Raster`、也不拿 `BlobStore`（§3.1 明写本块不做 IO），而 `Box` 支要投影出一个掩码——**那个掩码在仓里还没有制品 id 可指**。**以现说为准的理由**：切分 §四第 6 条要求边表与实际用量精确一致（§2.1 的 `continuum-artifact` 行因此不含 `BlobStore`／`ContentHash`），而保留制品 id 就要求 `resolve_edit_region` 落盘，二者只能有一真；本块取「不落盘」这一侧，故掩码以位图在内存里传递。
+
+**`width` / `height` 为什么仍在本型里**：§326 `:2382-2388` 的硬合成要求掩码与源图**同一坐标系**，而「分辨率是否保持」是 §168 `:825` 的一条检查——§5.2 的前置条件要比的就是这一对量与源图的那一对量。**源图的尺寸不在本型里**，也不由本函数去读：它作为 `resolve_edit_region` 的 `source_dims` 实参**由调用方给**（§4.2），因为从制品读尺寸要经 `Artifact.metadata`，而那份 schema 规范未给（§13 第 5 条，与 P5a 设计 §15 第 9 条、P5e 设计 §14 第 4 条互指）。**这正是「尺寸随掩码一起给」的落点**：掩码的尺寸随掩码（本型）给，源图的尺寸随调用给。
 
 **三个辅助类型的形状据实留白**：`NormalizedAnchor` 的两字段按 §163 `:648-649` 取 `x, y ∈ [0, 1]`（这一条有规范出处）；`NormalizedBox` 是它的两个角（**本设计定的**，规范只给名字）；`SemanticObjectRef` 指什么**规范未给**——§166 `:769` 给的是一句自然语言（「左边这个人」），名字从哪来正是 §4.3 表里的一行缺口，故本设计**不给它定形状**（定形状就是填那条缺口）。
 
@@ -324,23 +354,32 @@ pub struct EditMask {
 ```
 /// §325 :2360-2366 的唯一落点：把四种编辑区域表示解析成 §166 :775 的 `EditMask`。
 ///
+/// **`source_dims` 是必需参数**：`Box` 支要把归一化矩形投影成像素掩码，
+/// 而投影的坐标系就是源图的画布，故本函数要拿到 `(宽, 高)`。**本函数不自己读**：
+/// 从制品读尺寸要经 `Artifact.metadata`（那份 schema 规范未给，§13 第 5 条），
+/// 且那是一次 IO，而本块不做 IO（§3.1）。故尺寸作为实参收下。
 /// **`detector` 是必需参数**：`Point` 与 `SemanticObject` 两支都要经对象/区域检测（§164 :684），
 /// 故本函数**没有**任何一条「不传 detector 也能把 Point 变成掩码」的路径。
 pub fn resolve_edit_region(
     region: &EditRegion,
     source: &ArtifactId,
+    source_dims: (u32, u32),
     detector: &RegionDetector,
 ) -> Result<EditMask, ImageError>;
 ```
+
+**`source_dims` 是订正时补上的**：原签名只有 `(region, source, detector)`，而 `Box` 支要把归一化矩形投影成像素掩码、`Point` 与 `SemanticObject` 两支要把归一化坐标交给 detector，**三处都要源图的画布尺寸**，它原先没有来源。补成实参而不是「本函数去读制品」：读是 IO（§3.1 不给 IO 臂），而尺寸是调用方手上就有的量（它正是拿着源制品的那一方）。
 
 **四支各自的判据（逐支，不合并）**：
 
 | `EditRegion` 支 | 解析方式 | 判据的来源 |
 |---|---|---|
-| `Box` | 归一化矩形 → 掩码（**投影**，无模型） | §166 `:749`；本设计定的（规范只说它是四种之一） |
-| `Mask` | 掩码位图**原样**通过 | §166 `:750`（调用方已给掩码） |
+| `Box` | 归一化矩形 × `source_dims` → 掩码（**投影**，无模型） | §166 `:749`；本设计定的（规范只说它是四种之一） |
+| `Mask` | 入参的掩码位图**原样**通过（含宽高与像素） | §166 `:750`（调用方已给掩码位图，`EditRegion::Mask` 因此直接带 `EditMask`） |
 | `SemanticObject` | 经 `detector` 按名字找该对象的掩码 | §166 `:751`、`:769`；§164 `:684` |
 | `Point` | **必须**经 `detector` 找该点所在的语义区域（§164 `:684` 的 Object / Region Detection），**不得**退化成单像素 | §325 `:2360-2366`（MUST）；§164 `:669-705` |
+
+**`detector` 的返回值就是掩码位图**（`EditMask`）：三支要 detector 的过程都产出一张掩码，故本函数不需要第二枚「把 detector 的输出变成 `EditMask`」的类型；接口的其余形状由本块定、实现在 backend 一侧（§2.2）。
 
 **`Point` 那一支的两侧（缺一条即不算钉住）**：
 
@@ -365,6 +404,8 @@ pub fn resolve_edit_region(
 
 **本设计取的一条**：**零检出 ⇒ `Err(RegionUnresolved)`（fail-closed），不放大、不退化、不请模型猜**。理由：§325 的 MUST 是**否定式**的（「而不是单像素修改」），故最小的合法实现是「解析不出就拒绝」，而不是「解析不出就给一个凑合的区域」。放大到整图会让 §326 的 `outside_mask_change = FORBIDDEN` 变得无意义（mask 外为空集，任何改动都「合法」）；退化到单像素正被 §325 明文禁止。
 
+**代价（这一条也要写，否则只写了落点与边界）**：**零检出即 `Err` 的直接代价是合法点击会被拒**。误检、稀疏对象、点击落在对象边缘之外（§164 `:699-705` 的「hand + held object」这类多对象区域尤其）都会走到这一支；而 `ImageError::RegionUnresolved` 是**终止性的**——它不重试、不放宽、不给近似区域，故每一次误拒都要**用户重选**（或重跑 detector）才能继续。取这个代价的理由是两侧不对称：误拒是一次可恢复的往返，而「放大到整图」会让 §326 的判定失去意义（`Err` 那一侧的不对称见 §5.4 的失配方向）。**这一条不声称代价小**，只声称它比另一侧的代价小。
+
 **上表五条一条都没有在本设计里被填上**：它们是**缺口**（§13 第 1 条），收件人：规范维护者。**本设计不发明它们**——填其中任何一条，都是替 §325 定了一个规范没给的判据。
 
 **本条不解决什么，写清**：本设计只是**给 §325 的 MUST 一个落点与一个 fail-closed 的边界**（`ImageError::RegionUnresolved`），没有让「Point → 语义区域」这件事变得有判据。**上表五条仍在**。
@@ -373,7 +414,7 @@ pub fn resolve_edit_region(
 
 ## 4.4 结构性保证的两侧（照片，§11.4）
 
-- **要 `Point` 那一支就必须给 `detector`**：少传一个实参 ⇒ 编译失败（`trybuild` 的 `compile_fail`）。这把「没有检测就没有区域」钉在类型上。
+- **要 `Point` 那一支就必须给 `detector`（也要给 `source_dims`）**：少传任一实参 ⇒ 编译失败（`trybuild` 的 `compile_fail`）。这把「没有检测就没有区域」与「没有源图尺寸就投不出掩码」钉在类型上。
 - **本 crate 里没有第二条从 `Point` 到 `EditMask` 的路**：`resolve_edit_region` 是唯一的转换点；`EditRegion` 的四个支共用同一个函数、同一个返回类型。**这一条的射程要写清（它是「结构事实」而不是承诺）**：它只说「本 crate 里没有绕开的路」，说不了「别的 crate 不会自己写一个 Point→整图的转换」——后者没有落点（本块的算子面只经 `Operator` 暴露）。
 
 ---
@@ -384,16 +425,16 @@ pub fn resolve_edit_region(
 
 | 层 | 本块的兑现 | 保证的强度 |
 |---|---|---|
-| **强制作（使之合法）** | `hard-composite`（§3.2 第 4 行）：mask 外的像素从**源图逐点复制**（§165 `:735-737` 逐字「mask 外像素直接从原图复制」）。函数形态见 §5.2。 | 走过这一步的结果图**按构造**满足 §326（§326 `:2382-2386` 逐字「Runtime SHOULD 使用 generated patch + hard composite 保持 mask 外原像素」） |
-| **检出（发现不合法）** | `verify-outside-mask`（§3.2 第 5 行）与 §5.3 的比较器：算 mask 外的像素差（§168 `:832`），产出 Evidence（§7） | **确定性**（§168 `:835` 逐字「可以直接确定性检查」），且**不读模型自述**（§168 `:837-843` 逐字「这比让模型说『我只修改了手。』可靠得多」） |
+| **强制作（使之合法）** | `hard-composite`（§3.2 第 4 行）：mask 外的像素从**源图逐点复制**（§165 `:735-737` 逐字「mask 外像素直接从原图复制」）。函数形态见 §5.2。 | 走过这一步的结果图**按构造**满足 §326（§326 `:2378-2388` 逐字「Runtime SHOULD 使用 generated patch + hard composite 保持 mask 外原像素」） |
+| **检出（发现不合法）** | `verify-outside-mask`（§3.2 第 5 行）与 §5.3 的比较器：算 mask 外的像素差（§168 `:832`），其证据由**宿主的执行代码**构造（§7.2：本块不提供这一层的函数） | **确定性**（§168 `:835` 逐字「可以直接确定性检查」），且**不读模型自述**（§168 `:837-843` 逐字「这比让模型说『我只修改了手。』可靠得多」） |
 | **类型层** | **没有**。见 §5.4 | —— |
 
 ## 5.2 强制作：`composite_masked`
 
-两个确定性函数（本节与 §5.3）收同一个像素载体，本块定义它：
+两个确定性函数（本节与 §5.3）收同一个**图像**像素载体，本块定义它（掩码走 §4.1 的 `EditMask`——单通道，与 `Raster` 不是同一型）：
 
 ```
-/// 本块为两个确定性函数定的**最小像素载体**。
+/// 本块为两个确定性函数定的**最小图像像素载体**。
 /// **本设计不定义像素格式**：§168 :826 只给了「Alpha / 色彩空间是否异常」这一条检查名，
 /// 没有给通道语义、色彩空间或 Alpha 的表示。故本型只承载「宽、高、通道数、字节序列」，
 /// 通道的语义由 backend 的约定决定——**缺的是「像素格式与色彩空间」这一步**（§13 第 5 条）。
@@ -420,7 +461,15 @@ pub fn composite_masked(
 - **正例**：mask 外逐点等于 `source`（这就是 §326 的兑现）；mask 内逐点等于 `generated`。
 - **反例**：**构造一个「`generated` 把 mask 外也改过」的输入** ⇒ 输出的 mask 外**仍逐点等于 `source`**。这一条才是「强制作」的照片——若只拍正例，一个「原样返回 `generated`」的实现也能过。
 
-**入口的前置条件**：`(mask.width, mask.height) == (source.width, source.height)`，否则 `Err(ImageError::MaskMismatch { mask: (mask.width, mask.height), source: (source.width, source.height) })`。**这里不是「尺寸不符时按左上角对齐凑合」：** §168 `:825` 的「分辨率是否保持」是一条独立的检查，合成时按坐标截取会让「掩码与源图不同坐标系」这件事在结果里不可见——而它是 §326 的前提（掩码要真的指在同一张图上）。
+**入口的前置条件（逐条给出，三条都要）**：
+
+1. **`mask` 与 `source` 的宽、高相同**：`(mask.width, mask.height) == (source.width, source.height)`；
+2. **`generated` 与 `source` 的形状相同**：宽、高**与通道数**三者都相同；
+3. **`mask.pixels` 的长度与它自己的宽高相符**：`mask.pixels.len() == mask.width as usize * mask.height as usize`（掩码是单通道位图，§4.1；这条是 `EditMask` 的不变量，在此处复核而不是在此处定义）。
+
+任一条不成立即 `Err(ImageError::ShapeMismatch { left, right })`（`left` / `right` 取 `(宽, 高, 通道数)`；掩码那一侧的第三分量是 `None`，§3.1）。**这里不是「尺寸不符时按左上角对齐凑合」：** §168 `:825` 的「分辨率是否保持」是一条独立的检查，合成时按坐标截取会让「掩码与源图不同坐标系」这件事在结果里不可见——而它是 §326 的前提（掩码要真的指在同一张图上）。
+
+**第 2 条是订正时补上的**：原先只钉了第 1 条。**它同样必需**——mask 内的像素取自 `generated`，逐点复制要求二者**逐像素一一对应**；`generated` 与 `source` 尺寸或通道数不同时（例如 3 通道的补丁填进 4 通道的图），「mask 内取自 `generated`」这一步没有定义，函数的行为是未定义的。故它与第 1 条同级，不是可省略的健全性检查。
 
 ## 5.3 检出：`outside_mask_difference`
 
@@ -433,6 +482,8 @@ pub fn outside_mask_difference(
     mask: &EditMask,
 ) -> Result<PixelDiff, ImageError>;
 ```
+
+**入口的前置条件（与 §5.2 同形）**：`mask`、`source`、`result` 三者的宽、高相同；`source` 与 `result` 的通道数相同；`mask.pixels.len() == mask.width as usize * mask.height as usize`。任一条不成立即 `Err(ImageError::ShapeMismatch { left, right })`（形状取 `(宽, 高, 通道数)`）。**这一条是订正时补上的**：原先本函数**一条前置都没有**，而「mask 外的像素」这个说法本身要求三者共用同一坐标系——掩码指到源图的哪个像素、结果图的哪个像素，只有三者宽高一致时才有定义；通道数不同则「逐点相等」没有定义。**这里不是「比较器只读不写、不必设前置」**：比较器的产出（差多少）会被下游当成判据的量，量在未定义输入上算出来的值比 `Err` 更坏。
 
 - **两侧**：mask 外逐点相同 ⇒ `PixelDiff { differing: 0, .. }`；改一个像素 ⇒ `differing == 1`。**（§11.2 第 (l) 条）**
 - **本函数不判「通过」**：它给出**差多少**，而「差多少算不通过」这个判据不在本块——证据的判定面归 P5a（切分 §四第 1 条；P5a 设计 §3 已裁定「不判充分」）。**这里不是「返回一个 bool」：** 返回 bool 就把一条判据（阈值）塞进了本块，而 §326 给的是 `= FORBIDDEN`（即阈值为 0 的那一个特例），§168 给的是「可以直接确定性检查」——**两者都不足以让本块替 P5a 定「多少算不过」**。故本块给**量**，判**在 P5a**。
@@ -449,7 +500,7 @@ pub fn outside_mask_difference(
 
 - **当 `preserve_outside_region = true` 的节点没有接上 `hard-composite` 时**，**不报错**。产出是一张 mask 外被改动过的 `Image`，它与其他 `Image` 在类型上**完全一样**；只有跑了 §5.3 的比较器才看得见。⇒ **这一侧是 fail-open**。
 - **故 §326 在本块的兑现是「提供使之成立的步骤 + 提供检出它的检查器」**，**不是**「保证它一定被用上」。后者要求「谁保证 `preserve_outside_region = true` 的节点一定接了 `hard-composite`」，而规范未给（§13 第 2 条，收件人：第 3 层的执行器与装配方）。
-- **反向的一侧**：若 `hard-composite` 被接上但掩码与源图不同坐标系 ⇒ `Err(ImageError::MaskMismatch)`（§5.2 的前置条件）。**这一侧是 fail-closed**，故它**不能**用来代替上面那一条：它拦的是「掩码配错」，拦不了「根本没有合成」。
+- **反向的一侧**：若 `hard-composite` 被接上但掩码与源图不同坐标系（或 `generated` 与源图形状不同）⇒ `Err(ImageError::ShapeMismatch)`（§5.2 的前置条件）。**这一侧是 fail-closed**，故它**不能**用来代替上面那一条：它拦的是「掩码／补丁配错」，拦不了「根本没有合成」。
 
 **本处无照片（写明）**：拍得到的只有那两个函数的返回值（§11.2 第 (i)、(j)、(k) 条），**拍不到「图里真有一段管线没接上合成」**——那一侧的失配正是 fail-open 本身（§11.5 第 2 条）。
 
@@ -508,7 +559,7 @@ pub fn outside_mask_difference(
 
 P5a 的设计 §14 第 3 条点名问本块：「`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用，若不够须向本块报出」。**本设计的答复：够，不请求新臂。**
 
-| 本块的产出 | 用的 `EvidenceType` 臂 | 判据 |
+| 本块算子的结果（由**宿主的执行代码**转成证据，§7.2） | 用的 `EvidenceType` 臂 | 判据 |
 |---|---|---|
 | `verify-outside-mask` 的像素比较（§5.3） | `VisualCheck` | P5a 的设计 §4.2 已在 `VisualCheck` 那一格逐字写「§326/§168 的 mask 外像素判定是它的实例」 |
 | `verify-outside-mask` 的分辨率那一项（§168 `:825`） | `MetadataCheck` | P5a 的设计 §4.2 在 `MetadataCheck` 那一格逐字写「§29 的『读 resolution metadata』是它的实例」 |
@@ -518,7 +569,7 @@ P5a 的设计 §14 第 3 条点名问本块：「`EvidenceType::VisualCheck` / `
 
 ## 7.2 本块**不写域包装**（偏离 P5e 设计 §9.2 的一处，理由写下）
 
-P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_output`，它唯一固定的事是 `subject` 取 `EvidenceSubject::Unattached`。**本块不照做**，本块的证据产出**直接调 P5a 的 `Evidence::from_tool_result`**（P5a 设计 §4.4，`pub`）。两条理由：
+P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_output`，它唯一固定的事是 `subject` 取 `EvidenceSubject::Unattached`。**本块不照做**：本块**不写这一层**——证据由**宿主（第 3 层）的执行代码**直接调 P5a 的 `Evidence::from_tool_result`（P5a 设计 §4.4，`pub`）构造，不经任何域包装。**本 crate 的生产代码对这枚构造点零调用**（这也是 §2.1 把 `continuum-verify` 记为 dev 边的原因）。两条理由：
 
 1. **一个只固定 `subject` 的包装，在两个域里各写一份，就是同一件事的两个词汇表**——本仓一贯判为 Critical。**这里不是「与 P5e 保持形状一致」**：一致性的对象是**接口**（`from_tool_result`），不是**包装层**；四块各写一个包装，等于把同一个转换写四遍。
 2. **那个包装固定不了什么**。P5e 自己的设计 §12.4 已把这件事写明：`from_tool_result` 是 `pub`，「本块的生产代码可以直接调它——仍是同一个构造点，只是不经过本块的包装」。故包装的**唯一**内容是那一项 `subject`；而它**不是**类型级保证（调用方直接调构造点时，`Requirement(..)` 照样能传）。
@@ -593,7 +644,8 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 | 五枚 `Operator` | `Operator` 今天**没有持久化路径**（实测：`crates/continuum-operator/` 下不存在 `persist.rs`）。注册是**装配期在内存里**做的事（`OperatorRegistry` 的 `entries: HashMap`，`crates/continuum-operator/src/registry.rs:16`） |
 | `Image` 这一 Artifact 类型 | 它落进的是**既有的 TEXT 列**：`crates/continuum-artifact/src/persist.rs:11` 的 `artifact_type TEXT NOT NULL` 与 `crates/continuum-graph/src/persist.rs:42` 的同一名列——两列都**没有 CHECK 约束**。**加一枚枚举变体不产生 DDL**（该变体本身由 P5e 落，切分 §四第 2 条） |
 | §327 的谱系与 §167 的六项记录 | 落进既有的 `artifact` 与 `artifact_input` 两张表（迁移 10）与 `provenance` TEXT 列（§6.1） |
-| 掩码 | `ArtifactType::Blob` 的既有落盘路径：`BlobStore`（`crates/continuum-artifact/src/blobstore.rs:27`），内容按 `content_hash` 分桶 |
+| 掩码 | `ArtifactType::Blob` 的既有落盘路径：`BlobStore`（`crates/continuum-artifact/src/blobstore.rs:27`），内容按 `content_hash` 分桶。**这一行记的是它落在哪条既有路径上，不是本块的调用**——本块的函数都收 `&EditMask`（位图，§4.1），不调 `BlobStore`（§3.1、§2.1 的边表） |
+| §323/§324 的五个非制品字段（`prompt` / `dimensions` / `constraints` / `instruction` / `preserve_outside_region`） | 它们同样是**节点参数**（§3.2 末的落点声明），不是制品；节点参数随图落库，图已有表（迁移 20）。**它们的键名与类型规范未给**（缺口见 §13 第 11 条） |
 | 区域表示（Point / Box / SemanticObject） | 它们是**节点参数**（§4.2：`resolve_edit_region` 的入参），不是制品；节点参数随图落库，图已有表（迁移 20） |
 | 证据 | P5a 的表（其设计 §10.2）。本块不写（§7） |
 | §34 的授权旗标 | 住在 Contract 里（§34 `:1421` 逐字「Task Contract 可以定义」）；Contract 表属 P4。**且图像生成不在那五个旗标内**（§3.6） |
@@ -651,15 +703,15 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 | a | 五枚算子的端口类型、`determinism`、`side_effect_class`、backend 候选**逐枚**断言（期望值手写） | §3.2 表的五行（不是抽样） |
 | b | 以 `&ALL_OPERATORS` 调 `register_image_operators` 注册五枚后，逐枚 `resolve` 成功 | 注册的正例 |
 | c | 同一注册表注册两次 ⇒ `Err(ImageError::Registry(OperatorError::Duplicate { .. }))`（**不是**静默覆盖） | 注册的反例（§3.1：那一臂是 P1 的判定，本型只带出来） |
-| c2 | 上一子例之后，注册表的内容与调用前**逐枚相同**（先核后写，不留半注册） | 同一条规则的**写入面**（只看 `Err` 的话，「边写边核」也能返回 `Err`） |
-| d | `Box` → 掩码的**投影**：四个角落在预期像素上（手写期望） | §4.2 的 `Box` 支 |
-| e | `Mask` 原样通过：返回的 `EditMask.artifact` 与入参的制品 id 相同 | §4.2 的 `Mask` 支 |
+| c2 | 上一子例之后，注册表的内容与调用前**逐枚相同**（先查重后写，不留半注册） | 同一条规则的**写入面**（只看 `Err` 的话，「边查重边写」也能返回 `Err`） |
+| d | `Box` → 掩码的**投影**：给定手写的 `source_dims`，四个角落在预期像素上（手写期望） | §4.2 的 `Box` 支 |
+| e | `Mask` 原样通过：返回的 `EditMask` 与入参的掩码**逐字节相同**（含宽高） | §4.2 的 `Mask` 支 |
 | f | `Point` + detector 给出的区域 ⇒ 返回的掩码**逐字节等于** detector 给的掩码（本函数不合成像素） | §4.2 的 `Point` 正例 |
 | g | `Point` + detector 找不到 ⇒ `Err(RegionUnresolved { region: Point })`，**且不是单像素掩码、不是整图掩码** | §4.2 的 `Point` 反例；§325 的 MUST 的 fail-closed 侧 |
 | h | 同一 `Point` 在两次调用里给出**同一个** detector 的返回（函数自身无随机） | 「合成像素」那一侧的对照（否则 f 可由「函数自己造一个区域」满足） |
 | i | `composite_masked`：mask 外逐点等于 `source`，mask 内逐点等于 `generated` | §5.2 正例 |
 | j | `composite_masked` 收一个「mask 外也被改过」的 `generated` ⇒ 输出的 mask 外**仍逐点等于 `source`** | **强制作的那一侧**（§5.2） |
-| k | 掩码尺寸 ≠ 源图尺寸 ⇒ `Err(MaskMismatch { .. })` | §5.2 的前置条件（fail-closed 侧） |
+| k | 形状不符 ⇒ `Err(ShapeMismatch { .. })`，**逐对给用例**：掩码↔源图（宽高）、`generated`↔源图（宽高）、`generated`↔源图（通道数）；`outside_mask_difference` 侧再给 `result`↔源图一对 | §5.2 与 §5.3 的前置条件（fail-closed 侧）；只拍一对的话，另两对删掉也照绿 |
 | l | `outside_mask_difference`：mask 外全同 ⇒ 差异为 0；改一个像素 ⇒ 差异为 1 | §5.3 的两侧 |
 | m | 编辑产出制品的 `input_artifacts == [source_id]` 且 `id != source_id` | §6.1 的谱系边 |
 | n | 用同一个 id 经 `save_artifact` 写第二次 ⇒ `Err`，且原行不变 | §6.2（**这是 P1 判据的重跑，本块不另建**） |
@@ -681,9 +733,9 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 |---|---|---|
 | **取反**：`resolve_edit_region` 的 `Point` 支在 detector 空返回时**合成一个单像素掩码**（`Ok`） | g（`Err` 变 `Ok`） | f、h（正例那一侧不受影响）；d、e（另两支） |
 | **放宽**：`composite_masked` 改成「原样返回 `generated`」 | j（mask 外不再等于 `source`） | i（mask 内仍等于 `generated`，且若语料的 mask 外恰好没被改动，i 也照过——**故 i 的语料必须有一个 mask 外被改过的对照件**，否则此档不红 = 缺用例） |
-| **取反**：`MaskMismatch` 的前置条件删掉（尺寸不符也照做） | k | i、j |
+| **取反**：`ShapeMismatch` 的前置条件删掉（形状不符也照做） | k | i、j |
 | **收紧**：把 `generate-image` 的 `determinism` 改成 `Deterministic` | p 的第一枚（`cache_key` 由 `None` 变 `Some`）；**a 的那一行**（它的期望值是手写的） | o、q（另两枚 `Deterministic` 的判据与批次边界不受影响） |
-| **取反**：`register_image_operators` 改成边核边写（先注册前几枚，遇到违规才返回） | c2（注册表内容与调用前不同） | b、c（`Err` 那一半仍绿） |
+| **取反**：`register_image_operators` 改成边查重边写（先注册前几枚，遇到违规才返回） | c2（注册表内容与调用前不同） | b、c（`Err` 那一半仍绿） |
 | **等价变异**：把某个 backend 候选串改成另一个同样合法的串（如 `builtin` → `core`） | **全绿**——这是一枚**等价变异体**（候选是文本，没有跨表约束）。要打红它必须换变异体：把 `hard-composite` 的候选加一个，那时 r 红 | —— |
 | **放宽**：`ALL_OPERATORS` 少定义一枚（4） | `len() == 5` 的断言、b 的对应枚、q 的补集断言 | 其余（**这一档若不红，说明 b 是按 `ALL_OPERATORS` 自己遍历的**——即假照片） |
 
@@ -691,7 +743,7 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 
 本仓已有 `trybuild` 的既有做法（`crates/continuum-connector/Cargo.toml:53` 与其 `tests/type_level.rs` 的 `compile_fail`；`continuum-workspace` / `continuum-secrets` / `continuum-model-registry` / `continuum-capability` / `continuum-node` 同样登记了它）。**本块用两条**：
 
-1. **`resolve_edit_region` 少传 `detector` ⇒ 编不过**（§4.4）。这条钉的是「`Point` 那一支没有 detector 就调不动」。
+1. **`resolve_edit_region` 少传 `detector`（或少传 `source_dims`）⇒ 编不过**（§4.4）。这条钉的是「`Point` 那一支没有 detector 就调不动」与「`Box` 那一支没有源图尺寸就投不出掩码」。
 2. **`Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）在 `continuum-image` 里编不过** ⇒ 在本块的 crate 里**造不出** `Evidence`（P5a 设计 §4.4 的「唯一产生点」是结构事实）。**这一条在本块的分量比在 P5e 小**：本块不写域包装（§7.2），故它是本块侧唯一的一条证据面照片。
 
 **原先拟列在这里的第一条已移出本块的照片清单**：原写「`Operator { .. , determinism: Deterministic }` 的构造不带 `backend_candidates` ⇒ 编不过」。那是 P1 的 `Operator`（`crates/continuum-operator/src/definition.rs:79-88`，七个 pub 字段、无 `Default`）的**结构事实**，不是本块造出来的照片——本块只是照它构造 `ALL_OPERATORS`。
@@ -717,15 +769,16 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
    (ii) **域包装（`evidence_from_*`）该不该存在、若该存在由谁唯一持有**：本块**不写**（§7.2），理由是四块各写一个即同一件事的四个词汇表。**收件人：P5a + P5e + 协调者**。
    (iii) **§3.5 那条「`Deterministic` 算子的 backend 名单」规则与领域无关**（§3.5）：本块不重写它；若它该覆盖四个域，应由**一处**持有（P5e 的注册入口、或第 3 层的注册路径）。**收件人：P5e + 协调者**。
 4. **待与规范维护者对账（§34 无图像旗标）**（§3.6）：§34 的五个旗标（`docs/spec/01-concepts.md:1424-1428`）无一对应图像生成，故 `generate-image` 与 `local-generative-edit` 今天**没有授权门**。**缺的是「图像生成是否也要单独授权、若要是哪一枚旗标」这一步。收件人：规范维护者。**
-5. **待与规范维护者对账（三处 schema 与一处口径）**：
+5. **待与规范维护者对账（四处 schema 与一处口径）**：
    (i) **§325 的判据五条缺失**（§4.3 的表）：选取规则、置信度、零检出、区域上限、`SemanticObject` 的名字空间。
    (ii) **`Artifact.provenance` / `metadata` 的字段约定未给**（§6.3）——与 P5a 设计 §15 第 9 条、P5e 设计 §14 第 4 条**是同一处缺口的三半，三处互指**。
    (iii) **掩码的编码格式未给**（§3.2 第 2 行、§5.2 `Raster` 的像素格式）。
+   (iv) **§323/§324 的五个非制品字段（`prompt` / `dimensions` / `constraints` / `instruction` / `preserve_outside_region`）住在节点参数上，而节点参数的字段约定未给**（§3.2 末的落点声明、§13 第 11 条）：它们的键名、类型、取值域与「哪一枚参数属于哪一段流程」都没有规范出处。
    **收件人：规范维护者。**
 6. **待与规范维护者 + P5a 对账（§168 的第一项检查）**（§5.5）：`修改区域是否符合要求`（`docs/spec/03-product-drive.md:823`）是语义判定，需要 §262 第 3 级的独立模型验证器，而**它的判据规范未给**。本块不注册那枚算子。**缺的是「这一项检查的判据与它的持有方」这一步。收件人：规范维护者 + P5a 的下一轮。**
 7. **待与规范维护者对账（§240 的 `version` 与 §327 的 `v1/v2/v3`）**（§6.1）：两处是不是同一个计数，规范未明说；本设计取「沿谱系的步号」。**缺的是这一句明说。收件人：规范维护者。**
 8. **待与 P5b 对账**（§8）：本块**无 `bind` 目标**，且**不登记 `continuum-method` 边**；若协调者裁决补 `image/` 目录，`MethodDomain` 的臂与 `seeded()` 的条目归 P5b，本块只供算子 id。**收件人：协调者 + P5b。**
-9. **待与 P5a 对账（答复一条 + 假设一条）**：(i) 答复其设计 §14 第 3 条：`VisualCheck` + `MetadataCheck` 够用，**不请求新臂**（§7.1）。(ii) 本块假设 `Evidence::from_tool_result` 的签名（其设计 §4.4 的八个参数）在 P5a 落地时不变——本块 §7.2 直接调它。**若它变，本块没有任何包装可以挡，改动落在调用点。** 收件人：P5a。
+9. **待与 P5a 对账（答复一条 + 假设一条）**：(i) 答复其设计 §14 第 3 条：`VisualCheck` + `MetadataCheck` 够用，**不请求新臂**（§7.1）。(ii) 本块假设 `Evidence::from_tool_result` 的签名（其设计 §4.4 的八个参数）在 P5a 落地时不变——**宿主（第 3 层）的执行代码**在 §7.2 的数据流上直接调它。**若它变，本块没有任何包装可以挡，改动落在调用点**——而**那个调用点不在本块内**（§7.2：本块不提供这一层的函数，§2.1 因此把 `continuum-verify` 记为 dev 边）。**收件人：P5a + 第 3 层的宿主**（本条原先只写 P5a；按 §7.2 的读法，改动落在本块之外的那一处）。
 
 ---
 
@@ -743,6 +796,7 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 8. **P5f 的算子在方法库里没有条目**（§8）。**缺的是「§187 是否补一个 `image/` 目录、或 image 的方法并入哪一份既有目录」这一步的裁定。收件人：协调者。**
 9. **`Benchmark` 臂在本块没有用处**（§7.1）：§168 的四项检查都不是性能比较。这不是缺口，是据实记录——**免下一轮照 P5a 的询问以为本块用过它**。
 10. **本块的登记入口、区域解析函数、两个确定性函数今天都没有生产调用方**：`register_image_operators`（§3.1）、`resolve_edit_region`（§4.2）、`composite_masked`（§5.2）、`outside_mask_difference`（§5.3），四处。**这不是本块的缺口，是第 3 层的**（切分 §四第 4 条；P1 设计 §18 已有同形的一条；拍照的限制见 §11.5）。
+11. **§323/§324 的五个非制品字段住在节点参数上，而节点参数的字段约定未给**（§3.2 末的落点声明、§12 第 5 条 (iv)）：`prompt` / `dimensions` / `constraints`（§323 `:2316-2331`）与 `instruction` / `preserve_outside_region`（§324 `:2335-2345`）。**缺的是「这五个键住在 `Node` 的哪一处、各自的类型与取值域、以及 `resolve_edit_region` 与 `composite_masked` 的调用方从哪一处取它们」这三步。收件人：规范维护者。** 本块只声明它们的落点是节点参数（不进 `input_schema`、不进本块的任何类型），**不替它们定形状**。
 
 ---
 
