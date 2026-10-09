@@ -36,7 +36,7 @@
 // （`resolved_case.entity()` 一类），故四个载荷类型名一个都不必 import。
 use continuum_canonical::{
     Candidate, CandidateFacts, EntityId, EntityKind, ExplicitConstraint, Opaque, RequiredStrength,
-    ResolutionConfidence, ResolutionResult, ResolutionScope, UnknownReason, resolve,
+    ResolutionConfidence, ResolutionResult, ResolutionScope, UnknownReason, resolve, satisfies,
 };
 
 /// 夹具：一枚候选。
@@ -448,5 +448,577 @@ fn the_two_numbers_are_not_on_the_same_axis() {
     assert!(
         matches!(&r, ResolutionResult::Resolved(_)),
         "门槛那一格读的是 `confidence.meets(required)` 这两个不透明值：{r:?}",
+    );
+}
+
+// ============================================================================
+// Task 5：§4.2 的「不存在正确候选时不强行绑定」——四条断言 A／B／C／D 与两侧守卫。
+//
+// 每条用例的头注释写明**它钉的是什么**与**红条件是什么**；红条件在 Task 5 的变异轮里
+// 逐条真的取过（真写变异体、真跑到红），取到的结果记在
+// `.superpowers/sdd/p4-task-5-report.md`。
+//
+// # 「不存在正确候选时不强行绑定」这句绝对措辞的照片就是下面这六条
+//
+// A（在来源里）、A 的注入守卫（除两个声明的来源外没有第三个）、B（全不合格不产出）、
+// C（空集不产出）、D 第 1 条（合格者被选中）、D 第 2 条（多合格者得 `Ambiguous` 且
+// `surviving` 恰是合格的那两枚）、外加「守卫的另一侧」（唯一合格**要**产出）。
+// **少任何一条，这条绝对措辞就有一格没有照片**：A／B／D 三条都在 fail-open 侧
+// （少了它们，系统仍会返回一个看起来正常的 `Resolved`），C 在 fail-closed 侧，一条即可
+// （设计 §4.2 末段，`design:682-686`）。
+//
+// # 每条夹具都含至少一条**非空**显式约束 `K`
+//
+// 约束集为空时每个候选都平凡地合格（`qualifying` 的合取在空集上取中性元），用例会退化成
+// 「两个候选都在集合里」——**恒真**的用例，一个把「合格」判成恒真的实现照样绿。
+// 故下面每一条都先断言夹具的**前提**（哪一枚满足 `K`、哪一枚违反），把「合格／不合格」
+// 变成被证明的，而不是被假定的（本仓「正控制不得自证」的同一条）。
+//
+// # 载荷一律经只读访问器读
+//
+// 四个载荷的字段私有（见 `src/resolver.rs` 的文件头），本文件在 crate 外，
+// 故按名解构（`Unknown { reason, .. }`）与结构体字面量都写不出来——
+// 下面全部走 `entity()` / `surviving()` / `reason()` / `candidate_count()`。
+// ============================================================================
+
+/// §4.2 断言 A 的判据，**可执行形态**：`e ∈ 检索集 ∪ {由 binding 注入的那一枚}`。
+///
+/// # 这里不是「`e` ∈ 工作集」：因为那个版本会恒真
+///
+/// A 的初稿写「`e` 是**输入候选集**里的成员」，而「输入候选集」两读都通
+/// （设计 §4.2 的订正，`design:616-628`）：
+///
+/// - 读成「**检索器交出的那一集**」——§4.6 的 binding 注入会让 A 变假，故 A 必须
+///   把注入的那一枚**显式列成第二个来源**（本函数的 `injected` 参数就是它）；
+/// - 读成「**解析器实际工作的那一集**」——注入之后 A **恒真**，解析器可以自造任何实体
+///   而 A 永不响，而 A 本来就是防「解析器自造实体」的。
+///
+/// 故 A 拿的是**两个声明的来源**的并，不是「解析器手里那一集」。
+/// 证据在设计自己的照片里：`Resolved.candidate_count` 比检索集多 1（§4.6 的照片 (a)）
+/// ⟹ 「检索集」与「工作集」是两个集合。
+///
+/// # 今天 `injected` 一律传 `None`
+///
+/// `ExplicitBinding` 的注入点是 Task 6（`binding::apply`），今天**没有第二个来源**。
+/// 参数留在签名里，是为了让注入落地之后这条判据**不必重写**且**仍不恒真**——
+/// 判据写在「来源」上而不是写在「工作集」上，`assertion_a_injection_guard` 钉的就是这个差别。
+fn a_holds(
+    e: &EntityId,
+    retrieved: &[(Candidate, CandidateFacts)],
+    injected: Option<&EntityId>,
+) -> bool {
+    retrieved
+        .iter()
+        .any(|(c, _)| c.entity_id.as_str() == e.as_str())
+        || injected.is_some_and(|i| i.as_str() == e.as_str())
+}
+
+/// A 里「**至多一次**注入」那一侧的规模上界：`|检索集| + [有注入]`。
+///
+/// 它与 [`a_holds`] 是同一条判据的两个读数（成员、规模），
+/// 对应设计给的两条观测形式（`design:637-640`）。
+fn a_count_bound(retrieved: &[(Candidate, CandidateFacts)], injected: Option<&EntityId>) -> usize {
+    retrieved.len() + usize::from(injected.is_some())
+}
+
+/// **断言 A**（§4.2）：`Resolved(e)` 蕴含 `e ∈ 检索集 ∪ {注入的那一枚}`。
+///
+/// 不是「`e` 与某个候选相似」，而是**同一个 `EntityId` 值**（经 `as_str` 比）。
+/// 它排除的失败形态：解析器自造一个实体、或把检索分数最高的候选的**名字拼出来**。
+///
+/// 夹具：`K = [Scope(Project)]`（非空）；`{e-c1 满足 K, e-c2 违反 K}`。
+///
+/// 红条件（**取反档**）：让解析器不问候选、自己拼一个实体出来
+/// （例如把 `only.entity_id` 换成 `EntityId::from_str("e-invented")`，或把最高分候选的
+/// 名字按格式拼出来）⟹ 本用例第一条断言红。实测见报告 §变异轮。
+#[test]
+fn assertion_a_a_resolved_entity_is_a_member_of_the_retrieved_set_or_the_injected_one() {
+    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
+    let retrieved = vec![
+        (
+            cand("e-c1", Some(0.50)),
+            facts(ResolutionScope::Project, EntityKind::Tool),
+        ),
+        (
+            cand("e-c2", Some(0.99)),
+            facts(ResolutionScope::Global, EntityKind::Tool),
+        ),
+    ];
+    // 夹具前提：这两枚**确实**一个合格、一个不合格（`K` 非空，故这不是恒真的一格）。
+    assert!(
+        satisfies(&retrieved[0].0, &retrieved[0].1, &k[0]),
+        "夹具前提：e-c1 满足 K",
+    );
+    assert!(
+        !satisfies(&retrieved[1].0, &retrieved[1].1, &k[0]),
+        "夹具前提：e-c2 违反 K（它分数更高，故它不是被分数选中的那一枚）",
+    );
+
+    // 今天没有第二个来源（注入点是 Task 6）。
+    let injected: Option<EntityId> = None;
+
+    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let x = match &r {
+        ResolutionResult::Resolved(x) => x,
+        other => panic!("恰一个合格候选、门槛已过应落 `Resolved`，实得 {other:?}"),
+    };
+
+    assert!(
+        a_holds(x.entity(), &retrieved, injected.as_ref()),
+        "断言 A：解出的实体必须落在「检索集 ∪ 注入的那一枚」里，实得 {} \
+         （不在两个来源的并里 ⟹ 解析器自造了实体，或把某个名字拼了出来）",
+        x.entity().as_str(),
+    );
+    // 同一枚 `EntityId` 值（经 `as_str` 比）——不是「像某个候选」。
+    assert_eq!(
+        x.entity().as_str(),
+        retrieved[0].0.entity_id.as_str(),
+        "解出的 id 与检索集里那一枚是**同一个值**（不是相似、不是拼出来的）",
+    );
+    assert_eq!(
+        x.candidate_count(),
+        retrieved.len(),
+        "`candidate_count` 是判定**输入**的规模：它与夹具给的检索集一致 \
+         （今天没有注入，故上界 `|检索集| + 1` 取等号）",
+    );
+    assert!(
+        x.candidate_count() <= a_count_bound(&retrieved, injected.as_ref()),
+        "规模不得超过「检索集 ＋ 至多一次注入」",
+    );
+}
+
+/// **断言 A 的配套守卫**（§4.2 点名的那一条）：**注入只能来自 `ExplicitBinding`**。
+///
+/// # 没有这条用例，A 只是同义反复
+///
+/// 若 A 被实现成「`e` ∈ 工作集」（解析器手里那一集），那么注入之后它**恒真**：
+/// 解析器自造一个实体、把它塞进自己那一集，A 照样成立。
+/// 本用例把判据**钉在两个声明的来源上**，故自造实体在这里红。
+///
+/// # 夹具刻意选成「自造实体最像是对的那一格」
+///
+/// `K = [Scope(Project), BoundTo(e-pointed)]`，检索集里那一枚**违反 `Scope`**。
+/// 「用户点名的实体就是"正确候选"」是一个很自然的错误实现——那时解析器会返回
+/// `Resolved(e-pointed)`，而 **`e-pointed` 既不在检索集里、今天也没有 binding 给它背书**：
+/// 它不在两个来源的并里。正确结果是 `Unknown { AllCandidatesRejected }`
+/// （`binding` 不豁免约束；那一侧的正式用例是 Task 6 的照片 (b)，这里钉的是
+/// 「**在今天这个没有注入点的实现里**，除检索集外没有第二个来源」）。
+///
+/// # 红条件（这条用例本身的红）
+///
+/// 在 `resolve` 里加一条「没有合格候选时，把 `BoundTo` 点名的那个实体作为候选产出」
+/// （**取反档**：它正是「解析器自造实体」的形态）⟹ 结果落 `Resolved(e-pointed)`，
+/// 本用例 `Resolved` 那一支的**第一条**断言红（`a_holds` 为假）。
+/// 把 A 实现成「`e` ∈ 工作集」（**放宽档**）在**今天**与正确实现不可分
+/// ——注入点落地（Task 6）之后两者才分岔，而这条用例正是为那一刻准备的：
+/// 它读的是「两个声明的来源」，不是「解析器手里那一集」。
+/// 实测见报告 §变异轮。
+#[test]
+fn assertion_a_injection_guard() {
+    let k = [
+        ExplicitConstraint::Scope(ResolutionScope::Project),
+        ExplicitConstraint::BoundTo(EntityId::from_str("e-pointed")),
+    ];
+    // 检索集里的那一枚**违反 `Scope`**：合格集因此为空。它的 id 与 `BoundTo` 的那个也不同。
+    let retrieved = vec![(
+        cand("e-retrieved", Some(0.97)),
+        facts(ResolutionScope::Global, EntityKind::Tool),
+    )];
+    assert!(
+        !satisfies(&retrieved[0].0, &retrieved[0].1, &k[0]),
+        "夹具前提：这一枚违反 `Scope`，故合格集为空",
+    );
+
+    // 今天没有第二个来源：`ExplicitBinding` 的注入点（`binding::apply`）是 Task 6。
+    let injected: Option<EntityId> = None;
+
+    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    match &r {
+        // —— 这一支就是守卫本身 ——
+        ResolutionResult::Resolved(x) => {
+            assert!(
+                a_holds(x.entity(), &retrieved, injected.as_ref()),
+                "断言 A 的注入守卫：解出的实体 {} 不在「检索集 ∪ 注入的那一枚」里 \
+                 ——自造实体只能来自 `ExplicitBinding` 这唯一一个注入点，今天是零个",
+                x.entity().as_str(),
+            );
+            assert!(
+                x.candidate_count() <= a_count_bound(&retrieved, injected.as_ref()),
+                "观测形式之二：`candidate_count` 不得大于「检索集 ＋ 至多一次注入」的应有大小",
+            );
+        }
+        // —— 正确实现走这一支 ——
+        ResolutionResult::Unknown(u) => {
+            assert_eq!(
+                u.reason(),
+                &UnknownReason::AllCandidatesRejected,
+                "检索集非空、但全部违反约束：`AllCandidatesRejected`（不是 `NoCandidate`）",
+            );
+        }
+        other => panic!(
+            "合格集为空且候选集非空应落 `Unknown {{ AllCandidatesRejected }}`，实得 {other:?}",
+        ),
+    }
+}
+
+/// **断言 B**（§4.2，拒绑）：候选集非空 ∧ 全部候选都违反某个显式约束 ⟹ **不是 `Resolved`**。
+///
+/// # 「全部候选都得判到」——故**逐候选一条断言，不抽代表**
+///
+/// 夹具：三条非空约束 `K = [Scope(Project), EntityKind(Skill), BoundTo(e-x)]`，
+/// 三枚候选各**恰好违反一条不同的**约束（`c1` 违反 `Scope`、`c2` 违反 `EntityKind`、
+/// `c3` 违反 `BoundTo`）。每一枚各喂一次 [`resolve`]（它在该次里是唯一候选），
+/// **每一次**都断言不是 `Resolved`，并断言该次的具体态。
+///
+/// 「恰好违反一条」不是假定的：本用例对每一枚**逐条**核
+/// 「它违反的正是第 `i` 条、其余两条都满足」，故一个写歪的夹具会让本用例红，
+/// 而不是静默地少覆盖一格（本仓「枚举断言须逐项有照片」）。
+///
+/// # 逐次断言的是哪一态（`ConfirmRequired` 在本条取不到照片，照实说）
+///
+/// 本条的每一格里，候选集非空而**合格数为零**，按 [`resolve`] 写死的判定顺序落
+/// `Unknown { AllCandidatesRejected }`（`NoCandidate` 那一枚的界线是**候选集为空**，
+/// 见 `resolve` 的文档）。**`ConfirmRequired` 这一格在本条到不了**：它的条件是
+/// 「恰有**一个合格**候选而门槛未过」，与本条「全部候选都不合格」相抵——
+/// 故这里逐次断言的是 `AllCandidatesRejected`，不是「`Unknown` 或 `ConfirmRequired` 二选一」。
+///
+/// 红条件（**放宽档**）：把「全部候选都不合格」也判成 `Resolved`
+/// （例如让 `qualifying` 在结果为空时退回全体候选）⟹ 本用例逐枚红。实测见报告 §变异轮。
+#[test]
+fn assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved() {
+    let k = [
+        ExplicitConstraint::Scope(ResolutionScope::Project),
+        ExplicitConstraint::EntityKind(EntityKind::Skill),
+        ExplicitConstraint::BoundTo(EntityId::from_str("e-x")),
+    ];
+    // 每一枚**恰好违反一条**：c1 违反 k0（其 id 与 kind 都对），
+    // c2 违反 k1，c3 违反 k2。c1 与 c2 同 id 是故意的——`BoundTo` 要它们都得是 `e-x`。
+    let candidates = vec![
+        (
+            cand("e-x", Some(0.9)),
+            facts(ResolutionScope::Global, EntityKind::Skill),
+        ),
+        (
+            cand("e-x", Some(0.8)),
+            facts(ResolutionScope::Project, EntityKind::Tool),
+        ),
+        (
+            cand("e-y", Some(0.7)),
+            facts(ResolutionScope::Project, EntityKind::Skill),
+        ),
+    ];
+
+    for (i, (c, f)) in candidates.iter().enumerate() {
+        // —— 夹具前提：这一枚违反的**正是第 `i` 条**，其余两条都满足 ——
+        let violated: Vec<usize> = (0..k.len())
+            .filter(|&j| !satisfies(c, f, &k[j]))
+            .collect();
+        assert_eq!(
+            violated,
+            vec![i],
+            "夹具前提：第 {i} 枚候选必须**恰好**违反第 {i} 条约束（实得违反 {violated:?}）",
+        );
+
+        // —— 这一枚单独喂进去：它是该次唯一的候选，且不合格 ——
+        let r = resolve(
+            std::slice::from_ref(&candidates[i]),
+            &k,
+            &conf("high"),
+            &req("high"),
+        );
+        assert!(
+            !matches!(&r, ResolutionResult::Resolved(_)),
+            "断言 B：第 {i} 枚候选违反了第 {i} 条约束，它**唯一**且不合格，\
+             结果不许是 `Resolved`——实得 {r:?}",
+        );
+        match &r {
+            ResolutionResult::Unknown(u) => {
+                assert_eq!(
+                    u.reason(),
+                    &UnknownReason::AllCandidatesRejected,
+                    "第 {i} 枚：候选集非空（规模 1）而合格数为零 ⟹ `AllCandidatesRejected`",
+                );
+                assert_eq!(u.candidate_count(), 1, "第 {i} 枚：判定输入的规模是 1");
+            }
+            other => panic!(
+                "第 {i} 枚应落 `Unknown {{ AllCandidatesRejected }}`，实得 {other:?}",
+            ),
+        }
+    }
+
+    // —— 三枚一起喂：仍然全部不合格 ⟹ 仍不是 `Resolved`，且规模是 3 ——
+    let all = resolve(&candidates, &k, &conf("high"), &req("high"));
+    assert!(
+        !matches!(&all, ResolutionResult::Resolved(_)),
+        "断言 B（全集）：三枚各违反一条，没有一枚合格，结果不许是 `Resolved`——实得 {all:?}",
+    );
+    match &all {
+        ResolutionResult::Unknown(u) => {
+            assert_eq!(
+                u.reason(),
+                &UnknownReason::AllCandidatesRejected,
+                "全集：候选集非空（规模 3）而合格数为零 ⟹ `AllCandidatesRejected`",
+            );
+            assert_eq!(
+                u.candidate_count(),
+                3,
+                "全集：判定输入的规模是 3（`candidate_count` 数的是**输入**，不是合格数）",
+            );
+        }
+        other => panic!("全集应落 `Unknown {{ AllCandidatesRejected }}`，实得 {other:?}"),
+    }
+}
+
+/// **断言 C**（§4.2，空集）：候选集为空 ⟹ `Unknown { NoCandidate }`。
+///
+/// fail-closed 侧，一条即可（设计 §4.2 末段）——**但这一条必须逐项断到两个读数**：
+/// `reason` **与** `candidate_count`。只断 `reason` 的话，一个理由写死成常量、
+/// 计数乱填的实现也能绿（本仓「守卫须两侧都钉」的同一条）。
+///
+/// 红条件（**取反档**，两枚 `UnknownReason` 混用正是它要防的）：
+/// 把空集那一格的 `reason` 给成 `AllCandidatesRejected` ⟹ 本用例红；
+/// 空集返回 `ConfirmRequired` ⟹ 本用例红。实测见报告 §变异轮。
+#[test]
+fn assertion_c_an_empty_candidate_set_is_unknown_with_no_candidate() {
+    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
+    let empty: Vec<(Candidate, CandidateFacts)> = Vec::new();
+
+    let r = resolve(&empty, &k, &conf("high"), &req("high"));
+    let u = match &r {
+        ResolutionResult::Unknown(u) => u,
+        other => panic!(
+            "断言 C：候选集为空，没有可绑定的来源，结果不许是 `Resolved` / \
+             `ConfirmRequired` / `Ambiguous`——应落 `Unknown {{ NoCandidate }}`，实得 {other:?}",
+        ),
+    };
+    assert_eq!(
+        u.reason(),
+        &UnknownReason::NoCandidate,
+        "断言 C：候选集**为空**那一枚 `reason` 是 `NoCandidate`（不是 `AllCandidatesRejected`）",
+    );
+    assert_eq!(
+        u.candidate_count(),
+        0,
+        "断言 C 的第二个读数：空集的规模必为 0",
+    );
+}
+
+/// **断言 D 第 1 条**（§4.2）：`Resolved(e)` 蕴含 `e` **满足全部显式约束**。
+///
+/// 夹具：`K = [Scope(Project)]`（非空）；`{e-qualified 满足 K, e-unqualified 违反 K}`，
+/// 且**不合格的那一枚检索分数更高**（`0.99` vs `0.10`）。
+///
+/// # 为什么钉住 A 不足以替代 D
+///
+/// `e-unqualified` **也在检索集里**——若解析器绑定到它，**A 仍然成立**。
+/// 下面第三条断言就是这件事的证据：`a_holds` 对「绑到不合格的那一枚」**不响**。
+/// 故 D 是独立的一条，不能由 A 推出。
+///
+/// 红条件（**移除档**）：删掉约束求值（让候选全体都算合格、再取检索分数最高的那一枚）
+/// ⟹ 会绑定到 `e-unqualified`，本用例第一条断言红。实测见报告 §变异轮。
+#[test]
+fn assertion_d_1_the_qualified_candidate_is_selected_even_when_an_unqualified_one_is_present() {
+    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
+    let retrieved = vec![
+        (
+            cand("e-qualified", Some(0.10)),
+            facts(ResolutionScope::Project, EntityKind::Tool),
+        ),
+        (
+            cand("e-unqualified", Some(0.99)),
+            facts(ResolutionScope::Global, EntityKind::Tool),
+        ),
+    ];
+    assert!(
+        satisfies(&retrieved[0].0, &retrieved[0].1, &k[0]),
+        "夹具前提：e-qualified 满足 K",
+    );
+    assert!(
+        !satisfies(&retrieved[1].0, &retrieved[1].1, &k[0]),
+        "夹具前提：e-unqualified 违反 K",
+    );
+
+    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let x = match &r {
+        ResolutionResult::Resolved(x) => x,
+        other => panic!("恰一个合格候选、门槛已过应落 `Resolved`，实得 {other:?}"),
+    };
+    assert_eq!(
+        x.entity().as_str(),
+        "e-qualified",
+        "断言 D 前半：解出的是**合格**的那一枚（合格与否由非空约束 `K` 判定）",
+    );
+    assert_eq!(
+        x.satisfied().len(),
+        k.len(),
+        "`satisfied` **照录**判定时用的那一组约束（D 的判据要能由调用方自己核）",
+    );
+    // —— A 不足以替代 D 的证据 ——
+    assert!(
+        a_holds(&EntityId::from_str("e-unqualified"), &retrieved, None),
+        "这一行断言 A 对「绑到不合格的那一枚」**不响**（它也在检索集里）\
+         —— 故 D 是独立的一条",
+    );
+}
+
+/// **断言 D 第 2 条**（§4.2）：多个合格候选 ⟹ **不是 `Resolved`**。
+///
+/// 夹具：**同一条非空约束 `K = [Scope(Project)]`**；候选 `{c1 满足 K, c2 满足 K, c3 违反 K}`。
+/// 两条断言：
+///
+/// 1. 结果是 [`ResolutionResult::Ambiguous`] 而**不是** `Resolved(c1)`；
+/// 2. `Ambiguous.surviving` **恰是 `{c1, c2}`**——逐项：长度为 2、两枚都在、`c3` **不在**。
+///
+/// # 第 2 条才是要紧的那一条（`c3` 靠它承重）
+///
+/// 只断言「结果是 `Ambiguous`」时 **`c3` 不承重**：一个把「合格」判成**恒真**的实现
+/// 会让 `{c1, c2, c3}` 全合格，结果**仍是 `Ambiguous`**，用例照样绿。
+/// `c3` 是对照组，靠第 2 条兑现——这也是 `Ambiguous` 必须带 `surviving` 的原因。
+///
+/// # 为什么是**逐项相等**而不是集合相等
+///
+/// 集合相等会让「把 `surviving` 的顺序交给 `HashSet` 迭代」成为**等价变异体**
+/// （顺序变了而集合没变——那正是本仓纪律 1(b) 点名的假绿）。
+/// 逐项相等同时钉住「按输入次序」：夹具的 id 就取作 `c1`／`c2`／`c3`，
+/// 故输入次序与 **id 升序**在这一份夹具里是同一个次序。
+///
+/// 红条件（两枚真变异体）：
+/// - **移除档**：把「合格」判成恒真（`qualifying` 不过滤）⟹ `surviving` 多出 `c3`，第 2 条红；
+/// - **取反档**：把 `surviving` 的顺序交给无序容器迭代 ⟹ 第 2 条的逐项相等红。
+///   实测见报告 §变异轮（含它对两枚元素是否稳定变红的**照实记录**）。
+#[test]
+fn assertion_d_2_multiple_qualified_candidates_give_ambiguous() {
+    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
+    let retrieved = vec![
+        (
+            cand("c1", Some(0.90)),
+            facts(ResolutionScope::Project, EntityKind::Tool),
+        ),
+        (
+            cand("c2", Some(0.80)),
+            facts(ResolutionScope::Project, EntityKind::Skill),
+        ),
+        (
+            cand("c3", Some(0.99)),
+            facts(ResolutionScope::Global, EntityKind::Tool),
+        ),
+    ];
+    // 夹具前提：前两枚满足 K、第三枚违反 K（`c3` 是**对照组**，它承重靠下面第 2 条）。
+    assert!(
+        satisfies(&retrieved[0].0, &retrieved[0].1, &k[0]),
+        "夹具前提：c1 满足 K",
+    );
+    assert!(
+        satisfies(&retrieved[1].0, &retrieved[1].1, &k[0]),
+        "夹具前提：c2 满足 K",
+    );
+    assert!(
+        !satisfies(&retrieved[2].0, &retrieved[2].1, &k[0]),
+        "夹具前提：c3 **违反** K（它分数最高，故它正是「按分数选」会选中的那一枚）",
+    );
+
+    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+
+    // —— 第 1 条 ——
+    assert!(
+        !matches!(&r, ResolutionResult::Resolved(_)),
+        "断言 D 后半：两个合格候选不许产出 `Resolved`，实得 {r:?}",
+    );
+    let amb = match &r {
+        ResolutionResult::Ambiguous(a) => a,
+        other => panic!("两个合格候选应落 `Ambiguous`，实得 {other:?}"),
+    };
+
+    // —— 第 2 条（要紧的那一条）——
+    let surviving = amb.surviving();
+    assert_eq!(
+        surviving.len(),
+        2,
+        "`surviving` 恰是合格的那**两枚**（`c3` 不在其中）",
+    );
+    assert_eq!(
+        ids(surviving),
+        vec!["c1", "c2"],
+        "逐项相等（不是集合相等）：长度 2、两枚都在、**按输入次序**\
+         ——夹具的 id 取作 c1／c2／c3，故它同时也是 **id 升序**",
+    );
+    assert!(
+        !surviving
+            .iter()
+            .any(|c| c.entity_id.as_str() == "c3"),
+        "`c3` **不在** `surviving` 里——它违反 K，是本用例的对照组",
+    );
+    assert_eq!(
+        amb.candidate_count(),
+        retrieved.len(),
+        "`candidate_count` 是判定**输入**的规模（3），不是合格数（2）",
+    );
+}
+
+/// **守卫的另一侧**：候选集非空且**唯一**合格 ⟹ `Resolved`（不许落 `Unknown`）。
+///
+/// # 为什么这条不能省
+///
+/// 只钉「拒绑」那一侧（A／B／D）会让一个**永远返回 `Unknown`** 的解析器**照样全绿**
+/// ——它是 fail-open 的对侧，正是本仓「守卫须两侧都钉」的缺的那一侧。
+///
+/// 夹具：`K = [Scope(Project)]`（非空），三枚候选里**恰一枚**满足它——
+/// 另两枚的 scope 各是别的值（`Global` / `Session`）。门槛已过，故结论是
+/// [`ResolutionResult::Resolved`]，且解出的正是那一枚。
+///
+/// # 另两枚为什么不是「各违反种不同的约束」
+///
+/// 这一份 `K` 只含 `Scope` 一条，故「违反」只有一种形态（scope 不等于 `Project`）——
+/// 两枚违反者靠**各自的 scope 取值**相区分。**不为此再加一条约束**：本用例钉的是
+/// 「恰一个合格要产出」这一侧，`K` 再宽只会让「恰一个」更难核对。
+///
+/// 红条件（**移除档**）：让「没有候选合格」与「恰一个候选合格」走同一支
+/// （例如把 `qualifying` 的结果长度恒判成 0）⟹ 本用例红。实测见报告 §变异轮。
+#[test]
+fn the_other_side_a_nonempty_set_with_exactly_one_qualified_candidate_is_resolved() {
+    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
+    let retrieved = vec![
+        (
+            cand("e-only", Some(0.40)),
+            facts(ResolutionScope::Project, EntityKind::Tool),
+        ),
+        (
+            cand("e-global", Some(0.95)),
+            facts(ResolutionScope::Global, EntityKind::Tool),
+        ),
+        (
+            cand("e-session", Some(0.20)),
+            facts(ResolutionScope::Session, EntityKind::Skill),
+        ),
+    ];
+    // 夹具前提：**恰一枚**合格——这一条由 `satisfies` 现算，不是假定的。
+    let qualified: Vec<&str> = retrieved
+        .iter()
+        .filter(|(c, f)| satisfies(c, f, &k[0]))
+        .map(|(c, _)| c.entity_id.as_str())
+        .collect();
+    assert_eq!(
+        qualified,
+        vec!["e-only"],
+        "夹具前提：三枚里**恰一枚**（e-only）满足 K",
+    );
+
+    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let x = match &r {
+        ResolutionResult::Resolved(x) => x,
+        other => panic!(
+            "守卫的另一侧：候选集非空且唯一合格、门槛已过 ⟹ 必须落 `Resolved`，\
+             实得 {other:?}（一个永远返回 `Unknown` 的解析器会在这里红）",
+        ),
+    };
+    assert_eq!(
+        x.entity().as_str(),
+        "e-only",
+        "解出的正是唯一合格的那一枚",
+    );
+    assert_eq!(
+        x.candidate_count(),
+        retrieved.len(),
+        "`candidate_count` 是判定**输入**的规模（3），不是合格数（1）",
     );
 }

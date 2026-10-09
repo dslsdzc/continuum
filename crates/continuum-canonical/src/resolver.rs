@@ -340,6 +340,27 @@ impl RequiredStrength {
 
 /// Reference Resolver 的入口：把候选集与显式约束判成 §4.1 的四态之一。
 ///
+/// # 工作集 = 检索集 ＋ binding 注入（至多一次）
+///
+/// `candidates` 是**检索集**：`CandidateSources` 交出的那一集，调用方给什么就是什么。
+/// §4.6 的 `ExplicitBinding` 会在**过滤之前**把一个检索没给出的实体**注入**进来，
+/// 而那是**唯一允许的注入点**（`binding::apply`，Task 6）——除它之外本层**没有第二个**
+/// 能把实体放进判定的来源。这个式子就是**工作集**：
+///
+/// ```text
+/// 工作集 = 检索集 ＋ binding 注入（至多一次）
+/// ```
+///
+/// **本函数今天收不到 binding**（Task 6 才给它入口），故今天工作集 ≡ 检索集，
+/// 注入点的位置在这里留白。
+///
+/// **§4.2 的断言 A 拿的不是这个工作集，而是「检索集 ∪ 注入的那一枚」这两个来源的并**
+/// ——注入是 A 里**显式列出的第二个来源**，故 A 既不因注入而失效（注入后它仍只约束这两个来源），
+/// 也不因注入而恒真（恒真的那个版本拿的是**工作集**）。
+/// 两者的差别由 `tests/resolver.rs::assertion_a_injection_guard` 钉住：
+/// 「解析器自造一个既不在检索集、也没有 binding 背书的实体」必须让 A 变红，
+/// 而「A 拿工作集」那个版本对自造实体**永不响**（设计 §4.2 的订正，`design:616-635`）。
+///
 /// # 判定顺序（每一格的依据都在上面）
 ///
 /// 1. 用 [`qualifying`] 取出**合格**的候选：
@@ -355,6 +376,30 @@ impl RequiredStrength {
 /// `Ambiguous` 的结果也随门槛变（`tests/resolver.rs` 的四态用例把这一格钉成
 /// 「门槛变了、结果仍是 `Ambiguous`」）。
 ///
+/// # §4.2 的四条断言：**不存在正确候选时不强行绑定**（这句绝对措辞的照片在下面逐条点名）
+///
+/// 「不强行绑定」不是一个可以写在函数里的判断，而是**四条断言的合取**
+/// （设计 §4.2，`design:608-686`；规范原文是 §273 与 §200）。逐条与用例名对钉：
+///
+/// | 断言 | 判据 | 用例 |
+/// |---|---|---|
+/// | **A** | `Resolved(e)` 蕴含 `e ∈ 检索集 ∪ {注入的那一枚}`（**同一个 `EntityId` 值**，经 `as_str` 比；不是「像某个候选」） | `assertion_a_a_resolved_entity_is_a_member_of_the_retrieved_set_or_the_injected_one` |
+/// | **A 的注入守卫** | 除那两个来源外**没有第三个**——自造实体必须让 A 变红 | `assertion_a_injection_guard` |
+/// | **B** | 候选集非空 ∧ 全部候选都违反某个显式约束 ⟹ **不是** `Resolved` | `assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved` |
+/// | **C** | 候选集为空 ⟹ `Unknown { NoCandidate }` | `assertion_c_an_empty_candidate_set_is_unknown_with_no_candidate` |
+/// | **D①** | `Resolved(e)` 蕴含 `e` **满足全部**显式约束（不是「在集合里」） | `assertion_d_1_the_qualified_candidate_is_selected_even_when_an_unqualified_one_is_present` |
+/// | **D②** | 多个合格候选 ⟹ `Ambiguous` 且 `surviving` **恰是**合格的那几枚 | `assertion_d_2_multiple_qualified_candidates_give_ambiguous` |
+/// | 守卫的另一侧 | 非空且**唯一**合格 ⟹ `Resolved`（钉住「永远返回 `Unknown`」那个方向） | `the_other_side_a_nonempty_set_with_exactly_one_qualified_candidate_is_resolved` |
+///
+/// **A／B／D 三条都在 fail-open 侧**（少了任何一条，一个错的实现仍会返回一个看起来正常的
+/// `Resolved`，从返回值上看不出错），故三条都必须有照片；C 在 fail-closed 侧，一条即可。
+/// **D 的两条照片不是重复**：D① 钉「合格」，D② 钉「唯一」——前者在 `{合格一枚，不合格一枚}`
+/// 上取照片（A 在这一格**不响**：绑到不合格的那一枚 A 仍成立），后者在 `{合格两枚，不合格一枚}`
+/// 上取（`Ambiguous` 只被断言「是哪一态」时，第三枚**不承重**）。
+///
+/// **每条夹具都含至少一条非空显式约束**：约束集为空时每个候选都平凡地合格
+/// （[`qualifying`] 的合取在空集上取中性元），那些用例会退化成「候选都在集合里」——**恒真**。
+///
 /// # 返回类型不是 `Result`
 ///
 /// §4.1 写死（`design:433-437`）：§206 的 `abstain` 已把「没有可靠解析」收进
@@ -369,14 +414,21 @@ impl RequiredStrength {
 /// 才是**工作集**（§4.6），而真实候选来源今天**零个**（设计 §16 第 5 条）。
 /// 故本函数今天只被本 crate 的用例走到，钉的是**分支机制**
 /// （与设计 §15.2 第 3 条同一体：能拍的只有机制）。**本条不是「四态已接通」**：
-/// 接线归 Task 5 的四条断言与 Task 6 的注入点。
+/// 上面那张表里的七条用例（Task 5）钉住了 §4.2 的四条断言与两侧守卫，
+/// 而**注入点本身**归 Task 6 的 `binding::apply`。
+/// 两者不是一件事：四条断言核的是**判定产出的值**，注入点决定**判定看哪一集**。
 pub fn resolve(
     candidates: &[(Candidate, CandidateFacts)],
     constraints: &[ExplicitConstraint],
     confidence: &ResolutionConfidence,
     required: &RequiredStrength,
 ) -> ResolutionResult {
+    // 工作集 = 检索集 ＋ binding 注入（至多一次；见文档）。今天没有注入点，
+    // 故这一行取到的规模就是**检索集**的规模——它正是断言 A 的第二个读数：
+    // 解出的结果里那个数**不得超过**「检索集 ＋ 至多一次注入」的应有大小。
     let candidate_count = candidates.len();
+    // 过滤施加在**工作集**上：由 `ExplicitBinding` 注入的那一枚**同走这一道**
+    // ——binding 只提高**检索**这一侧，不豁免 `ExplicitConstraint`（§4.6 第 3 条）。
     let surviving = qualifying(candidates, constraints);
 
     match surviving.len() {
