@@ -135,13 +135,15 @@ impl CanonicalRepresentation {
 ///    而那正是本节上面刚否掉的那件事：它会在两处各存一份 §4.1 的三枚，
 ///    将来加一枚、改一个名要两处同改，而**没有任何东西会因此变红**
 ///    （本节上面那段已写明这条）。
-/// 2. **外部的门比 Task 2 时写的那句话更窄**（这一半是 Task 4 补的实测）：
-///    `Resolved` 的载荷类型今天字段是 `pub`（`resolver.rs` 的文件头写了为什么），
-///    故 crate 外**写得出**一枚 `ResolutionResult::Resolved(Resolved { entity, satisfied, candidate_count })`；
-///    但 [`UnresolvedMention::new`] 是 `pub(crate)`，**那枚值进不来**
-///    ——crate 外能做的只有「把一枚 `Resolved` 交给 [`crate::finish`]」，
+/// 2. **外部的门比 Task 2 时写的那句话更窄**（这一半是 Task 4 补的实测；
+///    本轮裁决一后又窄了一格）：四个载荷（`Resolved` / `ConfirmRequired` / `Ambiguous` / `Unknown`）
+///    的字段是**私有**的、且没有公开构造函数（`resolver.rs` 的文件头写了为什么），
+///    故 crate 外**写不出**一枚 `ResolutionResult::Resolved(Resolved { entity, satisfied, candidate_count })`
+///    ——只读得到（经访问器）、拼不出。而 [`UnresolvedMention::new`] 也是 `pub(crate)`，
+///    故 **crate 外能做的只有「把一枚经 [`resolve`](crate::resolve) 得到的判定结果交给 [`crate::finish`]」**，
 ///    而 `finish` 会把它归到 `Canonical` 那一支、根本不构造本类型。
-///    **故本不变量今天仍然只由那一处构造面守**，而不是「类型守不住、谁都能破」。
+///    **故本不变量今天仍然只由那一处构造面守**，而不是「类型守不住、谁都能破」；
+///    但**门比 Task 2 时更窄了**——那半句「crate 外写得出那枚载荷」今天已不成立。
 /// 3. **有一条运行期照片**：`tests/canonical.rs::every_mention_resolved_gives_the_canonical_arm`
 ///    断言「每一枚都是 `Resolved` ⟹ 落 `Canonical` 支」——把已解的并进挂起列表的变异体
 ///    会红在那一条上（Task 2 的变异轮实测过同一形状）。

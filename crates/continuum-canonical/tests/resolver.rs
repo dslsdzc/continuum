@@ -4,6 +4,16 @@
 //! 逐条真的取过（真写变异体、真跑到红），取到的结果记在
 //! `.superpowers/sdd/p4-task-4-report.md`。
 //!
+//! # 三条用例住在 `src/resolver.rs` 的 `#[cfg(test)]` 里（本轮裁决一搬的）
+//!
+//! `every_arm_carries_exactly_its_declared_fields`（字段清单逐项）、
+//! `resolution_result_carries_no_score`（结果携带不了分数）、
+//! `resolution_confidence_never_appears_in_a_candidate_or_a_resolved`（它两侧的解构）
+//! ——这三条的机制都是**对载荷做不带 `..` 的穷尽解构**。四个载荷的字段本轮**转私有**
+//! （`src/resolver.rs` 的文件头写了理由：crate 外构造不出 `ResolutionResult`），
+//! 穷尽解构于是只有 crate 内写得出。**用例名、断言、红条件一字未改**，只是换了文件。
+//! 本文件里**读载荷走只读访问器**（`resolved_case.entity()` 一类）。
+//!
 //! # 这些用例钉的是**分支机制**，不是解析质量
 //!
 //! 真实候选来源今天**零个**（设计 §16 第 5 条），`ExplicitBinding` 的注入点还没建
@@ -20,10 +30,13 @@
 //! （那是编译期照片；本仓纪律：编译不过不算红——本条要求的可观察者是「没有一条写 `unwrap`」，
 //! 而它由这份文件的源码形态兑现）。
 
+// **四个载荷类型（`Resolved` / `ConfirmRequired` / `Ambiguous` / `Unknown`）不在这里 import**：
+// 它们的字段私有（本轮裁决一），故「不带 `..` 的穷尽解构」只有 crate 内写得出——
+// 那三条用例搬进了 `src/resolver.rs` 的 `#[cfg(test)]`。本文件读载荷**走只读访问器**
+// （`resolved_case.entity()` 一类），故四个载荷类型名一个都不必 import。
 use continuum_canonical::{
-    Ambiguous, Candidate, CandidateFacts, ConfirmRequired, EntityId, EntityKind,
-    ExplicitConstraint, Opaque, RequiredStrength, ResolutionConfidence, ResolutionResult,
-    ResolutionScope, Resolved, Unknown, UnknownReason, resolve,
+    Candidate, CandidateFacts, EntityId, EntityKind, ExplicitConstraint, Opaque, RequiredStrength,
+    ResolutionConfidence, ResolutionResult, ResolutionScope, UnknownReason, resolve,
 };
 
 /// 夹具：一枚候选。
@@ -149,55 +162,56 @@ fn each_of_the_four_states_has_a_photo_and_the_state_is_asserted() {
     };
 
     // —— 逐格断言（四格都算过了，才不会「第一格红就看不到后面三格」）——
+    // 载荷的字段私有（本轮裁决一），读它们走**只读访问器**——这也是 Task 5 的读法。
     assert_eq!(
-        resolved_case.entity.as_str(),
+        resolved_case.entity().as_str(),
         "e-only",
         "`Resolved` 的解出实体是那一枚合格候选",
     );
     assert_eq!(
-        resolved_case.satisfied.iter().map(describe).collect::<Vec<_>>(),
+        resolved_case.satisfied().iter().map(describe).collect::<Vec<_>>(),
         k.iter().map(describe).collect::<Vec<_>>(),
         "`Resolved.satisfied` 是**照录**判定时用的那一组约束",
     );
-    assert_eq!(resolved_case.candidate_count, 1, "判定输入的规模是 1");
+    assert_eq!(resolved_case.candidate_count(), 1, "判定输入的规模是 1");
 
     assert_eq!(
-        confirm_case.first.as_str(),
+        confirm_case.first().as_str(),
         "e-only",
         "`ConfirmRequired.first` 是那个**占优**候选",
     );
     assert_eq!(
-        ids(&confirm_case.surviving),
+        ids(confirm_case.surviving()),
         vec!["e-only"],
         "`surviving` 是满足全部显式约束的候选全体（这一格里恰是那一枚）",
     );
     assert_eq!(
-        confirm_case.candidate_count, 1,
+        confirm_case.candidate_count(), 1,
         "判定输入的规模仍是 1（门槛不改变输入）",
     );
 
     assert_eq!(
-        ids(&ambiguous_case.surviving),
+        ids(ambiguous_case.surviving()),
         vec!["e-a", "e-b"],
         "`Ambiguous.surviving` 是合格的**全体**，按输入次序、不去重、不排序",
     );
     assert_eq!(
-        ambiguous_case.candidate_count, 2,
+        ambiguous_case.candidate_count(), 2,
         "`candidate_count` 是判定**输入**的规模，不是合格数",
     );
     assert_eq!(
-        ids(&ambiguous_with_unmet_gate.surviving),
+        ids(ambiguous_with_unmet_gate.surviving()),
         vec!["e-a", "e-b"],
         "门槛未过时 `Ambiguous` 的载荷一模一样——门槛在这一格没有可观察后果",
     );
 
     assert_eq!(
-        unknown_case.reason,
-        UnknownReason::NoCandidate,
+        unknown_case.reason(),
+        &UnknownReason::NoCandidate,
         "空候选集的那一枚 `reason` 是 `NoCandidate`",
     );
     assert_eq!(
-        unknown_case.candidate_count, 0,
+        unknown_case.candidate_count(), 0,
         "空集的规模是 0（它是把两枚 `reason` 分开的第二个读数）",
     );
 }
@@ -235,11 +249,11 @@ fn unknown_reason_distinguishes_an_empty_set_from_all_rejected() {
         other => panic!("空候选集应落 `Unknown`，实得 {other:?}"),
     };
     assert_eq!(
-        empty_reason.reason,
-        UnknownReason::NoCandidate,
+        empty_reason.reason(),
+        &UnknownReason::NoCandidate,
         "候选集**为空**那一格：`NoCandidate`",
     );
-    assert_eq!(empty_reason.candidate_count, 0, "空集的规模必为 0");
+    assert_eq!(empty_reason.candidate_count(), 0, "空集的规模必为 0");
 
     // 二：候选集非空、但全部违反那一条约束 ⟹ `AllCandidatesRejected`，规模非零。
     let all_rejected = vec![
@@ -257,18 +271,19 @@ fn unknown_reason_distinguishes_an_empty_set_from_all_rejected() {
         other => panic!("全不合格应落 `Unknown`，实得 {other:?}"),
     };
     assert_eq!(
-        rejected_reason.reason,
-        UnknownReason::AllCandidatesRejected,
+        rejected_reason.reason(),
+        &UnknownReason::AllCandidatesRejected,
         "候选集**非空但全不合格**那一格：`AllCandidatesRejected`",
     );
     assert!(
-        rejected_reason.candidate_count > 0,
+        rejected_reason.candidate_count() > 0,
         "这一格的规模必须非零（它把「本来就没有」与「全否掉了」分开）",
     );
 
     // 两枚**可区分**——这一句是本用例的名字所在。
     assert_ne!(
-        empty_reason.reason, rejected_reason.reason,
+        empty_reason.reason(),
+        rejected_reason.reason(),
         "两枚 `UnknownReason` 必须可区分：混成一枚，两条处置方向就再没有分支点",
     );
 }
@@ -283,7 +298,8 @@ fn unknown_reason_distinguishes_an_empty_set_from_all_rejected() {
 ///    这个 `match` 立刻不再穷尽（`E0004`）。
 ///
 /// **两处都是编译期照片**，按本仓纪律（编译不过不算红）故**运行期无红**。
-/// 本条能取到的运行期红是四态用例那四条（它们也直接对 `ResolutionResult` 断言）。
+/// 本条能取到的运行期红是**四态用例那几条**（它们也直接对 `ResolutionResult` 断言；
+/// 其中三条本轮搬进了 `src/resolver.rs` 的 `#[cfg(test)]`，见那个模块的说明）。
 ///
 /// # 为什么本层没有第二种失败
 ///
@@ -294,8 +310,10 @@ fn unknown_reason_distinguishes_an_empty_set_from_all_rejected() {
 /// # 本文件里**没有一条** `unwrap()`
 ///
 /// 这是本条要求的可观察者：`unwrap()` 是关于 `Result` / `Option` 的语法，
-/// 本层的结果类型两者都不是。全文 `grep -n 'unwrap' tests/resolver.rs` 零命中
-/// （这一句是本文件的可核事实，不是转述）。
+/// 本层的结果类型两者都不是。
+/// **判据是「去掉注释之后，`grep -n 'unwrap' tests/resolver.rs` 零命中」**——
+/// 数的是**代码行**；注释里出现的那些（含写这条判据的**本句自己**）不算。
+/// **故此处不写命中数**：任何一个数值都会被写它的这一句自身推翻。
 #[test]
 fn resolve_returns_the_result_type_with_no_err_arm() {
     let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
@@ -315,143 +333,6 @@ fn resolve_returns_the_result_type_with_no_err_arm() {
         ResolutionResult::Unknown(_) => "unknown",
     };
     assert_eq!(which, "resolved", "这一份输入落 `Resolved`");
-}
-
-/// 四支的**字段清单逐项**：机制 = 对四支**逐支穷尽解构、不带 `..`**。
-///
-/// 解构的是四个载荷类型**自己的字段**（§4.1 的字段清单）：
-/// `Resolved { entity, satisfied, candidate_count }` /
-/// `ConfirmRequired { first, surviving, candidate_count }` /
-/// `Ambiguous { surviving, candidate_count }` /
-/// `Unknown { reason, candidate_count }`。
-///
-/// 任一支加字段、少字段、改名 ⟹ **编译不过**（加字段 `E0027`、写不存在的字段 `E0026`、
-/// 改名 `E0026`／`E0609`）。
-///
-/// **明写**：这是**编译期照片，运行期无照片**——四个载荷是纯数据声明，
-/// 运行期能断言的只有「字段装得进、读得回」，而那与「字段清单**恰好**是这几个」不是一回事。
-/// 加字段这件事**没有变红的观测**，只有一条编译错误，而按本仓纪律「编译不过」不算红。
-///
-/// # `candidate_count` **不是分数**（免得这一条被读成与 §4.4 第 1 条相抵）
-///
-/// 它是**规模**（`usize`，§4.2 的断言 A／D 拿它核「集合里有几个」）；
-/// §4.4 第 1 条禁的是 `retrieval_score` 一类**排序用的数**。两者的区别由
-/// `resolution_result_carries_no_score` 与 `resolution_confidence_never_appears_in_a_candidate_or_a_resolved`
-/// 各自断言（那里逐枚断言语义，这里只断字段清单）。
-#[test]
-fn every_arm_carries_exactly_its_declared_fields() {
-    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
-    let one = vec![(
-        cand("e-one", None),
-        facts(ResolutionScope::Project, EntityKind::Tool),
-    )];
-    let two = vec![
-        (
-            cand("e-1", None),
-            facts(ResolutionScope::Project, EntityKind::Tool),
-        ),
-        (
-            cand("e-2", None),
-            facts(ResolutionScope::Project, EntityKind::Skill),
-        ),
-    ];
-    let empty: Vec<(Candidate, CandidateFacts)> = Vec::new();
-
-    // —— `Resolved`：**不带 `..`** ——
-    match resolve(&one, &k, &conf("l"), &req("l")) {
-        ResolutionResult::Resolved(Resolved {
-            entity,
-            satisfied,
-            candidate_count,
-        }) => {
-            assert_eq!(entity.as_str(), "e-one");
-            assert_eq!(satisfied.len(), 1);
-            assert_eq!(candidate_count, 1);
-        }
-        other => panic!("夹具前提：这一份输入该落 `Resolved`，实得 {other:?}"),
-    }
-
-    // —— `ConfirmRequired`：**不带 `..`** ——
-    match resolve(&one, &k, &conf("l"), &req("other")) {
-        ResolutionResult::ConfirmRequired(ConfirmRequired {
-            first,
-            surviving,
-            candidate_count,
-        }) => {
-            assert_eq!(first.as_str(), "e-one");
-            assert_eq!(ids(&surviving), vec!["e-one"]);
-            assert_eq!(candidate_count, 1);
-        }
-        other => panic!("夹具前提：这一份输入该落 `ConfirmRequired`，实得 {other:?}"),
-    }
-
-    // —— `Ambiguous`：**不带 `..`** ——
-    match resolve(&two, &k, &conf("l"), &req("l")) {
-        ResolutionResult::Ambiguous(Ambiguous {
-            surviving,
-            candidate_count,
-        }) => {
-            assert_eq!(ids(&surviving), vec!["e-1", "e-2"]);
-            assert_eq!(candidate_count, 2);
-        }
-        other => panic!("夹具前提：这一份输入该落 `Ambiguous`，实得 {other:?}"),
-    }
-
-    // —— `Unknown`：**不带 `..`** ——
-    match resolve(&empty, &k, &conf("l"), &req("l")) {
-        ResolutionResult::Unknown(Unknown {
-            reason,
-            candidate_count,
-        }) => {
-            assert_eq!(reason, UnknownReason::NoCandidate);
-            assert_eq!(candidate_count, 0);
-        }
-        other => panic!("夹具前提：这一份输入该落 `Unknown`，实得 {other:?}"),
-    }
-}
-
-/// §4.4 第 1 条：**已解出的结果携带不了分数**。
-///
-/// # 机制（与上一条共用，为什么还要单独写一条）
-///
-/// 判据仍然是对 `Resolved` 做**不带 `..` 的穷尽解构**——它的字段清单里**没有任何
-/// 分数字段**（`retrieval_score` 只出现在 [`Candidate`] 上，见 §272 与 §4.4）。
-/// 与上一条分开写，是因为它是**另一条要求**（§14 的表把它与「字段清单逐项」并列记为两条），
-/// 且这里还多断一件事：`candidate_count` 是**规模**、不是分数——它是 `usize`，
-/// 数的是「集合里有几个」。**这一句要写出来**，否则它会与「结果携带不了分数」读起来相抵。
-///
-/// # 分数的去处：它是**判定输入**的一部分，不进判定输出
-///
-/// 下面那份输入里的候选**带着分数**（`Some(0.97)`），而结果的三个字段里一个数都没有——
-/// 实体、约束、规模。**本条不主张「分数不参与任何判定」**（§272 说它 MAY 用于排序，
-/// 那是消费者的事；本层今天也没有排序），它主张的是**结果的形状**：
-/// 拿到一枚 `Resolved` 的调用方**在类型上取不到**那个分数。
-///
-/// 红条件（**移除档**）：给 `Resolved` 加一个 `confidence` 或 `retrieval_score` 字段
-/// ⟹ 上一条与本条的解构都**编译不过**（`E0027`）；按本仓纪律那是**编译期照片**，
-/// 故这一枚变异体的性质照实记：**没有运行期红**。见报告 §变异轮。
-#[test]
-fn resolution_result_carries_no_score() {
-    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
-    let cs = vec![(
-        cand("e-scored", Some(0.97)),
-        facts(ResolutionScope::Project, EntityKind::Tool),
-    )];
-
-    match resolve(&cs, &k, &conf("high"), &req("high")) {
-        // **不带 `..`**：这一行就是本用例的机制（清单里没有第四个字段）。
-        ResolutionResult::Resolved(Resolved {
-            entity,
-            satisfied,
-            candidate_count,
-        }) => {
-            assert_eq!(entity.as_str(), "e-scored", "解出的还是那一枚带分数的候选");
-            assert_eq!(satisfied.len(), 1, "照录的是那一条约束");
-            // `candidate_count` 是**规模**：它是「集合里有几个」，不是任何分数。
-            assert_eq!(candidate_count, 1usize, "规模是 usize，数的是候选个数");
-        }
-        other => panic!("该落 `Resolved`，实得 {other:?}"),
-    }
 }
 
 /// §4.4 第 2 条：`ResolutionConfidence` **没有读者能把它变成一个数**。
@@ -503,60 +384,6 @@ fn resolution_confidence_has_no_reader_that_yields_a_number() {
         matches!(&r, ResolutionResult::Resolved(_)),
         "门槛过了才落 `Resolved`（门槛唯一能改变结果的地方是「唯一合格」那一格）：{r:?}",
     );
-}
-
-/// §4.4 第 2 条的后半：`ResolutionConfidence` **不出现在** `Candidate` 与 `Resolved`
-/// 的字段里（**两侧都断**）。
-///
-/// # 机制
-///
-/// 两处**不带 `..` 的穷尽解构**：
-/// - [`Candidate`]（Task 3 的三字段，§272 照录）；
-/// - [`Resolved`]（本 task 的三字段，§4.1）。
-///
-/// 把 `ResolutionConfidence` 塞进任何一侧 ⟹ 那一侧的解构**编译不过**（`E0027`）。
-/// **照实记**：这是编译期照片，运行期无红。
-///
-/// 红条件（**取反档**）：给 `Candidate` 加 `pub confidence: ResolutionConfidence`
-/// ⟹ 本用例第一段编不过；**同一枚变异体还会让 Task 3 的**
-/// `tests/candidate.rs::the_candidate_records_exactly_the_three_fields_of_272` **先红**
-/// （两处钉同一张清单，那是设计有意的重复：一处钉 §272 的形、一处钉 §4.4 的位置）。
-#[test]
-fn resolution_confidence_never_appears_in_a_candidate_or_a_resolved() {
-    // —— `Candidate` 那一侧：**不带 `..`** ——
-    let c = cand("e-272", Some(0.5));
-    let Candidate {
-        entity_id,
-        evidence,
-        retrieval_score,
-    } = c;
-    assert_eq!(entity_id.as_str(), "e-272");
-    assert!(evidence.is_empty());
-    assert_eq!(retrieval_score, Some(0.5));
-
-    // —— `Resolved` 那一侧：**不带 `..`** ——
-    let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
-    let cs = vec![(
-        cand("e-res", None),
-        facts(ResolutionScope::Project, EntityKind::Tool),
-    )];
-    match resolve(&cs, &k, &conf("high"), &req("high")) {
-        ResolutionResult::Resolved(Resolved {
-            entity,
-            satisfied,
-            candidate_count,
-        }) => {
-            assert_eq!(entity.as_str(), "e-res");
-            assert_eq!(described(&satisfied), vec!["scope:Project".to_owned()]);
-            assert_eq!(candidate_count, 1);
-        }
-        other => panic!("该落 `Resolved`，实得 {other:?}"),
-    }
-}
-
-/// `describe` 对一批约束的投影（夹具函数，见它的文档）。
-fn described(ks: &[ExplicitConstraint]) -> Vec<String> {
-    ks.iter().map(describe).collect()
 }
 
 /// §4.4 第 3 条：`retrieval_score` 与 `ResolutionConfidence` **两个数不同轴**。

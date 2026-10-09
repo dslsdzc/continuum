@@ -1,0 +1,43 @@
+error[E0451]: fields `entity`, `satisfied` and `candidate_count` of struct `continuum_canonical::Resolved` are private
+  --> tests/compile_fail/resolution_result_is_not_constructible_outside.rs:26:9
+   |
+25 |     let _ = ResolutionResult::Resolved(Resolved {
+   |                                        -------- in this type
+26 |         entity: EntityId::from_str("e"),
+   |         ^^^^^^ private field
+27 |         satisfied: Vec::new(),
+   |         ^^^^^^^^^ private field
+28 |         candidate_count: 1,
+   |         ^^^^^^^^^^^^^^^ private field
+
+error[E0451]: fields `first`, `surviving` and `candidate_count` of struct `continuum_canonical::ConfirmRequired` are private
+  --> tests/compile_fail/resolution_result_is_not_constructible_outside.rs:33:9
+   |
+32 |     let _ = ResolutionResult::ConfirmRequired(ConfirmRequired {
+   |                                               --------------- in this type
+33 |         first: EntityId::from_str("e"),
+   |         ^^^^^ private field
+34 |         surviving: Vec::new(),
+   |         ^^^^^^^^^ private field
+35 |         candidate_count: 1,
+   |         ^^^^^^^^^^^^^^^ private field
+
+error[E0451]: fields `surviving` and `candidate_count` of struct `continuum_canonical::Ambiguous` are private
+  --> tests/compile_fail/resolution_result_is_not_constructible_outside.rs:40:9
+   |
+39 |     let _ = ResolutionResult::Ambiguous(Ambiguous {
+   |                                         --------- in this type
+40 |         surviving: Vec::new(),
+   |         ^^^^^^^^^ private field
+41 |         candidate_count: 2,
+   |         ^^^^^^^^^^^^^^^ private field
+
+error[E0451]: fields `reason` and `candidate_count` of struct `continuum_canonical::Unknown` are private
+  --> tests/compile_fail/resolution_result_is_not_constructible_outside.rs:46:9
+   |
+45 |     let _ = ResolutionResult::Unknown(Unknown {
+   |                                       ------- in this type
+46 |         reason: UnknownReason::NoCandidate,
+   |         ^^^^^^ private field
+47 |         candidate_count: 0,
+   |         ^^^^^^^^^^^^^^^ private field

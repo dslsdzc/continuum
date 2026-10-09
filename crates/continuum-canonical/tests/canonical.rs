@@ -11,10 +11,13 @@
 //! 真的去解析一枚 mention。这与设计 §15.2 第 3 条（`design:2264-2266`）写的是同一件事：
 //! 「能拍的只有机制：四个来源接口、闭集不变量、四态分支」。
 
+// **四个载荷类型（`Resolved` / `ConfirmRequired` / `Ambiguous` / `Unknown`）不在 import 里**：
+// 它们的字段私有（P4 Task 4 的评审判词「裁决一」），crate 外构造不出——
+// 故下面的四态夹具**经 `resolve` 产出**，不写字面量（见下面那一段夹具的说明）。
 use continuum_canonical::{
-    Ambiguous, Candidate, Canonicalized, ConfirmRequired, EntityId, Mention, MentionKind, Now,
-    ResolutionResult, Resolved, TemporalBinding, Unknown, UnknownReason, detect, finish, normalize,
-    resolve_temporal,
+    Candidate, CandidateFacts, Canonicalized, EntityId, EntityKind, ExplicitConstraint, Mention,
+    MentionKind, Now, Opaque, RequiredStrength, ResolutionConfidence, ResolutionResult,
+    ResolutionScope, TemporalBinding, detect, finish, normalize, resolve, resolve_temporal,
 };
 
 /// 一枚 UTC 日的毫秒数。本层按**恒定** 86400000 毫秒/日推进（不处理时区与夏令时）——
@@ -27,10 +30,22 @@ const DAY_MS: i64 = 86_400_000;
 ///
 /// **它们不是「另一批用例」**：`finish` 的七条用例对象没变，变的只是四态的构造形态。
 ///
-/// **载荷取最小但合法的一份**：`ConfirmRequired` / `Ambiguous` 的 `surviving`
-/// 给**一枚**真实的候选（空向量在语义上不可达——`ConfirmRequired` 是「那个占优候选本身」，
-/// `Ambiguous` 是「至少两个」），而本文件不核这些载荷（那是 `tests/resolver.rs` 的事），
-/// 故只给够用的形状。
+/// # 四态**经 `resolve` 产出**，不写字面量（本轮裁决一改的）
+///
+/// 四个载荷的字段本轮**转私有**、且没有公开构造函数（理由见 `src/resolver.rs` 的文件头：
+/// 「一个 `ResolutionResult` 是不是 `resolve` 产出的」有了类型判据）。
+/// 故这批夹具**不能**再直接构造载荷——改成各喂一份最小输入给 [`resolve`]，
+/// 由它判出要的那一支，并用一条 `matches!` 断言**夹具前提**（判出来的确实是那一支）。
+///
+/// **为什么取这一种（而不是把夹具搬进 crate 内的 `#[cfg(test)]`）**：
+/// 这批夹具是 `finish` 的七条用例的输入，而那七条是**本文件**的（Task 2 的用例对象不变），
+/// 搬走夹具就要连七条用例一起搬——那是把 Task 2 的证据挪窝，与「只改四态的构造形态」相抵。
+/// 经 `resolve` 产出则**一行用例都不用动**，且顺带让本文件的四态与
+/// `resolve` 的真实判定路径**同源**（原先那份手写字面量可以漂移到 `resolve` 产不出的形状）。
+///
+/// **载荷取最小但合法的一份**：各支由 `resolve` 按它自己的规则填
+/// （`ConfirmRequired` / `Ambiguous` 的 `surviving` 是真实候选，`Unknown` 取候选集为空那一格），
+/// 而本文件不核这些载荷（那是 `tests/resolver.rs` 与 `src/resolver.rs` 的事），故只给够用的输入。
 fn fixture_candidate(id: &str) -> Candidate {
     Candidate {
         entity_id: EntityId::from_str(id),
@@ -39,41 +54,88 @@ fn fixture_candidate(id: &str) -> Candidate {
     }
 }
 
+/// 夹具：一条非空显式约束（`Scope(Project)`）——四态夹具共用的那个 `K`。
+fn project_scope() -> [ExplicitConstraint; 1] {
+    [ExplicitConstraint::Scope(ResolutionScope::Project)]
+}
+
+/// 夹具：一枚候选连同它的**判定事实**（`scope` 取 `Project`，与 `project_scope` 相符）。
+fn fixture_pair(id: &str, kind: EntityKind) -> (Candidate, CandidateFacts) {
+    (
+        fixture_candidate(id),
+        CandidateFacts {
+            scope: ResolutionScope::Project,
+            kind,
+        },
+    )
+}
+
+/// 夹具：一枚「已达」的置信值（§275；本层不解释它的取值域，见 `src/resolver.rs`）。
+fn conf(level: &str) -> ResolutionConfidence {
+    ResolutionConfidence::new(Opaque::from_str(level))
+}
+
+/// 夹具：一枚「要求」的强度（§276 的 `required_resolution_strength`）。
+fn req(level: &str) -> RequiredStrength {
+    RequiredStrength::new(Opaque::from_str(level))
+}
+
 /// 夹具：`Resolved`（唯一合格候选、门槛已过）。
 fn resolved() -> ResolutionResult {
-    ResolutionResult::Resolved(Resolved {
-        entity: EntityId::from_str("entity.resolved"),
-        satisfied: Vec::new(),
-        candidate_count: 1,
-    })
+    let r = resolve(
+        &[fixture_pair("entity.resolved", EntityKind::Tool)],
+        &project_scope(),
+        &conf("l"),
+        &req("l"),
+    );
+    assert!(
+        matches!(r, ResolutionResult::Resolved(_)),
+        "夹具前提：这一份输入该落 `Resolved`，实得 {r:?}",
+    );
+    r
 }
 
 /// 夹具：`ConfirmRequired`（占优候选存在、门槛未过）。
 fn confirm_required() -> ResolutionResult {
-    ResolutionResult::ConfirmRequired(ConfirmRequired {
-        first: EntityId::from_str("entity.first"),
-        surviving: vec![fixture_candidate("entity.first")],
-        candidate_count: 1,
-    })
+    let r = resolve(
+        &[fixture_pair("entity.first", EntityKind::Tool)],
+        &project_scope(),
+        &conf("l"),
+        &req("other"),
+    );
+    assert!(
+        matches!(r, ResolutionResult::ConfirmRequired(_)),
+        "夹具前提：这一份输入该落 `ConfirmRequired`，实得 {r:?}",
+    );
+    r
 }
 
 /// 夹具：`Ambiguous`（多于一个合格）。
 fn ambiguous() -> ResolutionResult {
-    ResolutionResult::Ambiguous(Ambiguous {
-        surviving: vec![
-            fixture_candidate("entity.a"),
-            fixture_candidate("entity.b"),
+    let r = resolve(
+        &[
+            fixture_pair("entity.a", EntityKind::Tool),
+            fixture_pair("entity.b", EntityKind::Skill),
         ],
-        candidate_count: 2,
-    })
+        &project_scope(),
+        &conf("l"),
+        &req("l"),
+    );
+    assert!(
+        matches!(r, ResolutionResult::Ambiguous(_)),
+        "夹具前提：这一份输入该落 `Ambiguous`，实得 {r:?}",
+    );
+    r
 }
 
 /// 夹具：`Unknown`（零个合格候选；这里取「候选集为空」那一枚）。
 fn unknown() -> ResolutionResult {
-    ResolutionResult::Unknown(Unknown {
-        reason: UnknownReason::NoCandidate,
-        candidate_count: 0,
-    })
+    let r = resolve(&[], &project_scope(), &conf("l"), &req("l"));
+    assert!(
+        matches!(r, ResolutionResult::Unknown(_)),
+        "夹具前提：这一份输入该落 `Unknown`，实得 {r:?}",
+    );
+    r
 }
 
 /// 夹具：两枚**真实切出来**的 mention（`请把它和 this 都改掉` → `它`、`this`）。

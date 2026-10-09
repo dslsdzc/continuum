@@ -657,10 +657,16 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
   把它当准入规则会把「`project` 层可见的候选」在 `explicit` 约束下判成不合格，**而规范没这么说**。
 - `entity_kind_has_exactly_four_variants`（**四枚各一条**）：`Tool` / `Skill` / `Relation` / `ConnectorService`；
   机制 = 穷尽 `match` **不带 `..`**（加第五枚即**编译不过**）。
-- `a_connector_service_mention_resolves_to_the_connector_service_kind`（**正面一条**）：
-  `GitHub` 这类 mention 解出的候选，其 `CandidateFacts.kind` **恰是 `ConnectorService`**。
-- `a_connector_service_is_neither_a_tool_nor_a_skill`（**反面逐枚**）：
-  断言它**不是** `Tool`、**不是** `Skill`（逐枚两条，不是「不等于某个别的值」）。
+- `a_connector_service_candidate_is_accepted_by_the_connector_service_kind_constraint`（**正面一条**）：
+  `GitHub` 这类 mention 对应的候选，其 `CandidateFacts.kind` 是 `ConnectorService`，
+  故它在 `ExplicitConstraint::EntityKind(ConnectorService)` 下**合格**（承重的是那处 `satisfies`）。
+  > **用例名订正（2026-10-10，Task 4 评审后）**：原名 `a_connector_service_mention_resolves_to_the_connector_service_kind`
+  > ——「mention **解出**某个 kind」本层今天做不到（没有真实来源），名字比照片宽，已收窄为「被那条约束接受」。
+- `a_connector_service_candidate_is_rejected_by_the_tool_skill_and_relation_kind_constraints`（**反面逐枚**）：
+  断言它在 `EntityKind(Tool)` / `Skill` / `Relation` 三条约束下**都不合格**（逐枚三条，
+  不是「不等于某个别的值」；承重的是那三处 `satisfies`）。
+  > **用例名订正（2026-10-10，Task 4 评审后）**：原名 `a_connector_service_is_neither_a_tool_nor_a_skill`
+  > ——只点两枚、且断的是「值不等」而不是「判据不接受」，比照片宽，已收窄。
   **这三条依据写进注释**：`EntityKind` 是**四枚、不是 §198 的三枚**——§16 第 26 条本层认领了
   「服务名作为 mention 的解析目标」并写明「与其它实体**同形**处理」，而 `GitHub` / `Email`
   **不是 `Tool` / `Skill` / `Relation` 中任何一个**；只有三枚时调用方只能**硬塞**，

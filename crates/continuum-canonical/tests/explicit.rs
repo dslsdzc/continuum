@@ -257,15 +257,24 @@ fn entity_kind_has_exactly_four_variants() {
 /// 因为 `ConnectorService` 这个构造子没有了——按本仓纪律，**编译不过不算红**，
 /// 故「删掉第四枚」这件事的性质是**编译期照片**；本用例的运行期红条件落在
 /// `satisfies` 的 `EntityKind` 那一臂被写成恒真／恒假上）。
+///
+/// # 承重的是哪一句（用例名按此收窄，评审后订正）
+///
+/// 本用例的**头一条断言对两行前自建的夹具断它的 `kind`**——它**基本恒真**，
+/// 作用是**夹具前提**（说清下面那枚候选是什么），不是被判据支撑的那一半。
+/// 真正承重的是后面那处 `satisfies` 调用：它走 `satisfies` 的 `EntityKind` 那一臂。
+/// 〔订正（评审后）〕名字原先是 `a_connector_service_mention_resolves_to_the_connector_service_kind`
+/// ——「mention **解出**某个 kind」这件事本层今天做不到（没有真实来源，见上面的夹具说明），
+/// 名字比它拍到的东西大，故收窄为「这枚候选**被**那条约束**接受**」。
 #[test]
-fn a_connector_service_mention_resolves_to_the_connector_service_kind() {
+fn a_connector_service_candidate_is_accepted_by_the_connector_service_kind_constraint() {
     let c = cand("connector.github");
     let f = facts(ResolutionScope::Global, EntityKind::ConnectorService);
 
     assert_eq!(
         f.kind,
         EntityKind::ConnectorService,
-        "夹具前提与正面断言：这一枚候选的判定事实**恰是** `ConnectorService`",
+        "夹具前提（**恒真，不承重**）：这一枚候选的判定事实是 `ConnectorService`",
     );
     assert!(
         satisfies(&c, &f, &ExplicitConstraint::EntityKind(EntityKind::ConnectorService)),
@@ -279,7 +288,7 @@ fn a_connector_service_mention_resolves_to_the_connector_service_kind() {
 ///
 /// 「不等于 `Tool`」与「不是三枚中的任何一枚」是两句话；前者可以靠一个恰好也
 /// 不等于 `Tool` 的错值满足。故这里**逐枚**写出四条断言的头三条
-/// （用例名只点了两条，第三条 `Relation` 一并断——设计 §4.1.1 的理由段
+/// （用例名现在把三枚都点了，第三条 `Relation` 一并断——设计 §4.1.1 的理由段
 /// （`design:549-556`）说的是「`GitHub` / `Email` **不是 `Tool` / `Skill` / `Relation`
 /// 中任何一个**」，三枚都在那句话里，只断两枚会让第三枚没有照片）。
 ///
@@ -294,17 +303,33 @@ fn a_connector_service_mention_resolves_to_the_connector_service_kind() {
 /// 红条件（**移除档**）：「硬塞」的形态——让服务名候选的事实取 `kind: Tool`。
 /// 那时本条第一条断言红（`Tool` 的服务名候选会被 `EntityKind(ConnectorService)` 拒掉，
 /// 而正面那条用例也会红）。实测见报告 §变异轮。
+///
+/// # 承重的是哪一句（用例名按此收窄，评审后订正）
+///
+/// 前三条 `assert_ne!` 对两行前自建的夹具断它的 `kind`——它们**基本恒真**，
+/// 是**夹具前提**。真正承重的是后面那个循环里的三处 `satisfies` 调用（走判据，
+/// 不走 `!=`）。〔订正（评审后）〕名字原先是 `a_connector_service_is_neither_a_tool_nor_a_skill`
+/// ——那句话比它拍到的宽（只点两枚，实际断三枚，且断的是「判据不接受」而非「值不等」），
+/// 故收窄为「这枚候选**被**那三枚约束**拒绝**」。
 #[test]
-fn a_connector_service_is_neither_a_tool_nor_a_skill() {
+fn a_connector_service_candidate_is_rejected_by_the_tool_skill_and_relation_kind_constraints() {
     let c = cand("connector.github");
     let f = facts(ResolutionScope::Global, EntityKind::ConnectorService);
 
-    assert_ne!(f.kind, EntityKind::Tool, "服务名**不是** `Tool`（逐枚）");
-    assert_ne!(f.kind, EntityKind::Skill, "服务名**不是** `Skill`（逐枚）");
+    assert_ne!(
+        f.kind,
+        EntityKind::Tool,
+        "夹具前提（**恒真，不承重**）：服务名不是 `Tool`（逐枚）"
+    );
+    assert_ne!(
+        f.kind,
+        EntityKind::Skill,
+        "夹具前提（**恒真，不承重**）：服务名不是 `Skill`（逐枚）"
+    );
     assert_ne!(
         f.kind,
         EntityKind::Relation,
-        "服务名**不是** `Relation`（逐枚；用例名只点了两枚，第三枚的出处见文档注释）",
+        "夹具前提（**恒真，不承重**）：服务名不是 `Relation`（逐枚；用例名背后的三枚都写在这里）",
     );
 
     // 反向再钉一次（走判据而不是走 `!=`）：这三条约束都不接受它。
@@ -325,13 +350,20 @@ fn a_connector_service_is_neither_a_tool_nor_a_skill() {
 /// `USER_PERSISTENT`→`user`——四枚**各一条**断言。
 /// 反向：`workspace` / `tool` / `plugin` / `global` / `explicit` **五枚逐枚**断言 `None`。
 ///
-/// # 定义域封闭那一半是编译期的
+/// # 定义域封闭那一半是编译期的，**照片在实现里**
 ///
-/// 下面 `exhaustive` 那个 `match` **穷尽、不带 `..`** ⇒ 加第五枚即编译不过；
-/// 又因为本函数的入参是 `&AliasScope`（不是 `&str`），
+/// 定义域封闭的编译期照片是 `src/alias.rs` 的 `alias_scope_to_resolution_scope`
+/// 那个 `match`（`src/alias.rs:96-101`）——它**穷尽、不带 `..`、没有通配臂**
+/// ⇒ 给 `AliasScope` 加第五枚即**编译不过**。
+/// 又因为那个函数的入参是 `&AliasScope`（不是 `&str`），
 /// **「没有第五枚可以喂进去」在类型上成立**——这正是「取闭集、不取串」的理由：
 /// 开放取值域下「哪个串换不出来」是一条由调用方定义的性质，本层无从断言。
 /// 按本仓纪律，编译不过**不算红**，故这一半是**类型保证**。
+///
+/// **本用例只取「运行期四枚逐枚」那一半**：下面那个 `exhaustive` 函数**没有** `match`，
+/// 它只是把入参转给 `alias_scope_to_resolution_scope`——定义域封闭那张照片**不在它身上**。
+/// 〔订正（评审后）〕初稿把照片记在了这里，指到了一个不存在的地方：
+/// 那句「下面 `exhaustive` 那个 `match` 穷尽、不带 `..`」里的 `match` 从来不在本文件。
 ///
 /// # 这张表是本设计的决定（规范没给九值与四值的关系）
 ///
@@ -347,29 +379,32 @@ fn a_connector_service_is_neither_a_tool_nor_a_skill() {
 /// 实测见报告 §变异轮。
 #[test]
 fn the_alias_scope_mapping_has_exactly_the_four_alias_scopes_as_its_domain() {
-    /// 穷尽、**不带 `..`**：加第五枚即编译不过（定义域封闭的编译期照片）。
-    fn exhaustive(s: &AliasScope) -> ResolutionScope {
+    /// 只是把入参转给 `alias_scope_to_resolution_scope`。**它自己不是那张编译期照片**
+    /// ——那张照片是实现里那个穷尽 `match`（`src/alias.rs:96-101`），本函数里没有 `match`。
+    /// 〔订正（评审后）〕这个名字原先叫 `exhaustive`（「穷尽」），而它**不穷尽任何东西**；
+    /// 名字比它拍到的东西大，故收窄为 `mapped`。
+    fn mapped(s: &AliasScope) -> ResolutionScope {
         alias_scope_to_resolution_scope(s)
     }
 
     // 四枚各一条。
     assert_eq!(
-        exhaustive(&AliasScope::Turn),
+        mapped(&AliasScope::Turn),
         ResolutionScope::Conversation,
         "`TURN` → `conversation`（最弱的一对：§274 没有「轮次」这一值，取语义最近的）",
     );
     assert_eq!(
-        exhaustive(&AliasScope::Session),
+        mapped(&AliasScope::Session),
         ResolutionScope::Session,
         "`SESSION` → `session`（同名）",
     );
     assert_eq!(
-        exhaustive(&AliasScope::Project),
+        mapped(&AliasScope::Project),
         ResolutionScope::Project,
         "`PROJECT` → `project`（同名）",
     );
     assert_eq!(
-        exhaustive(&AliasScope::UserPersistent),
+        mapped(&AliasScope::UserPersistent),
         ResolutionScope::User,
         "`USER_PERSISTENT` → `user`（§278 的「持久」对应 §274 的 user 层）",
     );

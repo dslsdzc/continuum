@@ -10,7 +10,7 @@
 //!
 //! # 本目录的样例**逐份点名**（便于对数：这段点名的项数必须等于目录里 `.rs` 的份数）
 //!
-//! `tests/compile_fail/`（**五份**，应编不过）：
+//! `tests/compile_fail/`（**六份**，应编不过）：
 //!
 //! - **`entity_id_has_no_public_literal_construction`** —— `EntityId` 的里子串私有，
 //!   故 crate 外写不出元组构造 `EntityId("x".to_owned())`。它是简报里
@@ -37,6 +37,16 @@
 //!   `ResolutionConfidence::from_score(0.9)` 与 `ResolutionConfidence::from(0.9f64)`
 //!   都编不过：两个数**不同轴**（§4.4 第 3 条）。它钉的是那条禁令的构造侧。
 //!   （Task 4 追加。）
+//! - **`resolution_result_is_not_constructible_outside`** —— 四个载荷
+//!   （`Resolved` / `ConfirmRequired` / `Ambiguous` / `Unknown`）的字段私有、且没有公开构造函数
+//!   （`src/resolver.rs`），故 crate 外拼不出任何一个载荷 ⇒ **造不出一枚 `ResolutionResult`**。
+//!   **四支逐支各写一次**（「造不出一枚 `ResolutionResult`」这句话要对每一支都取到照片），
+//!   实跑得四段 `E0451: fields … are private`（`.stderr` 是实跑取值）。
+//!   它钉的是「判定结果是不是 `resolve` 产出的」这条不变量的**类型判据**那一侧；
+//!   **正面**（经 `resolve` 拿得到、经只读访问器读得到）在 `tests/resolver.rs`
+//!   与 `src/resolver.rs` 的 `#[cfg(test)]` 里；**逐支穷尽解构**那张照片在 crate 内的
+//!   `every_arm_carries_exactly_its_declared_fields` 里（见 `src/resolver.rs` 文件头）。
+//!   （Task 4 订正轮追加，裁决一。）
 //!
 //! `tests/compile_pass/`（**三份**，**应编得过**，是上面那几份**反例的正控制**）：
 //!
@@ -90,13 +100,14 @@
 // **公开 API 从 crate 外真的拿得到**那一侧的证据因此不在这里，而在
 // `tests/candidate.rs`（它整份都是 crate 外代码）＋ 两份 `compile_pass` 样例。
 
-/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**五份**。
-const COMPILE_FAIL_SAMPLES: [&str; 5] = [
+/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**六份**。
+const COMPILE_FAIL_SAMPLES: [&str; 6] = [
     "entity_id_has_no_public_literal_construction",
     "candidate_source_has_no_pick_one_method",
     "canonical_representation_is_not_constructible_outside",
     "resolution_confidence_has_no_numeric_reader",
     "resolution_confidence_cannot_be_built_from_a_score",
+    "resolution_result_is_not_constructible_outside",
 ];
 
 /// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**三份**。
