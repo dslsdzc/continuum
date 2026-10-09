@@ -2732,3 +2732,632 @@ async fn the_three_negative_methods_share_one_adapter_and_the_positive_path_stil
     assert_eq!(observed.invoke_calls(), 1, "成功路径该恰好发起一次 invoke");
     assert_eq!(observed.stream_calls(), 1, "失败路径该恰好发起一次 stream");
 }
+
+// ===== Task 11：不写库、可达性与射程边界（设计 §9、§4.4、§4.5、§11） =====
+//
+// 本节钉四样：① `NoEligibleCandidate` 的**两条来路**（§4.5）——一条在 ① 同步段就短路、
+// 一条要走完 ② 异步段（各断言是哪一枚，设计 §11 那一行要的就是这个）；
+// ② 整条路径**一行库都不写**（§9，**否定式照片**）；③ 可达性的**正面照片**：一条 `active`
+// 的模型真的成为 `CallPlan::selected()`；④ `Degraded` **原样带过**（§4.4 第 2 条，两侧对钉）。
+//
+// **简报列的第五条（「`plan_candidates` 到交进 `rank` 的 `availability` 的 id 集合双向相等」）
+// 本节不另立用例，据实记理由**（简报自己给的处置是「若三处观测点的变异完全等价，据实合并成一条
+// 并记在报告里——不为了凑三处而留两条等价用例」）：实测（2026-10-09）它与 Task 7 的
+// `the_request_reaching_the_policy_carries_the_candidates_availability`
+// **是同一处代码（`select` 里那次组装，`src/model_call.rs`）、同一形状的入参**——
+// Task 7 那条的夹具已经是「**候选集非空、其中某一条被 `rank` 丢掉**」（m-c 探到 `Unavailable`，
+// 输出里只剩两条，而 `availability` 里三条都在），正是简报要给本条的那个场景；
+// 两者断的是同一句话（`asked == candidate_ids`），换一组 id 不产生新的判别力。
+// Brief 里「前两条的夹具里候选集是全集」那个区分**实测不成立**。详情与实测见 task-11 报告
+// （`M6` 那一枚变异体同时红两者，日志 `.tmp/t11-M6.log`）。
+
+/// **与驱动同形的组合**：① `plan_candidates` 的 `Err` 由 `?` 短路，成功才走到 ② `select`。
+///
+/// 这条组合**今天没有生产方**（驱动未建，设计 §12 第 1 条），故由用例写出。
+/// 「候选集为空时 `rank` 一次都不会被调」这句判据的落点**就是这条组合的形状**：
+/// 判据的两半——① 在空候选集上报 `Err`（`plan_candidates` 的空判定短路，设计 §3.1 第 9 条）
+/// 与 ② 那枚 `Err` 被 `?` 挡住、`select` 不被调到——**只有把两段接起来才看得到**；
+/// `plan_candidates` 那一侧自己造不出「`rank` 被不被调」的照片（它的参数表里没有
+/// `&dyn RankingPolicy`，而 `rank` 是 D 的函数）。
+///
+/// **它读库、不写库**：`Tx` 在 `select` 之前就 drop（`select` 不收 `Tx`，设计 §3.4），
+/// 故本函数交出的 future 里没有一枚活着的库句柄。
+async fn plan_then_select(
+    db: &Db,
+    registry: &ProviderRegistry,
+    policy: &(dyn RankingPolicy + Sync),
+) -> Result<CallPlan, ModelCallError> {
+    let candidates = {
+        let tx = db.begin().unwrap();
+        plan_candidates(&tx, registry)?
+    };
+    select(candidates, a_route_input(no_constraints()), policy).await
+}
+
+/// 一枚**只要被碰到就 panic** 的排序策略：它是「`rank` 一次都没被调」这条判据的读数。
+///
+/// **两个方法都 `panic!`**：`rank` 与调用侧之间**唯一的接触面就是这一枚策略**（它的入参里
+/// 没有别的回调口），故「`rank` 没被调到」与「这一枚策略没被碰到」在本路径上**同真同假**。
+/// 判据于是有了一个**会失败的形态**：任何一次 `rank` 调用都会让用例以 panic 收场，
+/// 而不是像「只断 `Err`」那样——**一个「装作没候选、其实调了 `rank`」的实现会全绿**。
+///
+/// **它不是空转的**（正控制不拿清单自证）：同一个 `plan_then_select` 在候选活着时
+/// 确实会碰到策略——正控制写在
+/// [`rank_is_never_called_when_no_candidate_survives`] 的第一段里（同一份组合、换一枚
+/// 记录用的策略，记录非空）。**没有那一段，本策略的「没被提到」证明不了任何事**：
+/// 一枚从来没被任何东西碰到过的策略，与一枚碰不到的策略在读数上一样。
+struct PanickingPolicy;
+
+impl RankingPolicy for PanickingPolicy {
+    fn evaluate(&self, _request: &RoutingRequest, _model: &RoutableModel) -> CandidateScore {
+        panic!("候选集为空时该在 ① 短路——`rank` 的 `evaluate` 被调到了")
+    }
+
+    fn compare(&self, _a: &ExecutionCandidate, _b: &ExecutionCandidate) -> Ordering {
+        panic!("候选集为空时该在 ① 短路——`rank` 的 `compare` 被调到了")
+    }
+}
+
+/// `NoEligibleCandidate` 的**第一条来路**：候选集为空（设计 §4.5）——两个来路各一条：
+/// (a) 有画像、过闸门，但**一个适配器都没登记**；(b) 有画像、有适配器，但**全部被闸门挡下**
+/// （`stale`）。两条都在 ① 同步段短路。
+///
+/// **`rank` 一次都没被调**：两段的实参就是 [`PanickingPolicy`]——它被碰到即以 panic 收场。
+/// 这是协调者裁定的那条照片（G-∅-2）：它原在 Task 6 的一条用例里，而**那里类型上造不出来**
+/// （`plan_candidates` 的参数表里没有 `&dyn RankingPolicy`）。
+///
+/// # 第一段：正控制（**它不是本用例的判据，是为判据的读数正名**）
+///
+/// 同一份 `plan_then_select`、同一个库形状，只要有**一条**候选活下来，② 就被走到、
+/// 策略就被问到（记录非空）。这一段的用途**只是**证明上面那条组合确实接得到 `rank`：
+/// 少了它，「两条来路里策略没被碰到」与「这份组合根本到不了 `rank`」**在读数上不可区分**，
+/// 而那正是本条要钉的那件事的反面。
+///
+/// # 红的条件与**它实测不成立的那一档**（据实记，档位：移除＋**等价变异体**）
+///
+/// - **简报给的那一枚（档位：移除）**：删掉 `plan_candidates` 的空判定短路（让它照常返回空集、
+///   一路走到 `select`）→ **本条不红，实测为一枚等价变异体**（2026-10-09）。机制是构造性的：
+///   D 的 `rank` 在**空列表**上先短路（`crates/continuum-model-registry/src/router.rs:561-563`
+///   的空判定）**再**轮到策略，故 `select(Vec::new(), ..)` 拿到的 `Err` 与 ① 报的
+///   **逐字节同一枚** `ModelCallError::Routing(RoutingError::NoEligibleCandidate)`，
+///   而 `PanickingPolicy` 一次都碰不到（`evaluate` 与 `compare` 都在空列表之后）。
+///   同一件事的另一面：`plan_candidates` 改成返回 `Ok(vec![])` 之后**红的是 Task 6 的**
+///   `an_empty_candidate_set_is_no_eligible_candidate`（它断 `Err`），**不是本条**——
+///   按本仓的判据，这不是「本条没红却报绿」，而是**本条对那一枚没有判别力**。
+///   简报那一句「于是流程在 `plan_candidates` 就短路、根本走不到 `select`」**在可观察面上
+///   是非承重的**：走不走得到 `select`，在空候选集上**没有任何读数分得开**。
+/// - **本条真有判别力的那一枚（档位：替换）**：把空判定报出去的那枚 `Err` 换成别的变体
+///   （`RoutingError::UnknownAvailability { id }`）→ 本条的 `matches!` 红。
+///   **它同时红 Task 6 那一条**（同一条 `matches!`）——本条的增量因此只是那条组合的形状，
+///   不是那枚错误的身份。**这一点据实记，不声称本条比 Task 6 挡得更多**。
+/// - 那枚 panic 策略**本身**仍然是承重的：它挡的是「`select` 被调到**并且**有候选活着送到
+///   `rank`」这一类实现（那时 panic 直接炸掉用例），而 `Err` 断言挡不住这一类。
+///
+/// **实测（2026-10-09，`cargo test -p continuum-runtime --test model_call --no-fail-fast`）**：
+///
+/// - `M1`（＝简报那一枚，档位：移除）：**本条 `ok`**，红的是 Task 6 的两条
+///   （`an_empty_candidate_set_is_no_eligible_candidate` 与
+///   `a_model_kept_out_for_want_of_an_adapter_comes_back_once_it_is_registered`，
+///   都是「却得到 0 条候选」）——**等价变异体**，日志 `.tmp/t11-M1.log`；
+/// - `M2`（档位：替换）：红**三条**＝本条 ＋ 上面 Task 6 的两条，日志 `.tmp/t11-M2.log`。
+///
+/// （两枚的写法与锚点唯一性见 `.tmp/t11-mutate.py`；两枚都跑在**同一个 `-p` 目标的完整套件**下，
+/// 未做隔离版——`M2` 的红集里本条就在其中。）
+#[tokio::test]
+async fn rank_is_never_called_when_no_candidate_survives() {
+    // 第一段：正控制——同一条组合在候选活着时**确实**走到 ②（策略被问到）。
+    let (_dir_ctl, db_ctl) = a_model_db();
+    let mut registry_ctl = ProviderRegistry::new();
+    let tx = db_ctl.begin().unwrap();
+    seed_routable(&tx, &mut registry_ctl, "m-alive", ProviderHealth::Healthy);
+    // **夹具要 `commit`**：`Tx` 一被 drop 就回滚（未提交的播种会消失），而
+    // `plan_then_select` 自己 `begin` 一个**新的** `Tx`——同一个 `Db` 的连接是一枚 `Mutex`，
+    // 老的那一枚活着时新的 `begin` 会把它挡住（`crates/continuum-persist/src/tx.rs` 的
+    // `begin` 先 `lock`）。故夹具的写法是「播完就提交」，不是「攥着不放」。
+    tx.commit().unwrap();
+    let recording = RecordingPolicy::new();
+    let plan_ctl = plan_then_select(&db_ctl, &registry_ctl, &recording)
+        .await
+        .expect("有一条活着的候选，该有输出");
+    assert_eq!(
+        plan_ctl.selected().0.model().as_str(),
+        "m-alive",
+        "正控制：这一条组合确实走得到 ②，故下面「策略没被碰到」是一个有内容的读数"
+    );
+    assert_eq!(
+        recording.captured_availability().len(),
+        1,
+        "正控制：策略被问到恰好一次——0 次说明这份组合根本到不了 `rank`，那下面的断言就是空真的"
+    );
+
+    // 来路 (a)：有画像、过闸门，但**一个适配器都没登记**。
+    let (_dir_a, db_a) = a_model_db();
+    let registry_a = ProviderRegistry::new();
+    {
+        let tx = db_a.begin().unwrap();
+        register_with_state(&tx, "m-unserved", LifecycleState::Active);
+        insert_profile(&tx, "m-unserved");
+        tx.commit().unwrap();
+    }
+    let err_a = match plan_then_select(&db_a, &registry_a, &PanickingPolicy).await {
+        Ok(plan) => panic!(
+            "一个适配器都没登记，该在 ① 以 NoEligibleCandidate 短路，却得到 {} 条候选",
+            1 + plan.alternatives().len()
+        ),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(
+            err_a,
+            ModelCallError::Routing(RoutingError::NoEligibleCandidate)
+        ),
+        "唯一候选没有适配器 → 候选集为空 → NoEligibleCandidate，得到 {err_a:?}"
+    );
+
+    // 来路 (b)：有画像、有适配器，但状态不过闸门（`stale`）。
+    let (_dir_b, db_b) = a_model_db();
+    let mut registry_b = ProviderRegistry::new();
+    {
+        let tx = db_b.begin().unwrap();
+        register_with_state(&tx, "m-stale", LifecycleState::Stale);
+        insert_profile(&tx, "m-stale");
+        serve(&mut registry_b, &["m-stale"], Arc::new(FakeModel::new()));
+        tx.commit().unwrap();
+    }
+    let err_b = match plan_then_select(&db_b, &registry_b, &PanickingPolicy).await {
+        Ok(plan) => panic!(
+            "全部被闸门挡下，该在 ① 以 NoEligibleCandidate 短路，却得到 {} 条候选",
+            1 + plan.alternatives().len()
+        ),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(
+            err_b,
+            ModelCallError::Routing(RoutingError::NoEligibleCandidate)
+        ),
+        "全部被闸门挡下 → 同一枚 NoEligibleCandidate，得到 {err_b:?}"
+    );
+}
+
+/// `NoEligibleCandidate` 的**第二条来路**：候选集**非空**，但全部探到 `Unavailable`，
+/// 由 `rank` 滤光（设计 §4.5 那一行的第二条、§11 那一行的「各断言是哪一枚」）。
+///
+/// **这条来路在今天之前没有任何照片**（2026-10-09 实测：本 crate 的测试里
+/// `from select` 的 `NoEligibleCandidate` 一条断言都没有——`grep -n NoEligibleCandidate` 的
+/// 十一处命中全落在 ① 同步段那两条用例上）。本节的任务标题就是「可达性与射程边界」，
+/// 而 §4.5 那张表把这一枚标成「**可达**，且是主要失败路径之一」——故在此补上。
+///
+/// # 它和上一条的区别不是「同一件事换个入口」，是**两个不同的读数**
+///
+/// 上一条：`select` 根本没被调到（短路的落点在 ①）；本条：`select` 走到了底
+/// （`snapshot` 逐候选问过 `health()`、`rank` 被调到），而 `rank` 在把 `Unavailable` 滤完之后
+/// 报出同一枚 `Err`。**两者在错误值上一样、在「谁报的」上不同**，而这正是这条来路要断的东西。
+///
+/// # 非空锚（两处，缺一不可）
+///
+/// - `health_calls() == 1`（每个候选各一次）：证明 `select` 真的走到了 `snapshot`，
+///   故「也是 `NoEligibleCandidate`」不是「什么都没跑」；
+/// - `captured_availability().is_empty()`：`rank` 里那次 `evaluate` **在可用性过滤之后**
+///   （`router.rs:546-550`：`Unavailable` 走 `continue`，打分在它下面），故全被滤掉时
+///   策略一次都不被问到。**这一条同时是「`rank` 被调到」与「策略被问到」分得开的照片**——
+///   简报第 1 条那句「`rank` 一次都没被调用」若被读成「策略一次都没被问到」，两件事在
+///   空候选集上恰好同真，在这里则**分道扬镳**（`rank` 被调了、策略没被问）。
+///
+/// # 红的条件（档位：收紧）
+///
+/// 在 `select` 组装请求时把 `Unavailable` 的条目也丢掉（**二次裁剪**）→ `rank` 查不到条目，
+/// 报的是 `UnknownAvailability` 而不是 `NoEligibleCandidate`，本条的 `matches!` 红。
+/// **实测（2026-10-09）**：那一枚红**三条**——本条、Task 7 的
+/// `the_request_reaching_the_policy_carries_the_candidates_availability`（同一句「集合相等」）
+/// 与 Task 7 的 `a_probed_health_actually_reaches_the_ranking`（它对被丢掉的 `Unavailable`
+/// 候选有断言，而 `availability` 一缺条目，`rank` 先报的是 `UnknownAvailability`）。
+/// **预测写错据实记**：预估的是两条，第三条是实测出来的。日志 `.tmp/t11-M6.log`。
+/// **据实记：本条的增量是那枚错误的身份与 `health_calls` 那个锚，
+/// 不是「G 不在这一层裁剪」这件事本身**（那件事 Task 7 已经钉了）。
+#[tokio::test]
+async fn an_all_unavailable_candidate_set_is_no_eligible_candidate() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    let a = seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Unavailable);
+    let b = seed_routable(&tx, &mut registry, "m-b", ProviderHealth::Unavailable);
+
+    // ① 不因健康度丢候选：两条都进候选集（设计 §4.4 第 2 条——过滤 `Unavailable` 是 `rank` 的事）。
+    let candidates = plan_candidates(&tx, &registry).expect("健康度不是候选集的门槛，两条都该在");
+    assert_eq!(
+        ids_of(&candidates),
+        vec!["m-a".to_owned(), "m-b".to_owned()],
+        "探到 Unavailable 的候选**仍要进候选集**：裁剪发生在本层的下面就成了一次二次判据"
+    );
+
+    // ② 走完 ② 异步段：D 把它们全滤掉 → 同一枚 `NoEligibleCandidate`。
+    let policy = RecordingPolicy::new();
+    let err = match select(candidates, a_route_input(no_constraints()), &policy).await {
+        Ok(plan) => panic!(
+            "全部 Unavailable，该以 NoEligibleCandidate 回，却得到 {} 条输出",
+            1 + plan.alternatives().len()
+        ),
+        Err(e) => e,
+    };
+    assert!(
+        matches!(
+            err,
+            ModelCallError::Routing(RoutingError::NoEligibleCandidate)
+        ),
+        "候选集非空但全被滤掉 → 同一枚 NoEligibleCandidate，得到 {err:?}"
+    );
+
+    assert_eq!(
+        a.health_calls(),
+        1,
+        "非空锚：`select` 确实走到了 `snapshot`（逐候选取一次快照）"
+    );
+    assert_eq!(b.health_calls(), 1, "同上：第二条候选各问一次");
+    assert!(
+        policy.captured_availability().is_empty(),
+        "`rank` 被调到了，而策略一次都没被问到——打分在可用性过滤之后，全滤光就到不了 `evaluate`"
+    );
+}
+
+/// 五张「G 不该碰」的表的表名，按**固定的表序**（写死，免得两次取数的次序漂移让整表比对失真）。
+///
+/// **为什么是这五张**（设计 §9、简报的判据）：「没有落点」的最佳证据是
+/// **「所有可能被写到的表都没变」**，故清单要覆盖三面——
+/// ① 两处**没有落点**的表：`audit_log`（`AuditKind` 的八个变体里没有「模型调用」）
+/// 与**本该记执行画像但没那三列**的那一张；② `events`（§318 的状态更新与事件同事务，
+/// 它离这条路最近）；③ G **唯一读**的三张模型表。
+///
+/// **`execution_profile` 不列**（设计 §7 事实 3）：那张表**没有任何读写函数**，
+/// 列进去是一条**永远为真**的断言（简报点名的这一条）。
+const FIVE_TABLES: [&str; 5] = [
+    "events",
+    "audit_log",
+    "node_attempt",
+    "model_registry",
+    "model_profile",
+];
+
+/// 一张表的行数。**按表名现拼 SQL**：`COUNT(*)` 不接受参数位，而表名是本文件的常量
+/// （不是外部输入，故不是一次注入面）。
+fn row_count(tx: &Tx<'_>, table: &str) -> i64 {
+    let rows = tx
+        .query(&format!("SELECT COUNT(*) FROM {table}"), &[])
+        .unwrap_or_else(|e| panic!("数 {table} 的行数失败：{e:?}"));
+    match rows.first().and_then(|row| row.first()) {
+        Some(Value::Int(n)) => *n,
+        other => panic!("COUNT(*) 该给一行一列 Int，得到 {other:?}"),
+    }
+}
+
+/// 五张表逐表的行数，按 [`FIVE_TABLES`] 的次序。
+fn counts_of_the_five(tx: &Tx<'_>) -> Vec<(&'static str, i64)> {
+    FIVE_TABLES
+        .iter()
+        .map(|table| (*table, row_count(tx, table)))
+        .collect()
+}
+
+/// 往三张「G 不该碰」的表里各播**一行**，好让「行数不变」这句话**不是 `0 == 0`**。
+///
+/// **为什么非播不可**：三张表在 [`a_model_db`] 里都是空的，故「跑完前后都是 0」在空表上
+/// **恒真**——它挡不住任何东西（`0` 与「表压根不存在」在读数上一样）。播一行之后，
+/// 任何一次写入都会把那个数**抬起**（1 → 2），断言这才有了会失败的形态。
+///
+/// **代价据实记**（与本节末「夹具的自证」那一段同源）：本函数嵌着 P0 与 P1 的表结构
+/// （三条 `INSERT` 的列名），**它们的主人改列名时这里会红**——那正是想要的（G 不写这几张表，
+/// 而它们被谁改都得看得见），但射程只到**这三条 `INSERT` 用到的列**。
+fn seed_one_row_in_each_of_the_read_only_tables(tx: &Tx<'_>) {
+    tx.execute(
+        "INSERT INTO events (event_id, event_type, schema_version, occurred_at, payload)
+         VALUES ('e-task-11', 'task-11-fixture', 1, 0, '{}')",
+        &[],
+    )
+    .unwrap();
+    tx.execute(
+        "INSERT INTO audit_log (kind, occurred_at, payload, prev_hash, record_hash)
+         VALUES ('task-11-fixture', 0, '{}', 'prev', 'hash')",
+        &[],
+    )
+    .unwrap();
+    tx.execute(
+        "INSERT INTO node_attempt (graph_id, node_id, attempt, state)
+         VALUES ('g-task-11', 'n-task-11', 1, 'succeeded')",
+        &[],
+    )
+    .unwrap();
+}
+
+/// 整条路径**一行库都不写**（设计 §9，**否定式照片**）：跑通**成功与失败各一条路径**，
+/// 断言 `events` / `audit_log` / `node_attempt` / `model_registry` / `model_profile`
+/// **五张表逐表不变**。
+///
+/// **这一条同时是「G 不写半写副作用」的照片**（设计 §9 末段）：G 没有可半写的副作用，
+/// 而这条断言把它**钉成事实而不是声明**。
+///
+/// # 五张表为什么要全数（不是「审计与画像两张」）
+///
+/// 设计 §9 说两处落点都空：`AuditKind` 的八个变体里没有「模型调用」；`execution_profile`
+/// 表没有那三列。而**「没有落点」的最佳证据是「所有可能被写到的表都没变」**——
+/// `events`（§318 的状态更新与事件同事务）与三张模型表（G 唯一读的东西）也在其中。
+/// 两处**没有落点**的落点各有一个代表：`audit_log`（审计）与 `node_attempt`
+/// （执行记录那条线；`execution_profile` 本身不列，理由见 [`FIVE_TABLES`]）。
+///
+/// # 非空锚（否则五条断言全是 `0 == 0`）
+///
+/// 夹具**先往三张只读表各播一行**（[`seed_one_row_in_each_of_the_read_only_tables`]），
+/// 并断言那三个数就是 1、另外两张是 2（两条候选各一行）。**没有这一段**，
+/// 「跑完前后一样」在空表上是一条恒真的话——本仓点过名的形状（恒绿的守卫比没有更坏）。
+///
+/// # 两条路径都要
+///
+/// 只跑成功路径时，「失败路径上写了库」这一类实现全绿；只跑失败路径同理。
+/// 成功那条**断言它真的成功了**（`reply.content` 逐字回读）：若两条都失败，
+/// 「什么都没写」也可以是「什么都没跑」。
+///
+/// # 红的条件（档位：移除）—— **简报给的那一枚写不出来，取可写邻形**
+///
+/// 简报写的是「在 `call` 里插一句 `tx.execute(…)`（或用 `Db::begin` 写一行）」，
+/// 而**交付的 `call` 没有 `Tx`**（设计 §2.2／§3.4：`Tx` 不得跨 `await`，故 `call` /
+/// `call_stream` / `abort` 一个都不收库句柄，也不收 `Db`）——**按字面写不出来**。
+/// 可写邻形：在同一段里的 `plan_candidates`（它持 `Tx`，是 G 全模块唯一收 `Tx` 的入口）
+/// 里插一句写库 → `node_attempt` 的行数 1 → 2，红。
+/// **这两个形状断的是同一件事**（「G 的路径上有一次库写」），差别只在落点；
+/// 简报那一句的来历留在 task-11 报告 §4。
+///
+/// **实测（2026-10-09）**：那一枚红**一条**——就是本条（`43 passed; 1 failed`，
+/// 日志 `.tmp/t11-M3.log`）。**第一版不是这样**：变异体写的是 `node_attempt` 的固定主键，
+/// 而本条的当时那版把 `Tx` 放掉再数（见上），于是**变异体真写了而本条 `ok`**
+/// ——那是本条自己的测具假象，不是变异体不生效（日志 `.tmp/t11-M3-first-cut.log`）。
+#[tokio::test]
+async fn the_path_writes_nothing_to_the_database() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+
+    // 两条路径各一条候选：m-a-ok 成功、m-b-fail 以一枚 provider 错误失败。
+    // 名字刻意让缺省次序把 m-a-ok 排在前面（`RecordingPolicy` 的打分是常数，缺省 `compare`
+    // 第四档按 id 升序兜底），于是 `selected()` 是成功那一条、`alternatives()[0]` 是失败那一条。
+    // 次序**不是断言的落点**：下面两句各自先断言是哪一条。
+    seed_one_row_in_each_of_the_read_only_tables(&tx);
+    let ok = Arc::new(FakeModel::new());
+    let fails = Arc::new(FakeModel::new().with_invoke(InvokeOutcome::Fail(
+        ProviderError::Unavailable("这一条路径配的就是失败".into()),
+    )));
+    for (id, adapter) in [("m-a-ok", ok), ("m-b-fail", fails)] {
+        register_with_state(&tx, id, LifecycleState::Active);
+        insert_profile(&tx, id);
+        serve(&mut registry, &[id], adapter);
+    }
+
+    // 非空锚：五张表一张都不许是 0，否则下面那五条「不变」在空表上恒真。
+    let before = counts_of_the_five(&tx);
+    assert_eq!(
+        before,
+        vec![
+            ("events", 1),
+            ("audit_log", 1),
+            ("node_attempt", 1),
+            ("model_registry", 2),
+            ("model_profile", 2),
+        ],
+        "夹具该往三张只读表各播一行、两张模型表各两行（两条候选）；\
+         某个数是 0 说明「行数不变」那句话在那张表上恒真"
+    );
+
+    // 成功路径。
+    let messages = a_dialog();
+    let candidates = plan_candidates(&tx, &registry).expect("两条都该是候选");
+    let plan = select(
+        candidates,
+        a_route_input(no_constraints()),
+        &RecordingPolicy::new(),
+    )
+    .await
+    .expect("两条都在，该有输出");
+
+    // **全程只用一个 `Tx`，既不提交也不提前放手**——这不是随手写的：`Tx` 一被 drop 就回滚
+    // （未提交的写会消失），而**同步段是 G 唯一持 `Tx` 的地方**（设计 §3.4）。
+    // 把 `Tx` 放掉再数，等于把这一段里可能发生的写**先擦掉再数**：一个在 `plan_candidates`
+    // 里写了库的实现会照样全绿。**实测（2026-10-09）**：本条的第一版正是这样被放过的
+    // （`.tmp/t11-M3-first-cut.log`：变异体真的写了 `node_attempt`，而本条 `ok`）。
+    // 同一个 `Tx` 上数前数后，这次写就落在读数里。
+    let (ok_candidate, ok_adapter) = plan.selected();
+    assert_eq!(
+        ok_candidate.model().as_str(),
+        "m-a-ok",
+        "缺省次序按 id 升序，`selected()` 该是成功那一条"
+    );
+    let reply = call(
+        ok_candidate,
+        ok_adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    .expect("这一条配的是成功路径");
+    assert_eq!(
+        reply.content, "pong",
+        "成功路径该真的走通——否则下面的「什么都没写」也可能是「什么都没跑」"
+    );
+
+    // 失败路径。
+    let alternatives = plan.alternatives();
+    let (fail_candidate, fail_adapter) = alternatives[0];
+    assert_eq!(
+        fail_candidate.model().as_str(),
+        "m-b-fail",
+        "表尾第一条该是失败那一条"
+    );
+    match call(
+        fail_candidate,
+        fail_adapter,
+        CallInput {
+            messages: &messages,
+            max_tokens: None,
+        },
+        None,
+    )
+    .await
+    {
+        Err(ModelCallError::Provider { .. }) => {}
+        Ok(_) => panic!("这一条配的是失败路径，该回 Err"),
+        Err(other) => panic!("该是一枚 Provider 失败，得到 {other:?}"),
+    }
+
+    // 行数逐表比对。整表 `assert_eq!` 给一个总的读数，下面那个循环把红**指到是哪一张表**变了
+    // （整表比对只报「不等」）。
+    let after = counts_of_the_five(&tx);
+    assert_eq!(
+        after, before,
+        "整条路径（成功与失败各一次）一行都不该写：五张表逐表不变"
+    );
+    for (table, n) in &before {
+        assert_eq!(
+            row_count(&tx, table),
+            *n,
+            "`{table}` 的行数变了——G 的路径不该写这张表"
+        );
+    }
+}
+
+/// **可达性的正面照片**（设计 §11）：一条 `active` 的模型经 ① `plan_candidates`
+/// → ② `select` **确实成为 `CallPlan::selected()`**。
+///
+/// # 为什么非有这一条
+///
+/// **只钉「`stale` 被挡」而不钉这一侧时，整条路径可以在「永远返回 `NoEligibleCandidate`」
+/// 的情况下全绿**——而那正是 fail-open 的反面（一条永远不可用的路径与一条按规则拒绝的路径，
+/// 在「拒绝」这一侧的读数上一样）。本仓在 Task 6 的
+/// `a_model_with_a_profile_past_the_gate_and_an_adapter_is_a_candidate` 上写过同一条：
+/// 「只钉三个『不进』而不钉这一条时，一个永远返回空向量的实现全绿」。**本条的增量是把它钉到
+/// ② 的**输出**上**：候选进了集合还不够，它得**成为 `selected()`**（不是只出现在表尾）。
+///
+/// # 红条件（档位：取反）
+///
+/// 让 `select` 恒返回 `NoEligibleCandidate`（可写形：把交给 `rank` 的模型列表换成空的那一份）
+/// → `.expect("该有输出")` 处红。**实测（2026-10-09）**：**红 25 条**（该变异体是整条 ② 的取反，
+/// 凡是要有输出的用例都会红）——**隔离版**（`--` 后面只留本用例）红一条、`0 passed; 1 failed`，
+/// 证明本条**自己**挡得住这一枚。日志 `.tmp/t11-M4-full.log` 与 `.tmp/t11-M4-iso.log`。
+/// **顺带记**：全量那份红集里也有 `rank_is_never_called_when_no_candidate_survives`
+/// ——它的正控制那一段要有输出，这是那一段承重的旁证。
+///
+/// 另一个方向（把候选集本身改成恒空）红的是 Task 6 那一侧，不是本条——**两侧各管一段**。
+#[tokio::test]
+async fn a_routable_model_does_come_out_as_the_selected_candidate() {
+    let (_dir, db) = a_model_db();
+    let tx = db.begin().unwrap();
+    let mut registry = ProviderRegistry::new();
+    let adapter = seed_routable(&tx, &mut registry, "m-routable", ProviderHealth::Healthy);
+
+    let candidates = plan_candidates(&tx, &registry).expect("三条合取都成立，该有候选");
+    assert_eq!(
+        ids_of(&candidates),
+        vec!["m-routable".to_owned()],
+        "① 该交出这一条候选"
+    );
+
+    let policy = RecordingPolicy::new();
+    let plan = select(candidates, a_route_input(no_constraints()), &policy)
+        .await
+        .expect("有一条可执行的候选，该有输出");
+
+    assert_eq!(
+        plan.selected().0.model().as_str(),
+        "m-routable",
+        "② 该**选中**它，而不只是把它留在候选集里"
+    );
+    let expected: Arc<dyn ModelProvider> = adapter;
+    assert!(
+        Arc::ptr_eq(&expected, plan.selected().1),
+        "选中的那一对该是『这个模型 + 它自己的适配器』（设计 §3.1 第 1、6 条）"
+    );
+    assert!(
+        plan.alternatives().is_empty(),
+        "只有一条候选，表尾该是空的"
+    );
+    assert_eq!(
+        policy.captured_availability().len(),
+        1,
+        "策略被问到一次——`rank` 真的参与了这一次选择（不是 `select` 自己编了一个 `Ok`）"
+    );
+}
+
+/// `Degraded` 的候选**仍在输出里、且逐项原样**（设计 §4.4 第 2 条、§11）。
+///
+/// # 两侧对钉
+///
+/// 向一：中间那一条探到 `Degraded`；向二：同一条改回 `Healthy`，别的一切不变。
+/// **两次的 `selected()` 与 `alternatives()` 的 id 序列必须逐项相同**——
+/// 即健康度从 `Degraded` 变成 `Healthy`，G 这一侧的输出**一个字都不动**。
+///
+/// **两向为什么在同一条用例里、同一个 id 上**：这样才能把「输出没变」归因到**健康度这一样**上，
+/// 而不是「换了一组候选」或「换了策略」。两次跑在两个库上、同样的三个 id、同一份策略。
+///
+/// # 为什么输出相同就是判据
+///
+/// 设计 §4.4 第 2 条：**`Healthy` / `Degraded` 之间没有判据**，只过滤 `Unavailable` 是 `rank`
+/// 的事，`Degraded` **原样带进 `reason`**。故「G 这一侧对 `Degraded` 什么都不做」的**唯一**
+/// 可观察形式就是「改回 `Healthy` 之后输出逐项不变」。**用一个会改次序的策略**
+/// （[`ReversingPolicy`]）：输出是 m-c / m-b / m-a，于是「逐项相同」这句话真的有内容
+/// （缺省次序下断言同样的东西也成立，但次序是恒等的，读不出「配对与排序没被动过」）。
+///
+/// # `Degraded` 该不该降权，规范未给判据——故这里钉的**不是**「不该降权」
+///
+/// **降权是 [`RankingPolicy`] 的事**（打分是策略给的，基线不读健康度），G 手里根本没有分数。
+/// 故 G 这一侧能拿出的证据只能是「**原样带过**」——**「`Degraded` 该不该降权」这件事在
+/// 本设计里没有收件人**，据实记（简报让留给「## 遗留」的收件人，落在台账里）。
+///
+/// # 红的条件（档位：收紧）
+///
+/// 在 G 里对 `Degraded` 做**裁剪**（可写形：`snapshot` 把 `Degraded` 折成 `Unavailable`）
+/// → 向一的输出少一条（m-b 被 `rank` 滤掉）→ 两次的 id 序列不同，红。
+/// **「降权」那一半在 G 里写不出来**：G 不打分，分数由策略给——而策略是**测试自己**交进去的，
+/// 故「G 给 `Degraded` 降权」在交付签名上**无处安放**（层③：只能在改签名的前提下表达）。
+/// **实测（2026-10-09）**：裁剪那一枚红**三条**——本条、Task 3 的
+/// `a_unavailable_adapter_is_carried_through_verbatim`（它同样钉本层不动 `Degraded`）
+/// 与 Task 3 的 `the_snapshot_is_indexed_by_the_candidates_own_model_id`（它的夹具里有一条
+/// `Degraded`）。**预测写错据实记**：预估的是两条。日志 `.tmp/t11-M5.log`。
+#[tokio::test]
+async fn the_degraded_candidate_stays_in_the_output_unchanged() {
+    /// 三个候选、中间那一条取给定的健康度，跑一遍并交出输出里的 id 序列。
+    async fn ids_out(health_of_the_middle_one: ProviderHealth) -> Vec<String> {
+        let (_dir, db) = a_model_db();
+        let tx = db.begin().unwrap();
+        let mut registry = ProviderRegistry::new();
+        seed_routable(&tx, &mut registry, "m-a", ProviderHealth::Healthy);
+        seed_routable(&tx, &mut registry, "m-b", health_of_the_middle_one);
+        seed_routable(&tx, &mut registry, "m-c", ProviderHealth::Healthy);
+
+        let candidates = plan_candidates(&tx, &registry).expect("三条都该在候选集里");
+        let plan = select(candidates, a_route_input(no_constraints()), &ReversingPolicy)
+            .await
+            .expect("`Degraded` 不该被滤掉，三条都该有输出");
+
+        let mut ids = vec![plan.selected().0.model().as_str().to_owned()];
+        ids.extend(
+            plan.alternatives()
+                .iter()
+                .map(|(candidate, _)| candidate.model().as_str().to_owned()),
+        );
+        ids
+    }
+
+    let degraded = ids_out(ProviderHealth::Degraded).await;
+    let healthy = ids_out(ProviderHealth::Healthy).await;
+
+    assert_eq!(
+        degraded,
+        vec!["m-c".to_owned(), "m-b".to_owned(), "m-a".to_owned()],
+        "`Degraded` 的候选该**在输出里**且次序与策略给的一致（反序策略：m-c / m-b / m-a）——\
+         它若被裁掉，这里就少一条"
+    );
+    assert_eq!(
+        degraded, healthy,
+        "同一条候选从 `Degraded` 改回 `Healthy`，输出该**逐项相同**——\
+         两次不同说明 G 这一侧对 `Degraded` 动了手（设计 §4.4 第 2 条：两者之间没有判据）"
+    );
+}
