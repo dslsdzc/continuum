@@ -11,6 +11,14 @@
 //! （[`detect`] / [`Mention`] / [`MentionKind`]），以 `tests/surface.rs` 的五条用例钉住
 //! 四步折叠、不纠错、`span` 是字节偏移、零命中 fail-closed、`kind` 不透明五件事。
 //!
+//! Task 2 落 `§3.2` 的**两支互斥产物**与 `§3.1` 的最后两个组件：
+//! [`Canonicalized`] / [`CanonicalRepresentation`] / [`UnresolvedMention`]（`canonical` 模块）、
+//! Ambiguity Manager [`finish`]（`ambiguity` 模块，含四态 [`ResolutionResult`] 的**前向声明**
+//! ——该类型的载荷按设计 §4.1 由 Task 4 补，理由写在那个模块的文件头），
+//! 以及 Temporal Resolver [`resolve_temporal`] / [`Now`] / [`TemporalBinding`]（`temporal` 模块）。
+//! 以 `tests/canonical.rs` 的七条用例钉住：全解落 `Canonical`、三种未解态各落 `NeedsResolution`
+//! 且列表恰是那一枚、两支互为补集、四类脏输入各落一支、`Now` 是入参。
+//!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-node` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
 //!
@@ -23,11 +31,17 @@
 //! 它不能省（那张表要求每个 workspace 成员都在里面），只是今天还没有边。
 //! 反向的 `continuum-semantics ← continuum-canonical` 是**读取方**的边，登记在那一侧。
 
+mod ambiguity;
+mod canonical;
 mod error;
 mod surface;
+mod temporal;
 
+pub use ambiguity::{ResolutionResult, finish};
+pub use canonical::{CanonicalRepresentation, Canonicalized, UnresolvedMention};
 pub use error::CanonicalError;
 pub use surface::{Mention, MentionKind, Surface, detect, normalize};
+pub use temporal::{Now, TemporalBinding, resolve_temporal};
 
 /// **不透明值**：一个包 `String` 的 newtype。
 ///
