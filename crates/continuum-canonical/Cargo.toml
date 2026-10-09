@@ -25,8 +25,10 @@ unicode-normalization = { workspace = true }
 
 [dev-dependencies]
 # Task 3 的使用点：`tests/type_level.rs` 用编译失败样例钉住三件 crate 外**写不出**的东西
-# （`EntityId` 的字面量构造、`CandidateSource` 上的单实体方法、`CanonicalRepresentation`
-# 的结构体字面量），与 `continuum-node` / `continuum-model-registry` 的用法同形。
+# （`EntityId` 的字面量构造、`CandidateSource` 上没有 `pick_one` 这个口子、
+# `CanonicalRepresentation` 的结构体字面量），`trybuild` 的用法与 `continuum-node` /
+# `continuum-model-registry` 同形（那两份 crate 的 `tests/` 下**只有** `compile_fail/`；
+# 本 crate 多一份 `compile_pass/` 的理由写在 `tests/type_level.rs` 文件头）。
 # **它是外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表逐对断言的是
 # **workspace 成员之间**的边（设计 §1.2.3 推论 1），比对的内层循环只遍历 workspace 成员
 # （`dependency_direction.rs` 的 `for other in &all_crates`）；`trybuild` 不在 members 里。

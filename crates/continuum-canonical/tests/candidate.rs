@@ -53,7 +53,7 @@ fn candidate(entity_id: &str, score: Option<f64>) -> Candidate {
 
 /// 夹具：**只实现 `retrieve`** 的一个来源，返回固定的一批候选。
 ///
-/// 它同时是「本层不为单实体定义方法」在**运行期**这一侧的对照物：
+/// 它同时是 `tests/compile_pass/a_candidate_source_with_only_retrieve.rs` 在**运行期**这一侧的对照物：
 /// 一个只能交出集合的来源，本层拿它没有任何「取唯一那枚」的口子。
 struct FixedSource(Vec<Candidate>);
 
@@ -136,9 +136,10 @@ fn entity_id_round_trips_and_has_no_public_literal_construction() {
 ///
 /// # 钉的两件事
 ///
-/// 1. **本层不为单实体定义方法**——这一半的照片是 `trybuild`
+/// 1. **本层没有 `pick_one` 这个口子**——这一半的照片是 `trybuild`
 ///    （正例：只实现 `retrieve` 的实现编译通过；反例：`source.pick_one(&m)` 编译不过），
-///    在 `tests/type_level.rs`；本文件证明不了它。
+///    在 `tests/type_level.rs`；本文件证明不了它。**它钉的是那个名字**：
+///    另一名字的单实体方法 `trybuild` 枚举不到（见 `src/candidate.rs` 的「这条守卫的限度」）。
 /// 2. **本层拿到集合之后也不会把它塌成一枚**——这一半是本文件的运行期断言：
 ///    多个来源各交一批，装配后的**检索集按装配顺序拼接**，空来源不贡献、
 ///    重复的 `entity_id` **不去重**（去重会把「两个来源各自认为可能」这一事实抹掉，
@@ -146,13 +147,14 @@ fn entity_id_round_trips_and_has_no_public_literal_construction() {
 ///
 /// # 这条守卫的**限度**（简报要求写明）
 ///
-/// 它钉的是「**本层**不为单实体定义方法」，**不钉**「实现者内部返回唯一候选」——
+/// 它钉的是「**本层**没有 `pick_one` 这个口子」，**不钉**「实现者内部返回唯一候选」——
 /// 一个来源内部只交出一枚候选，本层看不出、也不该看出（§197 的高召回要求是**手段**层面的事，
 /// 本层没有召回率判据，设计 §15.2 第 3 条）。「候选集非空且唯一合格才 `Resolved`」
 /// 那一侧由 Task 5 的四条断言钉，不在本用例的射程里。
 ///
 /// 红条件（**取反档**，本 task 实测取过）：把 `CandidateSources::retrieve_all` 的拼接改成
-/// 「只取第一枚」（如 `.take(1)`）⇒ 本用例红在条数那一条上。
+/// 「只取第一枚」（如 `.take(1)`）⇒ 本用例红在 `ids(&retrieved)` 那一条上（元素序列不等）。
+/// **不是红在紧随其后的条数断言上**——那一条由 `ids(...)` 蕴含，永远不会先红（见用例内的注释）。
 #[test]
 fn a_candidate_source_can_only_return_a_set() {
     let m = a_mention();
@@ -172,6 +174,9 @@ fn a_candidate_source_can_only_return_a_set() {
         ["a", "b1", "b2"],
         "检索集按**装配顺序**拼接：三个来源共交出三枚，空来源不贡献、顺序不重排"
     );
+    // 下一条**不是独立断言**：上一句 `ids(&retrieved) == ["a","b1","b2"]` **已蕴含**它
+    // （元素序列相等 ⇒ 条数相等），故它永远轮不到独立变红。留着只为把「不塌成一枚」这句话
+    // 钉在它该在的位置（**不称它独立**）；这一半的独立照片是上一条。
     assert_eq!(
         retrieved.len(),
         3,

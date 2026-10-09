@@ -3,9 +3,12 @@
 //
 // 这一份同时是两枚变异体的哨兵：
 //   (i) 「给 trait 加第二个**必需**方法（无默认实现）」——本样例立刻编不过；
-//   (ii) 「给 trait 加一个返回单实体的方法并给它默认实现」——本样例仍编得过，
-//        那时红的是 `tests/compile_fail/candidate_source_has_no_single_entity_method.rs`
+//   (ii) 「给 trait 加一个**名叫 `pick_one`** 的单实体方法并给它默认实现」——本样例仍编得过
+//        （默认实现不需要实现者覆写），那时红的是
+//        `tests/compile_fail/candidate_source_has_no_single_entity_method.rs`
 //        （两份样例各守一侧，这就是「守卫须两侧都钉」）。
+//        **「名叫 `pick_one`」不是啰嗦**：那枚变异体若不叫 `pick_one`，两份样例都不会红——
+//        方法名是开放集，`trybuild` 枚举不完（见 `src/candidate.rs` 的「这条守卫的限度」）。
 //
 // 它顺带钉住「`Candidate` 的字段是 `pub`、且就是 §272 那三个」：
 // 这份样例在 **crate 外**用结构体字面量拼了一枚候选，字段少一个或多一个都编不过。

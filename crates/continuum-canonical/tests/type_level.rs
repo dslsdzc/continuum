@@ -18,8 +18,10 @@
 //!   （(a) 半边的运行期断言在 `tests/candidate.rs` 的同名用例里）。
 //!   预期是「元组结构体构造子是私有的」那一类；**判据是实跑产出的那份 `.stderr` 本身**，
 //!   不是某个码——本项目为「凭记忆写错误码」付过代价。
-//! - **`candidate_source_has_no_single_entity_method`** —— `CandidateSource` 上
-//!   **没有任何返回单一实体的方法**，故 crate 外调 `source.pick_one(&m)` 编不过。
+//! - **`candidate_source_has_no_single_entity_method`** —— crate 外调 `source.pick_one(&m)`
+//!   编不过（那份同名 `.stderr` 逐字比对的正是 `E0599: no method named \`pick_one\``）。
+//!   **它钉的是这个名字**，不是「本层没有任何单实体方法」那句更宽的话——方法名是开放集，
+//!   枚举不完（详见 `src/candidate.rs` 的「这条守卫的限度」）。
 //!   它是简报里 `a_candidate_source_can_only_return_a_set` 的**反例那半边**。
 //! - **`canonical_representation_is_not_constructible_outside`** ——
 //!   `CanonicalRepresentation` 的字段私有、唯一构造入口 `new` 是 `pub(crate)`
@@ -36,8 +38,20 @@
 //!   ⇒ `CandidateSource` 的**必需**方法集恰好是那一个。
 //!   这一份是「trait 上多加一个必需方法」那枚变异体的哨兵：加了就会红。
 //!
-//! # 这份清单钉的是「本层不为单实体定义方法」，不是「唯一候选不许出现」
+//! # 本 crate 为何有 `tests/compile_pass/`（另两个 crate 没有）
 //!
+//! `crates/continuum-node/tests/` 与 `crates/continuum-model-registry/tests/` 下**只有
+//! `compile_fail/`**（本仓现状）。那不是笔误，也不靠本 crate 去统一：本 crate 需要一份编译
+//! **通过**的样例，是因为 `a_candidate_source_with_only_retrieve` 钉的命题**只有编译期能表达**
+//! ——「一个只实现 `retrieve` 的实现编得过」⇔「该 trait 的**必需**方法集恰好是那一个」；
+//! 运行期用例只能证明「我没写第二个方法」，证明不了「写不出来」。
+//! 那两个 crate 的样例钉的都是「某条通道写不出来」，其正面那半（公开入口拿得到，如
+//! `continuum-node/tests/node.rs` 经 `ComputeNode::new` 造一枚节点）在 crate 外的**运行期**用例里
+//! 就有照片，故不需要一个编译通过的目录。
+//!
+//! # 这份清单钉的是「本层没有 `pick_one` 这个口子」，不是「唯一候选不许出现」
+//!
+//! 前者的限度（它只钉一个**名字**）写在 `src/candidate.rs` 的「这条守卫的限度」一节；
 //! 后者的限度写在 `tests/candidate.rs` 的 `a_candidate_source_can_only_return_a_set` 头注释里：
 //! 一个来源**内部**只交出一枚候选，本层看不出、也不该看出（§197 的高召回是**手段**层面的事）。
 //!
@@ -91,6 +105,8 @@ fn type_level_guarantees_hold() {
 /// **只查名字集合**：不解析分组、不解析错误码、不比对 `.stderr` 的内容——那些由
 /// `type_level_guarantees_hold` 与各份样例自身负责。也**不查 `.stderr` 是否配齐**
 /// （那是 `trybuild` 的事），**也不查 `compile_pass/` 下有没有多余的 `.stderr`**。
+/// 更细一层：第二条断言用的是 `str::contains`(**子串匹配**)，故它**不校验名字出现在哪一行**、
+/// 也不校验它周围的文字——见下面对那条断言的说明。
 #[test]
 fn the_sample_lists_match_the_directories() {
     assert_eq!(
@@ -107,6 +123,12 @@ fn the_sample_lists_match_the_directories() {
     // 第二条：两份清单里的名字**还都必须在文件头的散文清单里点名**——否则「改了常量、忘了散文」
     // 一样静默。**只截到第一个 `const` 之前**：否则常量自己那几行会让本断言恒真
     // （这是本守卫自身的假绿形状，故把截断的理由写在这里）。
+    //
+    // **它实际钉的比上面那句话弱**：判据是 `header.contains(name)`，即**子串**——名字只要在
+    // 该段散文的任何位置出现一次即满足（出现在别处的行文里也算数），它**不校验**名字落在那条
+    // 点名清单的行上，也不校验那行写了什么。把名字从点名处挪走、却留在文件头别处，本断言仍绿。
+    // 且**本守卫自身没有照片**（没有一条负控制把某个名字挪出清单看它变红）——它是一处
+    // 「靠人记得」的对钉。射程到此为止，故把这段写在这里，免得被读成「校对了点名清单」。
     let source = include_str!("type_level.rs");
     let header = source
         .split("const COMPILE_FAIL_SAMPLES")
