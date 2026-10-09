@@ -482,9 +482,14 @@ pub enum CheckpointError {
 
 ## 5.1 登记形态：照 P1 与 P5b，不自造
 
-§244（`docs/spec/05-normative.md:735-753`）的 `Operator` 八字段由 P1 落地为
-`crates/continuum-operator/src/definition.rs:78-88`：`id` / `version` / `input_schema: Vec<ArtifactType>` /
+§244（`docs/spec/05-normative.md:735-753`）的 `Operator` **七字段**由 P1 落地为
+`crates/continuum-operator/src/definition.rs:79-88`（字段本体 `:80-87`）：
+`id` / `version` / `input_schema: Vec<ArtifactType>` /
 `output_schema: Vec<ArtifactType>` / `determinism` / `side_effect_class` / `backend_candidates: Vec<BackendId>`。
+> **订正（2026-10-09，P5d 的复审查出）**：此处原写「**八字段**」。**§244 列的是七个**（实测
+> `05-normative.md:735-753`，逐行七名），**八是 §258 的 `Evidence` 的字段数**（`05-normative.md:1073-1088`）——
+> **那个数字是从相邻条款串过来的，不是 §244 说的。**
+> **而这句话后面紧接着就只列了七个名字**——**句子与自己的清单相抵，却因为没有人数一遍自己列的名字而留了下来**（同一句被 P5d 与 P5f 的设计逐字抄去，各需改自己那份）。
 **本块不加字段、不改签名**（切分 §二「无需重新冻结」段）。本块交付的是**内容**：
 17 枚 `Operator` 值的清单与它们的注册入口。
 
