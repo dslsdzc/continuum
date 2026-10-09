@@ -998,8 +998,14 @@ fn the_module_touches_neither_capability_nor_effects_nor_credentials() {
 // | 拼法 | 代码行上的命中 | 注释里的命中 |
 // |---|---|---|
 // | `ModelCallError::Provider` | **1**（`src/model_call.rs`，`into_call_error` 的 `Some(class)` 那一臂） | 2（同文件的两处 `///`：写「与 `[call]` 那一侧逐字同形」与「构造点只有一处」的那两句） |
-// | `ModelCallError::Cancelled` | **1**（同函数 `None` 那一臂） | 0 |
-// | `into_call_error` | **6**（5 处 `map_err(into_call_error)` ＋ 1 处 `pub fn into_call_error` 定义） | 3（都是 `///`） |
+// | `ModelCallError::Cancelled` | **1**（同函数 `None` 那一臂） | 1（`83e45a5` 新增的那段 `///` 引了这枚拼法） |
+// | `into_call_error` | **6**（5 处 `map_err(into_call_error)` ＋ 1 处 `pub fn into_call_error` 定义） | 4（都是 `///`） |
+//
+// **订正（2026-10-09，Task 10 修复轮）**：注释那两格原先写 `::Cancelled` **0**、`into_call_error` **3**。
+// **那两个数在写下它们的那一刻是对的**——同一量法跑在 `db3016e` 上得 `2 / 0 / 3`（实测），
+// 而**差额来自同一笔**：`83e45a5` 自己在 `src/model_call.rs:632-634` 新增的那段 `///` 点了这两枚拼法，
+// 故**一个提交自己新增的行，改掉了它自己那一张表所记的数**。**代码行那一列（1 / 1 / 6）不受影响**——
+// 新增的是 `///` 行，行首是 `//`，故不入那一列；本判据承重的正是那一列。
 //
 // 台账那句话**今天成立**——而它是在 Task 8 写的，Task 9 之后代码动过，故本轮重新取了一遍读数。
 //
