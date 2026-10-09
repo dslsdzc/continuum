@@ -796,13 +796,22 @@ git commit -m "feat(canonical): 显式约束与满足判据、四态与两个数
 ### Task 5: §4.2 的四条断言——「不存在正确候选时不强行绑定」的可断言形态
 
 **Files:**
-- Create: `crates/continuum-canonical/src/resolver.rs`（续，四条断言的实现体）
+- Create: `crates/continuum-canonical/src/resolver.rs`（续，**判据**：工作集的定义与「四条断言 ↔ 用例名」的表）
+  > **订正（2026-10-10，Task 5 实现期实测、评审核实）：原文此处写的是「（续，四条断言的实现体）」——那是错的。**
+  > 实测：**四条断言的实现体在 Task 4 就已经落地**（`src/resolver.rs` 的判定路径），
+  > 本 task 改 `src/resolver.rs` 的**全部是注释**（工作集定义、断言↔用例名的表、两行实现注释），
+  > 判定路径**一字未改**。**后果**：本 task 的 Step 2「运行，确认失败」**空转**——七条新用例第一次跑就绿，
+  > **红证据只能来自变异轮**（八枚，逐枚真跑，全为运行期红）。
+  > **判据**：**一个 task 的 Files 若写「某某的实现体」，先核那个实现体是不是已经存在**——
+  > 排错了会同时废掉「先跑红」这一步与该 task 的实付内容。
+  > **同族**：Task 2→Task 4 的次序相抵、Task 7 的 `alias.rs`（那两处已各自订正）。
 - Create: `crates/continuum-canonical/tests/resolver.rs`（续）
 - Modify: `crates/continuum-canonical/src/lib.rs`
 
 **Interfaces:**
 - Consumes: Task 4 的 `ExplicitConstraint` / `CandidateFacts` / `ResolutionResult` / `RequiredStrength`、Task 3 的 `Candidate`
-- Produces: 无新公开类型（`resolve` 的判定路径补全）
+- Produces: **无新公开类型、无新公开项**（本 task 落的是**判据**：七条用例与 `resolve` 文档里的工作集定义；
+  与上面那条订正同源——`resolve` 的判定路径**已由 Task 4 补全**，本 task 未改它）
 
 - [ ] **Step 1: 写用例**（四条断言，三条在 fail-open 侧，故三条都必须有照片）
 
