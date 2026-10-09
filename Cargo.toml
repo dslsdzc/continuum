@@ -19,6 +19,7 @@ members = [
     "crates/continuum-connector",
     "crates/continuum-model-registry",
     "crates/continuum-node",
+    "crates/continuum-canonical",
 ]
 
 [workspace.package]
@@ -43,3 +44,7 @@ landlock = "0.4"
 # （其 compat 模块是 `pub(crate)`），故须自行发该 syscall。libc 已作为 landlock 的
 # 传递依赖在锁文件里（0.2.189），直接登记不引入新 crate。
 libc = "0.2"
+# P4 语义层的 Task 1 起由 continuum-canonical 用于 §270 Surface Normalizer 的
+# 「Unicode 归一 ＋ 宽度归一」两步（NFKC）。本行登记在此而不登记别处，
+# 是为了让这一处新增**落在文件末尾**——本文件由多个分支共写，末尾改动的冲突面最小。
+unicode-normalization = "0.1"

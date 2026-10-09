@@ -149,6 +149,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 设计 §6；收件人见 §10 第 8 条）——**不是漏登记**。
     // **不登记 core**：本设计对它零引用。**不登记 persist / events**：本设计不写库（§4.2）。
     ("continuum-node", &["continuum-artifact"]),
+    // P4 语义层（设计 §2.1）：Input Canonicalization Frontend 与 Reference Resolver。
+    // 本层不登记任何指向执行层／资源层／边界层的边；允许集只含 continuum-persist
+    // （alias 表经 Tx）与层内前驱。`continuum-semantics ← continuum-canonical` 是
+    // 反向的读取方，不在这里。
+    ("continuum-canonical", &[]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
