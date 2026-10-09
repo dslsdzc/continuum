@@ -50,6 +50,7 @@
 | 复用判据（缓存键、`can_reuse`） | P1 已落地（`crates/continuum-graph/src/reuse.rs:29`）。本块**不建第二份**（§3.6） |
 | §239 的端口兼容判定、§245 的「后端是否在候选内」判定 | P1 已落地（`crates/continuum-port/src/port.rs:94` 的 `compatible`；`crates/continuum-graph/src/execution.rs:87` 的 `is_candidate_backend`）。本块只**声明**自己的 schema 与候选（§3.5） |
 | §229 的 Plan Review 状态机、§338–§341 的审查三层结构 | P4（P4 设计 §9） |
+| `Node.execution_policy` 的判定 | P4（切分 §四第 5 条：该字段的注记逐字「结构保存，判定属 P4」，字段在 `crates/continuum-graph/src/node.rs:18`、注记在 `:17`）。本块只碰 `verification_policy`（同文件 `:20`，注记「结构保存，判定属 P5」） |
 | `Task Contract` / `Requirement` / `Plan` / `Decision` 对象 | P4（`continuum-semantics`，该 crate 今天在 `crates/` 下不存在） |
 | L2 工作区的创建、放弃与只读强制本身 | P2 已落地（`crates/continuum-workspace`）。本块只声明一枚算子来**命名**它（§4.2） |
 | 内核层沙箱（§159、§256 的强制实现） | P2（`crates/continuum-sandbox`）。本块不把它做成算子，也不登记到它的边 |
@@ -124,14 +125,14 @@ CodeError
 **本块不新造算子类型**——§3.2 的登记形态照 P1 与 P5b。
 
 **本块持有的类型只有一枚，且它只承载注册期的两件事**（§3.2 与 §3.5 的形状校验）。
-**这不是省事**：切分 §四第 7 条要求「判据只许有一处」，而本块能持有的判定本来就只有那两件——
-其余每一件都在仓里已有落点（§3.5、§3.6 逐条给）。
+**这不是省事**：切分 §四第 7 条要求「判据只许有一处」，而本块**独占**的判定逐条列在 §2.4（**十件**），
+本层其余每一件判定都在仓里已有落点（§3.5、§3.6 逐条给）。
 
 **不新增第二个错误类型**：切分 §二第 4 条把「第二份错误类型」的禁令写给了 `Checkpointable` 那一处（归 P5e）；
 本块同理不另造。`OperatorError`（`crates/continuum-operator/src/registry.rs:7-12`）与 `MethodError`（P5b 设计 §4.4）
 各自带出来，不重述（§3.2 的 `CodeError` 两臂逐臂注明判定的持有者）。
 
-**判定**（本块是它们的唯一落点）：
+**判定**（本块是它们的唯一落点，共**十件**，逐条见 §2.4；其中与仓里已有落点最相邻的两件是）：
 
 1. 本领域 9 枚算子的 `determinism` 声明所依赖的「backend 逐位可复现」名单（§3.5）。
 2. L2 工作区的两个 backend 名与 §255 的两种形态的对应（§4.2）。
@@ -140,7 +141,7 @@ CodeError
 复用的四条件（P1 的 `can_reuse`，§3.6）；端口兼容（P1 的 `compatible`，§3.5）；后端是否在候选内（P1 的
 `is_candidate_backend`，§3.5）。
 
-**上面那六条判定「不持有」的反面是下面的 §2.4**：规格没给、而本设计不得不定的每一处判定，
+**上面那八条判定「不持有」的反面是下面的 §2.4**：规格没给、而本设计不得不定的每一处判定，
 在那里逐条给出**代价、边界、落点与具名收件人**。**没进 §2.4 那张表的判定，本块一处也没有定。**
 
 ## 2.3 本块的层间位置
@@ -171,15 +172,16 @@ L2 工作区的创建在 P2（第 5 层），而本块只在**声明**里命名�
 
 | # | 发明的判定 | 规范给到哪一步为止 | 代价 | 边界（拦不住什么） | 落点 | 收件人 |
 |---|---|---|---|---|---|---|
-| 1 | 9 枚算子各自的 `determinism` 取值 | §244 `:737-750` 只给字段名，**规范没有一处给过 operator 的 determinism** | §3.3 第 5、7 条：判 `NonDeterministic` 的六枚不进 §305 的复用，每轮重算；判 `Deterministic` 的两枚进复用 | 它**不判**「真实输入是否在端口上」——那一类由 §3.3 第 3 条与第 (o) 条用例管（§3.5 末） | §3.2 表的 `determinism` 列；照片 §10.2 第 (c)(g)(o) 条 | 规范维护者 |
+| 1 | 9 枚算子各自的 `determinism` 取值 | §244 `:737-750` 只给字段名，**规范没有一处给过 operator 的 determinism** | §3.3 第 5、7 条：判 `NonDeterministic` 的七枚不进 §305 的复用，每轮重算；判 `Deterministic` 的两枚进复用 | 它**不判**「真实输入是否在端口上」——那一类由 §3.3 第 3 条与第 (o) 条用例管（§3.5 末） | §3.2 表的 `determinism` 列；照片 §10.2 第 (c)(g)(o) 条 | 规范维护者 |
 | 2 | 9 枚算子各自的 `side_effect_class` 取值 | §244 同上；§307 `:2033` 只给「非幂等 Effect MUST NOT 直接自动重试」 | §3.3 第 8 条：`code-implement` 判 `NonIdempotent`，故它的失败**不得自动重试**，只能升级 | 它只影响重试策略；**不判**「重试几次、退避多少」（§307 的 `RetryPolicy` 字段面属 P1） | §3.2 表的 `side_effect_class` 列；照片 §10.2 第 (f) 条 | 规范维护者 |
 | 3 | 9 枚算子各自的 `backend_candidates` 名单 | §245 `:754-773` 只给「一个 Operator MAY 有多个 backend」与一个例（`Transcribe` 三 backend），**不给取值域** | §3.3 第 3 条（`code-workspace` 只列 §255 的两种形态，不列 §255 `:1029-1037` 的五种） | 名单是「Router 可以选的东西」，**不判**「Router 实际选哪个」（§245 `:773` 逐字把选择判给 Router） | §3.2 表的 backend 列；照片 §10.2 第 (h)(p) 条 | 规范维护者 |
 | 4 | 「逐位可复现的 backend」封闭名单（5 项）与注册期规则 | 无（§245 只说多 backend） | §3.5：远程执行不可用（性能代价，非正确性代价） | **拦不住**「候选都可复现、但真实输入不在端口上」那一类（§3.5 末已写明） | `register_code_operators`（§3.2）的核；错误臂 `CodeError::UnverifiableDeterminism`；照片 §10.2 第 (c)(d) 条 | 规范维护者（§11 第 7 条） |
 | 5 | §3.4 边表的**边判据** | §186/《总纲》§8.3 给的是**步骤名与步骤序**；§239 `:654` 只给「运行时 MUST 拒绝不兼容连接」 | 无（它是注册期的相容性核对） | 它只判**相邻两枚的 schema 相交**；**不判**「图上的边该不该存在」（那是 Planner 的构造） | §3.4 边表；照片 §10.2 第 (j) 条 | 规范维护者（以「§3.2 第 N 行」为依据的那几行） |
 | 6 | L2 工作区**落成算子**、Integration Gate **不落成算子** | §16 `:788-835` 说它是代码任务的基础，**没说它是不是算子**；§257 `:1053-1069` 说 Gate 的 MUST，**没说它的执行体** | §4.2 逐条给了两半的代价；替代方案（把 Gate 也算子化）被否的理由是「批准值没有位置装」 | 「每 Intent 一枚」这条**在类型层不可钉**（§4.2 末） | §4.2 的裁定；声明落点 `ALL_OPERATORS` 第 1 行 | 协调者（§11 第 4 条） |
 | 7 | §7.1 表里 `realized_by` 的映射 | §187 `:116-142` 只给方法名；P5b 的 `MethodEntry` 只给 `Vec<String>` 的容器 | §7.2：`TDD` 与 `debugging` 填空，代价是 P5b 判据 6 在 `Software` 域变红 | 它**表达不了次序与环境**（§7.2 第 1 条） | §7.1 表；入口 `bind_code_methods`；照片 §10.2 第 (k) 条 | P5b 的持有方 ＋ 协调者（§11 第 2 条） |
-| 8 | 链上**哪几步产 `Evidence`** 的分界 | §89 `:923-945` 只说「工具结果必须转换成 Evidence」，**不说每一步都产** | §5.2：四枚不产证据，其制品的存在性由 §266 第 1 项判 | 它**不判**「一条证据够不够」（那是 OPEN-001，P5a 设计 §3 的处置） | §5.2 表 | P5a（§11 第 1 条） |
+| 8 | 链上**哪几步产 `Evidence`** 的分界 | §89 `:923-945` 只说「工具结果必须转换成 Evidence」，**不说每一步都产** | §5.2：第 1–4 行四枚不产证据，故这四步在链上没有「语义成败」的证据承载——它们对不对只能靠各自的审查（§229 的 Plan Review，P4）与下游算子的证据间接体现 | 它**不判**「一条证据够不够」（那是 OPEN-001，P5a 设计 §3 的处置） | §5.2 表（第 1–4 行四枚不产证据，其制品的存在性由 §266 第 1 项判） | P5a（§11 第 1 条） |
 | 9 | 迁移档号 `150` | 切分 §二第 5 条只要求「写死后报出」，**不分配号** | §9.3：无（零表，登记的是归属不是 SQL） | 它**只声明本块那一段**；P5d/P5f/P6 三段本块无从声明 | §9.3 | 协调者（§11 第 6 条） |
+| 10 | 9 枚算子各自的 `input_schema` / `output_schema` 取值 | §244 `:737-750` 只给字段名与 `Vec<ArtifactType>` 的类型，**规范没有一处给过任一算子的端口取值** | §3.4 的边表与本表建立在这两列上：端口的型一旦改，边表与 §10.2 第 (j) 条的语料随之改，而规范未给边、也无论证可据 | **拦不住**「上游真给了这个型」——它只声明本块算子的端口形状；连接期是否相容由 P1 的 `compatible` 判（§3.4） | §3.2 表的 `input_schema` / `output_schema` 两列；照片 §10.2 第 (h)(i)(j) 条 | 规范维护者 |
 
 **另有两处「发明的判定」不在本块，但本块报了出**（它们由别的块持有，本块只报需求）：
 §5.3 的 `ModelReview` 臂（P5a）与 §5.4 的 `TestResult` 载荷 schema（规范维护者 ＋ P5a）。
@@ -226,7 +228,7 @@ backend 候选**在规范未给处由本设计定，并逐行标出「定」字�
 
 | # | id | 用途 | input_schema | output_schema | determinism | side_effect_class | backend 候选 | 出处 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `code-workspace` | 建立 L2 隔离工作区 | `[]` | `[SourceTree]` | `NonDeterministic`（定） | `Idempotent`（定） | `git-worktree` `overlayfs`（照录 §255） | §16 `:790-794`；§255 `:1023-1037` |
+| 1 | `code-workspace` | 建立 L2 隔离工作区 | `[]` | `[SourceTree]` | `NonDeterministic`（定） | `Idempotent`（定） | `worktree` `overlay`（定；取 P2 `WorkspaceBackend` 两臂的编码，§3.5 末） | §16 `:790-794`；§255 `:1023-1037` |
 | 2 | `code-plan` | 规划 | `[Json]` | `[Json]` | `NonDeterministic`（定） | `Pure`（定） | `primary-model`（定） | 《总纲》§8.3 `:1448`；§186 `:62` |
 | 3 | `code-decompose` | 拆任务 | `[Json]` | `[Json]` | `NonDeterministic`（定） | `Pure`（定） | `primary-model`（定） | 《总纲》§8.3 `:1448`；§186 `:64` |
 | 4 | `code-implement` | 全新 subagent 实现 | `[Json]` | `[Patch]` | `NonDeterministic`（定） | `NonIdempotent`（定） | `coding-agent` `local-agent-cli`（定） | 《总纲》§8.3 `:1448`；§186 `:66-68` |
@@ -316,7 +318,7 @@ pub enum CodeError {
    只是落在同一个取值上。
 
 5. **第 7 行与第 8 行分作两枚，不合成一枚多 backend 的算子**：分的原因是 `determinism`。
-   `code-test-run` 判 `Deterministic`（同一棵树跑同一套测试，结果逐次相同），而 §193 `:367-370` 的
+   `code-test-run` 判 `Deterministic`（同一棵树跑同一套测试，结果逐次相同），而 §193 `:368-369` 的
    Fuzzing 与 Property-based Testing 以熵源生成输入，同一棵树两次运行可能给出不同的覆盖与不同的发现，
    故 `code-fuzz-run` 判 `NonDeterministic`。**合成一枚并把 fuzz 放进它的候选里，会让那一枚声明的
    `Deterministic` 当场为假**——这正是 P5e 设计 §5.4 那条规则（`Deterministic` 的算子不得混进
@@ -356,13 +358,13 @@ pub enum CodeError {
 **先定关系**：上游算子的 `output_schema` 与下游算子的 `input_schema` **相交非空**——
 这是 §239 `:654` 逐字「运行时 MUST 拒绝不兼容连接」在**注册期**可检查的那一半。
 
-**边表**（§10.2 第 (t) 条的语料）。每行给「下游算子 ← 输入的来源」，括号里是**该来源的
+**边表**（§10.2 第 (j) 条的语料）。每行给「下游算子 ← 输入的来源」，括号里是**该来源的
 `output_schema` 与下游 `input_schema` 交集中的型**：
 
 | 下游算子 | 输入的来源（交集中的型） | 依据 |
 |---|---|---|
 | `code-workspace` | 无输入（Base 不在端口上，§3.3 第 2 条） | §3.2 第 1 行 |
-| `code-plan` | 无算子上游；其输入是 §228 的 `Plan` 或 Contract 的投影，**以 `Json` 由装配方给** | §3.2 第 2 行 |
+| `code-plan` | **无算子上游**；其输入是 §228 的 `Plan` 或 Contract 的投影，**以 `Json` 值由装配方投射**（不由任何算子的 `output_schema` 提供，故不在 (j) 的断言范围内） | §3.2 第 2 行 |
 | `code-decompose` | `code-plan`（`Json`） | §186 `:62`→`:64` |
 | `code-implement` | `code-decompose`（`Json`） | §186 `:64`→`:68` |
 | `code-spec-review` | `code-decompose`（`Json`）、`code-implement`（`Patch`） | §186 `:68`→`:70` |
@@ -374,9 +376,15 @@ pub enum CodeError {
 **依据栏的读法**：写 §186/§193 的，出处是规范正文的步骤序；写「§3.2 第 N 行」的，出处是
 **该行的 `input_schema` 与全表 `output_schema` 的对应**（即本设计的判定，规范未给边）。
 
-**判据（§10.2 第 (t) 条）**：逐行断言下游 `input_schema` 的**每一个型**都能在该行列出的上游里找到，
+**判据（§10.2 第 (j) 条）**：逐行断言下游 `input_schema` 的**每一个型**都能在该行列出的上游里找到，
 且所引的那一枚的 `output_schema` 含该型。断言的对象是「交集中的型」，不是「两侧相等」——
 P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不重述。
+
+**一处例外，要写清（否则会被当成判据的反例）**：`code-plan` 那一行的输入由装配方以 `Json` 值投射、
+**不由任何算子的 `output_schema` 提供**，故该行不在 (j) 的断言范围内——判据要求「上游的
+`output_schema` 含该型」，而这一行没有上游算子可指。这不是判据的漏洞：规范里那条边
+（《总纲》§8.3 `:1448` 的 `Milestone` → 规划）的上游是 §234 的 `Milestone`（P4 的对象），
+本块的算子集里没有它（见下段）。
 
 **本表不是全图**：`code-plan` 的上游（《总纲》§8.3 `:1448` 的那个 `Milestone`，以及 §228 的 `Plan`）
 不在本块的算子集里——`Milestone` 是 §234 的对象（P4），`Requirement / Design Review` 是 §229 的状态机（P4）。
@@ -398,7 +406,7 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
 **本块的处置（注册期判据，两侧都钉）**：
 
 - 本块持有一份**「逐位可复现的 backend」名单**（封闭表，内容是本设计定的）：
-  `git-worktree` `overlayfs` `builtin` `cargo-test` `local-test-runner`。
+  `worktree` `overlay` `builtin` `cargo-test` `local-test-runner`。
 - **注册期规则**：传给 `register_code_operators` 的每一枚 `determinism == Deterministic` 的算子，
   其 `backend_candidates` **逐个**必须在该名单内；否则该函数返回
   `CodeError::UnverifiableDeterminism { operator, backend }`（§3.2 的两臂之一），
@@ -409,10 +417,17 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
   而那条声明的消费者是 §305 的复用。代价是远程执行不可用——**这是性能代价，不是正确性代价**
   （同 P5e 设计 §5.4 对硬件编码器的处置形状）。
 
-**名单里为什么有 `overlayfs`**：§255 `:1029-1037` 逐行列了非 Git 项目的五种形态，而 P2 已落地的
+**名单里为什么有 `overlay`**：§255 `:1029-1037` 逐行列了非 Git 项目的五种形态，而 P2 已落地的
 `WorkspaceBackend`（`crates/continuum-workspace/src/backend.rs:22`）只有两臂。**本块取那两臂**
 （§4.2 的照片钉的就是这条），不按 §255 的五种各造一个 backend 名——**那会让 `backend_candidates`
 里出现三个没有实现的取值**，而 §245 的候选是「Router 可以选的东西」，不是「规范提过的名字」。
+
+**候选名取的是 P2 的编码，不是 §255 的散文形**：§255 `:1026` 写的是 `git worktree`（两个词），
+`:1032` 写的是 `OverlayFS`，而 P2 已落地的编码是 `"worktree"` 与 `"overlay"`
+（`crates/continuum-workspace/src/persist.rs:177-182` 的 `backend_str`；其注记 `:166-176` 明写这两个编码
+**显式给出，不由 `WorkspaceBackend` 的 serde 表示或 `Debug` 推出**）。`backend_candidates` 的元素是
+Router 拿去与 P2 的后端名比对的东西，故**以代码里的编码为准**：`git-worktree` 与 `overlayfs` 是
+§255 的散文名，逐名不等于那两个编码，本块不采用（§10.2 第 (p) 条的照片据此拍）。
 
 **这条规则的规范来源：没有。** §245 只给「一个 Operator 多 backend」，不给 backend 的确定性。
 故名单本身是本设计定的，并**据实记为缺口**（§11 第 7 条）：真正的判据是「该 backend 的什么属性使输出
@@ -420,7 +435,7 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
 
 **这条规则拦不住哪一类（要写清，否则会被当成一条全覆盖的守卫）**：它只查
 「声明 `Deterministic` 的算子，其候选是否逐位可复现」，**不查「这个算子的真实输入是否在端口上」**。
-`code-workspace` 正是后者：它的两个候选（`git-worktree` / `overlayfs`）**都在名单内**，故把它声明成
+`code-workspace` 正是后者：它的两个候选（`worktree` / `overlay`）**都在名单内**，故把它声明成
 `Deterministic` **能通过注册期规则**，而 §3.3 第 3 条判它错（真实输入是 Base，不在端口上）。
 **故 §3.5 的规则与 §3.3 第 3 条是两条独立的守卫，缺任一条都留下一类静默错误**：
 前者抓「候选不可复现」，后者抓「输入不可见」。后者的照片是 §10.2 第 (o) 条那一枚断言——
@@ -450,7 +465,7 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
 ## 4.1 §16 与 §255/§256/§257 说的是什么
 
 - §16（`docs/spec/01-concepts.md:788` 起）：`:790` 逐字「对于代码任务，L2 默认使用：」，`:793` 是
-  `git worktree`；`:796` 逐字「每个 Intent 创建独立：」，`:799` 是 `ai/task-id`；`:809-815` 逐行列
+  `git worktree`；`:796` 逐字「每个 Intent 创建独立：」，`:799` 是 `ai/task-id`；`:812-816` 逐行列
   Agent 可以做的事（修改 / commit / reset / 测试 / 重构）；`:819` 逐字「但完全不碰用户当前 branch。」；
   `:824-826` 逐字「L2 = 可以自由修改自己的隔离世界」；`:828-835` 说明真正跨越（AI worktree → user branch）
   才属于 L3。
@@ -488,7 +503,7 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
 2. **P2 已把它落地为一个类型 + 一个铸值点**（`IntegrationGate` / `approve_integration`，
    `crates/continuum-workspace/src/lib.rs:23` 的 `pub use`），而它**收 `&GateApproval`**——
    即它需要一次用户批准。把它做成算子会要求 `OperatorImpl::execute` 拿得到批准值，而那条签名今天
-   只有 `(inputs: &[ArtifactRef], ctx: &NodeContext)`（`crates/continuum-graph/src/execution.rs:76-79`），
+   只有 `(inputs: &[ArtifactRef], ctx: &NodeContext)`（`crates/continuum-graph/src/execution.rs:77-81`），
    没有装批准值的位置。**故本块不把它算子化**，这一条与 §4.4 的第二处缺口同源。
 
 **据实记一处残余**：`code-workspace` **每 Intent 一枚**（§16 `:796` 逐字「每个 Intent 创建独立」），
@@ -517,7 +532,7 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
 ## 4.4 第二处结构缺口：`NodeContext` 没有工作区句柄
 
 **事实**（逐条实测）：算子执行接口是 `OperatorImpl::execute(&self, inputs: &[ArtifactRef], ctx: &NodeContext)`
-（`crates/continuum-graph/src/execution.rs:76-79`）；`ArtifactRef` 只有 `id` 与 `content_hash` 两个字段
+（`crates/continuum-graph/src/execution.rs:77-81`）；`ArtifactRef` 只有 `id` 与 `content_hash` 两个字段
 （同文件 `:36-39`）；`NodeContext` 的字段是 `node` / `profile` / `cancelled` 三项
 （同文件 `:43-47`；四个方法在 `:50`、`:58`、`:62`、`:70`）。**三者里没有一处装得下一个 `TaskWorkspace`。**
 
@@ -587,7 +602,7 @@ P5e 设计 §5.3 已把「相等」那一条读法否掉，本块引用它而不
 
 **事实（逐行实测）**：§258 `:1091` 逐字「Evidence 类型例如：」，其后 `:1094-1102` 是九臂
 （`TEST` / `FUZZ` / `PROPERTY` / `FORMAL_PROOF` / `STATIC_ANALYSIS` / `BENCHMARK` / `VISUAL_CHECK` /
-`METADATA_CHECK` / `HUMAN_CONFIRMATION`）；§193 `:367-373` 另列六种验证方式，P5a 设计 §4.2 把其中
+`METADATA_CHECK` / `HUMAN_CONFIRMATION`）；§193 `:368-373` 另列六种验证方式，P5a 设计 §4.2 把其中
 `Differential` 与 `Metamorphic` 两臂补进了枚举，共十一臂。
 
 **这十一臂里没有一枚表达「由一个独立模型对制品作出的审查判定」**。而 §262 `:1176` 逐字把
@@ -626,8 +641,8 @@ payload 约定。**若 P5c 把结果放在别处（或需要一枚新的 `Eviden
    `code-test-run` 是确定性的那次（`Deterministic`），`code-fuzz-run` 是不确定的那次。
 3. **写在哪一列**：落进 `continuum-artifact` 的既有表——`crates/continuum-artifact/src/persist.rs:9`
    的迁移里 `artifact` 表的既有列（`artifact_type`、`content_hash`、`metadata`、`provenance` 等），
-   **不新增列、不新增表**。`artifact_type` 取 `test_result`（`crates/continuum-artifact/src/artifact.rs:51`
-   的 `as_str`）。
+   **不新增列、不新增表**。`artifact_type` 取 `test_result`（`crates/continuum-artifact/src/artifact.rs:47`
+   的 `as_str`，`TestResult` 那一臂在 `:51`）。
 4. **payload 约定：本设计不定义**（这一条是**据实留的缺口**，不是漏项）。
    理由是 §258 的字段里没有 outcome、且 `Artifact.metadata` 的类型是 `serde_json::Value`
    （`crates/continuum-artifact/src/artifact.rs:177`）而其 schema 规范未给——**这正是 P5a 设计 §15 第 9 条
@@ -689,7 +704,7 @@ P5b 设计第六节要求四块**只经 `bind` 填 `realized_by`**，且 `softwa
 | `debugging` | **`[]`** | **链上无此步**，见 §7.2 |
 | `worktree` | `["code-workspace"]` | §16 `:790-794` 的 git worktree；算子见 §4.2 |
 | `review` | `["code-spec-review", "code-quality-review"]` | §186 `:85` 逐字「规格审查与代码质量审查分离」 |
-| `fuzz` | `["code-fuzz-run"]` | §193 `:367-370` 的 Fuzzing 与 Property-based Testing |
+| `fuzz` | `["code-fuzz-run"]` | §193 `:368-369` 的 Fuzzing 与 Property-based Testing |
 | `verification` | `["code-test-run", "code-verify"]` | §186 `:74` 的 Verification；两枚的分工见 §3.3 第 5、11 条 |
 
 调用 `bind` 的**具名入口**：
@@ -720,7 +735,7 @@ pub fn bind_code_methods(registry: &mut MethodRegistry) -> Result<(), MethodErro
 
 **事实（逐行实测）**：§187 `:118-124` 逐行列 `software/` 的七条方法名，而 §186 `:57-77` 的链上
 只有 `planning`（`:62` 的 `Implementation Plan`）与 `verification`（`:74`）两处有对应的步骤；`review` 与 `fuzz` 各有对家
-（§186 `:70`/`:72`、§193 `:367-371`）；`worktree` 由 §16 给（§4.2）；**剩下两条没有**：
+（§186 `:70`/`:72`、§193 `:368-369`）；`worktree` 由 §16 给（§4.2）；**剩下两条没有**：
 
 1. **`TDD` 的全部内容是「次序」**——先写测试、后写实现。
    `MethodEntry.realized_by` 的类型是 `Vec<String>`（P5b 设计 §4.3），即**算子 id 的一个集合**，
@@ -729,6 +744,10 @@ pub fn bind_code_methods(registry: &mut MethodRegistry) -> Result<(), MethodErro
    不可区分**，而两者的差别正是这条方法的全部内容。
    **§186 `:82-85` 的四条优势里没有 TDD**（逐字是「计划先于实现」「任务上下文隔离」「逐任务验证」
    「规格审查与代码质量审查分离」），故本块也没有第二处出处可据。
+   **§188（`docs/spec/04-method.md:159-206`）与本节同一取向**：它逐字写「TDD = Implementation Discipline」
+   （`:166-167`），给出的内容正是那一条序（`先写测试 → 测试失败 → 实现 → 测试通过`，`:180-186`），
+   并明写它不构成正确性证明（`:161`；`:203-205` 逐字「Tests Passed ≠ Requirement Satisfied」）——
+   即 §188 把 TDD 定位为**纪律（次序）**，同样不给它一个算子对家。
 2. **`debugging` 在链上没有对应的步骤**。《总纲》`:1448` 的六个步骤里没有调试，
    §186 `:57-77` 的十行里也没有调试。**本块不发明一枚 `code-debug`**：
    发明它就要给它一个端口类型，而规范没有一处给过「调试的输入与产物是什么」——
@@ -866,16 +885,16 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
 | d | 造一枚 `Deterministic` 但候选含名单外 backend 的算子，以它连同若干合法算子调 `register_code_operators` ⇒ `Err(CodeError::UnverifiableDeterminism { .. })`，**且注册表内容与调用前逐枚相同**（先核后写，不留半注册） | **fail-open 的那一侧**（§3.5）；「注册表未变」那一半钉的是同一条规则的**写入面** |
 | e | `codew` 等**表外**的 `OperatorId` 构造出的算子与合法算子混合注册，逐枚成功（id 是开放串，不校验） | 上一条的**另一侧**（否则 d 可由「一律拒」满足） |
 | f | 第 4 行 `code-implement` 的 `side_effect_class == NonIdempotent`，其余八枚都不是 | §3.3 第 8 条，逐枚 |
-| g | 第 1、7、9 行的 `determinism == Deterministic`，第 2、3、4、5、6、8 行是 `NonDeterministic` | §3.2 表那一列的**逐行**断言（不是抽样） |
+| g | 第 7、9 行的 `determinism == Deterministic`，第 1、2、3、4、5、6、8 行是 `NonDeterministic` | §3.2 表那一列的**逐行**断言（不是抽样） |
 | h | 第 1 行的 `input_schema` 是空 `Vec`，且 `output_schema == [SourceTree]` | §3.3 第 2 条 |
 | i | 第 5 行与第 6 行的 `input_schema`、`determinism`、`side_effect_class` 逐字段相同，而 `id` 不同 | §3.3 第 10 条（「分离」这一条只有两枚同形的东西才说得上） |
-| j | §3.4 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的型**，不是「两侧相等」） | §239 的注册期一半（§3.4） |
+| j | §3.4 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的型**，不是「两侧相等」）。**`code-plan` 那一行除外**（其输入由装配方以 `Json` 值投射，不由任何算子提供，见 §3.4） | §239 的注册期一半（§3.4） |
 | k | 七条 `software/` 方法的 `realized_by` **逐条**等于 §7.1 表（含 `TDD` 与 `debugging` 为空 `Vec`） | §7.1 的登记（**逐条**，不是「非空即过」） |
 | l | 五条非空 `realized_by` 里的**每个串** `OperatorRegistry::resolve` 成功 | §7.1 末（P5b 的文本弱引用的运行期补件） |
 | m | `ALL_OPERATORS` 的 9 个 id 里有 **8 个**出现在 §7.1 表的非空 `realized_by` 里；**手写那 8 个的名单**（`code-workspace` `code-plan` `code-decompose` `code-spec-review` `code-quality-review` `code-test-run` `code-fuzz-run` `code-verify`），**`code-implement` 不在其中**（见下段） | §7.1 与 §3.2 之间的逐枚对应（这条钉的是「目录条目与算子集互相对得上」） |
 | n | `CodeError` 与 `MethodError` 是两个不同的类型（`bind_code_methods` 的返回类型是 `Result<(), MethodError>`，不包进 `CodeError`） | §7.1 第 4 段（判定是两件事则分开） |
 | o | §3.6 的照片：`code-test-run` / `code-verify` 两枚的 `cache_key` 为 `Some`，且四条件齐时 `can_reuse` 为真；`code-workspace` / `code-plan` / `code-decompose` / `code-implement` / `code-spec-review` / `code-quality-review` / `code-fuzz-run` 七枚为 `None` | §3.6 的**逐枚**（不是抽样）；其中 `code-workspace` 那一枚是 §3.3 第 3 条的**照片** |
-| p | `code-workspace` 的两个 `backend_candidates` 逐名等于 `WorkspaceBackend` 两臂的编码（`crates/continuum-workspace/src/backend.rs:22`） | §4.2 的「两个候选名与 P2 已落地的两臂对应」 |
+| p | `code-workspace` 的两个 `backend_candidates` 逐名等于 `WorkspaceBackend` 两臂的编码（`crates/continuum-workspace/src/persist.rs:177-182` 的 `backend_str`，即 `"worktree"` 与 `"overlay"`） | §4.2 的「两个候选名与 P2 已落地的两臂对应」（§3.5 末：以编码为准，不取 §255 的散文形） |
 
 **一条预防**：第 (m) 条的期望清单**必须手写**。若写成遍历 `ALL_OPERATORS`、再对每枚去
 `realized_by` 里找，它测的是「每个算子都在某个 `realized_by` 里」——**而「某条目录条目绑的算子
@@ -899,7 +918,7 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
 |---|---|---|
 | **取反**：§3.5 的名单判定改成恒真 | d 的第一个子例 | c（名单内的候选仍然通过）、a |
 | **取反**：`register_code_operators` 改成边核边写（先注册前几枚，遇到违规才返回） | d 的第二个子例（注册表内容与调用前不同） | c、a（合法批次两侧都绿） |
-| **放宽**：把 `code-workspace` 的 `determinism` 改成 `Deterministic` | o 的 `code-workspace` 那一枚（`None` 变 `Some`）、g 的第 1 行 | c（`git-worktree` / `overlayfs` 两个候选**都在** §3.5 的名单里，故注册期那条规则**不响**——见 §3.5 末）、p |
+| **放宽**：把 `code-workspace` 的 `determinism` 改成 `Deterministic` | o 的 `code-workspace` 那一枚（`None` 变 `Some`）、g 的第 1 行 | c（`worktree` / `overlay` 两个候选**都在** §3.5 的名单里，故注册期那条规则**不响**——见 §3.5 末）、p |
 | **收紧**：把 `code-test-run` 的 `determinism` 改成 `NonDeterministic` | g 的第 7 行、o 的第二组 | c、a、p |
 | **移除**：把 `code-fuzz-run` 从 `ALL_OPERATORS` 删掉（8 枚） | `len() == 9`、a 的对应枚、k 的 `fuzz` 行、m（手写的那 8 个 id 名单里少一个） | 其余 |
 | **取反**：把 `TDD` 的 `realized_by` 从空改成 `["code-implement", "code-test-run"]` | k（§7.1 表的 `TDD` 行） | l（那两个 id 都能 resolve，故 l 仍绿——**这一档若不红，说明 k 是按「非空即过」写的**） |
@@ -984,7 +1003,9 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    **收件人：P4 的持有方 ＋ 协调者**（决定是否要在某处写明两者的分别）。
 6. **待与协调者对账（迁移号段）**：本块声明 `150`（§9.3，实测 `130`–`199` 全段零命中）。
    P5a 已取 `130`；P5b 与 P5e 零迁移（本块实测，§9.2）；**P5d / P5f / P6 三段未声明**。
-   请把六块与 P6 的档合并成一张表。
+   请把六块与 P6 的档合并成一张表。**与 P5e 设计 §11.3 重复**：那一节已提同一建议
+   （六块按 P3 先例后延）并明写「不另开对账条目」（理由是该块零迁移、无号可占）。
+   本块与之的差别只在本块**写死了一个号 `150`**，故保留本条请求；号段由协调者一次合并，两处不各记一次。
 7. **待与规范维护者对账（§3.5 的封闭表）**：§3.5 的「逐位可复现的 backend」名单是本设计定的，
    规范没有一处给 backend 的确定性。**缺的是「该 backend 的什么属性使输出逐位可复现」这一步。**
 8. **待与规范维护者 ＋ P5a 对账（`TestResult` 的载荷）**：§5.4 第 4 条。与 P5a 设计 §15 第 9、14 条
@@ -1015,8 +1036,8 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    判『通过/不通过』所必需的」这一步。收件人：规范维护者 ＋ P5a。**
 8. **`code-workspace` 的每轮重建代价**（§3.3 第 3 条）：它声明 `NonDeterministic` 故不进 §305 的复用。
    **这不是缺口，是取 fail-closed 的代价**；据实记在此处，免得被读成「忘了声明 `Deterministic`」。
-9. **本块的三处登记入口与五处声明今天都没有生产调用方**：`register_code_operators`（§3.2）、
-   `bind_code_methods`（§7.1）、`ALL_OPERATORS`（§3.2）、§3.2 表里的九枚 `determinism` 声明、
+9. **本块今天没有生产调用方的落点，逐类列出**：三处登记入口 `register_code_operators`（§3.2）、
+   `bind_code_methods`（§7.1）、`ALL_OPERATORS`（§3.2）；§3.2 表里的九枚 `determinism` 声明；
    以及 §5.2 的四条证据产出面（后者的调用方是装配方，本块不建那个包装，§6.2）。
    **这不是本块的缺口，是第 3 层的**（切分 §四第 4 条禁止 P5 自建执行路径；P1 设计 §18 已有同形的一条；
    拍照的限制见 §10.5）。
@@ -1033,7 +1054,7 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    另有两步的证据类型在 §258/§193 里无臂可落。**
    实测：①`code-plan` 与 `code-decompose` 产出的是制品，其存在由 §266 第 1 项 `ArtifactExists` 判
    （P5a 设计 §8.3 第 1 项），不是 `Evidence`（§5.2）；②`code-spec-review` 与 `code-quality-review`
-   的产出（模型审查判定）在 §258 `:1094-1102` 的九臂与 §193 `:367-373` 的并集里无臂（§5.3）。
+   的产出（模型审查判定）在 §258 `:1094-1102` 的九臂与 §193 `:368-373` 的并集里无臂（§5.3）。
    后果：若照那一句的字面去实现，「每步产出证据」会逼出一个语义不符的臂（`StaticAnalysis`），
    而失配是静默的（一次模型判断拿到确定性检查的优先级，§5.3）。
    **判据**：**「每步产出 X」这句话，要先逐点核「该步的产出是不是 X 那一类」**——
@@ -1050,19 +1071,25 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    本行只核了「目录与块是一对一」（这一条已由 P5b 的设计订正过），没核**目录里的每一条**。
    与 §八 的「`3d/` 有目录、无对家」是同一种错位，只是粒度细一层（那是「整个目录」，
    本处是「目录里的两条」）。
-3. **⚠️ §四第 7 条举的三处例子（§226 四类差异、§214 冲突、表达式比较）在本仓都没有落地点，
-   而真正已落地的另两处判据它没举。**
-   实测：`grep -rn "ContractDiff" crates/` 零命中；`grep -rln "expression" crates/` 零命中；
-   `crates/continuum-semantics` 不存在（P4 未开始实现）。**已落地的、与本块相邻的三处是**：
-   ①复用判据 `crates/continuum-graph/src/reuse.rs:29`（该条已举，是它唯一的实例）；
-   ②§239 的端口兼容 `crates/continuum-port/src/port.rs:94` 的 `compatible`；
-   ③§245 的后端候选判定 `crates/continuum-graph/src/execution.rs:87` 的 `is_candidate_backend`。
-   后果：举的三处都在**未来**（P4 的），读者会以为「这一条约束的是将来」；
-   而它的**射程里今天就有两处**（②③），且它们正是四个领域算子块**最容易各写一遍**的东西
-   （「我这个 schema 能不能接那个」与「这个 backend 在不在候选里」各写一遍函数，太自然了）。
+3. **⚠️ §四第 7 条只举了「复用判据」一例，而它今天的射程里另有两处已落地的判据没举。**
+   实测：§四第 7 条全文（切分文档 `:180-186`）只举复用判据一例
+   （`crates/continuum-graph/src/reuse.rs:29` 的 `can_reuse`），并写「发现一处、登记一处」。
+   **已落地的、与本块相邻的另两处是**：①§239 的端口兼容 `crates/continuum-port/src/port.rs:94`
+   的 `compatible`；②§245 的后端候选判定 `crates/continuum-graph/src/execution.rs:87`
+   的 `is_candidate_backend`。
+   后果：读者会以为该条只约束复用一处，而它的**射程里今天就有三处**——另两处正是四个领域算子块
+   **最容易各写一遍**的东西（「我这个 schema 能不能接那个」与「这个 backend 在不在候选里」
+   各写一遍函数，太自然了）。
    **判据**：**列「已落地的判据」时，要按 `grep` 的结果列，不能按印象列**——
-   本条恰好在第一枚实例（复用判据）上做对了，后面三处却列成了未落地之物。
-   **处置**：本设计按实测把 ②③ 写进 §3.4 与 §1.2（本块只声明、不写第二份判定）。
+   本条在第一枚实例（复用判据）上做对了，另两处却漏了。
+   **处置**：本设计按实测把 ①② 写进 §3.4 与 §1.2（本块只声明、不写第二份判定）。
+   **订正来历**：本设计早先的稿子在此处写过「§四第 7 条举的三处例子（§226 四类差异、§214 冲突、
+   表达式比较）」——**该三个例子出自协调者的派单口径，切分文档里没有**。实测：切分文档的
+   `:180-186` 查不到 `§226` / `§214` / 表达式比较；`grep -rn "ContractDiff" crates/` 与
+   `grep -rln "expression" crates/` 零命中，`crates/continuum-semantics` 不存在（P4 未开始实现）。
+   三处实出自 P4 的设计与计划（`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md:1050`、
+   `:1081-1083`；`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:155-156`），
+   是 P4「只建类型不建检测器」的三项。**记在此处，以免同一条错误再被照抄。**
 4. **✔ 已复测为正确的两条**（记在此处是为了让复审不必重做）：
    (i) §一 说的「工程 §8.1 组件表里的四行（`docs/02-工程.md:495-498`）」——实测 `:495` 是「代码领域算子」、
    `:496` 研究、`:497` 媒体、`:498` 图像，四行连续（表头 `:483`、第 1 行 `:485`），准确。
