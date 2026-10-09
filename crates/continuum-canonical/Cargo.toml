@@ -14,6 +14,11 @@ thiserror = { workspace = true }
 # 理由写在这里：手写字符表**做不出完整的兼容分解**（`ﬁ` U+FB01 只是其中一枚），
 # 那种写法是一张残缺的表而不是「Unicode 归一」，与本仓「全量真实现不留桩」相抵。
 # **它不进 `dependency_direction.rs` 的 `ALLOWED`**：那张表逐对断言的是
-# **workspace 成员之间**的边（设计 §7.3），本 crate 是外部 crate。
+# **workspace 成员之间**的边（设计 §1.2.3 推论 1；「叶子 crate 的条目记实际依赖」
+# 这个口径见 §2.2）：比对的内层循环只遍历 workspace 成员
+# （`dependency_direction.rs` 的 `for other in &all_crates`），
+# 而 `unicode-normalization` 是**外部** crate，故它与本 crate 之间的这条边不进比对。
+# 〔订正（修复轮 1）〕本行初稿引的是「设计 §7.3」——§7.3 是「版本化（§226）与
+# `ContractRef`」，与依赖边无关。**话对、号码错**，旧号码记此。
 # 它会改 `Cargo.lock`（本 crate 的依赖列表多一项），故提交时按显式路径带上。
 unicode-normalization = { workspace = true }
