@@ -597,6 +597,12 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
   本 task 补载荷，即改 `ambiguity.rs` 的定义与 `canonical.rs` 的 `finish` 签名。
 - Modify: `crates/continuum-canonical/tests/canonical.rs`
   ——**Task 2 的 7 条用历经 `finish` 的夹具直接构造四态**，补载荷时这 7 条要一并改（不是新增一批）。
+- Modify: `crates/continuum-canonical/src/canonical.rs`（`UnresolvedMention` 的那一处，见下）
+  ——**本 task 也要处置 M-2-3**：`UnresolvedMention` 在**类型层**允许装 `ResolutionResult::Resolved`
+  （实测 `crates/continuum-canonical/src/canonical.rs:109-125`），该不变量**只由构造面保证**
+  （`src/canonical.rs:104-108` 的注释照实写了这一点）。这正是**「两支互为补集」唯一没被类型钉住的地方**，
+  而 Task 2 只能删掉恒真的异或断言、把这条留给本 task。**要么把它做成类型上不可表示，要么写明为什么不做**——
+  **不处置也是一种处置，但要写出来。**
   > **本条来历（2026-10-09，P4 Task 2 实现期查出并交裁，裁定：写进本 task 的 Files）**：
   > 计划 Task 2 那一节把 `finish` 排在 Task 2，而本 task 的 Produces 才给出 `ResolutionResult` 的载荷，
   > **两处次序相抵**。Task 2 报了替代方案两条并都否掉（照录载荷⇒编不过；自定二元类型＋本 task 写映射⇒
