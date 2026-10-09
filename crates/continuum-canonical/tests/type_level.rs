@@ -47,9 +47,13 @@
 //! **通过**的样例，是因为 `a_candidate_source_with_only_retrieve` 钉的命题**只有编译期能表达**
 //! ——「一个只实现 `retrieve` 的实现编得过」⇔「该 trait 的**必需**方法集恰好是那一个」；
 //! 运行期用例只能证明「我没写第二个方法」，证明不了「写不出来」。
-//! 那两个 crate 的样例钉的都是「某条通道写不出来」，其正面那半（公开入口拿得到，如
-//! `continuum-node/tests/node.rs` 经 `ComputeNode::new` 造一枚节点）在 crate 外的**运行期**用例里
-//! 就有照片，故不需要一个编译通过的目录。
+//! 那两个 crate 的样例钉的都是「某条通道写不出来」，其**正面那半各有各的落点**，都不需要一个
+//! 编译通过的目录。`continuum-node` 的正面那半在 crate 外的**运行期**用例里就有照片
+//! （`tests/node.rs` 经 `ComputeNode::new` 造一枚节点）。`continuum-model-registry` 则没有一条
+//! 可写成「编得过」的正面样例——`ModelProfile` 在 crate 外没有构造入口（`try_new` 是
+//! `pub(crate)`、十二个字段私有），集成测试里那份画像只能经公开的 `load_profile` 从库里读回
+//! （`tests/persist.rs` 的头注释写明这是唯一通道），而需要画像的闸门用例住在 crate 内的
+//! `#[cfg(test)] mod tests`（`tests/lifecycle.rs` 的头注释点明了这条后果）。
 //!
 //! # 这份清单钉的是「本层没有 `pick_one` 这个口子」，不是「唯一候选不许出现」
 //!
