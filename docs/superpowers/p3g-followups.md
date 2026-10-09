@@ -110,13 +110,15 @@
 | **M-11-6** | 本轮的**预测写错**（两处） | `M5`／`M6` 两枚变异体预估各红 **2 条**，**实测各 3 条**——`M5` 多的那条是 Task 3 的 `the_snapshot_is_indexed_by_the_candidates_own_model_id`（夹具里有 `Degraded`），`M6` 多的是 Task 7 的 `a_probed_health_actually_reaches_the_ranking`（`availability` 缺条目时 `rank` 先报 `UnknownAvailability`） | **据实记**（两处都已写进交付用例的文档原地）。这是本仓点过的形状：**预测写错不会让人去查不存在的问题**，但**不记就会** |
 | **M-11-7** | 「`Degraded` 该不该降权」 | **规范未给判据**（打分是 `RankingPolicy` 的事，而基线不读健康度），而 **G 侧「降权」那一半在交付签名上写不出来**（G 手里没有分数，策略是测试自己交进去的）——故 G 这一侧能拿出的证据只能是「**原样带过**」（改为 `Healthy` 后输出逐项相同） | **据实记为具名缺口，收件人未指派**（简报原写「见 `## 遗留` 的收件人」，本表就是那个落点）。**「裁剪」那一半有照片**：`M5` 实测红 3 条，日志 `.tmp/t11-M5.log` |
 
-**门读数（自证覆盖，2026-10-09，跑在 `b6c1994` 的树上）**：`cargo test --workspace --no-fail-fast` ⇒
+**门读数（自证覆盖，2026-10-09，跑在**分支 tip `2c73ede`** 的树上——即本 task 全部提交之后）**：
+`cargo test --workspace --no-fail-fast` ⇒
 `Compiling` **1** 行、`Running` **97** 行、`test result:` **114** 行（＝97 目标 ＋ **17** Doc-tests）、
 通过 **743**、失败 0、**warning 0**（`model_call` 目标 **44**）。
 **「0 warning」这条读数有效**：本轮另做正控制——往 `src/model_call.rs` 注入 `use std::fmt;`
 ⇒ 同一条命令的日志里真出现 **2** 行 `warning`（`unused import` ＋ 汇总行），随后还原、
 `sha256` 回到基线 `312ce17c…`（日志 `.tmp/t11-W1.log`）。
-日志 `.tmp/t11-gate-workspace.log`。**与 738 的关系**：`743 = 738 + 5`（Task 10 修复轮那次是 738）。
+日志 `.tmp/t11-gate-workspace-final.log`（tip 上这一跑）与 `.tmp/t11-gate-workspace.log`
+（`b6c1994` 上那一跑，两跑读数逐项相同）。**与 738 的关系**：`743 = 738 + 5`（Task 10 修复轮那次是 738）。
 
 ## 二、据实记为无照片（本轮不补）
 
