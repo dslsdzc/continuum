@@ -124,7 +124,8 @@
 GenerativePermission   PermittedGenerativeContent   MediaError
 ```
 
-另有一枚**常量**（不是类型）：`ALL_OPERATORS: [Operator; 17]`，它承载的正是 `Operator`（P1 的类型）。
+另有一枚**构造函数**（不是类型）：`all_operators() -> [Operator; 17]`，它承载的正是 `Operator`（P1 的类型）。
+（**这里不是 `const`**：`Operator` 在 crate 外构造不出常量值，理由见 §5.1。）
 **本块不新造算子类型**——§5.1 的登记形态照 P1 与 P5b。
 以及**定义在 `continuum-operator`** 的两枚（落点理由见 §4.2）：
 
@@ -491,13 +492,16 @@ pub enum CheckpointError {
 
 ```
 /// 本领域 17 枚算子的全集。顺序即 §5.2 表的行序。
-pub const ALL_OPERATORS: [Operator; 17];   // 不变量：id 逐枚不同、version 均为 1
+/// 不变量：id 逐枚不同、version 均为 1。
+/// **这里不是 `const`**：理由见下（`Operator` 在 crate 外构造不出常量值）。
+/// 数目 17 写在**返回类型**里，使清单个数的改动编译期可见。
+pub fn all_operators() -> [Operator; 17];
 
-/// 把给定的一批算子注册进给定注册表（`&ALL_OPERATORS` 是常规实参）。
+/// 把给定的一批算子注册进给定注册表（`&all_operators()` 是常规实参）。
 /// **先核后写**：先逐枚核 §5.4 的声明，全部通过后再逐枚注册；任一枚不成即返回 `Err`，
 /// 此时注册表的内容与调用前逐枚相同（不留半注册）。
 /// 一枚媒体算子与既有算子同 (id, version) 是注册期的错误，**不静默跳过**。
-/// **参数带一批算子**（不是只吃 `ALL_OPERATORS`）：§5.4 那条规则要能对**任意** `Operator` 触发，
+/// **参数带一批算子**（不是只吃 `all_operators()`）：§5.4 那条规则要能对**任意** `Operator` 触发，
 /// §12.2 第 (i) 条才写得出来。
 pub fn register_media_operators(
     registry: &mut OperatorRegistry,
@@ -536,9 +540,16 @@ pub enum MediaError {
 **分得开**，因为两者的判定不同（一个是「这一次检查点/恢复为什么不成」，一个是注册期查重）；
 本臂的判定与 `OperatorError::Duplicate` **是同一件事**，故只带出来、不重述。
 
-`ALL_OPERATORS` 是**常量不是构造函数**：本仓的既有约定是「枚举/清单带 `ALL` 常量 + 数目断言」
-（`crates/continuum-artifact/src/artifact.rs:28`、`crates/continuum-effect/src/effect.rs:31` 的 `EffectType::ALL`），
-本块照办，并把「17」写成类型的一部分（`[Operator; 17]`），使清单个数的改动**编译期可见**。
+`all_operators()` 是**函数不是常量**。**这里不是 `const`**，两条理由各自独立成立：
+其一，本仓带 `ALL` 常量的既有做法（`crates/continuum-artifact/src/artifact.rs:28` 的
+`ArtifactType::ALL`、同文件 `:100` 的 `PrivacyClass::ALL`）**成立的前提是那些类型无字段**——
+取值可在 `const` 中直接枚举，`Operator` 不满足这个前提；
+其二，`Operator` 含 `OperatorId`（`String`，**字段私有**，`new` 不是 `const fn`，
+`crates/continuum-operator/src/definition.rs:24-27`）与三枚 `Vec` 字段
+（`input_schema` / `output_schema` / `backend_candidates`，`:79-88`），
+故在 crate 外**构造不出 `Operator` 的常量值**。
+**引用一条既有约定时要连它的成立条件一起搬**。数目 17 改由**返回类型**承载
+（`[Operator; 17]`），仍使清单个数的改动**编译期可见**——这正是本行要保住的那条性质。
 
 ## 5.2 十七枚算子
 
@@ -968,10 +979,10 @@ P5b 设计第六节（`:371-390`）要求四块**只经 `bind` 填 `realized_by`
 | `render-review` | `["verify-deterministic", "verify-multimodal"]` | §32 `:1384`、`:1386` 的链尾两步是「审看渲染结果」 |
 
 **`bind` 的参数是文本**（P5b 设计 §4.3 的 `realized_by: Vec<String>`），故上表的值是字符串，
-**本块无法在编译期核对它们与 `ALL_OPERATORS` 的 id 一致**（P5b 设计 §3.2 末已把这条弱引用的无照片写清）。
+**本块无法在编译期核对它们与 `all_operators()` 的 id 一致**（P5b 设计 §3.2 末已把这条弱引用的无照片写清）。
 本块的判据是**运行期的一条用例**（§12.2 第 (s) 条）：对每一条 `realized_by` 里的每个串，
 `OperatorRegistry::resolve` 必须成功——这条用例**在本块的 crate 里闭得上**，因为本块同时持有
-`ALL_OPERATORS` 与 `MethodRegistry`。**这是 P5b 所说「消费块才能核」的那个消费块之一。**
+`all_operators()` 与 `MethodRegistry`。**这是 P5b 所说「消费块才能核」的那个消费块之一。**
 
 调用 `bind` 的**具名入口**（此前全文只有类别名「本块的登记代码」，无一处签名收 `&mut MethodRegistry`）：
 
@@ -1071,7 +1082,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
   **11 枚新串逐条断非空、小写、`_` 连接**（同用例 `:32-35` 的既有断言，遍历 `ALL` 即覆盖）。
 - `CheckpointError`（3 臂）、`GenerativePermission`（5 臂）：各一条**臂数与往返**用例
   （`as_str` / `parse` 两枚穷尽 `match` + 一条数目断言，形状照 `ArtifactType` 的既有做法）。
-- `ALL_OPERATORS`：`len() == 17`，且 `id` 逐枚不同（两两比较，不是只查总数）。
+- `all_operators()`：`len() == 17`，且 `id` 逐枚不同（两两比较，不是只查总数）。
 
 ## 12.2 判定侧：正例 + 反例成对（缺一条即不算钉住）
 
@@ -1082,7 +1093,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 | c | 新型写入 `artifact_type` 列再读回，得到同一型 | 落库往返（§3.5 的「不改但要重跑」） |
 | d | 改过的 `crates/continuum-port/tests/compatibility.rs:47` 用例改为**遍历 `ArtifactType::ALL`**，逐型断言 serde 往返（17 型，不是 6 型） | §3.5 的 (e)（本块改的唯一一处**不会自己变红**的遗漏） |
 | e | `shot_set` / `subtitle_track` 两个多词串的往返 | 多词型的编码（唯一两条带 `_` 的新串） |
-| f | 以 `&ALL_OPERATORS` 调 `register_media_operators` 注册 17 枚后，逐枚 `resolve` 成功 | 注册的正例 |
+| f | 以 `&all_operators()` 调 `register_media_operators` 注册 17 枚后，逐枚 `resolve` 成功 | 注册的正例 |
 | g | 同一注册表注册两次 ⇒ `Err(MediaError::Registry(OperatorError::Duplicate { .. }))`（**不是**静默覆盖） | 注册的反例（§5.1：那一臂是 P1 的判定，本型只带出来） |
 | h | `Deterministic` 的每一枚算子，其每个 backend 都在 §5.4 的名单内 | §5.4 的规则（正例） |
 | i | 造一枚 `Deterministic` 但候选含名单外 backend 的算子，以它连同若干合法算子调 `register_media_operators` ⇒ `Err(MediaError::UnverifiableDeterminism { .. })`，**且注册表内容与调用前逐枚相同**（先核后写，不留半注册） | **fail-open 的那一侧**（§5.4）；「注册表未变」那一半钉的是同一条规则的**写入面** |
@@ -1100,7 +1111,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 
 **一条预防**：第 (a) 与 (f) 的期望清单**必须手写**。若 (a) 写成遍历 `ArtifactType::ALL`，
 它测的是「`ALL` 与 `parse` 一致」——那正是 `ALL` 的既有守卫，**而「11 枚新型在不在 `ALL` 里」不会被它测到**；
-若 (f) 写成 `ALL_OPERATORS.len()`，它测的是 Rust 的 `len()`。**语料从被测清单里取就是恒真的假照片。**
+若 (f) 写成 `all_operators().len()`，它测的是 Rust 的 `len()`。**语料从被测清单里取就是恒真的假照片。**
 
 ## 12.3 变异预告（谁红）
 
@@ -1114,7 +1125,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 | **移除**：`RestoreRejected` 的身份比对删掉（一律 `Ok`） | q 的第一个子例 | o、p（有进度/无进度与身份无关）、r 全组 |
 | **收紧**：`required_permission` 对四枚生成算子**都**返回 `Broll` | l 的后三条 | j、k、m（它们不看具体是哪一枚） |
 | **取反**：`transcribe` 的 `determinism` 改成 `Deterministic` | r 的第二组（`cache_key` 由 `None` 变 `Some`）；**同时该轮 h 会红**（`local-whisper` 等三个候选不在 §5.4 的名单里） | r 的第一组、i |
-| **放宽**：`ALL_OPERATORS` 少注册一枚（16） | `len() == 17` 的断言、f 的对应枚 | 其余（这**一档若不红，说明 f 是按 `ALL_OPERATORS` 自己遍历的**——即假照片） |
+| **放宽**：`all_operators()` 少注册一枚（16） | `len() == 17` 的断言、f 的对应枚 | 其余（这**一档若不红，说明 f 是按 `all_operators()` 自己遍历的**——即假照片） |
 | **等价变异**：把某个新型的串改成另一个**同样合法**的小写串（如 `shot_set` → `shotset`） | **全绿**——这是一枚**等价变异体**（编码是自洽的，往返仍成立）。**要打红它必须换变异体**：改成与 `artifact_type.rs:40` 的表外取值相撞的串（如 `nope`），那时 b 红 | —— |
 
 ## 12.4 结构层的照片（`trybuild`）
@@ -1139,7 +1150,7 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 **原先列在这里的第一条已移出本块的照片清单**：原写「`Operator { .. , determinism: Deterministic }`
 的构造不带 `backend_candidates` ⇒ 编不过」。那是 P1 的 `Operator`
 （`crates/continuum-operator/src/definition.rs:78-88`，七个 pub 字段、无 `Default`）的**结构事实**，
-不是本块造出来的照片——本块只是照它构造 `ALL_OPERATORS`，故不计入本块的照片。
+不是本块造出来的照片——本块只是照它构造 `all_operators()`，故不计入本块的照片。
 
 ## 12.5 拍不出照片的地方
 
