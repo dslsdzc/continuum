@@ -236,9 +236,9 @@ pub enum ImageError {
 
 | # | id | input_schema | output_schema | determinism | side_effect_class | backend 候选 | 出处 |
 |---|---|---|---|---|---|---|---|
-| 1 | `generate-image` | `[Image]` | `[Image]` | `NonDeterministic`（定） | `NonIdempotent`（定） | `image-gen-backend`（定） | §323 `:2316-2331`；§162 `:596-612`；§161 `:581` |
+| 1 | `generate-image` | `[Image]` | `[Image]` | `NonDeterministic`（定） | `Pure`（定） | `image-gen-backend`（定） | §323 `:2316-2331`；§162 `:596-612`；§161 `:581` |
 | 2 | `detect-edit-region` | `[Image]` | `[Blob]` | `NonDeterministic`（定） | `Pure`（定） | `object-detector-backend`（定） | §164 `:684`（Object / Region Detection）；§325 `:2360-2366`；§166 `:745-776` |
-| 3 | `local-generative-edit` | `[Image, Blob]` | `[Image]` | `NonDeterministic`（定） | `NonIdempotent`（定） | `inpainting-backend`（定） | §164 `:688`（Local Generative Edit）；§165 `:724`（Generative Inpainting）；§324 `:2335-2345`；§163 `:626-665` |
+| 3 | `local-generative-edit` | `[Image, Blob]` | `[Image]` | `NonDeterministic`（定） | `Pure`（定） | `inpainting-backend`（定） | §164 `:688`（Local Generative Edit）；§165 `:724`（Generative Inpainting）；§324 `:2335-2345`；§163 `:626-665` |
 | 4 | `hard-composite` | `[Image, Blob]` | `[Image]` | `Deterministic`（定） | `Idempotent`（定） | `builtin`（定） | §165 `:728`（Hard Composite）；§326 `:2378-2388`；§164 `:690`（Composite） |
 | 5 | `verify-outside-mask` | `[Image, Blob]` | `[Json]` | `Deterministic`（定） | `Pure`（定） | `builtin`（定） | §168 `:818-835`；§326 `:2372`；《工程》`:512` |
 
@@ -251,8 +251,8 @@ pub enum ImageError {
 3. **第 1、3 行是 `NonDeterministic`**：它们都经生成后端（图像生成模型 / inpainting 模型），同输入同 prompt **不保证逐位相同**——§327 `:2396-2402` 的谱系里每一步记 `seed`（§167 `:803`）本身即「同 prompt 可以是另一张图」的承认。
 4. **第 2 行是 `NonDeterministic`**：Object / Region Detection（§164 `:684`）是模型步，不是算法步。**这是本设计的判定**。
 5. **第 4、5 行是 `Deterministic`**：`hard-composite` 是逐像素复制（§165 `:735-737` 逐字「mask 外像素直接从原图复制」），`verify-outside-mask` 是比较（§168 `:832-835` 的 `outside-mask pixel difference`「可以直接确定性检查」）。两者都不含模型解码。**§168 自己说了「可以直接确定性检查」，故这两枚的 determinism 不是我造的。**
-6. **第 1、3 行是 `NonIdempotent`，第 2 行是 `Pure`**：§307 的 `RetryPolicy` 要求「非幂等 Effect MUST NOT 直接自动重试」，而重跑一次图像生成得到的是**另一张图**（这是副作用意义上的不可重放）；而区域检测是**分析**（它产出一个区域，不产出要被使用的最终制品）。P5e 的 §5.2 用的是同一条线（四枚生成算子 `NonIdempotent`，分析型 `Pure`），本块照同一口径取。
-7. **`hard-composite` 的 `Idempotent` 而不是 `Pure`**：同输入同后端产出逐位相同的输出（幂等），但它产生一个**大制品**（一整张图，且 §327 要求它是**新的** Artifact）；`Pure` 在本仓的用法里与「可自由重算」相邻，而重算一次合成要落一个新 Artifact 与新事件。**这是本设计的判定**，理由与 P5e 对 `render` 的处置同形。
+6. **第 1、3 行是 `Pure`**（2026-10-10 订正：此前取 `NonIdempotent`，理由「重跑一次得到**另一张图**」）。**那次取值把 `Determinism` 的理由当成了 `SideEffectClass` 的理由**——两者是两个正交字段。两枚的产物是**一个值**（`Image`），它们**不改变本仓之外的状态**；消耗的算力记在预算维度，不是副作用。区域检测（第 2 行）同为 `Pure`（它是**分析**，产出一个区域值）。口径与依据见 P5d 设计 §4.4 第 3 条。
+7. **`hard-composite` 的 `Idempotent` 而不是 `Pure`**：同输入同后端产出逐位相同的输出（幂等），且它在**本地存储**里落下一整张图——这是**本仓之外的状态**（`Idempotent` 的口径见 P5d 设计 §4.4 第 3 条）。**这里不用「成本／大制品」作理由**：2026-10-10 的裁定明写「消耗资源」与「改变状态」是两件事，原句「重算一次合成要落一个新 Artifact 与新事件」按该裁定不再是 `Idempotent` 的判据，故本处改据「落下本地文件」这一条。**这是本设计的判定**，与 P5e 对 `render` 的处置同形。
 
 **五枚都不含「参考物是文本」的情况**：§162 `:603` / §323 `:2321` 的 `reference_artifacts` / `references[]` 未给类型，本设计取 `Image`（图像域内，参考物是图像）。若实际需要 `Text` 参考（如文字描述作为参考制品），那是**输入面的加宽**，走 §12 第 5 条报出——**本设计不预先收它**。
 
@@ -304,7 +304,7 @@ pub enum ImageError {
 
 **被否决的更显然写法：给 `local-generative-edit` 编一张「支持掩码编辑的 backend」名单**（照 P5e §5.4 对 `Deterministic` 算子的做法）。**这里不是那样：理由两条，各自独立**——(i) 那条名单的判据（backend 的什么属性使 mask 外的像素不变）规范没有一处给，编出来就是发明；(ii) §326 已经给了一条**不依赖它**的路（生成的整图经 `hard-composite` 强制回填），故名单不是必需的，而它会让「哪些 backend 可用」变成一张谁也核不动的封闭表。代价是「本可省掉一次合成」的性能——**这是性能代价，不是正确性代价**，与「编一张无判据的名单」相比取向明确。
 
-**两枚 `NonIdempotent` 算子的重试面，据实写明**：§307 禁止非幂等效应自动重试；本块第 1、3 行是 `NonIdempotent`，故它们**不进自动重试**。代价是生成失败后要人来决定重跑——这是**代价，不是缺陷**（重跑得到另一张图，自动重试等于静默换结果）。
+**本块今天没有 `NonIdempotent` 算子，§307 的重试禁令在本块没有主体（据实写明）**：2026-10-10 订正后第 1、3 行取 `Pure`（§3.2 第 6 条），第 4 行取 `Idempotent`（第 7 条，它落下本地文件但重复得到同一状态），故 §307「非幂等 Effect MUST NOT 直接自动重试」在本块**不拦任何一枚**。**这不是「本块的算子都安全」**：判据是「有没有累积的外部后果」，本块五枚都没有。**将来出现向远端投递／导出的算子时禁令才有主体**，届时应由承载它的那一块报出（口径见 P5d 设计 §4.4 第 3 条）。**这与「重跑得到另一张图」无关**——那是 `Determinism`，重跑仍会得到另一张图，只是它不构成外部副作用。
 
 ## 3.6 §34 的生成授权**不覆盖图像生成**（据实，不发明）
 

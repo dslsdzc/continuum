@@ -576,10 +576,10 @@ pub enum MediaError {
 | 9 | `timeline-compose` | `[Json, ShotSet, Audio]` | `[Timeline]` | `Deterministic` | `Pure` | `builtin` | §10 `:545`；§32 `:1378`；§329 |
 | 10 | `effects-subtitle` | `[Timeline]` | `[Timeline, SubtitleTrack]` | `Deterministic` | `Pure` | `ffmpeg-filtergraph` | §32 `:1380`；§328 `:2418` |
 | 11 | `render` | `[Timeline]` | `[Render]` | `Deterministic` | `Idempotent` | `ffmpeg` | §32 `:1382`；§328 `:2419` |
-| 12 | `generate-broll` | `[Timeline]` | `[Video]` | `NonDeterministic` | `NonIdempotent` | `video-gen-backend` | §34 `:1424` |
-| 13 | `generate-voice` | `[Transcript]` | `[Audio]` | `NonDeterministic` | `NonIdempotent` | `tts-backend` | §34 `:1425` |
-| 14 | `generate-music` | `[Json]` | `[Audio]` | `NonDeterministic` | `NonIdempotent` | `music-gen-backend` | §34 `:1426` |
-| 15 | `frame-interpolation` | `[Video]` | `[Video]` | `NonDeterministic` | `NonIdempotent` | `interpolation-backend` | §34 `:1427` |
+| 12 | `generate-broll` | `[Timeline]` | `[Video]` | `NonDeterministic` | `Pure` | `video-gen-backend` | §34 `:1424` |
+| 13 | `generate-voice` | `[Transcript]` | `[Audio]` | `NonDeterministic` | `Pure` | `tts-backend` | §34 `:1425` |
+| 14 | `generate-music` | `[Json]` | `[Audio]` | `NonDeterministic` | `Pure` | `music-gen-backend` | §34 `:1426` |
+| 15 | `frame-interpolation` | `[Video]` | `[Video]` | `NonDeterministic` | `Pure` | `interpolation-backend` | §34 `:1427` |
 | 16 | `verify-deterministic` | `[Render, Timeline]` | `[Json]` | `Deterministic` | `Pure` | `builtin` | §32 `:1384` |
 | 17 | `verify-multimodal` | `[Render, Transcript, SubtitleTrack]` | `[Json]` | `NonDeterministic` | `Pure` | `independent-model` | §32 `:1386` |
 
@@ -605,11 +605,17 @@ pub enum MediaError {
    `Deterministic`**：这五枚的判定是**算法**（切分点、节拍、容器元数据、按计划拼轨、按参数加滤镜），
    不含模型解码。**这是本设计的判定，不是规范的**——规范没有一处给过 operator 的 determinism。
 4. **`narrative-plan` / `vision-analysis` / 生成类的四枚是 `NonDeterministic`**：它们都经模型或生成后端。
-5. **生成类的四枚是 `NonIdempotent`**：§307 `:2022-2034` 的 `RetryPolicy` 要求「非幂等 Effect MUST NOT
-   直接自动重试」，而重跑一次视频生成得到的是**另一段视频**。这与 P1 的 `SideEffectClass::NonIdempotent`
-   （`crates/continuum-operator/src/definition.rs:17-21`）逐字对应。
-6. **`render` 的 `Idempotent` 而不是 `Pure`**：同输入同后端产出逐位相同的输出（幂等），但它产生一个大制品、
-   耗时长；`Pure` 在本仓的用法里与「可自由重算」相邻，而重算一次渲染的**成本**不是零。**这是本设计的判定。**
+5. **生成类的四枚是 `Pure`**（2026-10-10 订正：此前取 `NonIdempotent`，理由「重跑一次得到**另一段**视频」）。
+   **那次取值把 `Determinism` 的理由当成了 `SideEffectClass` 的理由**——而两者是两个正交字段：「重跑得到另一段」
+   是非确定性，不是对外部世界的改变。四枚的产物是**一个值**（`Video` / `Audio`），它们**不改变本仓之外的状态**；
+   消耗的算力／计费记在预算维度（§333 的 `gpu_time` / `money_cost`），不是副作用。口径与依据见 P5d 设计 §4.4 第 3 条。
+   这与 P1 的 `SideEffectClass`（`crates/continuum-operator/src/definition.rs:17-21`）的语义一致：它只对
+   「重复执行会累积外部后果」那一类（§307 点名）给出禁令，本块今天没有那一类算子。
+6. **`render` 的 `Idempotent` 而不是 `Pure`**：同输入同后端产出逐位相同的输出（幂等），且它在**本地存储**里
+   落下一个大媒体文件——这是**本仓之外的状态**（`Idempotent` 的口径见 P5d 设计 §4.4 第 3 条：改变本仓之外的状态、
+   但重复执行得到同一状态）。**这里不再用「成本」作理由**：2026-10-10 的裁定明写「消耗资源」与「改变状态」是两件事，
+   §334（`docs/spec/05-normative.md:2528`）把「低成本」与「无外部副作用」并列即是此意——原句「重算一次渲染的成本
+   不是零」按该裁定不再是 `Idempotent` 的判据，故本处改据「落下本地文件」这一条。**这是本设计的判定。**
 7. **`verify-deterministic` 的 `Deterministic`**：它就是 §262 第 1 级的那个确定性检查器（§32 `:1384`）。
    **`verify-multimodal` 的 `NonDeterministic`**：它是 §262 第 3 级的独立模型验证器（§32 `:1386`）。
 
@@ -1106,7 +1112,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 | k | 授权 `Broll` 时 ⇒ `Ok` | 上一条的**另一侧**（否则 j 可由「一律 Err」满足） |
 | l | `required_permission` 对四枚生成算子各返回**对应的**那一枚（逐枚断言是哪一枚，不是「是 `Some`」） | §7.2 的映射（**枚举断言逐项有照片**：四臂各一条） |
 | m | `required_permission` 对一枚非生成算子返回 `None` | 上一条的**另一侧** |
-| n | `generate-broll` 与 `frame-interpolation` 的 `side_effect_class == NonIdempotent`，`render` 的是 `Idempotent` | §5.2 的第 5、6 条理由，逐枚 |
+| n | `generate-broll` / `frame-interpolation` 的 `side_effect_class == Pure`，`render` 与 `proxy-build` 的是 `Idempotent`，`media-import` 的亦 `Idempotent` | §5.2 的第 5、6 条理由，逐枚 |
 | o | `checkpoint()` 有进度 ⇒ `Ok`；`restore` 后状态与存前一致 | §4.5 判据 1 的正例 |
 | p | 无进度 ⇒ `Err(NothingToCheckpoint)` | §4.5 判据 1 的反例 |
 | q | 另一版本的检查点 ⇒ `Err(RestoreRejected)`，**且算子状态与调用前逐字段相同** | §4.5 判据 2（两侧：错误类型 + 半恢复） |

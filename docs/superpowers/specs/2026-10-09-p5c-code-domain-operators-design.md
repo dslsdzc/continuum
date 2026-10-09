@@ -179,7 +179,7 @@ L2 工作区的创建在 P2（第 5 层），而本块只在**声明**里命名�
 | # | 发明的判定 | 规范给到哪一步为止 | 代价 | 边界（拦不住什么） | 落点 | 收件人 |
 |---|---|---|---|---|---|---|
 | 1 | 9 枚算子各自的 `determinism` 取值 | §244 `:737-750` 只给字段名，**规范没有一处给过 operator 的 determinism** | §3.3 第 5、7 条：判 `NonDeterministic` 的七枚不进 §305 的复用，每轮重算；判 `Deterministic` 的两枚进复用 | 它**不判**「真实输入是否在端口上」——那一类由 §3.3 第 3 条与第 (o) 条用例管（§3.5 末） | §3.2 表的 `determinism` 列；照片 §10.2 第 (c)(g)(o) 条 | 规范维护者 |
-| 2 | 9 枚算子各自的 `side_effect_class` 取值 | §244 同上；§307 `:2033` 只给「非幂等 Effect MUST NOT 直接自动重试」 | §3.3 第 8 条：`code-implement` 判 `NonIdempotent`，故它的失败**不得自动重试**，只能升级 | 它只影响重试策略；**不判**「重试几次、退避多少」（§307 的 `RetryPolicy` 字段面属 P1） | §3.2 表的 `side_effect_class` 列；照片 §10.2 第 (f) 条 | 规范维护者 |
+| 2 | 9 枚算子各自的 `side_effect_class` 取值 | §244 同上；§307 `:2033` 只给「非幂等 Effect MUST NOT 直接自动重试」 | §3.3 第 8 条：九枚**都不是** `NonIdempotent`（第 4 行 2026-10-10 由 `NonIdempotent` 改判 `Pure`），故 §307 的禁令在本块今天没有主体 | 它只影响重试策略；**不判**「重试几次、退避多少」（§307 的 `RetryPolicy` 字段面属 P1） | §3.2 表的 `side_effect_class` 列；照片 §10.2 第 (f) 条 | 规范维护者 |
 | 3 | 9 枚算子各自的 `backend_candidates` 名单 | §245 `:754-773` 只给「一个 Operator MAY 有多个 backend」与一个例（`Transcribe` 三 backend），**不给取值域** | §3.3 第 3 条（`code-workspace` 只列 §255 的两种形态，不列 §255 `:1029-1037` 的五种） | 名单是「Router 可以选的东西」，**不判**「Router 实际选哪个」（§245 `:773` 逐字把选择判给 Router） | §3.2 表的 backend 列；照片 §10.2 第 (h)(p) 条 | 规范维护者 |
 | 4 | 「逐位可复现的 backend」封闭名单（5 项）与注册期规则 | 无（§245 只说多 backend） | §3.5：远程执行不可用（性能代价，非正确性代价） | **拦不住**「候选都可复现、但真实输入不在端口上」那一类（§3.5 末已写明） | `register_code_operators`（§3.2）的核；错误臂 `CodeError::UnverifiableDeterminism`；照片 §10.2 第 (c)(d) 条 | 规范维护者（§11 第 7 条） |
 | 5 | §3.4 边表的**边判据** | §186/《总纲》§8.3 给的是**步骤名与步骤序**；§239 `:654` 只给「运行时 MUST 拒绝不兼容连接」 | 无（它是注册期的相容性核对） | 它只判**相邻两枚的 schema 相交**；**不判**「图上的边该不该存在」（那是 Planner 的构造） | §3.4 边表；照片 §10.2 第 (j) 条 | 规范维护者（以「§3.2 第 N 行」为依据的那几行） |
@@ -237,7 +237,7 @@ backend 候选**在规范未给处由本设计定，并逐行标出「定」字�
 | 1 | `code-workspace` | 建立 L2 隔离工作区 | `[]` | `[SourceTree]` | `NonDeterministic`（定） | `Idempotent`（定） | `worktree` `overlay`（定；取 P2 `WorkspaceBackend` 两臂的编码，§3.5 末） | §16 `:790-794`；§255 `:1023-1037` |
 | 2 | `code-plan` | 规划 | `[Json]` | `[Json]` | `NonDeterministic`（定） | `Pure`（定） | `primary-model`（定） | 《总纲》§8.3 `:1448`；§186 `:62` |
 | 3 | `code-decompose` | 拆任务 | `[Json]` | `[Json]` | `NonDeterministic`（定） | `Pure`（定） | `primary-model`（定） | 《总纲》§8.3 `:1448`；§186 `:64` |
-| 4 | `code-implement` | 全新 subagent 实现 | `[Json]` | `[Patch]` | `NonDeterministic`（定） | `NonIdempotent`（定） | `coding-agent` `local-agent-cli`（定） | 《总纲》§8.3 `:1448`；§186 `:66-68` |
+| 4 | `code-implement` | 全新 subagent 实现 | `[Json]` | `[Patch]` | `NonDeterministic`（定） | `Pure`（定） | `coding-agent` `local-agent-cli`（定） | 《总纲》§8.3 `:1448`；§186 `:66-68` |
 | 5 | `code-spec-review` | 规格审查 | `[Patch, Json]` | `[Json]` | `NonDeterministic`（定） | `Pure`（定） | `independent-reviewer-model`（定） | §186 `:70`；`:85` |
 | 6 | `code-quality-review` | 质量审查 | `[Patch, Json]` | `[Json]` | `NonDeterministic`（定） | `Pure`（定） | `independent-reviewer-model`（定） | §186 `:72`；`:85` |
 | 7 | `code-test-run` | 验证：跑测试，产 `TestResult` | `[SourceTree, Patch]` | `[TestResult]` | `Deterministic`（定） | `Idempotent`（定） | `cargo-test` `local-test-runner`（定） | §186 `:74`；§259 `:1109-1119` |
@@ -327,11 +327,12 @@ pub enum CodeError {
 
 4. **第 1 行是 `Idempotent` 而不是 `NonIdempotent`**：它的效果是「使该 Intent 的隔离工作区存在」，
    这是一个**目标态**，不是增量操作——重复调用不产生**第二份**工作区（P2 的实现里，同一 Intent 的
-   第二次创建会撞上已存在的 `ai/<intent>` 分支或 Intent 目录而返回 `Err`）。
-   §307（`:2033`）的禁令管的是「重跑一次会产出**另一份**东西」那一类（P5e 设计 §5.2 第 5 条对生成类
-   算子的判据），本行不属于那一类。**这里不是照 `render` 的 `Idempotent` 抄的**：`render` 的 `Idempotent`
-   讲的是「同输入同后端产出逐位相同的输出」，本行讲的是「重复调用不产生第二份」——两条理由不同，
-   只是落在同一个取值上。
+   第二次创建会撞上已存在的 `ai/<intent>` 分支或 Intent 目录而返回 `Err`）。它**改变了本仓之外的状态**
+   （落下一棵工作区树），故不是 `Pure`；而重复执行得到同一状态，故不是 `NonIdempotent`——这正是
+   `Idempotent` 的口径（见 P5d 设计 §4.4 第 3 条）。**`NonIdempotent` 管的是「重复执行会累积外部后果」那一类**
+   （§307 `:2033` 点名：向外部服务投递、删除远端资源），本行不属于那一类。**这里不是照 `render` 的 `Idempotent` 抄的**：
+   `render` 的 `Idempotent` 讲的是「落下本地文件、重复得到同一状态」，本行讲的是「重复调用不产生第二份」
+   ——两条理由不同，只是落在同一个取值上。
 
 5. **第 7 行与第 8 行分作两枚，不合成一枚多 backend 的算子**：分的原因是 `determinism`。
    `code-test-run` 判 `Deterministic`（同一棵树跑同一套测试，结果逐次相同），而 §193 `:368-369` 的
@@ -351,10 +352,12 @@ pub enum CodeError {
    **这是本设计的判定，不是规范的**——规范没有一处给过 operator 的 determinism。
    据实记代价：规划与拆任务的产物因此不进 §305 的复用，每轮重算。
 
-8. **第 4 行是 `NonIdempotent`，其余八枚都不是**：重跑一次实现得到的是**另一份补丁**
-   （模型解码的随机性 + 它读到的上下文已变）。§307 `:2033` 逐字「非幂等 Effect MUST NOT 直接自动重试」，
-   故 `code-implement` 的失败不得自动重试，只能升级。**这一条与 §262 的验证侧无关**，
-   它是 §307 在代码域的唯一落点。
+8. **九枚都不是 `NonIdempotent`**（第 4 行于 2026-10-10 由 `NonIdempotent` 改判 `Pure`；此前判 `NonIdempotent`
+   的理由是「重跑一次实现得到的是**另一份补丁**」）。**那次取值把 `Determinism` 的理由当成了 `SideEffectClass`
+   的理由**：模型解码的随机性属 `determinism`（第 4 行本就是 `NonDeterministic`），而「另一份补丁」仍只是
+   **一个值**——第 4 行不改变本仓之外的状态。**判据**：「消耗资源」与「改变状态」是两件事，消耗算力记在预算维度
+   （§333），不是副作用（口径与依据见 P5d 设计 §4.4 第 3 条）。§307 `:2033` 的禁令在本块**今天没有主体**：
+   九枚无一向远端投递或删除；将来出现那类算子时才有主体。
 
 9. **第 7、8 行的 `Idempotent` 而不是 `Pure`**：两枚都在 Task Workspace 里跑构建与测试（写出
    `target/` 一类的中间物），故不是 `Pure`（P5e 设计 §5.2 第 6 条对 `render` 用的是同一条理由）。
@@ -902,7 +905,7 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
 | c | `determinism == Deterministic` 的每一枚算子，其每个 backend 都在 §3.5 的名单内 | §3.5 的规则（正例） |
 | d | 造一枚 `Deterministic` 但候选含名单外 backend 的算子，以它连同若干合法算子调 `register_code_operators` ⇒ `Err(CodeError::UnverifiableDeterminism { .. })`，**且注册表内容与调用前逐枚相同**（先核后写，不留半注册） | **fail-open 的那一侧**（§3.5）；「注册表未变」那一半钉的是同一条规则的**写入面** |
 | e | `codew` 等**表外**的 `OperatorId` 构造出的算子与合法算子混合注册，逐枚成功（id 是开放串，不校验） | 上一条的**另一侧**（否则 d 可由「一律拒」满足） |
-| f | 第 4 行 `code-implement` 的 `side_effect_class == NonIdempotent`，其余八枚都不是 | §3.3 第 8 条，逐枚 |
+| f | 第 2、3、4、5、6、9 行的 `side_effect_class == Pure`，第 1、7、8 行的是 `Idempotent`，**九枚无一为 `NonIdempotent`** | §3.3 第 4、8、9 条，逐枚（不是抽样） |
 | g | 第 7、9 行的 `determinism == Deterministic`，第 1、2、3、4、5、6、8 行是 `NonDeterministic` | §3.2 表那一列的**逐行**断言（不是抽样） |
 | h | 第 1 行的 `input_schema` 是空 `Vec`，且 `output_schema == [SourceTree]` | §3.3 第 2 条 |
 | i | 第 5 行与第 6 行的 `input_schema`、`determinism`、`side_effect_class` 逐字段相同，而 `id` 不同 | §3.3 第 10 条（「分离」这一条只有两枚同形的东西才说得上） |
@@ -975,8 +978,10 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    故只能拍到「算子的声明取值正确」（第 (h)、(p) 条），拍不到「它建出了什么」。
 3. **§305 的复用真的省下了一次重跑**：`can_reuse` 今天无生产调用方（P1 设计 §18 把它列在
    「无执行点的机制」里），且 `CacheKey` 无存储。故只能拍到 (o) 那条返回值。
-4. **§307 的「非幂等不自动重试」真的拦住了一次重试**：重试的决策点在
-   `crates/continuum-graph/src/failure.rs` 一侧（P1），本块只声明 `side_effect_class`（第 (f) 条）。
+4. **§307 的「非幂等不自动重试」在本块没有照片，据实记**：重试的决策点在
+   `crates/continuum-graph/src/failure.rs` 一侧（P1），而本块九枚**无一为 `NonIdempotent`**（§3.3 第 8 条），
+   故那条禁令在本块**没有主体可拦**——第 (f) 条拍的是「九枚的取值」，不是「拦下了一次重试」。
+   **这不是缺口**：判据是「有没有改变外部世界」，本块今天没有那类算子；将来出现才有照片。
 5. **两条臂的证据真的产了出来**：§5.3 报出的 `ModelReview` 臂于 2026-10-10 在 P5a 落地（其设计 §4.2）。
    **本条照片仍缺一半**：证据的**构造**在宿主的执行代码（第 3 层），而本块只声明 `evidence_type`
    （§5.2 表、§6.2 末）——**本块侧可拍的只有「不写死它」这件事**，它是「代码里没有那一行」。
