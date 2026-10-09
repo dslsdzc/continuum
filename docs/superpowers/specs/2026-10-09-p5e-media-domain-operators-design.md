@@ -36,7 +36,7 @@
 | Derived Artifact 的复用（§131） | 切分 §五 P5e 行；§8.3 的「媒体衍生 Artifact」行 | §6 | **不建第二份判据**；本块的兑现是让本领域算子满足 P1 已落地的判据的前提 |
 | 生成内容必须单独授权（§34） | 切分 §五 P5e 行 | §7 | 授权臂全量；**调用点不在本块**（切分 §四第 4 条） |
 | Timeline 的 Artifact 形态（§329） | 切分 §五 P5e 行 | §8 | 形状落点全量；**字段级 schema 不定义**（缺口见 §14 第 4 条） |
-| 只产出 Evidence、只消费判定 | 切分 §四第 1 条 | §9 | 产出经 §9.2 的领域包装走到 P5a 的 `Evidence::from_tool_result`（唯一构造点）；不新建证据类型 |
+| 只产出 Evidence、只消费判定 | 切分 §四第 1 条 | §9 | 产出**直接**走到 P5a 的 `Evidence::from_tool_result`（唯一构造点），**不写域包装**（§9.2；跨块口径见 P5a 设计 §4.4）；不新建证据类型 |
 | 与 P5b 方法库的接缝 | P5b 设计第六节（`docs/superpowers/specs/2026-10-08-p5b-execution-method-library-design.md:371-390`） | §10 | 四条 `video/` 方法的 `realized_by` 逐条填出 |
 | 迁移号段 | 切分 §二第 5 条 | §11 | **本块零迁移**；附实测空档表 |
 
@@ -69,10 +69,10 @@
 
 | 被依赖 | 用到什么（逐项实测） | 边别 |
 |---|---|---|
-| `continuum-artifact` | `ArtifactType`（§3 的清单落在这里，本块经它声明端口类型）、`ArtifactId`（§9.2 的证据产出） | 普通 |
+| `continuum-artifact` | `ArtifactType`（§3 的清单落在这里，本块经它声明端口类型） | 普通 |
 | `continuum-operator` | `Operator` / `OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` / `BackendId` / `OperatorRegistry` / `OperatorError` / `Checkpointable` / `CheckpointError`（§4 的类型落在这个 crate 里） | 普通 |
 | `continuum-method` | `MethodRegistry` / `MethodId` / `MethodError` / `bind`（§10 的 `bind_media_methods` 收 `&mut MethodRegistry`、以 `MethodId` 逐条调 `bind` 并透出 `MethodError`；P5b 设计 `:291` 明写四块**只经 `bind` 填内容**；P5b 设计 `:375` 要求每块对其领域目录里**每一条**已 seed 的 id 调用一次 `bind(id, &[...])`，故调用方是本块的具名入口 `bind_media_methods`，不是用例） | 普通 |
-| `continuum-verify` | `Evidence` / `EvidenceType` / `EvidenceProducer` / `EvidenceSubject` / `Claim` / `EvidenceStrength` / `EvidenceScope` / `Evidence::from_tool_result` / `VerifyError`（切分 §四第 1 条：四块**只产出**证据） | 普通 |
+| `continuum-verify` | `Evidence` / `EvidenceSubject`（§12.4 第 1、2 条的 `trybuild` 用例：本 crate 里 `Evidence { .. }` / `Evidence::default()` / `EvidenceSubject::Requirement(..)` 编不过） | **dev 边** |
 | `continuum-graph` | `can_reuse` / `cache_key` / `CacheKey`（§6.2 的照片：核本块声明的 `determinism` 真能让 §305 的判据成立） | **dev 边** |
 
 `continuum-method` 是 P5b 新建的 crate，其 workspace 依赖集合为空集（P5b 设计第九节）；本块依赖它，
@@ -94,8 +94,15 @@
 本仓已有同形的先例：`continuum-provider` 那一行注记明写「Task 4 起加上 persist：**dev 边**」
 （同文件 `:32-34`）。
 
-**边别按「谁在用」判，两处判法同一条**（零使用的边即假边，反之：生产代码用到的边即普通边）：
+**边别按「谁在用」判，三处判法同一条**（零使用的边即假边，反之：生产代码用到的边即普通边）：
 
+- `continuum-verify` 是 **dev 边**（**2026-10-10 由「普通」改判**）：原先的理由栏写的是「切分 §四第 1 条：
+  四块只产出证据」，而本块**不提供这一层的函数**——原先唯一的生产侧入口 `evidence_from_media_output`
+  已按协调者裁定删去（§9.2），产出由**宿主的执行代码**直接调 `from_tool_result` 构造。
+  故本 crate 的**生产代码对这枚 crate 零调用**（`OperatorImpl::execute` 的返回是 `Vec<Artifact>`，
+  `crates/continuum-graph/src/execution.rs:76-82`），唯一使用点是 §12.4 的两条 `trybuild` 用例。
+  **判据的推广**：协调者 2026-10-10 的四块统一口径（P5a 设计 §4.4「四个领域算子块一律不写域包装」）
+  使四块在该 crate 上的形态一致（P5f 设计 §2.1 早已是 dev 边，其来历写在该节的订正段）。
 - `continuum-graph` 是 **dev 边**：生产代码不调它；用到它的是 §6.2 的照片（§12.2 第 (r) 条对
   `can_reuse` / `cache_key` 的断言），那是用例。
 - `continuum-method` 是**普通边**：四条 `bind` 由本块的具名入口 `bind_media_methods`（§10）调用（§1.2 表第 2 行逐字
@@ -160,6 +167,7 @@ CheckpointError   CheckpointOwner
 （`crates/continuum-runtime/tests/dependency_direction.rs:30` 的注记，与 P3c 设计 §4.1 订正段
 `docs/superpowers/specs/2026-10-05-p3c-provider-boundary-design.md:336` 逐字「层内边」）。
 本条边是单向的：`continuum-verify` 不依赖任何 P5 领域算子块（P5a 设计 §2.1 的边表里没有它们）。
+**边别为 dev 边**（2026-10-10 由「普通」改判：本块不写域包装后，生产代码对该 crate 零调用，§2.1）。
 
 **原先此处引的先例已换掉**：原引 `docs/02-工程.md:577` 的补记行 `continuum-secrets → continuum-capability`。
 实测那一行是 `资源层 (4) ──→ 边界层 (5)` 的**跨层**边（编号与行文都在 `docs/02-工程.md:577`），
@@ -719,7 +727,7 @@ pub enum MediaError {
 | Verifier 的**级别序**、候选过滤、独立性判定、隔离输入面、判定的聚合 | **P5a**（其设计 §7） |
 | 媒体域的**比较器**（读 `Render` 的元数据与像素，给出「这一步成不成」的判定） | **本块**（§5.2 第 16、17 行的算子） |
 | 后者怎样变成前者的一个候选 | 装配方以**值**构造 `AvailableVerifier`（P5a 设计 §7.2 的形状），`level` 取本设计声明的那一级 |
-| 算子的产物怎样变成 `Evidence` | 本块（§9.2），经 P5a 的 `Evidence::from_tool_result` |
+| 算子的产物怎样变成 `Evidence` | **宿主（第 3 层）**在算子产出制品之后直接调 P5a 的 `Evidence::from_tool_result`；本块只声明形状（§9.2：`subject` 取 `Unattached`；臂见 §9.1），**不写这一层的函数** |
 
 **本块声明的事实**：`verify-deterministic` 在 §262 的序里是第 1 级（`DeterministicChecker`）、
 `verify-multimodal` 是第 3 级（`IndependentModelVerifier`）。**这是本设计的声明**——§32 只说这两步在链尾，
@@ -928,7 +936,13 @@ P5a 设计 §14 第 3 条（`docs/superpowers/specs/2026-10-08-p5a-verification-
 本设计**不改名、不加臂**（P5a 持有那个枚举，且 `VISUAL_CHECK` 是 §258 的措辞），只把不适记在此处；
 若 P5a 的下一轮判它需要一枚更宽的臂，那是 P5a 的一次改动，本块的两个调用点随之改一行。
 
-## 9.2 产出的形状：一律 `Unattached`
+## 9.2 产出的形状：一律 `Unattached`（**本块不写域包装**）
+
+**跨块口径（协调者 2026-10-10 裁定，写在 P5a 设计 §4.4）：四个领域算子块一律不写域包装，
+一律直接调 `Evidence::from_tool_result`。** 本块是四块之一：§9.1 的两枚验证算子各产一条证据，
+构造由**宿主的执行代码**（第 3 层）在本块的算子产出制品之后，直接调 P5a 的 `from_tool_result` 完成。
+
+**原先的定义（留着来历，2026-10-10 删）**：
 
 ```
 /// 把一个媒体算子节点的输出转成 `Evidence`（§89）。
@@ -945,30 +959,32 @@ pub fn evidence_from_media_output(
 ) -> Result<Evidence, VerifyError>;
 ```
 
-- **签名与 `from_tool_result` 逐项对齐。** 上列七项就是 P5a 那个构造点的八个参数**减去**本函数固定的
-  `subject`（P5a 设计 `:324-333` 的签名：`id` / `evidence_type` / `subject` / `claim` / `producer` /
-  `artifact_refs` / `strength` / `scope`）。`id` / `strength` / `scope` **必须由调用方给**，本块不代它
-  取值（§2.2：证据的充分性判定不属本块）。**这里不是「只收五项的瘦包装」：那样 `id` / `strength` /
-  `scope` 就没有供上的位置，而 `from_tool_result` 要求调用方给出它们——包装要么漏参编不过，
-  要么就得就地造值，那就成了 `Evidence` 的第二个产生点，把 P5a 设计 §4.4 的「唯一产生点」当场破掉。**
+**删的是哪一层**：它**只是转发**——签名与 `from_tool_result` 逐项对齐（上列七项就是那个构造点的八个参数
+**减去**它固定的 `subject`），无一项域内的形状转换。删去后本 crate 的 `pub` 面少一枚，
+`continuum-verify` 随之由普通边改判 **dev 边**（§2.1）。**这一层删掉不等于「没有地方构造证据」**：
+构造点是 `pub`，宿主直接调它。**P5d 的同形包装与本次一并删去**（其设计 §5.2）。
+
+**保留下来的四条事实（它们不依赖那一枚函数）**：
+
 - **`subject` 取 `Unattached`**，不是 `Requirement(..)`。理由借 P5a 设计 §4.3.1 自己的那条：
   「证据先于归属存在：工具节点产出一条证据时，它可能还不知道（或不该由它决定）面向哪条 Requirement」。
   附带的一个后果是**本块不需要 `RequirementId`**（属 P4 的 `continuum-semantics`，该 crate 今天不存在），
-  故 §2.1 的边表里没有它。
+  故 §2.1 的边表里没有它。**这一条现在由宿主的调用点兑现**（传 `Unattached`），本块不再以签名固定它。
 - **`producer` 由调用方以值给**，取 `EvidenceProducer::Node { node, backend }`（P5a 设计 §4.3.3 的两臂）。
   **这里不是「收 `NodeId` + `BackendId` 再就地拼出 `EvidenceProducer::Node`」：`NodeId` 定义在
   `continuum-graph`（`crates/continuum-graph/src/ids.rs:40`，经 `crates/continuum-graph/src/lib.rs:22`
   re-export），`pub fn` 的签名里点名它就把该依赖从 **dev 边**升成普通边，而本块的生产代码不查图
   （§2.1 第 5 行：那条边是 dev 边，只有 §6.2 的照片用它）。**
-  **据实记一处：本函数拦不住 `EvidenceProducer::Human`**——两臂的搭配由 P5a 的构造点判（P5a 设计 §4.4
+  **据实记一处：本块拦不住 `EvidenceProducer::Human`**——两臂的搭配由 P5a 的构造点判（P5a 设计 §4.4
   只拦「`HumanConfirmation` 与 `producer != Human`」这一对），故「本块的产出都是 `Node`」这一句是
   **声明级**的，不是类型级的。收成类型级要本块自己写一遍那两臂的搭配判定，那是把 P5a 的判据抄成
-  第二份（§2.2 的「本块不持有的判定」），故不取。
-- **时刻不在本函数的签名里。** `Evidence` **没有时间字段**——P5a 设计 §4.1 逐字段照 §258 的八字段，
+  第二份（§2.2 的「本块不持有的判定」），故不取。**删去包装后，连承载那条声明的参数也没有了**：
+  声明留在 §9.1 的表里，兑现方是宿主的调用点。
+- **时刻不在产出面里。** `Evidence` **没有时间字段**——P5a 设计 §4.1 逐字段照 §258 的八字段，
   无一是时刻。P5a 的 `occurred_at` 是 `evidence` **表**的一列（P5a 设计 §10.2），由写入那一行证据的
   落库方给，不是 `from_tool_result` 的参数；本块零迁移、不写那一行（§11）。**原先那一版收
   `occurred_at: i64`**，它与构造点对不上（`from_tool_result` 无此参数），故删。
-- **本块不判定任何东西**：`evidence_from_media_output` 只做形状转换，不判「这条证据够不够」。
+- **本块不判定任何东西**：产出面只声明「这一步产一条证据、臂是哪一枚」，不判「这条证据够不够」。
   「充分」的判据不存在（OPEN-001，P5a 设计 §3 的处置）——本块**不绕开也不补**。
 
 ## 9.3 消费面：本块不调用 P5a 的判定
@@ -1078,8 +1094,11 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 - **若 P5e 的实现阶段确需落库**，那一刻取号即可，判据是**未占用**（同 p3d 的取法，
   该文 `:487-493`：「『未占用』的判据是按库说的，不是按全仓说的」，
   并说明 `60` 与 `50` 各在别处自建的库里出现过而无害）。**本设计给出的次序建议**是
-  `140`（P5 六块按 P3 的先例后延：P5a `130`、P5b `140`、P5c `150`、P5d `160`、P5e `170`、P5f `180`，P6 `190`）
+  `170`（P5 六块按 P3 的先例后延：P5a `130`、P5b `140`、P5c `150`、P5d `160`、P5e `170`、P5f `180`，P6 `190`）
   ——**这是建议不是裁定**，六块与 P6 的档由协调者统一划（切分 §二第 5 条）。
+  **（2026-10-10 订正）领句原先写的是 `140`，与同一句括注相抵**：括注把 `140` 分给 P5b、`170` 分给 P5e，
+  平行段落 P5f 设计 §10.3 的领句写的正是自己的号（`180`）。故领句改为 `170`；
+  P5c 设计 §9.3 与 P5d 设计 §8.3 引的都是那个括注（两处引用不受影响）。
 
 **收件人：协调者**。**这一节只是一句注记，不另开对账条目**：本块零迁移故无号可占，
 号段怎么划与本块无关（原先在 §13 与 §14 各开过一条「迁移号段」的对账项，已删——
@@ -1153,9 +1172,11 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 1. `Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）在 `continuum-media` 里编不过
    ⇒ 在本块的 crate 里**造不出** `Evidence`（字段私有、无 `Default`／`From`），绕过构造点在类型上写不出来。
    这是 P5a 设计 §4.4（`:319`）「唯一产生点」那条结构事实在本块的**使用侧**照片。
-   **这一条证不到「产出只能经 `evidence_from_media_output`」**：`Evidence::from_tool_result` 是 `pub`
-   （P5a 设计 `:324`），本块的生产代码可以直接调它——仍是同一个构造点，只是不经过本块的包装；
-   本块的包装固定的只有 `subject` 一项（§9.2）。
+   **这一条证不到「产出只能经本块的某枚函数」**：`Evidence::from_tool_result` 是 `pub`
+   （P5a 设计 `:324`），构造由**宿主**直接调它完成（§9.2），**调用点不在本 crate 里**——
+   **（2026-10-10 订正）原句写「本块的生产代码可以直接调它……只是不经过本块的包装」，
+   而那一枚包装已按协调者裁定删去**（§9.2）；这两条 `trybuild` 用例据此成为本块在
+   `continuum-verify` 上的**唯一使用点**，也是 §2.1 把该边判为 dev 边的理由。
 2. `EvidenceSubject::Requirement(..)` 在 `continuum-media` 里构造 ⇒ 编不过（§9.2 的「本块不构造
    Requirement 归属」）。**这一条的成立依赖 P5a 不 re-export `RequirementId`**——该类型的归属 P5a
    自记未定（P5a 设计 §4.3.1：「落地时以 P4 的 `RequirementId` 为准」），故它是一条**对别人块形状的
@@ -1207,9 +1228,11 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 3. **待与规范维护者 + 协调者对账（§6.3）**：模型型派生产物（`Transcript` / `FaceIndex` / `Embeddings`）
    的可复现性判据不存在，故本块把 `transcribe` / `vision-analysis` 声明为 `NonDeterministic`，
    §131 `:1968` 的「无需重新计算」对这三类产物不成立。**缺的是「模型输出的可复现性条件」这一步**。
+   **互指（2026-10-10 补）**：本文件 §14 第 3 条记的是同一处缺口——同一条事实在本文件的「对账条目」与
+   「遗留与未决项」两节各记一次，**两处都留，互为指针**（本处指它、那里指回来）。
 4. **待与规范维护者对账（§8）**：§329 的六个字段没有类型、没有引用关系、`audio_mix` 无表示。
    **缺的是「Timeline 六个字段的类型与互引」这一步**。与 P5a 设计 §15 第 9 条（`Artifact.metadata` 的 schema）
-   是同一处缺口的两半，两处互指。
+   是同一处缺口的两半，两处互指。**同一处缺口本文件另记一次，在本文件 §14 第 4 条，两处互为指针**。
 5. **待与 P5a 对账**（三条）：
    (i) 本块答复 P5a 设计 §14 第 3 条的询问：`VisualCheck` 够用，**不请求新臂**（§9.1），
    但「`VisualCheck` 这个名字对跨模态检查偏窄」记在 §9.1 末。
@@ -1251,8 +1274,11 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
    （2026-10-09 已折入，来历见 §15 第 2 条）。**收件人：协调者 + P1**。
 3. **模型型派生产物的可复现性判据不存在**（§6.3）。**缺的是「温度/种子/版本冻结三项是否构成
    「同输入同输出」的充分条件」这一步。收件人：规范维护者 + 协调者。**
+   **互指（2026-10-10 补）**：本文件 §13 第 3 条记的是同一处缺口，**两处都留，互为指针**。
 4. **§329 的 Timeline 六个字段无 schema**（§8 第 3 条）。**缺的是「六个字段的类型与 tracks↔clips 的引用关系」
    这一步。收件人：规范维护者。**
+   **互指（2026-10-10 补）**：本文件 §13 第 4 条记的是同一处缺口（那里另与 P5a 设计 §15 第 9 条互指），
+   **两处都留，互为指针**。
 5. **`ThreeDGeneration` 这一臂今天没有算子映射它**（§7.2）：与 §1.2 表里那条 3D 归属缺口同源
    （切分 §八 的「`3d/` 在四个具名算子里没有对家」那一条）。**缺的是「3D 链归哪一块」这一步的裁定。收件人：协调者。**
 6. **检查点的存储形态未定义**（§4.6、§11.1）：`Checkpoint` 的持久化、版本兼容、损坏检测都不在 §308 里。
@@ -1262,10 +1288,13 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
    **收件人：规范维护者。**
 8. **§32 链尾两步的 §262 级别是本块的声明**（§5.5）。**缺的是「verifier 候选的级别由谁持有」这一步。
    收件人：P5a + 装配方。**
-9. **本块的两处登记入口、两处判定与一处产出包装今天都没有生产调用方**：`register_media_operators`
+9. **本块的两处登记入口、两处判定今天都没有生产调用方**：`register_media_operators`
    （§5.1）、`bind_media_methods`（§10）、`authorize_generative`（§7.2）、`checkpoint()` / `restore()`
-   （§4.5、§7.3）、`evidence_from_media_output`（§9.2），五者。**这不是本块的缺口，是第 3 层的**
+   （§4.5、§7.3），四者。**这不是本块的缺口，是第 3 层的**
    （切分 §四第 4 条禁止 P5 自建执行路径；P1 设计 §18 已有同形的一条；拍照的限制见 §12.5）。
+   **（2026-10-10 订正）**原先这里列五者，含「一处产出包装 `evidence_from_media_output`（§9.2）」——
+   那一枚已按协调者裁定删去（§9.2），故由五者减为四者；证据的构造点（`from_tool_result`）在宿主侧，
+   本块**没有**那一层的调用点可列。
 
 ---
 

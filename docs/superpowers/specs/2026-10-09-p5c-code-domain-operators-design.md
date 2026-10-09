@@ -68,10 +68,10 @@
 
 | 被依赖 | 用到什么（逐项实测） | 边别 |
 |---|---|---|
-| `continuum-artifact` | `ArtifactType`（§3.2 的端口类型经它声明）、`ArtifactId`（§5.2 的证据产出） | 普通 |
+| `continuum-artifact` | `ArtifactType`（§3.2 的端口类型经它声明） | 普通 |
 | `continuum-operator` | `Operator` / `OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` / `BackendId` / `OperatorRegistry` / `OperatorError` | 普通 |
 | `continuum-method` | `MethodRegistry` / `MethodId` / `MethodError` / `bind`（§7.1 的 `bind_code_methods` 收 `&mut MethodRegistry`、以 `MethodId` 逐条调 `bind` 并透出 `MethodError`） | 普通 |
-| `continuum-verify` | `Evidence` / `EvidenceType` / `EvidenceProducer` / `EvidenceSubject` / `Claim` / `EvidenceStrength` / `EvidenceScope` / `EvidenceId` / `Evidence::from_tool_result` / `VerifyError`（切分 §四第 1 条：四块**只产出**证据） | 普通 |
+| `continuum-verify` | `Evidence`（§10.4 第 1 条的 `trybuild` 用例：本 crate 里 `Evidence { .. }` 与 `Evidence::default()` 编不过） | **dev 边** |
 | `continuum-graph` | `can_reuse` / `cache_key` / `CacheKey`（§3.6 的照片：核本块声明的 `determinism` 真能让 §305 的判据成立） | **dev 边** |
 | `continuum-workspace` | `WorkspaceBackend`（§4.2 的照片：核 `code-workspace` 的两个 backend 名与 P2 已落地的两臂逐名一致，`crates/continuum-workspace/src/backend.rs:22`） | **dev 边** |
 
@@ -97,6 +97,14 @@
 
 **dev 边为什么也要登记**：`dependency_direction.rs` 的 `cargo tree` 带 `--edges all`，dev 边与普通边一视同仁。
 本仓已有同形的先例（`continuum-provider` 那一行注记明写「Task 4 起加上 persist：**dev 边**」，同文件 `:32-34`）。
+
+**`continuum-verify` 那一行的边别由「普通」改为「dev 边」（2026-10-10 订正）**：原先的理由栏写的是
+「切分 §四第 1 条：四块只产出证据」，而本块**不提供这一层的函数**（§6.2：产出由装配方直接调
+`Evidence::from_tool_result`，本块不建包装），故本 crate 的**生产代码对这枚 crate 零调用**——
+`OperatorImpl::execute` 的返回是 `Vec<Artifact>`（`crates/continuum-graph/src/execution.rs:76-82`），
+唯一使用点是 §10.4 的 `trybuild` 用例。按本表下「边别按『谁在用』判」的口径即 **dev 边**
+（与 P5f 设计 §2.1 同形，那里的来历写在其 §2.1 的订正段）。**判据的推广**：协调者 2026-10-10
+的四块统一口径（P5a 设计 §4.4「四个领域算子块一律不写域包装」）使四块在该 crate 上的形态一致。
 
 **边别按「谁在用」判**：`continuum-graph` 与 `continuum-workspace` 是 **dev 边**——生产代码不调它们；
 用到它们的是 §10.2 的两条运行期断言（第 (o) 与 (p) 条），那是用例。若实现期发现生产代码要调它们
@@ -164,6 +172,7 @@ CodeError
 `continuum-provider → continuum-capability`（资源层内的「接口 → 能力类型」）就被登记为层内边
 （`crates/continuum-runtime/tests/dependency_direction.rs:30` 的注记，与 P3c 设计 §4.1 订正段逐字「层内边」）。
 本条边是单向的：`continuum-verify` 不依赖任何 P5 领域算子块（P5a 设计 §2.1 的边表里没有它们）。
+**边别是 dev 边**（2026-10-10 由「普通」改判：本块不写域包装后，生产代码对该 crate 零调用，§2.1）。
 
 **本块与 P2 之间没有普通边**，只有一条 dev 边（§2.1 第 6 行）。这一条要单独读出：
 L2 工作区的创建在 P2（第 5 层），而本块只在**声明**里命名它的两个 backend——两层的相接处
@@ -691,11 +700,15 @@ payload 约定。**若 P5c 把结果放在别处（或需要一枚新的 `Eviden
 
 ## 6.2 产出面：**本块不建第二枚包装**
 
-P5e 已定义一枚包装 `evidence_from_media_output`（P5e 设计 §9.2），其签名与 P5a 的
-`Evidence::from_tool_result` 逐项对齐，**唯一固定的项是 `subject = EvidenceSubject::Unattached`**。
-本块的产出面与它**逐项相同**（§5.2：`subject` 一律 `Unattached`，七个参数由调用方给）。
+**跨块口径（协调者 2026-10-10 裁定，写在 P5a 设计 §4.4）：四个领域算子块一律不写域包装，
+一律直接调 `Evidence::from_tool_result`。** 本块是四块之一，本条即该口径在本块的落点。
 
-**故本块不定义 `evidence_from_code_output`**。理由两条：
+**原先的处境（留着来历）**：P5e 曾定义一枚包装 `evidence_from_media_output`（P5e 设计 §9.2），
+其签名与 P5a 的 `Evidence::from_tool_result` 逐项对齐，**唯一固定的项是 `subject = EvidenceSubject::Unattached`**；
+本块的产出面与它**逐项相同**（§5.2：`subject` 一律 `Unattached`，七个参数由调用方给）。
+2026-10-10 的裁定把那一枚与 P5d 设计 §5.2 的同形包装一并删去，本块的取向（不建）随之成为四块的统一口径。
+
+**故本块不定义 `evidence_from_code_output`**。理由两条（这两条是本块自己的，且与裁定同向）：
 
 1. **切分 §四第 7 条的同一条判据适用于包装**：两枚函数做的是同一件事（把七项拼给 P5a 的唯一构造点，
    固定 `subject`），而两枚都正确时，「同一件事两个词汇表」在仓里就有了两个入口。
@@ -704,8 +717,9 @@ P5e 已定义一枚包装 `evidence_from_media_output`（P5e 设计 §9.2），�
 2. **包装里没有任何一件是本域特有的**。P5e 的包装若真固定了本域的东西（例如固定的 `EvidenceType`），
    它才有存在的理由；而它固定的 `subject` 是**四个领域算子块共有**的取值。
 
-**本块的产出路径**：由装配方／本块的具名入口直接调 `Evidence::from_tool_result`（`pub`，
-P5a 设计 §4.4），`subject` 传 `Unattached`。**`TestValidity` 与 `VerdictAggregate` 都不在本块产出的东西里**。
+**本块的产出路径**：由**装配方**在算子产出制品之后直接调 `Evidence::from_tool_result`（`pub`，
+P5a 设计 §4.4），`subject` 传 `Unattached`；**本块的 crate 里没有这一层的函数**（故 §2.1 把该边判为 dev 边）。
+**`TestValidity` 与 `VerdictAggregate` 都不在本块产出的东西里**。
 
 **据实记一处残余**：本块因而**不产 §5.3 那两条待定臂的证据的任何代码**——`code-spec-review` /
 `code-quality-review` 的 `EvidenceType` 由装配方在调用时给出，本块不把它写死。这与
@@ -965,8 +979,10 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
    ⇒ 在本块的 crate 里**造不出** `Evidence`，绕过构造点在类型上写不出来。
    这是 P5a 设计 §4.4「唯一产生点」那条结构事实在本块的**使用侧**照片。
    **这一条证不到「产出只能经本块的某枚函数」**：`Evidence::from_tool_result` 是 `pub`
-   （P5a 设计 §4.4），本块的生产代码直接调它——**这正是 §6.2 的取向**（本块不建第二枚包装），
-   故本块**没有**那类照片，也不该有。
+   （P5a 设计 §4.4），产出由**装配方**直接调它构造（§6.2），**这个调用点不在本块的 crate 里**
+   ——**这正是 §6.2 的取向**（本块不建第二枚包装），故本块**没有**那类照片，也不该有。
+   **（2026-10-10 订正）原句写「本块的生产代码直接调它」，与 §2.1 把该边改判 dev 边相抵**：
+   本 crate 的生产代码对该 crate 零调用，调用点在装配方。（订正前那句的来历留在此处。）
 
 **本块不用第二条 `trybuild`**：P5e 设计 §12.4 第 2 条用的是「`EvidenceSubject::Requirement(..)`
 在本块里构造 ⇒ 编不过」。**那一枚在本块不成立**，因为 `continuum-verify` 的
@@ -1034,7 +1050,9 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    本块**不改名、也不合并**（改名要动 §186 的正文或产一枚新 `ArtifactType`，两者都不在本块范围）。
    **收件人：P4 的持有方 ＋ 协调者**（决定是否要在某处写明两者的分别）。
 6. **待与协调者对账（迁移号段）**：本块声明 `150`（§9.3，实测 `130`–`199` 全段零命中）。
-   P5a 已取 `130`；P5b 与 P5e 零迁移（本块实测，§9.2）；**P5d / P5f / P6 三段未声明**。
+   P5a 已取 `130`；P5b 与 P5e 零迁移（本块实测，§9.2）；**（2026-10-10 订正）P5d 与 P5f 现各已声明处置**——
+   P5d 设计 §8.3「本块不占档……不占 `160`」、P5f 设计 §10.3「本块不占档」并建议自取 `180`；
+   故原先的「P5d / P5f / P6 三段未声明」现在只剩 **P6**（其切分 §四第 2 条给的处置是「由 P6C 的设计写死」）。
    请把六块与 P6 的档合并成一张表。**与 P5e 设计 §11.3 重复**：那一节已提同一建议
    （六块按 P3 先例后延）并明写「不另开对账条目」（理由是该块零迁移、无号可占）。
    本块与之的差别只在本块**写死了一个号 `150`**，故保留本条请求；号段由协调者一次合并，两处不各记一次。
@@ -1055,8 +1073,12 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
 1. **（已关闭，2026-10-10）两枚审查算子的 `EvidenceType` 无臂可落**（§5.3）——P5a 收下本块报出的
    `ModelReview` 并落地（P5a 设计 §4.2）。**此处保留原条目，是因为「这条缺口曾存在」这件事本身是
    §5.3 那三条处置的证据**；缺的那一步已由 P5a 走完，收件人不再是 P5a。
-2. **`software/` 的 `TDD` 与 `debugging` 无算子对家**（§7.2）。**缺的是「方法是次序/环境约束时，
-   登记形态怎么表达」这一步。收件人：P5b 的持有方 ＋ 协调者。**
+2. **（已关闭，2026-10-10）`software/` 的 `TDD` 与 `debugging` 无算子对家**（§7.2）——协调者已裁定，
+   落点是 P5b 的 `UNREALIZED_BY_DESIGN` 常量（P5b 设计 §10 判据 6 给出裁决与两案否决的理由）。
+   **此处保留原条目，是因为「这条缺口曾存在」这件事本身是 §7.2 那三条处置的证据**；缺的那一步
+   （「方法是次序/环境约束时，登记形态怎么表达」）已由该裁定走完，答案即「不表达，列入豁免表」。
+   **同 §11 第 2 条已按同形改过**（那条留的是「（2026-10-10 追加指针）」）；本条原先漏改，2026-10-10 订正。
+   收件人不再是 P5b 的持有方 ＋ 协调者。
 3. **L2 工作区与算子之间的两条通道都缺席**：Base 进不了端口（§4.3）、工作区句柄进不了执行上下文（§4.4）。
    **缺的是「跨层的非制品输入怎样进入判定与执行」这一步。收件人：P1 ＋ 第 3 层的执行器。**
 4. **`code-workspace` 的「每 Intent 一枚」在类型层不可钉**（§4.2 末、§11 第 4 条）。
@@ -1076,6 +1098,9 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    拍照的限制见 §10.5）。
 10. **迁移档 `150` 只在本块一侧写死**（§9.3、§11 第 6 条）：P5d / P5f / P6 三段未声明。
     **缺的是「六块与 P6 的档谁在哪一步合并成一张表」这一步。收件人：协调者。**
+    **（2026-10-10 订正）「P5d / P5f 未声明」这半句已不成立**：P5d 设计 §8.3、P5f 设计 §10.3
+    各已写出处置（两块均「不占档」，P5f 另建议自取 `180`）；仍真的一半只剩 **P6 未声明**。
+    「缺的是哪一步」的那半句仍成立，故本条保留。
 
 ---
 
@@ -1116,6 +1141,10 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
    **判据**：**列「已落地的判据」时，要按 `grep` 的结果列，不能按印象列**——
    本条在第一枚实例（复用判据）上做对了，另两处却漏了。
    **处置**：本设计按实测把 ①② 写进 §3.4 与 §1.2（本块只声明、不写第二份判定）。
+   **（2026-10-10 订正）切分文档已按本条与 P5f 设计 §12 第 3 条的报出扩表**：§四第 7 条现列**四处**
+   实例（复用判据、端口兼容、后端候选判定、制品不得被默认覆盖 §327），并逐字注明
+   「2026-10-10 补入，P5c 与 P5f 的设计报出并经复核」。**本条的报告部分仍有效**——它记的是
+   「切分当时漏举」的来历；**而已被执行的只是那条扩表请求，「只举了一例」这一句对现文本已不成立。**
    **订正来历**：本设计早先的稿子在此处写过「§四第 7 条举的三处例子（§226 四类差异、§214 冲突、
    表达式比较）」——**该三个例子出自协调者的派单口径，切分文档里没有**。实测：切分文档的
    `:180-186` 查不到 `§226` / `§214` / 表达式比较；`grep -rn "ContractDiff" crates/` 与

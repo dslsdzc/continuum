@@ -244,7 +244,7 @@ OPEN-001 一旦有判据，本设计的翻案是**三处**，且三处都在类�
 
 **为什么是这十四臂、不是九臂、也不是更多**：取「§258 的九臂 ＋ §193 里 §258 未列的两臂 ＋ §262/§330 报出的三臂」。**口径分两段，据实分清**：前十一臂是**「§258 与 §193 两处提到过的证据产物的并集」**，是「不发明」口径下能确定的最大集合；后三臂**不是同一种出处**——它们是领域算子块的**供给方报出**（切分 §四第 1 条：证据类型是 P5a 的，四块不得自加），依据是「规范承认该判定存在（§262 第 3 级、§330 两步骤），而既有臂无承载物」，故这三臂是**为已存在的判定补类型**，不是从规范正文里逐字取到的枚举项。**`§191` 的五个检查与 `§265` 的 mutation 不进本枚举**，理由：规范把这两者写成对**已有**证据的作用（前者判测试证据是否有效、后者说「test evidence strength ↓」），不是新的证据。**「只有这十四臂」这句话本设计不写**：§258 的九臂前缀是「例如」，§193 的六种方式之外规范没有穷尽声明，§262/§330 两处也不构成穷尽声明，故此处只能说「已实测的出处有上表十四行」。**P5f 的 `§326` mask 外像素判定不再向本块要臂**：P5f 设计 §7.1 答复「`VisualCheck` ＋ `MetadataCheck` 够用，不请求新臂」，本块照此收（该答复见 §14 第 3 条）。
 
-`EvidenceType` 与 `ArtifactType` 一样带 `ALL` 常量与 `as_str` / `parse`，`ALL` 的完整性由「数目断言 + 两个穷尽 `match`」把关（与 `crates/continuum-artifact/src/artifact.rs:28-35`、`:47`、`:68` 同形）。
+`EvidenceType` 与 `ArtifactType` 一样带 `ALL` 常量与 `as_str` / `parse`，`ALL` 的完整性由「数目断言 + 两个穷尽 `match`」把关。**`ALL` 的类型带数目字面量**：`pub const ALL: [EvidenceType; 14]`——本处原先只说「与 `crates/continuum-artifact/src/artifact.rs:28-35` 同形」而**没有把那个形写出来**，而那一处的形恰恰是带数目字面量的（`pub const ALL: [ArtifactType; 6]`；P5e 把 `ArtifactType` 扩到十七型后为 `[ArtifactType; 17]`，其设计 §3.2）。故补上字面量，与 `:47` / `:68` 同形的那一句仍指 `as_str` / `parse`。
 
 **这次 11 → 14 的代价（据实写，不写成「无代价」）**：`EvidenceType` 是 `Evidence` 的一部分，而《工程》§9.4（`docs/02-工程.md:633`）把「执行层 → 跨领域　Evidence 数据模型」列为**载荷较重的跨层接口**之一——改动会波及多层。本次加三臂，受影响的是**执行层与长期循环两侧对 `EvidenceType` 的穷尽 `match`**：两侧各要新增三条臂，漏一条即在编译期或运行期出缺口（本设计的两个穷尽 `match` 靠编译器强制，但那两侧的 `match` 不在本块内）。**这不是「加三行枚举」的量**：它是那条跨层接口的一次形状变更。
 
@@ -349,6 +349,14 @@ impl Evidence {
 上表的第一条**对 `evidence_type` 做穷尽 `match`**（无通配臂）：十四臂里哪几型需要制品、哪一型不需要，是逐臂写死的，因此 `EvidenceType` 加一臂时这条规则**编译期**被强制重新决定——不会出现「新臂悄悄落进『不需要制品』那一支」。**2026-10-10 加的三臂（`ModelReview` / `ContradictionCheck` / `CitationVerification`）逐臂作出的决定是「需要制品」**：三枚算子都要读被审查或被核验的制品，故并入上表第一条的集合；这一条与 P5d 设计 §5.1 第 3 条的要求一致。
 
 **它不检查什么（据实列出）**：`claim` 的内容、`strength` 的值、`scope` 的值、`artifact_refs` 里制品是否存在（那要查库，是 `load_artifact` 的事，见 §10）、生产者的节点是否真属该图。最后一条在 §7.4 的输入装配处检查（那里才有「受验节点」这个上下文）。
+
+**跨块口径（协调者 2026-10-10 裁定）：四个领域算子块一律不写域包装，一律直接调本构造点。**
+
+- **它管的是哪一层**：P5c / P5d / P5e / P5f 各自「产出的形状」那一节**不写** `evidence_from_*` 这一层函数；证据由**宿主的执行代码**（第 3 层）在算子产出制品之后直接调上表的 `from_tool_result` 构造，`subject` 取 `EvidenceSubject::Unattached`（§4.3.1）。四块的产出面（算子 → `EvidenceType` 的对应）是**声明**，不是各写一个入口函数。
+- **为什么四块一律不写**：`from_tool_result` 是唯一产生点，而「唯一」是**结构事实**（八字段全私有、无 `Default`、无 `From` / `FromStr`）。一枚「只固定 `subject = Unattached`」的域包装，四块各写一个就是**同一件事的四个词汇表**——正是本仓判为 Critical 的那一类；而它固定的那一项是四块**共有**的取值，不是任何一块域内特有的。
+- **订正来历（2026-10-10）**：本条裁定之前，P5d 设计 §5.2 与 P5e 设计 §9.2 各定义过一枚（`evidence_from_research_finding` / `evidence_from_media_output`），P5c 设计 §6.2 与 P5f 设计 §7.2 已各自拒过并给了理由。协调者裁定**四块一律不写**，那两枚随之删去——P5d / P5e 各自的「产出的形状」一节留有来历与删去的范围。
+- **连带的事实（各块在自己的 §2.1 里记）**：四块的生产代码对 `continuum-verify` **零调用**——`OperatorImpl::execute` 的返回是 `Vec<Artifact>`（`crates/continuum-graph/src/execution.rs:76-82`），构造点在宿主侧。故那四条依赖边按各块自己的「边别按『谁在用』判」规则为 **dev 边**（唯一的使用点是结构层用例）。
+- **各自指针**：P5c 设计 §6.2、P5d 设计 §5.2、P5e 设计 §9.2、P5f 设计 §7.2。
 
 ---
 
@@ -999,7 +1007,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 1. **待与 P4（语义层）对账**：本设计假设 `RequirementId` 由 P4 的 `continuum-semantics` 提供（§4.3.1）、`ContractView` 的字段名与 §224 一致（§6.1）、`ContractSatisfied` 与「`Intent.completion_predicate` 有无内容」以**值**进入 `CompletionInput`（§8.4）。依据是切分 §二末「与 P4 的接口面**照设计写，不照实现写**」，本设计据此读 P4 设计 §7.1 / §7.2 / §16（`:999`、`:1018`、`:2321`）。**P4 的设计若再改，由本块的一方复核并订正，不由 P4 替它改**（切分原话）。
    另：`Blocked` / `Undetermined` 如何升 `Decision`（§7.5、§8.2）落在 P4 的 Decision 面上，本块只给返回值形状。
 2. **与 P5c（代码领域算子）的对账（已答，2026-10-10）**：本设计假设「测试是否通过」由**制品**承载（§8.3 第 6 项），故需要一个 `TestResult` 制品的 payload 约定。**P5c 设计 §5.4 答：承载处取 `TestResult` 制品，与假设一致，不改**（`Test` 臂照用，不需新臂）。**P5c 另报出一枚新臂 `ModelReview`**（其设计 §5.3：两枚审查算子 `code-spec-review` / `code-quality-review` 的产物无臂可落），本块已收下并落地（§4.2 末三行）。`§193` 的 Differential / Metamorphic 两臂：**P5c 答复本轮在本域无生产者**（其设计 §5.3 末），本块不据此删臂（枚举归 P5a）。
-3. **与 P5f（图像领域算子）与 P5e（媒体）的对账（P5f 已答，2026-10-10）**：§326/§168 的「mask 外像素差被确定性检出」是 §262 第 1 级的一个实例：**插槽与「无物可读 ⇒ `Unknown`」的规则在本块（§7.5），比较器在 P5f**。另：`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用——**P5f 设计 §7.1 答：够，不请求新臂**（`VisualCheck` 覆 §5.3 的像素比较与 §168 的 Alpha / 色彩空间那一项，`MetadataCheck` 覆 §168 的分辨率那一项，`Benchmark` 不用）。故本块不为 §326 加臂。
+3. **与 P5f（图像领域算子）与 P5e（媒体）的对账（两块均已答，2026-10-10）**：§326/§168 的「mask 外像素差被确定性检出」是 §262 第 1 级的一个实例：**插槽与「无物可读 ⇒ `Unknown`」的规则在本块（§7.5），比较器在 P5f**。另：`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用——**P5f 设计 §7.1 答：够，不请求新臂**（`VisualCheck` 覆 §5.3 的像素比较与 §168 的 Alpha / 色彩空间那一项，`MetadataCheck` 覆 §168 的分辨率那一项，`Benchmark` 不用）。故本块不为 §326 加臂。**P5e 也对同一询问答了**：其设计 §13 第 5 条 (i)（同见 §9.1）逐字「`VisualCheck` 够用，**不请求新臂**」，并记下一处不适（该名读起来偏视觉，而 `verify-multimodal` 的输入含音频与字幕），本块据此不收臂。**题头原先只写「P5f 已答」，把已答的 P5e 留在未答一侧**，2026-10-10 订正。
 4. **待与 P3d（模型注册表与 Router）对账**：本设计假设「独立 verifier」「跨 family verifier」的判据可由**候选的身份**判出，而今天 `ExecutionProfile.model` / `.provider` 是裸 `String`（`crates/continuum-graph/src/execution.rs:21-22`），**family 的判据不存在**，故 §7.6 明写本块不实现第 4 级的 family 判定。另：Verifier 选定级别之后，「级别内具体选哪个 backend」是否走 §250 的 Router，**本设计假设不走**（装配方直接给候选），这一条要与 P3d 对账。
 5. **待与 P2（边界层）对账**：`mandatory_effects_completed` 以**值**传入（§8.4）。本设计假设这个值由装配方从 Effect Journal（§268）读出；**本块不登记到 `continuum-effect` 的边**（§2.1）。值的类型与产生点须与 P2 对账。
 6. **待与 P1（执行层）对账**：三条。
@@ -1035,3 +1043,4 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 16. **`Test Validity Verifier` 的产生者与输入面未定义**（§6.5）：§8.3 的依赖行逐字给 `Test Validity Verifier ← 测试代码 + Requirement`（`docs/02-工程.md:523`），而「测试代码」在本设计里零命中；§191（`docs/spec/04-method.md:298`）只给五个检查名，未给执行者与触发点。本设计只冻结产出（`TestValidity`，§6.4）与消费点（`counts`，§6.3）。**缺的是「谁跑这五个检查、输入取自哪里（源码／制品／`Evidence<Test>`）」这一步。收件人：规范维护者 + P5a 的下一轮。**
 17. **§189 的 `Verification → 判断证据是否充分` 与本设计「不判充分」相抵**（§3.5）：这是规范正文里**直接要求判充分**的那一句（`docs/spec/04-method.md:210`，表 `:242-243`），且落在本设计的「规范依据」区间内。本设计不执行，理由见 §3.1；另一种读法（对阶段的描述、非对本块的 MUST）已列出。**缺的是「§189 是对本块的 MUST 还是对阶段的描述」这一步的裁定。收件人：规范维护者 + 协调者。**
 18. **P5c–P5f 的六行共写今天无人认领**（§2.1 的共写文件表）：`Cargo.toml` 的 `[workspace] members` 与 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`）各需六行（P5a–P5f 各一），而 **P5c/P5d/P5e/P5f 的设计今天在 `docs/superpowers/specs/` 下不存在**（实测目录：该目录只有 P5a、P5b 与两份切分），故「六行由谁加齐」在本轮无人接。**缺的是「一次加齐还是逐块各加自己一行、由谁在哪一步做」这一步。收件人：协调者（在 P5b–P5f 各自的实现计划派单时定）。**
+    **（2026-10-10 订正）本条的两半都已过期**：①「四份设计在 `docs/superpowers/specs/` 下不存在」现已假——实测该目录含 P5c/P5d/P5e/P5f 四份（`2026-10-09-p5c-…` / `-p5d-…` / `-p5e-…` / `-p5f-…`）；②它问的那一步已由四块各自答掉——P5c §2.1、P5d §2.1、P5e §2.1、P5f §2.1 的共写文件表逐块写「本块**只加自己这一行**」（四块逐字）。**保留本条是因为「这一处曾无人认领」是一件要留档的事实**；现在剩下的只是协调者在新 crate 落地时按各块自报的那一行收口。**收件人：协调者。**

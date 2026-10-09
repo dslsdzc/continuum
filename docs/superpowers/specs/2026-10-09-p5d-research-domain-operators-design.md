@@ -70,10 +70,10 @@
 
 | 被依赖 | 用到什么（逐项实测） | 边别 |
 |---|---|---|
-| `continuum-artifact` | `ArtifactType`（§4.2 七枚算子的 `input_schema` / `output_schema` 取 `Vec<ArtifactType>`）、`ArtifactId`（§5.2 的 `artifact_refs`） | 普通 |
+| `continuum-artifact` | `ArtifactType`（§4.2 七枚算子的 `input_schema` / `output_schema` 取 `Vec<ArtifactType>`） | 普通 |
 | `continuum-operator` | `Operator` / `OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` / `BackendId` / `OperatorRegistry` / `OperatorError`（§4.1 的登记入口） | 普通 |
 | `continuum-method` | `MethodRegistry` / `MethodId` / `MethodError` / `bind`（§7 的 `bind_research_methods` 收 `&mut MethodRegistry`、以 `MethodId` 逐条调 `bind` 并透出 `MethodError`） | 普通 |
-| `continuum-verify` | `Evidence` / `EvidenceType` / `EvidenceId` / `EvidenceSubject` / `EvidenceProducer` / `Claim` / `EvidenceStrength` / `EvidenceScope` / `Evidence::from_tool_result` / `VerifyError`（切分 §四第 1 条：本块**只产出**证据） | 普通 |
+| `continuum-verify` | `Evidence`（§9.4 的 `trybuild` 用例：本 crate 里 `Evidence { .. }` 与 `Evidence::default()` 编不过） | **dev 边** |
 | `continuum-graph` | `can_reuse` / `cache_key`（§6.1 的照片：核本块声明的 `determinism` 真能让 §305 的判据成立） | **dev 边** |
 
 `continuum-method` 是 P5b 新建的 crate，其 workspace 依赖集合为空集（P5b 设计第九节）；本块依赖它，
@@ -98,6 +98,14 @@
 **边别按「谁在用」判**：`continuum-graph` 是 **dev 边**——生产代码不调它，用到它的是 §6.1 的照片
 （§9.2 第 (k) 条对 `can_reuse` / `cache_key` 的断言），那是用例。
 
+**`continuum-verify` 那一行的边别由「普通」改为「dev 边」（2026-10-10 订正）**：原先的理由栏写的是
+「切分 §四第 1 条：本块只产出证据」，而本块**不提供这一层的函数**——原先唯一的生产侧入口
+`evidence_from_research_finding` 已按协调者裁定删去（§5.2），产出由**宿主的执行代码**直接调
+`from_tool_result` 构造。故本 crate 的**生产代码对这枚 crate 零调用**（`OperatorImpl::execute` 的返回是
+`Vec<Artifact>`，`crates/continuum-graph/src/execution.rs:76-82`），唯一使用点是 §9.4 的 `trybuild` 用例
+——按上一条口径即 **dev 边**（与 P5f 设计 §2.1 同形，那里的来历写在其 §2.1 的订正段）。**判据的推广**：
+协调者 2026-10-10 的四块统一口径（P5a 设计 §4.4「四个领域算子块一律不写域包装」）使四块在该 crate 上的形态一致。
+
 **共写文件**（本块的那部分；切分 §一 的共写文件表已登记这两处共写）：
 
 | 文件 | 本块的改动 | 说明 |
@@ -116,26 +124,25 @@
 不是判定：`determinism` 的消费者是 §305 的复用判据（P1 落地的 `can_reuse`），backend 的选择由 Router 决定
 （§245 `docs/spec/05-normative.md:773` 逐字「具体 backend 由 Router 决定」），两处的判定都不在本块。
 
-**这是可断言的，不是一句自谦**：`continuum-research` 的 `pub` 面只有**四枚项**，逐枚列在下面，无一项的类型由本块定义：
+**这是可断言的，不是一句自谦**：`continuum-research` 的 `pub` 面只有**三枚项**，逐枚列在下面，无一项的类型由本块定义：
 
 ```
 pub fn all_operators() -> [Operator; 7];                                   // §4.1
 pub fn register_research_operators(registry: &mut OperatorRegistry, operators: &[Operator])
     -> Result<(), OperatorError>;                                          // §4.1
 pub fn bind_research_methods(registry: &mut MethodRegistry) -> Result<(), MethodError>;   // §7
-pub fn evidence_from_research_finding(
-    id: EvidenceId, evidence_type: EvidenceType, claim: Claim,
-    producer: EvidenceProducer, artifact_refs: Vec<ArtifactId>,
-    strength: EvidenceStrength, scope: EvidenceScope,
-) -> Result<Evidence, VerifyError>;                                        // §5.2
 ```
 
-四条逐一给「它新造了什么」的答复：
+三条逐一给「它新造了什么」的答复：
 
 - 前两条的类型全在 `continuum-operator`（`Operator` / `OperatorRegistry` / `OperatorError`）。
 - 第三条的类型全在 `continuum-method`（`MethodRegistry` / `MethodError`）。
-- 第四条的类型全在 `continuum-verify`（P5a 的），本函数**只固定一件事**：`subject` 取 `EvidenceSubject::Unattached`
-  （§5.2）；它**不判**任何东西。
+
+**原先这里有第四枚 `evidence_from_research_finding`（§5.2），2026-10-10 按协调者裁定删去**：它与 P5e 的
+`evidence_from_media_output` 同形（都只是 `from_tool_result` 的领域包装、都只固定 `subject = Unattached`），
+四块各写一枚即同一件事的四个词汇表（口径见 P5a 设计 §4.4）。**删去后本块的 `pub` 面不再触及
+`continuum-verify`**，故 §2.1 把那条边改判 **dev 边**。**这与「本块零类型」是同向的**：本块连那一层的入口
+也不提供。
 
 **「零个类型」的代价据实记**：本块因此也没有一枚可供别的块命名的领域类型。
 这不是遗漏：本块要表达的东西（七枚算子的取值、两处映射）都落在既有类型上，凭空造一枚类型是替规范定一个版本化的外部接口。
@@ -158,6 +165,7 @@ pub fn evidence_from_research_finding(
 `continuum-provider → continuum-capability`（资源层内的「接口 → 能力类型」）就被登记为层内边
 （`crates/continuum-runtime/tests/dependency_direction.rs:29-31` 的注记逐字含「层内边」，行在 `:35-38`）。
 本条边是单向的：`continuum-verify` 不依赖任何 P5 领域算子块。
+**边别是 dev 边**（2026-10-10 由「普通」改判：本块不写域包装后，生产代码对该 crate 零调用，§2.1）。
 
 ---
 
@@ -476,7 +484,13 @@ P5a 设计 §4.2 末与 §14 第 8 条点名问本块：「`CitationVerification
 那一半记的是「测试通过与否没有承载位」，本半记的是「研究域的两枚判定的极性没有承载位」。
 **两处都留，互为指针**；缺的是同一步：「证据的结果位」。
 
-## 5.2 产出的形状：一律 `Unattached`
+## 5.2 产出的形状：一律 `Unattached`（**本块不写域包装**）
+
+**跨块口径（协调者 2026-10-10 裁定，写在 P5a 设计 §4.4）：四个领域算子块一律不写域包装，
+一律直接调 `Evidence::from_tool_result`。** 本块是四块之一：§5.1 的两枚判定算子各产一条证据，
+构造由**宿主的执行代码**（第 3 层）在本块的算子产出制品之后，直接调 P5a 的 `from_tool_result` 完成。
+
+**原先的定义（留着来历，2026-10-10 删）**：
 
 ```
 /// 把一枚研究领域判定算子的产物转成 `Evidence`（§89）。
@@ -493,31 +507,30 @@ pub fn evidence_from_research_finding(
 ) -> Result<Evidence, VerifyError>;
 ```
 
-- **签名与 `from_tool_result` 逐项对齐**：上列七项就是 P5a 那个构造点的八个参数**减去**本函数固定的
-  `subject`。`id` / `strength` / `scope` **必须由调用方给**，本块不代它取值（§2.2：证据的充分性判定不属本块）。
-  **这里不是「只收五项的瘦包装」：那样 `id` / `strength` / `scope` 就没有供上的位置，
-  而 `from_tool_result` 要求调用方给出它们——包装要么漏参编不过，要么就得就地造值，
-  那就成了 `Evidence` 的第二个产生点。**
-- **`subject` 取 `Unattached`**，不是 `Requirement(..)`：证据先于归属存在（P5a 设计 §4.3.1 的读法）。
+**删的是哪一层**：它**只是转发**——签名与 `from_tool_result` 逐项对齐（上列七项就是那个构造点的八个参数
+**减去**它固定的 `subject`），无一项域内的形状转换。删去后本 crate 的 `pub` 面由四枚减到三枚（§2.2），
+`continuum-verify` 随之由普通边改判 **dev 边**（§2.1）。**这一层删掉不等于「没有地方构造证据」**：
+构造点是 `pub`，宿主直接调它。**P5e 的同形包装与本次一并删去**（其设计 §9.2）。
+
+**保留下来的四条事实（它们不依赖那一枚函数）**：
+
+- **`subject` 一律取 `Unattached`**，不是 `Requirement(..)`：证据先于归属存在（P5a 设计 §4.3.1 的读法）。
   附带的一个后果是**本块不需要 `RequirementId`**（属 P4 的 `continuum-semantics`，该 crate 今天不存在），
-  故 §2.1 的边表里没有它。
+  故 §2.1 的边表里没有它。**这一条现在由宿主的调用点兑现**（传 `Unattached`），本块不再以签名固定它。
 - **`producer` 由调用方以值给**，取 `EvidenceProducer::Node { node, backend }`。
   **这里不是「收 `NodeId` + `BackendId` 再就地拼出 `EvidenceProducer::Node`」：`NodeId` 定义在
   `continuum-graph`（`crates/continuum-graph/src/ids.rs:40`），`pub fn` 的签名里点名它就把该依赖从
   **dev 边**升成普通边**，而本块的生产代码不查图（§2.1 第 5 行：那条边是 dev 边）。
-- **时刻不在本函数的签名里**：`Evidence` 没有时间字段（P5a 设计 §4.1 逐字段照 §258 的八字段，无一是时刻）。
+- **时刻不在产出面里**：`Evidence` 没有时间字段（P5a 设计 §4.1 逐字段照 §258 的八字段，无一是时刻）。
   P5a 的 `occurred_at` 是 `evidence` **表**的一列，由写入那一行证据的落库方给；本块零迁移、不写那一行（§8）。
-- **本函数不判任何东西**：只做形状转换。「充分」的判据不存在（OPEN-001，P5a 设计 §3 的处置）——
-  本块**不绕开也不补**。
-- **与本块的 `evidence_type` 参数有关的一处据实自陈**：本函数**拦不住调用方传错臂**——
-  「第 5 行的算子只能用 `ContradictionCheck`」这条映射不在类型里。收成类型级要本块定义一枚「研究域的判定算子」
-  类型（§2.2 表明本块零类型），或要 `EvidenceType` 收窄成两个值——**两者都不是本块能定的**（枚举归 P5a）。
-  故这条映射由 §9.2 第 (i) 条那条用例把守，**它是运行期的，不是类型级的**。
+- **本块不判任何东西**：产出面只声明「这一步产一条证据、臂是哪一枚」，不判「这条证据够不够」。
+  「充分」的判据不存在（OPEN-001，P5a 设计 §3 的处置）——本块**不绕开也不补**。
 
-**与 P5e 的同形包装据实记（本块不隐藏这处重复）**：P5e 设计 §9.2 有一枚 `evidence_from_media_output`，
-形状与本函数相同（同样只是 `from_tool_result` 的领域包装、同样固定 `subject = Unattached`）。
-**这不是「两处判据」**——两者都不判任何东西（不判充分、不判有效性），故不触切分 §四第 7 条。
-**但它是同一件事的两份代码**，收件人见 §10 第 1 条（若协调者判该只留一处，共同部分应上移到 P5a 的一次改动里）。
+**一处据实自陈（删去包装后仍成立，且分量变大）**：本块**拦不住调用方传错臂**——「第 5 行的算子只能用
+`ContradictionCheck`」这条映射**既不在类型里，也不再在任何本块提供的函数里**（原先它还落在那一枚包装的
+参数上，现在连那一处也没有）。收成类型级要本块定义一枚「研究域的判定算子」类型（§2.2 表明本块零类型），
+或要 `EvidenceType` 收窄成两个值——**两者都不是本块能定的**（枚举归 P5a）。故这条映射今天**只有声明，
+没有本 crate 内的照片**（§9.5 第 7 条）。
 
 ## 5.3 消费面：本块不调用 P5a 的任何判定
 
@@ -657,7 +670,7 @@ pub fn bind_research_methods(registry: &mut MethodRegistry) -> Result<(), Method
 | 本块的产物 | 为什么不落库 |
 |---|---|
 | 7 枚 `Operator` | `Operator` 今天**没有持久化路径**：`continuum-operator` 无 `persist.rs`（实测该 crate 的 `src/` 只有 `definition.rs` `registry.rs` `lib.rs`），注册是**装配期在内存里**做的事（`OperatorRegistry` 的 `entries: HashMap`，`registry.rs:16`）。本块照此，不新增存储 |
-| 本块产出的 `Evidence` | 落进 P5a 的表（P5a 设计 §10.2 的四张表，号段 `130`）。本块不写那一行（§5.2 末） |
+| 本块产出的 `Evidence` | 落进 P5a 的表（P5a 设计 §10.2 的四张表，号段 `130`）。本块不写那一行（§5.2、§8） |
 | 来源集合 / 抽取结果 / 矛盾结论 / 引文核验结果（四枚 `Json` 制品） | 落进**既有的** `artifact` 表（`crates/continuum-artifact/src/persist.rs:9` 的 `p1_artifact` 迁移）与 `BlobStore`；`artifact_type` 是 `TEXT NOT NULL` 且**无 CHECK 约束**（同文件 `:11`），既有取值 `json` 已够 |
 | 合成产出的 `Report` | 同上（`report` 这一串要等 P5e 的枚举改动落地，`crates/continuum-artifact/src/artifact.rs:68` 的 `parse` 今天返回 `None`） |
 | §131 的复用凭据 | `CacheKey`（`crates/continuum-graph/src/reuse.rs:9-12`）今天**也没有存储**，它的存储属 §305 的落点即 P1。本块不替它建表（§6.1） |
@@ -726,7 +739,7 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 | f | 四条 `research/` 方法的 `realized_by` **逐条非空**，且每个串 `OperatorRegistry::resolve` 成功（先经 `bind_research_methods` 填入，§7） | §7（P5b 设计 §4.5 交办的判据）+ 弱引用的运行期补件 |
 | g | `bind_research_methods` 之后，`select(MethodDomain::Research)` 返回**四条**（数目手写） | §7 的覆盖；**这一条钉的是「四条的 id 都被 bind 过」而不是「四条都存在」** |
 | h | 对未 seed 的 `MethodId` 调 `bind` ⇒ `MethodError::NotFound` | §7 的反例（错透了 `MethodError`，本块没有自己的错误类型） |
-| i | 两枚判定算子各产一条证据：`evidence_from_research_finding` 的返回的 `subject == Unattached`、`evidence_type` 与 §5.1 的两臂逐枚对应 | §5.2 的固定项；**两侧都要**：正例是这两枚，反例是「传 `MetadataCheck` 也能建成」（说明本函数不拦臂，§5.2 末的自陈不是空话） |
+| i | （**已撤销，2026-10-10**）原为「两枚判定算子各产一条证据：`evidence_from_research_finding` 的返回的 `subject == Unattached`、`evidence_type` 与 §5.1 的两臂逐枚对应」。**那一枚函数已按协调者裁定删去**（§5.2），构造在宿主侧，本 crate 里没有可断言的调用点——故本条**没有主体**。§5.1 的两臂对应随之成为**声明**，其照片改动记在 §9.5 第 7 条 | —— |
 | j | `research-source-set` 的 `backend_candidates == ["builtin"]`（**逐元素断言**，不是「非空」） | §6.2 第 1 条那半句可断言的事实 |
 | k | `cache_key(&research_source_set, h)` 为 `Some`，且四条件齐时 `can_reuse` 为真；**对另外六枚逐枚**断言 `cache_key(..)` 为 `None` | §6.1 的六行**逐行**（不是抽样）：一枚 `Some` + 六枚 `None` |
 | l | §4.5 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的型**，不是「两侧相等」） | §239 的注册期一半（§4.5） |
@@ -746,10 +759,10 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 | **取反**：`research-source-set` 的 `determinism` 改成 `NonDeterministic` | k 的第一枚（`Some` → `None`） | j（候选列表与 determinism 无关）、其余各条 |
 | **取反**：`research-search` 的 `determinism` 改成 `Deterministic` | k 的第二组（该枚由 `None` 变 `Some`） | j、l、m（它们不看 determinism） |
 | **移除**：`register_research_operators` 的「先核后写」删掉（边核边写） | d 的第二个子例、e 的第二个子例（表内容与调用前不同） | c（合法批次两侧都绿） |
-| **移除**：`bind` 的 `retrieval` 那一条 | f 对 `research-search` / `research-source-set` 两个串的解析（它们从 `realized_by` 里消失）、g（`select` 那一条的 `realized_by` 变空） | 其余三条 `bind`、a–e、i–m |
+| **移除**：`bind` 的 `retrieval` 那一条 | f 对 `research-search` / `research-source-set` 两个串的解析（它们从 `realized_by` 里消失）、g（`select` 那一条的 `realized_by` 变空） | 其余三条 `bind`、a–e、j–m（i 已撤销） |
 | **放宽**：把 `research-question` 的 `input_schema` 改成 `[Text]` | l 的第 1 行（无输入的来源不存在了）、m 仍绿（`Text` 是既有型） | 其余各行 |
 | **收紧**：把 `research-citation-verification` 的 `input_schema` 的 `Report` 删掉（只留 `Json`） | b（该行的端口断言）、**l 的第 7 行会变绿**（`Json` 在上游找得到）——**故 l 单独不足以钉住这一格**，b 与 l 要一起看 | j、k |
-| **取反**：`evidence_from_research_finding` 的 `subject` 从 `Unattached` 改成 `Requirement(..)` | i 的第一个子例 | 其余全部 |
+| **（已撤销，2026-10-10）取反**：`evidence_from_research_finding` 的 `subject` 从 `Unattached` 改成 `Requirement(..)` | ——（那一枚函数已删，§5.2；本条随 i 一并撤销） | 其余全部 |
 | **等价变异**：把 `research-source-set` 的候选从 `["builtin"]` 改成 `["Builtin"]`（大小写不同） | j 红（逐元素断言），**但这不是等价变异体**：`BackendId` 是大小写敏感的 `String`（`crates/continuum-operator/src/definition.rs:66`），改串即改身份 | —— |
 | **等价变异**：把 `research-question` 的 `backend_candidates` 从 `["primary-model"]` 改成 `["primary_model"]` | **全绿**——这是一枚**等价变异体**（两个串在表里等价，都是本设计定的名字，无外部消费者）。要打红它必须换变异体：把它改成与另一枚算子共用的串以外的任意值，那时 b 红 | —— |
 
@@ -761,11 +774,12 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 1. `Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）在 `continuum-research` 里编不过
    ⇒ 在本块的 crate 里**造不出** `Evidence`（字段私有、无 `Default`／`From`），绕过构造点在类型上写不出来。
    这是 P5a 设计 §4.4「唯一产生点」那条结构事实在本块的**使用侧**照片。
-   **这一条证不到「产出只能经 `evidence_from_research_finding`」**：`Evidence::from_tool_result` 是 `pub`，
-   本块的生产代码可以直接调它——仍是同一个构造点，只是不经过本块的包装（§5.2）。
+   **这一条证不到「产出只能经本块的某枚函数」**：`Evidence::from_tool_result` 是 `pub`，构造由**宿主**直接调它
+   完成（§5.2），**调用点不在本 crate 里**——故这一条是本块在 `continuum-verify` 上的**唯一使用点**，
+   也是 §2.1 把该边判为 dev 边的理由。
 
 **只有一条的理由**：本块没有第二处结构约束可拍。本块零类型（§2.2）⇒ 没有「某个领域类型不可构造」这类照片；
-`subject = Unattached` 的固定在**签名**里（`subject` 不是参数），不靠编译失败来证（§5.2 末的自陈已把它的强度写明）。
+`subject = Unattached` 现在由**宿主的调用点**兑现（本 crate 里没有签名可拍，§5.2），不靠编译失败来证。
 **这里不是「照 P5e 的照片清单抄两条」**：P5e 的第二条依赖「P5a 不 re-export `RequirementId`」这个对别人块的假设，
 本块不重复那条依赖。
 
@@ -786,6 +800,11 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    `ArtifactType::Report`，而该变体不在今日枚举内（§1.2、§3.2），故 `continuum-research` 在 P5e 落地前
    **编译不过**——§9.2 的 (a)–(m) 与 §9.4 的 `trybuild` 用例都以本 crate 编译通过为前提。
    (m) 因此不是一条今天可写的用例，而是**等 P5e 枚举改动落地后才能拍的照片**（该条已就地标注）。
+7. **§5.1 的两枚判定算子 ↔ 两枚 `EvidenceType` 的对应，在本 crate 里没有照片**（2026-10-10 补）：
+   原先钉它的是 §9.2 第 (i) 条（对着被删的那枚包装断言 `subject == Unattached` 与逐枚的臂）。
+   包装删去后（§5.2），这条映射**既不在类型里、也不在本块提供的任何函数里**——它是**声明**，
+   兑现方是宿主的调用点，而那个调用点不在本块（§9.4 第 1 条末）。**这不是本块的缺口**：
+   它是「构造点在宿主侧」的代价，与 §9.4 第 1 条同源；据实记在此处，免得被读成「用例漏写了」。
 
 ---
 
@@ -793,11 +812,12 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 
 以下每条都是**本设计假设了别的块的某枚形状**或**发现某处无归属**之处。
 
-1. **待与 P5e 与 P5a 对账（两枚同形的证据包装）**：§5.2 的 `evidence_from_research_finding` 与
-   P5e 设计 §9.2 的同类函数形状相同（都只是 `from_tool_result` 的领域包装，都固定 `subject = Unattached`）。
-   两者都不判任何东西，故不触切分 §四第 7 条；**但它们是同一件事的两份代码**。
-   若协调者判该只留一处，方案是：P5a 在自己的 crate 里补一个固定 `subject` 的构造点（一次改动、一条 `pub` 面），
-   两块的包装随之删掉。**本块不替 P5a 决定它该不该多一条 `pub` 面。**
+1. **（已关闭，2026-10-10）与 P5e 与 P5a 对账（两枚同形的证据包装）**：本条原记「§5.2 的
+   `evidence_from_research_finding` 与 P5e 设计 §9.2 的同类函数形状相同（都只是 `from_tool_result` 的领域包装、
+   都固定 `subject = Unattached`），是同一件事的两份代码」，并给出「只留一处」的方案。
+   **协调者已裁定**：四块一律不写域包装、一律直接调 `from_tool_result`（口径写在 P5a 设计 §4.4）——
+   本块那枚与 P5e 的那枚**一并删去**（§5.2；P5a 那一侧也**不需要**多一条 `pub` 面，`from_tool_result` 本就是 `pub`）。
+   **本条保留「这处重复曾存在」这一事实**；缺的那一步（「该不该存在、若存在由谁唯一持有」）已由该裁定走完。
 2. **待与协调者与 P5e 对账（「逐位可复现的 backend」名单的家）**：§6.2。撞车面是 P5c/P5f 与 P5e 三处。
 3. **（已关闭，2026-10-10）与 P5a 对账（两条 `EvidenceType` 新臂）**：§5.1。两条已一起落地于 P5a 设计 §4.2
    （一次改动，同 `ArtifactType`／P5e 的约定），且两条都进了 `from_tool_result` 的「需要制品」那一支。
@@ -818,7 +838,8 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
    `2543aeb` 把 `pub const ALL_OPERATORS: [Operator; 17]` 改为 **`pub fn all_operators() -> [Operator; 17]`**
    （数目 17 落在返回类型里，清单个数的改动仍编译期可见）。**本项无待办。**
 10. **待与协调者与装配方对账（本块的条目今天没有生产调用方）**：`all_operators` / `register_research_operators`
-    （§4.1）、`bind_research_methods`（§7）、`evidence_from_research_finding`（§5.2），四条。
+    （§4.1）、`bind_research_methods`（§7），三条。**（2026-10-10 订正）**原先这里列四条，含
+    `evidence_from_research_finding`（§5.2）——那一枚已按协调者裁定删去，故由四条减为三条。
    **这不是本块的缺口，是第 3 层的**（切分 §四第 4 条禁止 P5 自建执行路径；拍照的限制见 §9.5）。
    **与切分 §八「算子解析的落点仍无人认领」那一条同源**，本块不把那一处各自再记一次。
 
