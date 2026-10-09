@@ -37,7 +37,9 @@
 
 - **P-2-1「`CanonicalRepresentation` 的 crate 外不可构造性今天无照片」** —— 它的那一半要 trybuild，
   而 `tests/type_level.rs` 与 `trybuild` 这个 dev-dep 是 **Task 3** 的（`Task 2` 不动 `Cargo.toml`）。
-  **Task 3 落地时应一并把这条照片拍上**；在那之前，这里记的是「无照片」，不是「已保证」。
+  **已由 Task 3 拍上**（`tests/compile_fail/canonical_representation_is_not_constructible_outside.rs`
+  ＋ 它那份实跑取值的 `.stderr`），闭合记录见下面「Task 3」一节的第一条。
+  那之前这里记的是「无照片」，不是「已保证」。
 - **台账记账缺口（2026-10-09 复审查出，本轮不修）** —— 订正轮报告 §9.4 自称「对评审三条的逐条判定」，
   而上一轮评审是 **1 Important ＋ 3 Minor**，它只答了 2 条 Minor，**答漏一条且误标了自己答复的条数**。
   被答漏的那条即 **M-2-3**（已如上转交）。**这不是代码缺陷，是记账缺口**——
@@ -47,6 +49,29 @@
   `Canonicalized` `src/canonical.rs:46-52`、`CanonicalRepresentation` `src/canonical.rs:71-85`、
   `UnresolvedMention` `src/canonical.rs:109-125`。**失效方向**：diff 包的行号与源文件行号长得一样，
   引用时若不写明「这是哪个坐标系的行号」，就没人发现。
+
+---
+
+## Task 3（候选面：`EntityId`、`Candidate`、`CandidateSource`、`CandidateSources`）
+
+### 已闭合（在版控里，供终审不必重做）
+
+- **P-2-1（Task 2 转来）「`CanonicalRepresentation` 的 crate 外不可构造性无照片」** ——
+  已拍上：`tests/compile_fail/canonical_representation_is_not_constructible_outside.rs`
+  （实跑得 `E0451: field \`mentions\` of struct \`CanonicalRepresentation\` is private`）
+  ＋ 正控制 `tests/compile_pass/` 里那两份。**限度照实记**：它钉的是「crate 外拼不出**结构体字面量**」，
+  **不钉**「拿不到这个值」——经 `finish` 拿得到，被挡住的只是绕过 `finish` 自己拼一个。
+
+### 本 task 自定的判据（本轮新记）
+
+- **`CandidateSources` 的拼接口径是本层自定的** —— 设计 §4.3（`design:700-729`）给这个类型的全部内容
+  只有「由装配方给出」一句，**方法集与拼接口径规范未给**。本层取
+  `new` / `retrieve_all`（另有 `Default`，与 `new` 同义），口径三条：**按装配顺序拼接、不去重、不排序**。
+  三条都写在 `src/candidate.rs` 的 `retrieve_all` 文档里，各有一条运行期照片
+  （`tests/candidate.rs::a_candidate_source_can_only_return_a_set`；「不去重」与「不塌成一枚」
+  两枚变异体 M7／M7b 实测各红在该用例的不同行上）。
+  **`CandidateSources` 今天没有消费者**：Task 5 的 `Interfaces. Consumes` 里只列了 Task 3 的 `Candidate`。
+  **收件人：规范维护者**（§4.3 的 `CandidateSources` 只给了「由装配方给出」一句）。
 
 ---
 

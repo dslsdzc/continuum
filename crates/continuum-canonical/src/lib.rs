@@ -19,6 +19,13 @@
 //! 以 `tests/canonical.rs` 的七条用例钉住：全解落 `Canonical`、三种未解态各落 `NeedsResolution`
 //! 且列表恰是那一枚、两支互为补集、四类脏输入各落一支、`Now` 是入参。
 //!
+//! Task 3 落 §272／§4.3 的**候选面**：[`EntityId`] / [`Candidate`] / [`CandidateSource`] /
+//! [`CandidateSources`]（`candidate` 模块），以 `tests/candidate.rs` 的四条用例钉住
+//! `EntityId` 的往返与空串处置、候选集不塌成一枚、`Candidate` 的三字段、分数的可选性；
+//! 并以 `tests/type_level.rs` 驱动的 `tests/compile_fail/` 三份样例钉住
+//! 「crate 外写不出 `EntityId` 的字面量构造」「`CandidateSource` 上没有单实体方法」
+//! 「crate 外拼不出 `CanonicalRepresentation`」（最后一条是 Task 2 转来的 P-2-1）。
+//!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-node` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
 //!
@@ -33,12 +40,14 @@
 
 mod ambiguity;
 mod canonical;
+mod candidate;
 mod error;
 mod surface;
 mod temporal;
 
 pub use ambiguity::{ResolutionResult, finish};
 pub use canonical::{CanonicalRepresentation, Canonicalized, UnresolvedMention};
+pub use candidate::{Candidate, CandidateSource, CandidateSources, EntityId};
 pub use error::CanonicalError;
 pub use surface::{Mention, MentionKind, Surface, detect, normalize};
 pub use temporal::{Now, TemporalBinding, resolve_temporal};

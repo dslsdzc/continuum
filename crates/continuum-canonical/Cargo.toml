@@ -22,3 +22,15 @@ thiserror = { workspace = true }
 # `ContractRef`」，与依赖边无关。**话对、号码错**，旧号码记此。
 # 它会改 `Cargo.lock`（本 crate 的依赖列表多一项），故提交时按显式路径带上。
 unicode-normalization = { workspace = true }
+
+[dev-dependencies]
+# Task 3 的使用点：`tests/type_level.rs` 用编译失败样例钉住三件 crate 外**写不出**的东西
+# （`EntityId` 的字面量构造、`CandidateSource` 上的单实体方法、`CanonicalRepresentation`
+# 的结构体字面量），与 `continuum-node` / `continuum-model-registry` 的用法同形。
+# **它是外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表逐对断言的是
+# **workspace 成员之间**的边（设计 §1.2.3 推论 1），比对的内层循环只遍历 workspace 成员
+# （`dependency_direction.rs` 的 `for other in &all_crates`）；`trybuild` 不在 members 里。
+# **但它会让 `Cargo.lock` 变化**（`continuum-canonical` 的依赖列表多一项），
+# 故提交时要按显式路径带上锁文件。
+# **只在测试目标里用**：`src/` 里没有一行读它（本 crate 对 workspace 内的引用仍是零）。
+trybuild = { workspace = true }
