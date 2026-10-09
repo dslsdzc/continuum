@@ -1,0 +1,234 @@
+# P5（跨领域层）的归属与接口（共享面）
+
+> 本文不是设计，是**六份设计并行的前提**。它的作用是：让 P5 的六个子项目**对着同一套归属、
+> 同一套接口类型**写，不至于各造一套词汇——「同一件事两个词汇表」在本项目一贯判为 **Critical**。
+>
+> 本文里的判断若与用户在 2026-10-08 的决定冲突，以本文为准并回报；本文之外的口径以规范为准。
+>
+> **本文只做切分与归属登记，不替任何子项目写设计。** 每条「这件事该做成什么形状」的问题，
+> 一律留给该子项目自己的设计。
+
+---
+
+## 一、路径归属
+
+| 路径 | 归属 | 依据 |
+|---|---|---|
+| `Evidence` 数据模型、Requirement Coverage、`VerificationProfile`、Verifier 选择与隔离输入、Completion Predicate 判定 | **P5a** | 工程 §8.1 前九行、§8.2、§8.3；总纲 §8.2 |
+| Execution Method Library（方法的登记形态与按领域选取的入口） | **P5b** | 工程 §8.1 第 10 行、§8.3；总纲 §8.1；§187 |
+| 代码领域算子 | **P5c** | 工程 §8.1 第 11 行；总纲 §8.3；§16 §186 |
+| 研究领域算子 | **P5d** | 工程 §8.1 第 12 行；总纲 §8.4；§330 |
+| 媒体领域算子（含 `ArtifactType` 的 P5 扩展，见 §四第 2 条） | **P5e** | 工程 §8.1 第 13 行；总纲 §8.5；§328 §329 §32 §33 §131 |
+| 图像领域算子 | **P5f** | 工程 §8.1 第 14 行；总纲 §8.6；§323–§327、§161–§168 |
+
+**「领域算子」这个词不在规范正文里**：它出自工程文档 §8.1 组件表里的四行（`docs/02-工程.md:495-498`）
+与 P1 的设计（`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:36`）。
+故上表**每块都给两栏依据**：工程文档的小节号与规范的 `§` 号，无一以其中一栏代替另一栏。
+
+**P0–P7 这套序是工程侧的**：《总纲》`:4` 明写「本文不规定实施顺序或里程碑安排」，
+故 P5 这个名字本身只在工程侧成立，引用时应指明出处是工程侧的分解，不是规范的要求。
+
+### 共写文件（本轮各块都要碰、但只有一处能改）
+
+| 路径 | 处置 |
+|---|---|
+| `Cargo.toml`（`[workspace] members`） | **共写**。六个子项目各要新建 crate，即各要在此加一行。**建议由先落地的子项目一次加齐六行**（含尚未落地者），否则六次改动逐次落在同一处。 |
+| `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 表 | **共写**，同上。`workspace_crates()` 从 workspace 定义派生（`crates/continuum-runtime/tests/dependency_direction.rs:234`），故新增 crate 会**先让该门变红**再被 `ALLOWED` 补齐——这是刻意的，不要靠「先不加 member」绕过。 |
+| `crates/continuum-artifact/src/artifact.rs` 的 `ArtifactType` | **共写，但只由 P5e 一处改**。见 §四第 2 条。 |
+| `crates/continuum-graph/src/node.rs` 的 `verification_policy: Value` | **P5a**（今天 `Value`，`:19` 的注记写明「结构保存，判定属 P5」）。该文件属 P1，故是共写。 |
+
+---
+
+## 二、接口冻结现状
+
+### 无需重新冻结（代码里已有，本轮各块只消费）
+
+**§244/§245 的 Operator 面**（`crates/continuum-operator/src/definition.rs`、`registry.rs`）：
+
+```
+Operator { id, version, input_schema: Vec<ArtifactType>, output_schema: Vec<ArtifactType>,
+           determinism, side_effect_class, backend_candidates }
+trait Checkpointable { type Checkpoint; checkpoint(); restore() }
+OperatorRegistry::{register, resolve}
+```
+
+`input_schema` / `output_schema` **取 `ArtifactType`**，不是字符串——这一条决定了 §四第 2 条的耦合形状：
+四个领域算子块都要经 P1 的那一枚枚举声明自己的端口类型。
+
+**§238 的 EVIDENCE 边**：`crates/continuum-graph/src/edge.rs` 的 `EdgeKind::Evidence`，
+语义已由 P1 的设计 §8.2 定为「验证关系。指向被验证节点。不参与调度与失效传播」。
+**P5a 不得另造一条验证关系边**，只在它之上挂判定。
+
+**其余已冻结的外围面**（各块按需消费，均不在 P5 的改动范围内）：§315/§316 的 Provider 面（P3c）、
+§124/§125 的 Connector 面（P3b）、§247–§251 的 Router 面（P3d）、§291 的 placement（P3e）、
+§252/§253 的能力面（P3a）、§268 的 Effect Journal（P2）。
+
+### 需要新冻（本轮各块的设计必须共同遵守，不得各造一份）
+
+1. **`Evidence` 的数据模型**（§258）——**今天全仓零个 `Evidence` 类型**，只有 `EdgeKind::Evidence`
+   这一枚边的种类。P5a 是它的唯一持有方。
+2. **`VerificationPolicy` 的形状**——今天 `Node.verification_policy` 是 `serde_json::Value`
+   （字段在 `crates/continuum-graph/src/node.rs:20`，其上一行 `:19` 的注记是「结构保存，判定属 P5」）。
+   P5a 冻结它的类型，形状由 P5a 的设计定。
+3. **`ArtifactType` 的 P5 扩展清单**——今天六型（`SourceTree` / `Patch` / `TestResult` / `Text` / `Json` / `Blob`，
+   `crates/continuum-artifact/src/artifact.rs:14-21`），
+   §239 举的 `Image` / `Video` / `Timeline` 等**都不在枚举里**。清单由 P5e 一次性落地。
+4. **`Checkpointable` 的错误类型**——今天两处返回 `Result<_, String>`，P1 的计划明写
+   「错误类型的形状应由第一个实现它的领域算子（P5）确定」
+   （`docs/superpowers/plans/2026-10-01-p1-execution-layer.md:1142`）。
+   **指给 P5e**：§308 点名的第一项长任务就是视频生成。其余块**不得**再造第二个错误类型。
+
+### 与 P4 的接口面：**照设计写，不照实现写**
+
+P5a 要接的是 P4 的 `TaskContract.requirements[].verification_requirement`、`constraints`、
+`verification_policy` 与预算面。**P4 的实现尚未开始**（三个 crate `continuum-canonical` /
+`continuum-semantics` / `continuum-budget` 在 `crates/` 下都不存在，其计划 21 个 task 停在 Task 1），
+而 P4 的**设计仍在动**（2026-10-06 当日有多次改动，见 `git log -- docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md`）。
+**故 P5a 对着 P4 的设计 §X 写，并在设计里写明所据的是哪一节**；P4 的设计若再改，
+由 P5a 的一方复核并订正，不由 P4 替它改。
+
+---
+
+## 三、跨层边
+
+工程 §9.1 的层间图里与 P5 有关的两条（**箭头读法：「被依赖者 → 依赖者」，见 `docs/02-工程.md:563-571`
+的订正段——同一天有两份独立设计按反向读并各自得出错误结论，故此处照抄该读法**）：
+
+```
+执行层 (3) ──→ 跨领域 (8)      P5a 的 Evidence 输入来自第 3 层节点输出（工程 §8.3）
+跨领域 (8) ──→ 长期循环 (7)    §232 的 ProductReadiness 要存 value + evidence + last_verified
+```
+
+工程 §9.4 把 `执行层 → 跨领域　Evidence 数据模型` 列为载荷较重的跨层接口之一——即 **P5a 的
+`Evidence` 形状一改，受影响的是执行层与长期循环两侧**。这条是 P5a 冻结 Evidence 时的主要代价来源。
+
+P5 的四个领域算子块**都只经 `Operator` / `OperatorRegistry` 与第 3 层相接**，不新开跨层边；
+工程 §8.3 的「领域算子 ← 第 3 层 Operator 注册表 ＋ 第 4 层 Router」是既有的一行，不是新边。
+
+---
+
+## 四、横切约束（六份设计都必须遵守）
+
+1. **Verifier 与 Evidence 判定是横切面，不是每块各带一份。** P5a 持有其全部类型与判定；
+   P5c/P5d/P5e/P5f **只产出**（把节点输出转成 `Evidence`，§89：工具结果必须先转成 Evidence）、
+   **只消费**（接受 P5a 的判定结果）。四个算子块**不得**各自定义证据类型、各自的「充分」判据、
+   或各自的完成判定。理由见 §五末的判定段。
+2. **`ArtifactType` 只由 P5e 一处扩展。** P5f 需要 `Image`、P5c/P5d 可能各需一两型——
+   **一律不在自己的块里加**，向 P5e 报出所需变体，由 P5e 在**一次改动**里落地。
+   判据是**同一个枚举、同一枚 `ALL` 常量、同两个穷尽 `match`**（`as_str` / `parse`），
+   分两次改动会在两次之间留下一棵编译不过的树，且两次都要改同一个数目断言。
+   **一次改动要同时碰这几处**（2026-10-08 实测）：
+   （a）`crates/continuum-artifact/src/artifact.rs` 的枚举本体（`:14-21`）；
+   （b）同文件的 `ALL`（`:28-35`）——**它带数目字面量 `[ArtifactType; 6]`**；
+   （c）同文件的 `as_str`（`:47`）与 `parse`（`:68`）——两个穷尽 `match`，无通配臂，加型时编译失败；
+   （d）`crates/continuum-artifact/tests/artifact_type.rs` 的数目断言
+   （`:23` 的 `assert_eq!(ArtifactType::ALL.len(), 6, ...)`）。
+   **不改但要重跑**的两处：`crates/continuum-artifact/src/persist.rs:164` 与
+   `crates/continuum-graph/src/persist.rs:410` 的两个 `parse_type` / `parse_artifact_type`
+   ——它们委托到 `ArtifactType::parse`（唯一产生点），故不含自己的表；
+   以及 `crates/continuum-port/src/port.rs:94` 的 `compatible`（按 `ArtifactType` 等值判定）。
+3. **P5b 的方法登记接口先冻。** §187 的四个目录（`software/` `video/` `research/` `3d/`）
+   与四个领域算子块是**多对多**：`software/` 对 P5c、`research/` 对 P5d、`video/` 对 P5e，
+   而 `3d/` **在四个具名算子里没有对家**（见 §八）。故 P5c/P5d/P5e/P5f 的「方法」条目的
+   登记形态归 P5b，四块只填内容；**在 P5b 的设计过审前，四个算子块不得自造方法登记形态**。
+4. **P5 不得自建执行路径。** 算子的执行、`Queued → Running` 的迁移、`OperatorRegistry::resolve`
+   的调用点都在第 3 层（P1 的设计第 18 节把「算子解析的落点」列为 P1 的已知缺口，
+   写明执行器就位后在 `Queued → Running` 处调 `resolve`）。P5 的算子块只**注册**算子，
+   不接管节点的状态迁移；若发现那条落点无人认领，报给协调者，不在 P5 内补。
+5. **`execution_policy` 不归 P5。** `Node.execution_policy`（字段在 `crates/continuum-graph/src/node.rs:18`，注记在 `:17`）
+   的注记是「判定属 P4」，P4 的设计已给出它的判据。P5 只碰 `verification_policy`（`:20`）。
+6. **依赖边只登记实际用到的**（`ALLOWED` 与实际依赖**精确一致**，断言是逐对 `assert_eq!`）；
+   P2b 曾为此删过两条零使用的边。六个新 crate 的条目一并按这条办。
+
+---
+
+## 五、六份设计的范围
+
+| 子项目 | 一句话范围 | 它拥有 / 产出的接口 | 主要规范依据 |
+|---|---|---|---|
+| **P5a** 验证与证据判定 | 把节点输出转成 `Evidence`，按每项 REQUIRED 建证据集合并判定覆盖是否完整，按任务取得 `VerificationProfile`、按 §262 的五级序选 Verifier 并限定它的输入（不含 Worker 的完成声明与完整推理），最后按 §266 判定 Intent 是否可以完成——它是 §342 第 5、10 条不变量的执行点 | 冻结 `Evidence`、`VerificationPolicy`、Requirement Coverage 与 Completion Predicate 的判定面；把 `Node.verification_policy` 从 `Value` 定型 | §258 §259 §260 §261 §262 §263 §264 §265 §266 §188–§195 §215 §89 §29；工程 §8.1 前九行、§8.2–§8.4；总纲 §8.2 |
+| **P5b** 执行方法库 | 把「这一类任务怎样做得可靠」从 ADFIR 的图结构里分出来（§187：ADFIR 决定做什么、Execution Method 决定怎样做得可靠）——定方法的登记形态与按领域选取的入口，并为四个领域各建一份方法目录 | 方法登记与选取的接口（先冻，见 §四第 3 条） | §186 §187；工程 §8.1 第 10 行、§8.3；总纲 §8.1 |
+| **P5c** 代码领域算子 | 把代码任务的执行链（L2 隔离工作区上的规划 → 拆任务 → 实现 → 规格审查 → 质量审查 → 验证，《总纲》§8.3）落成一组可注册的 Operator：各步的端口类型、determinism、side_effect_class、backend 候选，并让每步产出 P5a 的 Evidence | 本领域的 Operator 集与它在 P5b 目录里的条目 | §16 §186 §244 §245 §239；工程 §8.1 第 11 行；总纲 §8.3 |
+| **P5d** 研究领域算子 | 把 §330 的七步链（Question → Search → SourceSet → EvidenceExtraction → ContradictionCheck → Synthesis → CitationVerification）落成一组可注册的 Operator；其中 `ContradictionCheck` 与 `CitationVerification` 是给 P5a 的证据侧供给 | 本领域的 Operator 集与它在 P5b 目录里的条目 | §330；工程 §8.1 第 12 行；总纲 §8.4 |
+| **P5e** 媒体领域算子 | 把 §32 的剪辑链与 §328 的七种标准 Artifact 落成 Operator 集与 Artifact 类型，含 Timeline 的 Artifact 形态（§329）、Derived Artifact 在原素材未变时的复用（§131）、以及生成内容必须单独授权（§34）；**并一次性落地 `ArtifactType` 的 P5 扩展清单**（§四第 2 条） | 本领域的 Operator 集；`ArtifactType` 的 P5 新变体（唯一落地点）；`Checkpointable` 的错误类型（§二第 4 条） | §328 §329 §32 §33 §34 §131 §308 §239；工程 §8.1 第 13 行；总纲 §8.5 |
+| **P5f** 图像领域算子 | 把 §323–§327 的两种原生操作落成 Operator 集——完整生成与局部修改**分作两个算子**（§161 明写「不能统一成一个 `image_tool(prompt)`」）、编辑区域的四种表示（Point 必须解析成语义区域，§325）、`outside_mask_change = FORBIDDEN` 的确定性强制作（§326），以及每次编辑产生新 Artifact 的谱系（§327） | 本领域的 Operator 集；**不拥有** `ArtifactType` 的改动（向 P5e 报出）。
+**订正（2026-10-09，P5b 的设计查出）：本行原先还写「与它在 P5b 目录里的条目」——那句没有对应物**：
+§187 的四个目录里**没有图像那一档**（详见 §八那条「`image/` 没有目录」）。**P5f 今天没有目录可填。** | §323–§327；§161–§168（`docs/spec/03-product-drive.md:568-830`）；工程 §8.1 第 14 行；总纲 §8.6 |
+
+**§343 的分级后果**：v0.1 的最小实现范围里**含** `Evidence` / `Verifier` / `Completion Predicate`
+（即 P5a 在 v0.1 内），而**明确列为「可以暂不实现」的含 `Image Local Edit`**——故 P5f 的
+局部修改那一半在 v0.1 之外，完整生成那一半仍在内。**这不改变分块**，只改变 P5f 的落地次序。
+
+### Verifier 与 Evidence 判定：**单列一块（P5a）＋ 一条横切约束（§四第 1 条）**，不是四块各带一份
+
+理由有三条，按分量排：
+
+1. **工程 §8.3 给的是单链，不是四条平行链**：`Evidence ← 节点输出` → `Requirement Coverage ← Contract + Evidence`
+   → `Verifier 判定 ← VerificationProfile + Evidence + Artifact` → `Completion Predicate ← Verifier 判定 + Requirement Coverage`。
+   四块各带一份，等于把**同一条链造四遍**——正是本项目判为 Critical 的「同一件事两个词汇表」。
+2. **判定必须只有一处，否则 §342 第 10 条不成立**：不变量要求「完成必须由 Completion Predicate 与
+   Verification 决定」。若四个领域各有自己的完成判定，则「完成」这个词在系统里就有四个含义，
+   模型可以挑最松的那个宣告完成。
+3. **它是唯一一处能统一 §262 五级序与 §263 隔离输入的地方**：Verifier 的选择与输入面的裁剪
+   （初次验证只输入 Contract、Artifact、Evidence，§263）若散在四块里，`§29` 的「Worker 的完成
+   声明不能覆盖确定性失败结果」就没有单一落点。
+
+**它单列的是「判定」，「产出」仍是各算子自己的事**——故 §四第 1 条把这条写成两侧都钉：
+四个算子块必须出 Evidence，且必须经 P5a 的判定，**两侧都不许绕**。
+
+---
+
+## 六、复审安排
+
+每份设计由**另一个代理**交叉复审，且复审的任务是**试着推翻**它的断言、并找**漏项**——不是核对其措辞。
+P3 的实测：这一做法推翻了作者自扫保留的一条断言，以及作者报告里的两处假证据。
+
+本轮另加一条针对 P5 的：**六份设计要一起做一次整套终审**，判据是「六块合起来是否覆盖工程 §8.1 的
+十四行与总纲 §8.1–§8.6」，逐行对到具体的块，**不接受「由某块顺带覆盖」**。
+
+---
+
+## 七、本轮验收
+
+六份设计文档过审 + 各自的实现计划。**本轮不写实现代码**（brainstorming 的硬门：设计未批不落实现）。
+
+---
+
+## 八、本轮的已知缺口（先记在此，免得六份设计各自踩一遍）
+
+- **ENG-004 / OPEN-001 阻断 P5a 的收口。** 工程 §8.5 明写「**A1 阻断本层的收口**」：
+  §260 §266 §259 三条约束都指向「证据集合满足什么条件才算充分」没有判据。
+  **P5a 的设计必须显式处置它**——取一个方向或明写「本轮不判定充分」，不得绕开。
+- **`3d/` 在四个具名算子里没有对家。** §187 的方法库列 `software/ video/ research/ 3d/`，
+  而 P1 的设计与工程 §8.1 都只列代码、研究、媒体、图像四个算子；总纲第 8 章的六节里
+  也没有 3D（§8.3–§8.6 是代码、研究、媒体、图像）。而总纲 §3.1 的例子里有 3D 链
+  （`Images → CameraPose → Reconstruction → Scene → Render → Verify`）、P1 的设计 `:168`
+  也把 `Scene` 列为 P5 的类型。**故 `Scene` 与 `3d/` 目录的归属本轮无解**，
+  先记为缺口，不在切分里硬塞给某一块。
+- **`image/` 没有目录，而 P5f 声称有——上一条的对偶（2026-10-09 补入，P5b 的设计查出；**本文件原先漏了它**）。**
+  §187 的目录只有 `software/` `video/` `research/` `3d/` **四个，没有 `image/`**
+  （`docs/spec/04-method.md` 的 §187 原文）。
+  而**本文件 §五 的 P5f 那一行写着「本领域的 Operator 集与**它在 P5b 目录里的条目**」**——
+  **那句话没有对应物**（P5f 是「图像」，而目录里没有图像那一档）。
+  ⇒ **与上一条恰好相反**：上一条是**有目录、无对家**（`3d/`），这一条是**有对家、无目录**（P5f）。
+  **两条合起来才是完整的**：**目录与算子块不是一一对应，而是「四对四减去两处错位」。**
+  **处置**：**不在本文件里发明一个 `image/` 目录**（§187 以「例如：」开头，它是**举例不是穷尽**——
+  这一点 P5b 的设计已据实写明，见它的 R7）。
+  **P5b 的设计已把「没有目录可填」的那一块（P5f）的 `realized_by` 留空并记了缺口**；
+  **本文件不替它决定**，只把这条错位记全。
+  **判据**：**一条「X 有 Y」的断言，要同时核「Y 存在吗」与「X 存在吗」**——
+  **本文件原先只核了后者（`3d/` 有目录但无块），漏了前者（P5f 有块但无目录）。**
+
+- **`ArtifactType` 的 P5 清单尚无权威来源。** P1 的设计 `:168` 举 `Image`/`Video`/`Timeline`/`Scene` 四例，
+  §328 举七种（`Video` `Audio` `ShotSet` `Transcript` `Timeline` `SubtitleTrack` `Render`），
+  §323 举 `Image`，§330 的 `SourceSet` 是否算 Artifact 类型未定义。
+  **P5e 落地时必须自己定这份清单并写明逐条出处**；本文件不替它定。
+- **`Checkpointable` 今天无实现、无调用点、无测试**（P1 计划的 Step 6 明写这是刻意的）。
+  它归属 P5e（§二第 4 条）意味着**一条今天完全没有测试的接口要靠 P5e 首次兑现**——
+  P5e 的设计须写明它的落点与判据。
+- **算子解析的落点仍无人认领**（§四第 4 条）：P1 设计第 18 节把
+  「`Queued → Running` 处调 `OperatorRegistry::resolve`」记为 P1 的缺口，写明「执行器就位后」
+  是它唯一的合法落点。P5 不接管节点状态迁移，故这条要么归第 3 层，要么须由协调者指认。
+- **工程 §8.4 的完成判据里有一条跨块判据**：「Verifier 的初判输入不含 Worker 的完成声明与完整推理」
+  ——它同时约束 P5a（输入面的裁剪）与四个算子块（不得把完成声明塞进证据）。
+  已在 §四第 1 条覆盖，此处具名留档。
