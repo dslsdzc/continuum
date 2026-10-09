@@ -1,6 +1,6 @@
 # P5a 验证与证据判定 — 设计
 
-**范围**（切分文档 `docs/superpowers/specs/2026-10-08-p5-scope-and-split.md:149` 的原话，逐字照用）：
+**范围**（切分文档 `docs/superpowers/specs/2026-10-08-p5-scope-and-split.md` §五 的 P5a 行的原话，逐字照用）：
 
 > 把节点输出转成 `Evidence`，按每项 REQUIRED 建证据集合并判定覆盖是否完整，按任务取得
 > `VerificationProfile`、按 §262 的五级序选 Verifier 并限定它的输入（不含 Worker 的完成声明与完整推理），
@@ -79,7 +79,7 @@
 - **不登记 `continuum-policy` / `continuum-effect` / `continuum-capability`**：§266 的 `mandatory_effects_completed` 以**值**传入（§8.4）。§9.1 的图里 `跨领域 (8)` 只从 `执行层 (3)` 接边（`docs/02-工程.md:573-586`），故这一处不登记边，与 P4 设计 §1.2.3 的规则同形。（该图是否为穷尽列表，本设计不假定；即便它漏了一条边，本条也不受影响——判据是「本块实际用到什么」。）
 - **不登记 `continuum-model-registry` / `continuum-connector` / `continuum-provider`**：§262 第 3、4 级的可用性由装配方以**值**传入（§7.2），本块不查注册表。
 
-**共写文件**（切分 §一共写文件表 `:33-38`）：
+**共写文件**（切分 §一 的共写文件表）：
 
 | 文件 | 本块的改动 | 说明 |
 |---|---|---|
@@ -149,7 +149,7 @@ Conjunct  CompletionVerdict  CompletionInput  AdversaryOutcome  VerifyError
 
 # 3. OPEN-001 / ENG-004 的显式处置
 
-切分 §八第 1 条（`:197-199`）要求本设计**显式处置**「证据集合满足什么条件才算充分」没有判据这一缺口，「不得绕开」。本节是那处处置。
+切分 §八第 1 条要求本设计**显式处置**「证据集合满足什么条件才算充分」没有判据这一缺口，「不得绕开」。本节是那处处置。
 
 ## 3.1 三个可选方向各自缺的那一步（**构造性论证**）
 
@@ -899,7 +899,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 | P4 `TaskContract` / `Requirement` / `VerificationRequirement`（设计 §7.1 §7.2） | 以 `ContractView` 的**值**读 `id` / `class` / `verification_requirement` | 否；**本块不解析 `verification_requirement`**（P4 §7.2 的「只存不判」在本块延续为「只读不判」） |
 | P4 `Intent.completion_predicate` | §8.4 的第 6 条输入（只判有无内容） | 否；改由本块接下的部分见 §15 第 7 条 |
 
-**一条据实记录**：切分文档 §二末（`:83-88`）把「P5a 要接的 P4 接口面」写成 `TaskContract.requirements[].verification_requirement`、`constraints`、`verification_policy` 与预算面。**实测：§224 的 `TaskContract` 里没有 `constraints`，也没有 `verification_policy`**（`docs/spec/05-normative.md:209-254`；`constraints` 是 §236 的 Node 字段，`verification_policy` 同理）。故本块对 P4 的实际接口面是：`requirements[].{id, class, verification_requirement}` 与预算面（本块不用预算）；`constraints` / `verification_policy` 属执行层。**这不改变任何一方的归属，只订正一处措辞**，并记在此处以免下一轮照它去找两个不存在的字段。
+**一条据实记录**：切分文档 §二末「与 P4 的接口面」段把「P5a 要接的 P4 接口面」写成 `TaskContract.requirements[].verification_requirement`、`constraints`、`verification_policy` 与预算面。**实测：§224 的 `TaskContract` 里没有 `constraints`，也没有 `verification_policy`**（`docs/spec/05-normative.md:209-254`；`constraints` 是 §236 的 Node 字段，`verification_policy` 同理）。故本块对 P4 的实际接口面是：`requirements[].{id, class, verification_requirement}` 与预算面（本块不用预算）；`constraints` / `verification_policy` 属执行层。**这不改变任何一方的归属，只订正一处措辞**，并记在此处以免下一轮照它去找两个不存在的字段。
 
 ---
 
@@ -991,7 +991,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 以下每条都是**本设计假设了别的块的某枚形状**之处。逐条写清「假设了什么」与「为什么必须假设」。
 
-1. **待与 P4（语义层）对账**：本设计假设 `RequirementId` 由 P4 的 `continuum-semantics` 提供（§4.3.1）、`ContractView` 的字段名与 §224 一致（§6.1）、`ContractSatisfied` 与「`Intent.completion_predicate` 有无内容」以**值**进入 `CompletionInput`（§8.4）。依据是切分 §二末「与 P4 的接口面**照设计写，不照实现写**」（`:82-88`），本设计据此读 P4 设计 §7.1 / §7.2 / §16（`:999`、`:1018`、`:2321`）。**P4 的设计若再改，由本块的一方复核并订正，不由 P4 替它改**（切分原话）。
+1. **待与 P4（语义层）对账**：本设计假设 `RequirementId` 由 P4 的 `continuum-semantics` 提供（§4.3.1）、`ContractView` 的字段名与 §224 一致（§6.1）、`ContractSatisfied` 与「`Intent.completion_predicate` 有无内容」以**值**进入 `CompletionInput`（§8.4）。依据是切分 §二末「与 P4 的接口面**照设计写，不照实现写**」，本设计据此读 P4 设计 §7.1 / §7.2 / §16（`:999`、`:1018`、`:2321`）。**P4 的设计若再改，由本块的一方复核并订正，不由 P4 替它改**（切分原话）。
    另：`Blocked` / `Undetermined` 如何升 `Decision`（§7.5、§8.2）落在 P4 的 Decision 面上，本块只给返回值形状。
 2. **待与 P5c（代码领域算子）对账**：本设计假设「测试是否通过」由**制品**承载（§8.3 第 6 项），故需要一个 `TestResult` 制品的 payload 约定。**若 P5c 把结果放在别处（或需要一枚新的 `EvidenceType` 臂），须向本块报出**（§4.2：证据类型是 P5a 的，四块不得自加）。`§193` 的 Differential / Metamorphic 两臂已在本设计里预置，P5c 若无对应实现须说明。
 3. **待与 P5f（图像领域算子）与 P5e（媒体）对账**：§326/§168 的「mask 外像素差被确定性检出」是 §262 第 1 级的一个实例：**插槽与「无物可读 ⇒ `Unknown`」的规则在本块（§7.5），比较器在 P5f**。另：`EvidenceType::VisualCheck` / `Benchmark` 是否够 P5e/P5f 用，若不够须向本块报出。

@@ -1,9 +1,9 @@
 # P5e 媒体领域算子 — 设计
 
-**范围**（切分文档 `docs/superpowers/specs/2026-10-08-p5-scope-and-split.md:190` 的原话，逐字照用）：
+**范围**（切分文档 `docs/superpowers/specs/2026-10-08-p5-scope-and-split.md` §五 的 P5e 行的原话，逐字照用；引文里的「下方的补记二」指该行下方那条补记，即 §131 只列派生产物的种类、复用条件在 §305）：
 
 > 把 §32 的剪辑链与 §328 的七种标准 Artifact 落成 Operator 集与 Artifact 类型，含 Timeline 的 Artifact 形态（§329）、
-> Derived Artifact 在原素材未变时的复用（§131）、以及生成内容必须单独授权（§34）；
+> Derived Artifact 在原素材未变时的复用（§305，见下方的补记二）、以及生成内容必须单独授权（§34）；
 > **并一次性落地 `ArtifactType` 的 P5 扩展清单**（§四第 2 条）
 
 **本块拥有 / 产出的接口**（同行的第二栏）：本领域的 Operator 集；`ArtifactType` 的 P5 新变体（**唯一落地点**）；
@@ -30,15 +30,15 @@
 
 | 具名义务 | 出处 | 本设计的落点 | 本轮可达的形态 |
 |---|---|---|---|
-| `ArtifactType` 的 P5 扩展清单（11 枚新变体） | 切分 §四第 2 条（`:142-155`） | §3 | 全量（清单 + 逐条出处 + 一次改动的七处落点） |
-| `Checkpointable` 的错误类型 | 切分 §二第 4 条（`:88-91`） | §4 | 全量（形状 + 落点 + 第一枚实现 + 判据） |
+| `ArtifactType` 的 P5 扩展清单（11 枚新变体） | 切分 §四第 2 条 | §3 | 全量（清单 + 逐条出处 + 一次改动的七处落点） |
+| `Checkpointable` 的错误类型 | 切分 §二第 4 条 | §4 | 全量（形状 + 落点 + 第一枚实现 + 判据） |
 | 媒体领域的 Operator 集（17 枚） | 切分 §五 P5e 行；§32 §328 §33 | §5 | 全量（端口类型、determinism、side_effect_class、backend 候选） |
 | Derived Artifact 的复用（§131） | 切分 §五 P5e 行；§8.3 的「媒体衍生 Artifact」行 | §6 | **不建第二份判据**；本块的兑现是让本领域算子满足 P1 已落地的判据的前提 |
 | 生成内容必须单独授权（§34） | 切分 §五 P5e 行 | §7 | 授权臂全量；**调用点不在本块**（切分 §四第 4 条） |
 | Timeline 的 Artifact 形态（§329） | 切分 §五 P5e 行 | §8 | 形状落点全量；**字段级 schema 不定义**（缺口见 §14 第 4 条） |
-| 只产出 Evidence、只消费判定 | 切分 §四第 1 条（`:138-141`） | §9 | 产出经 §9.2 的领域包装走到 P5a 的 `Evidence::from_tool_result`（唯一构造点）；不新建证据类型 |
+| 只产出 Evidence、只消费判定 | 切分 §四第 1 条 | §9 | 产出经 §9.2 的领域包装走到 P5a 的 `Evidence::from_tool_result`（唯一构造点）；不新建证据类型 |
 | 与 P5b 方法库的接缝 | P5b 设计第六节（`docs/superpowers/specs/2026-10-08-p5b-execution-method-library-design.md:371-390`） | §10 | 四条 `video/` 方法的 `realized_by` 逐条填出 |
-| 迁移号段 | 切分 §二第 5 条（`:93-99`） | §11 | **本块零迁移**；附实测空档表 |
+| 迁移号段 | 切分 §二第 5 条 | §11 | **本块零迁移**；附实测空档表 |
 
 ## 1.2 不建什么
 
@@ -51,7 +51,7 @@
 | 节点状态迁移、`Queued → Running`、`OperatorRegistry::resolve` 的调用点、算子的执行 | 第 3 层（切分 §四第 4 条）。本块只**注册**算子 |
 | `execution_policy` 的判定 | P4（切分 §四第 5 条）。本块只碰 `verification_policy`（那是 P5a 的落点，本块不碰） |
 | `Image` 的两个图像算子（完整生成、局部修改）、mask 外像素比较器 | P5f。`Image` 这一**型**由本块一次落地（§3），两个**算子**不属本块 |
-| 3D 链（`Reconstruct3D` / `RenderScene`）、`3d/` 目录的对家 | **本轮无解**（切分 §八 `:241-244`）。本块**不注册**这两个算子；`Scene` 这一**型**的处理见 §3.3 |
+| 3D 链（`Reconstruct3D` / `RenderScene`）、`3d/` 目录的对家 | **本轮无解**（切分 §八 的「`3d/` 在四个具名算子里没有对家」那一条）。本块**不注册**这两个算子；`Scene` 这一**型**的处理见 §3.3 |
 | `SourceSet` 这一型 | 本设计**不收**，理由见 §3.4 |
 | 复用判据本身（缓存键、`can_reuse`） | P1 已落地（`crates/continuum-graph/src/reuse.rs:29`）。本块**不建第二份**（§6） |
 | 迁移 / 表 | 本块**零表**（§11） |
@@ -84,7 +84,7 @@
   取 `Vec<ArtifactType>`（`crates/continuum-operator/src/definition.rs:82-83`），不经 `Port`。§239 的 `compatible`
   是 P1 的（`crates/continuum-port/src/port.rs:94`）。
 - **不登记 `continuum-semantics`**：本块不构造 `RequirementId`——产出的证据一律 `Unattached`（§9.2）。
-  该 crate 今天在 `crates/` 下不存在（P4 未开始实现，切分 §二末 `:110-112` 已记）。
+  该 crate 今天在 `crates/` 下不存在（P4 未开始实现，切分 §二末「与 P4 的接口面」段已记）。
 - **不登记 `continuum-persist`**：本块零表（§11），不碰 `Tx` / `Migration`。
 - **不登记 `continuum-events`**：本块不写事件（§11）。
 - **不登记 `continuum-policy` / `continuum-capability`**：§34 的授权旗标以**值**从 Contract 传入（§7.2），本块不查策略引擎、不取 Capability Token。
@@ -103,17 +103,17 @@
   §12.2 第 (s) 条那条运行期用例只是 `realized_by` 文本弱引用的补件（§10 的「`bind` 的参数是文本」一段），
   不是 `bind` 的使用点。
 
-**共写文件**（切分 §一共写文件表 `:33-38` 给的是**四处**：`Cargo.toml`、`dependency_direction.rs`、
-`artifact.rs`、`node.rs`。下表是本块的那部分，**另含切分未登记的四行**，逐行注明来历）：
+**共写文件**（切分 §一 的共写文件表给的是**五处**：`Cargo.toml`、`dependency_direction.rs`、
+`artifact.rs`、`node.rs`、`crates/continuum-operator/src/definition.rs`。下表是本块的那部分，**另含切分未登记的三行**，逐行注明来历）：
 
 | 文件 | 本块的改动 | 说明 |
 |---|---|---|
 | `Cargo.toml` 的 `[workspace] members` | 加一行 `crates/continuum-media` | 切分建议由先落地者一次加齐六行；本块**只加自己这一行** |
 | `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-media", &["continuum-artifact", "continuum-graph", "continuum-method", "continuum-operator", "continuum-verify"])`——**五项**，与 §2.1 边表的五行逐行对应（含 `continuum-graph` 的 dev 边，理由见上） | 新 crate 会先让该门变红再被补齐（`:288` 的用例），这是刻意的；数组按字母序 |
-| `crates/continuum-artifact/src/artifact.rs` | §3.5 的 (a)(b)(c) 三处 | 切分 §一 `:37` 登记为「共写，但只由 P5e 一处改」 |
-| `crates/continuum-artifact/tests/artifact_type.rs` | §3.5 的 (d) | 切分 §四第 2 条的 (d)（`:150-151` 逐字点名该文件的 `:23`）；**切分 §一 的共写表里没有这一行**，故在此补记 |
-| `crates/continuum-port/tests/compatibility.rs` | §3.5 的 (e) | **切分 §四第 2 条的清单漏了这一处** |
-| `crates/continuum-operator/src/definition.rs` | §4 的两行签名 + 新类型 + `BackendId` 的 `Display`（§4.4） | **切分 §一 的共写表没有这一行**，见 §15 第 2 条 |
+| `crates/continuum-artifact/src/artifact.rs` | §3.5 的 (a)(b)(c) 三处 | 切分 §一 的共写文件表登记为「共写，但只由 P5e 一处改」 |
+| `crates/continuum-artifact/tests/artifact_type.rs` | §3.5 的 (d) | 切分 §四第 2 条的 (d)（逐字点名该文件的 `:23`）；**切分 §一 的共写表里没有这一行**，故在此补记 |
+| `crates/continuum-port/tests/compatibility.rs` | §3.5 的 (e) | 切分 §四第 2 条的清单已列入这一处（2026-10-09 折入；本设计定稿时它是漏项） |
+| `crates/continuum-operator/src/definition.rs` | §4 的两行签名 + 新类型 + `BackendId` 的 `Display`（§4.4） | 切分 §一 的共写表已列入这一行（2026-10-09 折入；本设计定稿时它是漏项，见 §15 第 2 条） |
 | `crates/continuum-operator/src/lib.rs` | §4.4 的 re-export 两枚 | 同上 |
 
 ## 2.2 冻结清单：本块持有的类型与判定
@@ -150,7 +150,7 @@ CheckpointError   CheckpointOwner
 - `执行层 (3) → 跨领域 (8)`：§2.1 的边表**五行**全是它的实例（例如 `continuum-media` 依赖
   `continuum-operator`、`continuum-graph`；五行对应 §3.1 的执行层组件与 §8.1 的跨领域组件）。
   `execution_policy` / `verification_policy` 的定型落在消费侧而不是字段上，也是同一条的后果
-  （切分 §二第 2 条的裁定段 `:72-84`；本块不重复它）。
+  （切分 §二第 2 条的裁定段；本块不重复它）。
 - `跨领域 (8) → 长期循环 (7)`：本块**不接**这一条——本块不产出 `value + evidence + last_verified`
   （§232 的 `ProductReadiness` 属长期循环）。本块的产物注册进 `OperatorRegistry`，不写长期循环的表。
 
@@ -172,7 +172,7 @@ CheckpointError   CheckpointOwner
 
 `crates/continuum-artifact/src/artifact.rs:14-21` 的枚举是六型：`SourceTree` / `Patch` / `TestResult` /
 `Text` / `Json` / `Blob`（实测该文件 `:15-20` 逐行照录）。`ALL` 是 `:28` 的 `[ArtifactType; 6]`（`:28-35`）。
-切分 §八 `:272-275` 明写「本清单尚无权威来源」，要求本设计自己定并写明逐条出处。
+切分 §八「`ArtifactType` 的 P5 清单尚无权威来源」那一条明写「本清单尚无权威来源」，要求本设计自己定并写明逐条出处。
 
 ## 3.2 本设计定的清单：11 枚新变体
 
@@ -209,7 +209,7 @@ CheckpointError   CheckpointOwner
 
 ## 3.3 `Scene` 的显式处置：**收型，不收算子**
 
-切分 §八 `:241-244` 把「`Scene` 与 `3d/` 目录的归属」记为**本轮无解**，并明写「先记为缺口，不在切分里硬塞给某一块」。
+切分 §八「`3d/` 在四个具名算子里没有对家」那一条把「`Scene` 与 `3d/` 目录的归属」记为**本轮无解**，并明写「先记为缺口，不在切分里硬塞给某一块」。
 本设计的处置分两半，两半必须分别读：
 
 1. **收 `Scene` 这一型**（上表第 6 行）。理由两条，按分量排：
@@ -217,7 +217,7 @@ CheckpointError   CheckpointOwner
      `ArtifactType` 这一枚举的权威（`crates/continuum-artifact/src/artifact.rs:7` 的自述即「`§239` 的类型集合」）。
      不收它，等于让 §239 的一条例子在本版本里不可表达。
    - **§四第 2 条要的是「一次改动」。** 将来 3D 那一块落地时若必须补 `Scene`，就是**对同一个枚举的第二次改动**——
-     正是切分 `:144-145` 要避免的形态（两次改动之间留下数目断言与 `ALL` 的两套取值）。现在收，代价是零：
+     正是切分 §四第 2 条要避免的形态（两次改动之间留下数目断言与 `ALL` 的两套取值）。现在收，代价是零：
      一个枚举变体不产生算子、不产生表、不产生迁移。
 2. **不收 3D 的算子。** 本设计**不注册** `Reconstruct3D(ImageSet) -> Scene`（`docs/spec/01-concepts.md:547`）
    与 `RenderScene(Scene) -> Video`（`:549`）——它们的归属是本轮无解的那一条，本块不认领。
@@ -229,7 +229,7 @@ CheckpointError   CheckpointOwner
 
 ## 3.4 不收 `SourceSet`：理由
 
-切分 §八 `:274` 记「§330 的 `SourceSet` 是否算 Artifact 类型未定义」。**本设计不收**，理由一条：
+切分 §八「`ArtifactType` 的 P5 清单尚无权威来源」那一条记「§330 的 `SourceSet` 是否算 Artifact 类型未定义」。**本设计不收**，理由一条：
 
 **§330 与 §328 的措辞不是同一件事。** §328 `:2410` 逐字是「视频领域 SHOULD 使用**标准 Artifact**：」，
 其后七行是要落的类型名；§330 `:2449-2465` 逐字是「研究任务 SHOULD **拆成**：」，其后是一条**步骤链**
@@ -245,19 +245,24 @@ CheckpointError   CheckpointOwner
 
 ## 3.5 一次改动要同时碰的处所（**全部实测**）
 
-切分 §四第 2 条 `:146-155` 已给出四处待改与两处「不改但要重跑」。**本设计在当前树里逐条复测，并补一处它漏记的**：
+切分 §四第 2 条已给出待改的处所与「不改但要重跑」的那几处。**本设计在当前树里逐条复测，并补它当时漏记的那一处**：
+
+> **注记（2026-10-09）**：本节的复测写在切分文档接受这些发现**之前**——正文的「切分当时…」与下表
+> 「切分给的行号」一栏描述的是**折入前**的切分文档（当时待改的是 (a)–(d) 四处）。切分文档现已折入
+> (e) 与 `:24` 的注记（来历见 §15 开头的注记），故那几处读时应以切分文档**现在**的文本为准；
+> 本节其余各条（本设计实测出来的那份清单）不受影响。
 
 **(a)–(d) 复测结果（与切分一致）**：
 
 | 项 | 切分给的行号 | 本设计实测 | 一致 |
 |---|---|---|---|
 | (a) 枚举本体 | `artifact.rs:14-21` | 枚举头 `:14`，六型 `:15-20`，闭合 `:21` | 一致 |
-| (b) `ALL` | `artifact.rs:28-35` | 见下 | 一致，**但切分漏了同处的注记** |
+| (b) `ALL` | `artifact.rs:28` | 见下 | 一致（切分当时只点代码，未点 `:24` 的注记；该注记已于 2026-10-09 折入） |
 | (c) `as_str` / `parse` | `artifact.rs:47` / `:68` | `:47` 是 `pub fn as_str`，`:68` 是 `pub fn parse` | 一致 |
 | (d) 数目断言 | `tests/artifact_type.rs:23` | `:23` 逐字 `assert_eq!(ArtifactType::ALL.len(), 6, "ArtifactType 的名单与变体数不符")` | 一致 |
 
 **(b) 的补充**：`ALL` 的**注记 `:24` 带数目字样**——逐字是「全部六型。供全量遍历的用例使用（与
-[`PrivacyClass::ALL`] 同形）。」。切分的 (b) 只点了 `:28-35` 的代码，没点 `:24` 的文本。
+[`PrivacyClass::ALL`] 同形）。」。切分当时的 (b) 只点了 `:28-35` 的代码，没点 `:24` 的文本；2026-10-09 已把 `:24` 的注记折入（见本节注记）。
 **这一处不会编译失败**（它在 `///` 里），改完代码不改它，注释就变成假话。
 
 **(e) 切分漏记的一处，且是唯一一处不会变红的**：
@@ -269,13 +274,13 @@ CheckpointError   CheckpointOwner
 - 它**照旧编译、照旧通过**——六型仍在枚举里，`serde_json` 往返仍成立；
 - 而它的**名字与它的清单都成了假话**（枚举已有 17 型，它只说 6 型）。
 
-故「一次改动」的清单是**五处**（切分的四处 ＋ (e)），其中带报警的四处是
+故「一次改动」的清单是**五处**（(a)–(e)；切分文档 2026-10-09 已把 (e) 折入，此前只列 (a)–(d)），其中带报警的四处是
 (a)（编译失败）、(b)（编译失败：`[ArtifactType; 6]` 与 `ALL` 的项数不符）、(c)（编译失败：两个穷尽 `match` 各缺 11 臂）、
 (d)（断言失败）；**(e) 是唯一不会响的一处**。**处置**：把该用例改为遍历 `ArtifactType::ALL`（并在改名时去掉名字里的数目字面量，
 使下一次加型不必再改名字）。**这里不是「照既有写法补 11 行」：手工清单在这里已经证明过它会漂**
 ——它与 `ALL` 是两个各自维护的清单，而 `ALL` 有守卫、它没有。
 
-**不改但要重跑的三处（切分 `:152-155` 三处全列，第三处 `compatible` 在 `:155`）**：
+**不改但要重跑的三处（切分 §四第 2 条三处全列，第三处是 `compatible`）**：
 
 | 项 | 位置（实测） | 为什么不改 | 重跑要看什么 |
 |---|---|---|---|
@@ -295,7 +300,7 @@ CheckpointError   CheckpointOwner
 
 ## 3.6 「一次改动」在本轮的排布下**不可能在设计期成立**
 
-切分 §四第 2 条把「一次改动」写成：四块「向 P5e 报出所需变体，由 P5e 在一次改动里落地」（`:142-143`）。
+切分 §四第 2 条把「一次改动」写成：四块「向 P5e 报出所需变体，由 P5e 在一次改动里落地」。
 **实测：这条在本轮不可能按设计期的口径兑现。**
 
 - `docs/superpowers/specs/` 下今天只有两份 P5 的设计（P5a、P5b；P5e 是本文件的第三份）。
@@ -306,7 +311,7 @@ CheckpointError   CheckpointOwner
 `ArtifactType` 的那一次编辑发生在 **P5e 的实现任务**里，且**它是这六块里最后一次编辑这个枚举的编辑**。
 可行的排法只有一种：**P5e 的枚举实现任务排在 P5c/P5d/P5f 的设计与「报出」之后**。
 判据：实现该任务的 brief 里必须写明「本任务落地的是 P5e 设计的 §3.2 清单 + P5c/P5d/P5f 已报出的变体，
-二者合并为一次编辑」；若该 task 先于那三份报出而运行，则「一次改动」当场不成立，且切分 `:144-145` 的两条后果
+二者合并为一次编辑」；若该 task 先于那三份报出而运行，则「一次改动」当场不成立，且切分 §四第 2 条的两条后果
 （编译不过的中间树、数目断言改两次）都会发生。
 
 **收件人：协调者**（排期与派单）。切分文档本身不改（本设计只记，见 §15）。
@@ -326,7 +331,7 @@ CheckpointError   CheckpointOwner
   `fn checkpoint(&self) -> Result<Self::Checkpoint, String>;` 与
   `fn restore(&self, checkpoint: &Self::Checkpoint) -> Result<(), String>;`——**两处 `String`**。
 - `crates/continuum-operator/tests/registry.rs` 只测 `OperatorRegistry`；全仓 `grep -rn "Checkpointable" crates/`
-  只有 `definition.rs:92` 一处命中 ⇒ **无实现、无调用点、无测试**（与切分 §八 `:276` 一致）。
+  只有 `definition.rs:92` 一处命中 ⇒ **无实现、无调用点、无测试**（与切分 §八「`Checkpointable` 今天无实现、无调用点、无测试」那一条一致）。
 - P1 的**设计**写的是 `Result<Checkpoint, OperatorError>` / `Result<(), OperatorError>`
   （`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:369-372`）；**计划**把它落成了 `String`，
   并把这条偏离记在遗留里（`docs/superpowers/plans/2026-10-01-p1-execution-layer.md:5563`：
@@ -350,10 +355,10 @@ CheckpointError   CheckpointOwner
 （`OperatorId` `:24`、`OperatorVersion` `:45`、`BackendId` `:66`）都已在同文件内，
 **落点不新增任何一条依赖边**。
 
-**切分文档的一处漏项**：§一 的共写文件表（`:33-38`）登记了 `Cargo.toml`、`dependency_direction.rs`、
-`artifact.rs`、`node.rs` 四处，**没有 `crates/continuum-operator/`**。而 §二第 4 条把错误类型指给 P5e 时，
+**切分文档原先的一处漏项（2026-10-09 已折入）**：本设计定稿时，§一 的共写文件表只登记了 `Cargo.toml`、`dependency_direction.rs`、
+`artifact.rs`、`node.rs` 四处，**没有 `crates/continuum-operator/`**；切分文档现已补上该行。而 §二第 4 条把错误类型指给 P5e 时，
 没有指出它只能落在别人的 crate 里。本设计据此把它补进 §2.1 的共写表（两行：`definition.rs` 与 `lib.rs`），
-并在 §15 第 2 条记为切分文档的漏项。
+并在 §15 第 2 条记为切分文档当时的漏项。
 
 **「这里不是 `continuum-media`：因为那会让第 3 层依赖第 8 层，即 2-环。**」这是一条**硬**理由
 （同切分 §二第 2 条订正段对 `verification_policy` 的处置形状：先例只是「同一处境曾有同一处置」，成环才是
@@ -443,7 +448,7 @@ pub enum CheckpointError {
 
 ## 4.5 第一枚实现：`continuum-media` 的两枚长算子
 
-切分 §八 `:276-278` 明写「一条今天完全没有测试的接口要靠 P5e 首次兑现」，要求写明落点与判据。
+切分 §八「`Checkpointable` 今天无实现、无调用点、无测试」那一条明写「一条今天完全没有测试的接口要靠 P5e 首次兑现」，要求写明落点与判据。
 本设计把「首次兑现」定为**真的实现**，不是「定义了一个没人实现它的类型」：
 
 - **实现的算子**：`generate-broll`（§308 `:2048` 点名的第一项长任务「video generation」）与 `render`（§5.2 第 11 行）。
@@ -459,7 +464,7 @@ pub enum CheckpointError {
   3. 选中的 backend 不支持检查点时 ⇒ `Err(UnsupportedByBackend { .. })`；支持时 ⇒ `Ok`（两侧）。
 - **调用点不在本块**（据实写明）：谁在什么时候调 `checkpoint()` / `restore()`，规范未给；它属第 3 层的
   恢复路径（§311 / §312 那一组）。故「无调用点」这件事在 P5e 落地之后**仍然成立**，只是从「无实现、无调用点、
-  无测试」变成「有实现、有测试、无生产调用点」。切分 §八 `:279-281` 记的「算子解析的落点无人认领」
+  无测试」变成「有实现、有测试、无生产调用点」。切分 §八「算子解析的落点仍无人认领」那一条记的
   与这一条**同源**，本设计把它们合并成一条对账条目（§13 第 1 条），不各自记一次。
 
 ## 4.6 残余：本型不规定检查点的存储
@@ -479,7 +484,7 @@ pub enum CheckpointError {
 §244（`docs/spec/05-normative.md:735-753`）的 `Operator` 八字段由 P1 落地为
 `crates/continuum-operator/src/definition.rs:78-88`：`id` / `version` / `input_schema: Vec<ArtifactType>` /
 `output_schema: Vec<ArtifactType>` / `determinism` / `side_effect_class` / `backend_candidates: Vec<BackendId>`。
-**本块不加字段、不改签名**（切分 §二「无需重新冻结」段 `:44-56`）。本块交付的是**内容**：
+**本块不加字段、不改签名**（切分 §二「无需重新冻结」段）。本块交付的是**内容**：
 17 枚 `Operator` 值的清单与它们的注册入口。
 
 注册入口的形状照 `OperatorRegistry`（`crates/continuum-operator/src/registry.rs:19-48`）：
@@ -713,8 +718,8 @@ pub enum MediaError {
 
 **故：本块不得再定义第二个复用判据。** 本仓对「同一件事两个词汇表」一贯判为 Critical；
 切分 §四第 1 条与 §四第 2 条把「只产出一份」的口径写给了证据与 ArtifactType 两处，
-**复用判据是同一形状的第三处，而切分文档没有把它具名**（切分 §五 P5e 行把 §131 列为本块的义务，
-§八 没有指出 §305/P1 已有落点）。**这是切分文档的一处漏项**，记在 §15 第 1 条。
+**复用判据是同一形状的第三处——切分文档 2026-10-09 已把它写成 §四第 7 条**（本设计定稿时没有；
+当时 §五 P5e 行把 §131 列为本块的义务，§八 没有指出 §305/P1 已有落点）。**这是切分文档当时的一处漏项**，记在 §15 第 1 条。
 
 ## 6.2 本块的兑现：让本领域算子满足那条判据的前提
 
@@ -822,7 +827,7 @@ pub fn authorize_generative(
 
 **`ThreeDGeneration` 这一臂今天没有算子映射它**：§34 的旗标与算子不是一一对应（旗标是 Contract 的词汇，
 算子是执行单元）。本设计**照录五臂**（`:1424-1428` 是规范正文的五项），并把「哪枚算子需要它」记为
-与 §1.2 表里那条 3D 归属缺口同源的事。**不给它编一个算子**：编一个就落进 §八 `:241-244` 那条无解里。
+与 §1.2 表里那条 3D 归属缺口同源的事。**不给它编一个算子**：编一个就落进 §八「`3d/` 在四个具名算子里没有对家」那条无解里。
 **这不是死臂**：它是 `GenerativePermission` 的一个取值，而 §34 明写它可以出现在 Contract 里；
 一个 Contract 声明 `allow_3d_generation` 而系统里没有 3D 生成算子，是**系统不提供该能力**，
 不是「这一臂没人用」。
@@ -882,7 +887,7 @@ pub fn authorize_generative(
 
 ## 9.1 两枚证据类型，不请求新臂
 
-切分 §四第 1 条（`:138-141`）：四个算子块**只产出**（把节点输出转成 `Evidence`）、**只消费**（接受 P5a 的判定结果），
+切分 §四第 1 条：四个算子块**只产出**（把节点输出转成 `Evidence`）、**只消费**（接受 P5a 的判定结果），
 **不得**自定义证据类型、自定义「充分」判据、自定义完成判定。
 
 P5a 设计 §14 第 3 条（`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:997`）
@@ -1007,7 +1012,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 | §131 的复用凭据 | `CacheKey`（`crates/continuum-graph/src/reuse.rs:9-12`）今天**也没有存储**（实测：`cache_key` / `can_reuse` / `CacheKey` 在 `crates/` 下的非测试命中只有 `reuse.rs` 与 `lib.rs:28` 的 `pub use`）。它的存储属 §305 的落点即 **P1**（P1 设计 §18 `:568-590` 把 `can_reuse` 列在「无执行点的机制」里）。**本块不替它建表** |
 | 检查点 | §4.6：`Checkpoint` 是返回值，存储属第 3 层的恢复路径 |
 
-## 11.2 实测占用表（判据在切分 §二第 5 条 `:99`）
+## 11.2 实测占用表（判据在切分 §二第 5 条）
 
 **实测命令**：`grep -rn "Migration::new(" crates/`，逐处读**调用的第二个实参**（号在参数表的次行或同行）。
 实测结果（工作树 `p5e`，2026-10-09）：
@@ -1031,7 +1036,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 
 **协调者已裁定的号段**（P3 那一轮）：A=`50`、B=`60`、C=`70`、D=`80`、E=`90`
 （`docs/superpowers/specs/2026-10-05-p3d-model-registry-router-design.md:480` 逐字
-「一个子项目一个十位档」）。P4 取 `100/110/120`（P4 设计 `:2052`）。**P5a 已取 `130`**（切分 §二第 5 条 `:96`）。
+「一个子项目一个十位档」）。P4 取 `100/110/120`（P4 设计 `:2052`）。**P5a 已取 `130`**（切分 §二第 5 条）。
 
 **实测空档**（十位档）：`140` `150` `160` `170` `180` `190` 六个档今天在**运行时装配链**里全部为空
 （上表「是」的九处取值为 `1 2 10 20 30 40 41 50 80`，无一落在 `130`–`199`；测试夹具占的 `100/101/102`
@@ -1049,7 +1054,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
   该文 `:487-493`：「『未占用』的判据是按库说的，不是按全仓说的」，
   并说明 `60` 与 `50` 各在别处自建的库里出现过而无害）。**本设计给出的次序建议**是
   `140`（P5 六块按 P3 的先例后延：P5a `130`、P5b `140`、P5c `150`、P5d `160`、P5e `170`、P5f `180`，P6 `190`）
-  ——**这是建议不是裁定**，六块与 P6 的档由协调者统一划（切分 §二第 5 条 `:97`）。
+  ——**这是建议不是裁定**，六块与 P6 的档由协调者统一划（切分 §二第 5 条）。
 
 **收件人：协调者**。**这一节只是一句注记，不另开对账条目**：本块零迁移故无号可占，
 号段怎么划与本块无关（原先在 §13 与 §14 各开过一条「迁移号段」的对账项，已删——
@@ -1157,10 +1162,10 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 以下每条都是**本设计假设了别的块的某枚形状**或**发现某处无归属**之处。
 
 1. **登记（不是裁定请求）：三处「有判定、无调用点」合并为一条，落点都在第 3 层的执行器**。
-   本块有两处「有判定、无调用点」，加上切分 §八 `:279-281` 已有的那一处，同源：
+   本块有两处「有判定、无调用点」，加上切分 §八「算子解析的落点仍无人认领」已有的那一处，同源：
    (i) `checkpoint()` / `restore()`（§4.5）：属第 3 层的恢复路径（§311 / §312 那一组）；
    (ii) `authorize_generative`（§7.3）：属 `Queued → Running` 的前置判定；
-   (iii) `OperatorRegistry::resolve` 的调用点（切分 §八 `:279-281`；P1 设计 §18 `:576-580` 逐字
+   (iii) `OperatorRegistry::resolve` 的调用点（切分 §八 的「算子解析的落点无人认领」；P1 设计 §18 `:576-580` 逐字
    「执行器就位后，`Queued → Running` 是它唯一的合法落点」）。
    **三处都在同一处落点**（`Queued → Running`）。本块不自建（切分 §四第 4 条），
    也不把三处各自记一次。**收件人：第 3 层的执行器**（谁建执行路径谁承接这三处；协调者转）。
@@ -1168,7 +1173,7 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
    本块只是在册子上把三处并成一笔。
 2. **待与 P1 对账**：三条。
    (i) `CheckpointError` 与 `CheckpointOwner` 落在 `crates/continuum-operator/src/definition.rs`，
-   并改 `:95` / `:96` 两行签名（§4.2、§4.4）——**这是本块对 P1 文件的改动**，切分 §一 的共写表未登记它（§15 第 2 条）。
+   并改 `:95` / `:96` 两行签名（§4.2、§4.4）——**这是本块对 P1 文件的改动**——切分 §一 的共写表当时未登记它，2026-10-09 已把 `crates/continuum-operator/src/definition.rs` 的 `Checkpointable` 一行补入（§15 第 2 条）。
    (ii) `CheckpointOwner` 与 `OperatorRef`（`crates/continuum-graph/src/node.rs:42-45`）两字段相同，
    本设计**不合并**（合并会成环，§4.3）。若 P1 判 `OperatorRef` 应下移到 `continuum-operator`，
    本块的 `CheckpointOwner` 随之删掉、改用 `OperatorRef`。
@@ -1223,7 +1228,7 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 4. **§329 的 Timeline 六个字段无 schema**（§8 第 3 条）。**缺的是「六个字段的类型与 tracks↔clips 的引用关系」
    这一步。收件人：规范维护者。**
 5. **`ThreeDGeneration` 这一臂今天没有算子映射它**（§7.2）：与 §1.2 表里那条 3D 归属缺口同源
-   （切分 §八 `:241-244`）。**缺的是「3D 链归哪一块」这一步的裁定。收件人：协调者。**
+   （切分 §八 的「`3d/` 在四个具名算子里没有对家」那一条）。**缺的是「3D 链归哪一块」这一步的裁定。收件人：协调者。**
 6. **检查点的存储形态未定义**（§4.6、§11.1）：`Checkpoint` 的持久化、版本兼容、损坏检测都不在 §308 里。
    **缺的是「检查点写在哪里、谁写、怎么判损坏」这一步。收件人：规范维护者 + 第 3 层。**
 7. **§5.4 的 backend 名单、§6.2 的 `Json` 映射与 §5.3 边表的边判据都是本设计定的封闭表，规范无来源**（§13 第 7 条）。
@@ -1257,17 +1262,17 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
    而两套的失配方向是「一套说能复用、另一套说不能」（§305 的 `contract unaffected` 那一条最容易漏）。
    **判据**：「A 拥有 X 的判定」这句话，要先问「X 的判定在仓里有没有落点」——本行只核了规范来源（§131），
    没核代码落点。
-2. **⚠️ §一 的共写文件表（`:33-38`）漏了 `crates/continuum-operator/`。** 实测：§二第 4 条把
-   `Checkpointable` 的错误类型指给 P5e（`:88-91`），而该接口的定义在 `crates/continuum-operator/src/definition.rs:92-96`，
+2. **⚠️ §一 的共写文件表漏了 `crates/continuum-operator/`。** 实测：§二第 4 条把
+   `Checkpointable` 的错误类型指给 P5e，而该接口的定义在 `crates/continuum-operator/src/definition.rs:92-96`，
    其错误类型**只能**定义在同一个 crate（否则第 3 层与第 8 层成环，§4.2）。
    故这是一处必然发生、却未登记的共写。**判据**：「把 X 定给某块」这句话，要同时核「X 定义在谁的 crate 里」。
-3. **⚠️ §四第 2 条的「一次改动要同时碰这几处」（`:146-155`）漏了 `crates/continuum-port/tests/compatibility.rs:47` 的
+3. **⚠️ §四第 2 条的「一次改动要同时碰这几处」漏了 `crates/continuum-port/tests/compatibility.rs:47` 的
    `six_types_round_trip_through_serde`。** 它手工列了六型（`:49-54`），
    **加型后照旧编译、照旧通过**——即它是清单里唯一一处**不会报警**的遗漏（§3.5 的 (e)）。
    **判据**：「一次改动要同时碰哪几处」这句话，要连「不会变红的处所」一起列——
    会编译失败的地方自己会喊，不会喊的那些要靠清单。
 4. **⚠️ §四第 2 条与 §五 P5e 行都没有提 `§9 Typed Artifact`（`docs/spec/01-concepts.md:496-514`）。**
-   §八 `:272-275` 说「本清单尚无权威来源」时，举的是 P1 设计 `:168`、§328、§323、§330 四处，
+   §八「`ArtifactType` 的 P5 清单尚无权威来源」那一条说「本清单尚无权威来源」时，举的是 P1 设计 `:168`、§328、§323、§330 四处，
    **漏了这一处**——而它是本仓里**最完整的一份 Artifact 类型清单**（12 个名字，
    且 `:498` 逐字写「领域差异主要通过 Artifact 类型表达」）。
    它也是本设计清单里 `Mesh` 与 `Report` 两型的**唯一**出处（§3.2 第 5、8 行）。
