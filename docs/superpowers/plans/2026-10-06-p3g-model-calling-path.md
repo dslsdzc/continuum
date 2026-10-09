@@ -1494,6 +1494,17 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo tree -p continuum-runtime --depth 1 --edges
 预期：全绿、0 warning；`cargo tree` 的**直接边**与开工前**逐项相同**
 （本计划不加任何 workspace 成员之间的边）。**实测对照，不据口径断言**。
 
+> **订正（2026-10-09，G Task 12 复核实测；原话照留）**：上面那半句按字面**为假**——
+> 本计划**确实加了两条直接边**，只是它们都是**外部 crate 的 dev 边**：
+> `crates/continuum-runtime/Cargo.toml` 的 `[dev-dependencies]` 加了 `async-trait` 与 `futures-core`，
+> 另把 workspace 的 `tokio` 加了 `time` feature（都在 `Cargo.toml` 的 Global Constraints 里写明）。
+> **它真正要判的那件事是括号里那一句——「不加任何 workspace 成员之间的边」**，而那一半实测成立：
+> `ALLOWED` 一字未改（Step 2 的 `git diff` 无输出），且 `every_crate_depends_only_on_its_allowed_set`
+> 逐对断言 `cargo tree --depth 1 --edges all` 的内部直接边与 `ALLOWED` 相等（绿）——
+> 那一条是**两侧**的（表里多的、crate 真依赖却没登记的，都红）。
+> **判据**：内部边由那条用例逐对钉住，外部 dev 边**不进 `ALLOWED`**（那张表只列 workspace 成员），
+> 故「与开工前逐项相同」这句话只在**内部边**这一层成立，字面读法（连外部边也算）不成立。
+
 - [ ] **Step 2: 复核「G 不加任何边」（本计划唯一的 `ALLOWED` 判据）**
 
 ```bash
@@ -1535,14 +1546,22 @@ grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
 | §3.5 截止两侧 + 只包住一次调用 | Task 8 的 `a_call_that_never_returns_hits_the_deadline` 两向 + `the_deadline_wraps_one_call_only`。
   **订正（2026-10-09，G Task 9 评审实测）：本格原先读起来像「§3.5 的截止面已覆盖」，而 `call_stream` 那一侧是零覆盖**——
   **把 `Some(limit)` 那整臂删掉，35 条全绿**（三个调用点全传 `None`；`StreamOutcome` 也没有 `Never`／`ReplyAfter` 一类的可配面）。
-  **故本格只覆盖 `call` 那一侧。** `call_stream` 的截止**记在 `docs/superpowers/p3g-followups.md` 的 M-9-7**（具名缺口，未指派），
-  **本格不得被读成「两侧都覆盖了」** |
+  **故本格只覆盖 `call` 那一侧。** `call_stream` 的截止**记在 `docs/superpowers/p3g-followups.md` 的 M-9-7**
+  （具名缺口；**收件人已于 2026-10-09 的 Task 12 对账改为具名「协调者」、并写明「在哪一步做」**——原文写的是「下一轮补这条用例的人」，那是一个角色、不是收件人），
+  **本格不得被读成「两侧都覆盖了」**。
+  **订正（2026-10-09，G Task 12 复核）：本格后半「只包住一次调用」的那一枚
+  `the_deadline_wraps_one_call_only` 是回归护栏、不是判别式**——它今天钉的是
+  「两次调用各成功 ＋ 适配器被调两次」（`tests/model_call.rs:1821`，实测），
+  而能把它与「截止被做成一次性的共享值」分开的那枚变异体**只能在改签名的前提下表达**
+  （`&mut Option<Duration>` ＋ `.take()`：`src/` 编得过、调用侧五处 `E0308` 编不过），
+  按本仓纪律「调用侧编译失败不算红」⇒ **没有判别式**（台账 **M-8-3**）。
+  **故本格后半不得被读成「有一个能把『一次一处』与『一次性共享』分开的判别式」。** |
 | §3.5 截止（`call_stream` 侧） | **无照片**——见上一格的订正与本计划台账 M-9-7。**本行是「找不到证据的不得标注为覆盖」的一个实例** |
 | §3.5 「丢弃流不是取消」两侧 | Task 9 的 `dropping_a_stream_does_not_cancel` 与 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id` |
-| §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 + Task 11 的三处（**若等价则据实合并**） |
-| §4.5 `NotRoutable` / `DuplicateModelCandidate` / `UnknownAvailability` 不可达 | 前者**构造性**（D 的样例，G 不重钉）；后者 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table`；第三 Task 11 的一一对应 |
+| §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 的**两处**。**订正（2026-10-09，G Task 12 复核）**：本格原写「Task 3 + Task 7 + Task 11 的三处」——**而计划 Task 11 那一条（`the_manager_of_the_availability_is_one_to_one_with_the_candidates`）实测与 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability` 同处代码、同形状入参、同一句断言（`asked == candidate_ids`），据实合并、未交付**（台账 **M-11-3**；交付文件的节头 `tests/model_call.rs:2743-2757` 记了理由与 `M6` 那枚变异体的实测）。**故「Task 11 的那一处」今天不存在**——它**不是丢掉了一个观测点，是那一个观测点本来就是等价的第二个落点**，覆盖不受影响。 |
+| §4.5 `NotRoutable` / `DuplicateModelCandidate` / `UnknownAvailability` 不可达 | 前者**构造性**（D 的样例，G 不重钉）；中者 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table`；**第三（`UnknownAvailability`）走 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability`**——**订正（2026-10-09，G Task 12 复核）**：原写「第三 Task 11 的一一对应」，**而 Task 11 那一条按 M-11-3 合并、今天在交付树里不存在**（同上一格）。 |
 | §5 G 不调 `usage()` | Task 10 的第一条（**否定式**） |
-| §6.1 五变体分类表 | Task 1 的四条（逐臂）+ Task 8 的四条（分类落到错误类型上） |
+| §6.1 五变体分类表 | Task 1 的**三条**用例（其中一条把五个变体**逐臂**钉死）+ Task 8 的四条（分类落到错误类型上）。**订正（2026-10-09，G Task 12 复核；原写「Task 1 的四条」）**：这是**手数的数**（本仓点过名的形状）——实测 Task 1 交付**三条**（`tests/model_call.rs:50`／`:102`／`:128`，本计划的 Task 1 一节也列三条），**五变体的覆盖不受影响**（那一条用例在**一条用例内**逐臂断言五枚） |
 | §8.2 `None` ≠ `Some(0)` 两向 | Task 7 的 `the_budget_reaches_the_policy_verbatim_both_ways` |
 | §9 记录面两处都空 | Task 11 的五张表行数不变（**否定式**） |
 | §1.3 用词纪律 | Task 4 的第三条守卫（**下界**，逃逸面写在文件头） |
@@ -1667,7 +1686,13 @@ Deadline 的 elapsed_ms 口径           **→ 已回写设计 §3.1 末段**：
   Task 5 钉住的是「`InvokeRequest` 放不下一个授权位」（强制点 (1) 在模型侧的落点）。
   强制点 (2)（`AuthorizedEffect`）与 (3)（逐枚签发的凭据）在 G 侧**没有照片，也不可能有**：
   G 既不做副作用、也不取凭据，故**没有可观察的行为面**——它们的证据是
-  **Task 4 的第四条模块面守卫（零引用）**，而那是一条**下界**。
+  **Task 4 的 `the_module_touches_neither_capability_nor_effects_nor_credentials`（零引用）**，
+  而那是一条**下界**。
+  **订正（2026-10-09，G Task 12 复核；原写「Task 4 的第四条模块面守卫」）**：那个序数**数不到**——
+  Task 4 的三条判据守卫按本计划 Task 4 Step 1 的**条目次序**是
+  第三条＝用词纪律（§1.3）、第四条＝中立性（§10.3）、第五条＝本条（零引用），
+  而按「三条判据守卫」数它又是第三条；**两种数法下「第四条」都不是它**。
+  **故按内容引、不再写序数**（本仓成例：改了上文，序数就会漂）。
 
 ### 四、设计 §14 的 15 条：本计划一条都不接，收件人照原文
 
@@ -1719,4 +1744,15 @@ Degraded 的降权判据                D §11 第 24 条 + 本设计 §13.2 的
                                   G 落地时**只核不改**（Task 12 Step 2 的那条 `git diff` 就是这次核对）。
                                   同理 `runtime → continuum-core` 与 `runtime → continuum-model-registry`
                                   也各自有了真使用点。**收件人：无（据实记，供后来者对账）。**
+                                  **订正（2026-10-09，G Task 12 复核实测；原话照留）**：上面
+                                  「F 是第一个（工具侧）」与「G 是第二个」**都测不成立**——
+                                  在 G 的分叉点 `9254108` 上 `git grep -n continuum_provider
+                                  9254108 -- crates/continuum-runtime/` **零命中**（F 的工具侧
+                                  `src/tool_call.rs` 用的是 `continuum_capability` / `continuum_effect`
+                                  / `continuum_policy`，**不引 `continuum_provider`**），故
+                                  **G 是这条边在 runtime 里的第一个使用点，不是第二个**。
+                                  `runtime → continuum-core` 同理：分叉点上 runtime 侧零引用，
+                                  首个引用是 G 的 `src/error.rs` 与 `src/model_call.rs`。
+                                  **对账结论不变**（`ALLOWED` 本来就含这两条，无登记动作要补），
+                                  改的只是「谁是第一个用的人」这一句事实。
 ```
