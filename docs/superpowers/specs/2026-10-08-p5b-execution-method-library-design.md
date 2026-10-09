@@ -187,6 +187,8 @@ impl MethodDomain {
     /// 本轮**是否有算子块作它的对家**（第 7 节、第 8 节 R2）。
     /// Software/Video/Research → true；ThreeD → false。
     /// 这是**本设计的决定**（来源是当前分块，不是规范），不是规范断言。
+    /// 注意：它是**域级**谓词；`Software` 里两条**条目级**的例外（`TDD`/`debugging`）
+    /// 另由 `UNREALIZED_BY_DESIGN` 承载（第 4.5 节），不并入本谓词。
     pub fn has_counterpart(&self) -> bool;
 }
 ```
@@ -278,8 +280,9 @@ impl MethodRegistry {
     pub fn new() -> Self;
 
     /// §187 的四份目录，逐名照录（第 5 节）。四条目录共 18 条。
-    /// realized_by 初始为空：`ThreeD` 的三条是**刻意**留空（无对家，第 7 节第 2 条），
-    /// 其余 15 条待各自的算子块经 bind 填入。
+    /// realized_by 初始为空：`ThreeD` 的三条**刻意**留空（域无对家，第 7 节第 2 条），
+    /// `Software` 的 `TDD` 与 `debugging` 两条**刻意**留空（条目无对家，第 4.5 节、判据 6），
+    /// 其余 13 条待各自的算子块经 bind 填入。
     pub fn seeded() -> Self;
 
     pub fn register(&mut self, entry: MethodEntry) -> Result<(), MethodError>;
@@ -304,14 +307,36 @@ impl MethodRegistry {
 `bind` 对未注册 id 返回 `NotFound`。三条判据与 `OperatorRegistry` 的两条同形
 （`registry.rs:24-48`）。
 
-**空的 `realized_by` 有两个来源，靠 `MethodDomain::has_counterpart` 分开。**
-一个空 `Vec` 既可能是「**无对家**」（`ThreeD`，第 7 节第 2 条），也可能是「**四块还没 bind**」。
-`MethodEntry` 本身分不清，故判据不能只看空不空，要用谓词一起判：
+**空的 `realized_by` 有三个来源：两个是「按设计留空」，一个是「漏 bind」。**
+一个空 `Vec` 可能是「**域无对家**」（`ThreeD`，第 7 节第 2 条）、「**条目无对家**」
+（`software/` 的 `TDD` 与 `debugging`，来源是 P5c 设计 §7.2），也可能是「**四块还没 bind**」。
+`MethodEntry` 本身分不清三者，故判据不能只看空不空，要**域级用谓词、条目级用名册**一起判：
 
-- `has_counterpart(ThreeD) == false` ⇒ 该域逐条**允许**为空，且**应当**为空（刻意留空）。
-- `has_counterpart(d) == true` ⇒ 该域逐条**必须非空**，空就是「漏 bind」。
-  这条断言在 P5b 自己的 crate 里**闭不了**——四块在别的 crate、在其后运行（第 6 节），
-  故它是**交给四块各自计划的判据**，并由整合作一次收口（第 10 节判据 6）。
+- **域级（谓词）**：`has_counterpart(ThreeD) == false` ⇒ 该域逐条**允许**为空，且**应当**为空。
+- **条目级（名册）**：`has_counterpart(d) == true` 而某条条目在 `UNREALIZED_BY_DESIGN` 里 ⇒
+  该条**允许**为空，且**应当**为空。
+- **其余任何空 `Vec`** ⇒ 「四块还没 bind」（漏 bind）。
+
+条目级的名册取常量（定义在 `continuum-method`）：
+
+```rust
+/// 「按设计留空」的条目，形状是 (领域名, 方法 id)，领域名与 `MethodDomain::as_str` 的取值对齐。
+/// 今日**恰为两条**：§187 目录里的 `software/TDD` 与 `software/debugging`——
+/// 两条方法名不是算子、本轮无算子对家（P5c 设计 §7.2 报出，协调者 2026-10-10 裁定，
+/// 理由写在第十节判据 6）。
+/// 这张表是判据 6 的**例外集**：它把「刻意留空」与「漏 bind」在条目级分开。
+/// 表必须**恰为**这两条——多一条、少一条、或写错一个名，判据 6 都红（第 10 节）。
+pub const UNREALIZED_BY_DESIGN: [(&str, &str); 2] =
+    [("software", "TDD"), ("software", "debugging")];
+```
+
+**这张表不是「注释里的一句豁免」，是判据的输入。** 域级有 `has_counterpart` 兜住 `ThreeD`；
+条目级若只写一句「`TDD`/`debugging` 除外」的散文，将来有人再留空第三条时无人会红——
+故例外集写成常量、并与判据 6 的两条断言绑在一起（第 10 节）。
+
+**`has_counterpart(d) == true` 的域里，「逐条非空」因此收窄为「除 `UNREALIZED_BY_DESIGN` 外逐条非空」。**
+这条断言在 P5b 自己的 crate 里**闭不了**——四块在别的 crate、在其后运行（第 6 节），
+故它是**交给四块各自计划的判据**，并由整合作一次收口（第 10 节判据 6）。
 
 **`register`/`resolve` 的具名消费点**：`register` 的唯一调用者是内部的 `seeded()`
 （四块被禁止调它），`MethodError::Duplicate` 只在这条路径上可达；方法侧的 `resolve`
@@ -374,14 +399,15 @@ impl MethodRegistry {
 **不得自造 `MethodEntry` 的字段、不得新建方法类型、不得注册进 `OperatorRegistry`**。
 每块对其领域目录里的**每一条已 seed 的 id** 调用一次 `bind(id, &[...])`——
 **「每条」是判据不是劝告**：`has_counterpart(该域) == true`（第 4.1 节），故该域每条条目的
-`realized_by` **必须非空**；漏 bind 一条即「空着」，由第 10 节判据 6 抓（该判据须由本表四块的
-计划各自承接，见第 4.5 节）。
+`realized_by` **必须非空**——**两条例外**：`software/` 的 `TDD` 与 `debugging`
+（列在 `UNREALIZED_BY_DESIGN`，第 4.5 节、判据 6），两条不是算子、本轮不 bind；
+其余漏 bind 一条即「空着」，由第 10 节判据 6 抓（该判据须由本表四块的计划各自承接，见第 4.5 节）。
 若某领域需要 §187 名之外的条目，**先报协调者**（那会动到第 8 节 R3/R6/R9 的裁决），
 不得自行 `register` 一个规范无来源的方法名。
 
 | 块 | 领域目录 | 要填的 id（§187 照录） | 边界 |
 |---|---|---|---|
-| **P5c**（代码领域算子） | `software/` | `planning` `TDD` `debugging` `worktree` `review` `fuzz` `verification` | `worktree` 指 §16 的 git worktree（`docs/spec/01-concepts.md` §16；`docs/spec/05-normative.md` 无 §16，实质在 `docs/spec/01-concepts.md`）——P5c 填其 `realized_by` 时须与 §16 的 `git worktree` 语义一致；`verification` 只填**代码域的验证算子 id**，不是 P5a 的完成判定（后者不注册为算子） |
+| **P5c**（代码领域算子） | `software/` | `planning` `worktree` `review` `fuzz` `verification`（**五条**）；`TDD` `debugging` **本轮不 bind**（`UNREALIZED_BY_DESIGN`，第 4.5 节、判据 6） | `worktree` 指 §16 的 git worktree（`docs/spec/01-concepts.md` §16；`docs/spec/05-normative.md` 无 §16，实质在 `docs/spec/01-concepts.md`）——P5c 填其 `realized_by` 时须与 §16 的 `git worktree` 语义一致；`verification` 只填**代码域的验证算子 id**，不是 P5a 的完成判定（后者不注册为算子） |
 | **P5d**（研究领域算子） | `research/` | `retrieval` `evidence-analysis` `contradiction-check` `citation-verification` | `contradiction-check` / `citation-verification` 对应 §330 的 `ContradictionCheck` / `CitationVerification`；`realized_by` 填的是**算子 id**，证据本身走 P5a（切分文档 §四第 1 条，四块**只产出** Evidence） |
 | **P5e**（媒体领域算子） | `video/` | `shot-analysis` `narrative-plan` `timeline-compose` `render-review` | 与 §32 剪辑链、§328 七种 Artifact 对齐；`timeline-compose` 的产物是 `Timeline`（§329），其 `ArtifactType` 变体由 P5e 一次性落地 |
 | **P5f**（图像领域算子） | **无目录可填** | —— | §187 没有 `image/` 目录；见第 8 节 R3。P5f **不得**自行建域或借 `3d/` 域 |
@@ -407,6 +433,8 @@ impl MethodRegistry {
    **不是漏填**，是没有对家。**这个区别必须落在可断言的谓词上，不能只靠注释**：
    空的 `Vec` 同时也是「四块还没 bind」的形状，若无谓词，第 10 节判据 6 就分不清
    「`3d/` 刻意留空」与「某块漏绑」（第 4.5 节）。P5f 那一行（第 6 节表）不存在条目，故不适用。
+   **条目级另有一类「按设计留空」（`software/` 的 `TDD`/`debugging`），由 `UNREALIZED_BY_DESIGN`
+   承载**（第 4.5 节、判据 6）；两张名册各管一级，互不替代。
 3. **`Scene` 的归属不动。** P1 的设计 `:168` 把 `Scene` 列为 P5 的类型，但哪一块负责它
    **本轮无解**（切分文档 §八已记）；本设计**不认领**，也不把它牵进 `3d/` 的方法条目。
 
@@ -483,8 +511,10 @@ R2 被重新裁决（例如 `3d/` 分给了某一块）时，`has_counterpart` �
   （例如 image 域并入既有某目录而 P5f 仍独立），`bind` 须改成追加或显式合并。**收件人：协调者。**
 
 **打 ⚠️ 者**（找不到规范判据、或两处来源相抵，据实留成缺口）：R2、R3、R4、R5、R8、R9。
-**这些项本设计均未发明填法**，只登记入口形状（`MethodDomain` / `select` / `has_counterpart`）
-并把输入来源留空。**R6 与 R7 是设计取向，不是缺口**。
+**这些项本设计均未发明填法**，只登记入口形状（`MethodDomain` / `select` / `has_counterpart` /
+`UNREALIZED_BY_DESIGN`）并把输入来源留空。**R6 与 R7 是设计取向，不是缺口**。
+**另有一处已裁定的结构不匹配，不是缺口而是收窄**：`software/` 的 `TDD` 与 `debugging` 两条
+方法名不是算子，判据 6 的「逐条非空」据此收窄（第 10 节判据 6；报出方是 P5c 设计 §7.2）。
 
 ---
 
@@ -522,14 +552,42 @@ R2 被重新裁决（例如 `3d/` 分给了某一块）时，`has_counterpart` �
 4. **两条错误路径各一枚**：`register` 撞同名 → `Duplicate`；`resolve` 未注册 → `NotFound`；
    `bind` 未注册 → `NotFound`。
 5. **选取确定性**：同一 registry 对同一 domain 两次 `select` 给出同一序列，且序列按 id 升序。
-6. **空与漏由谓词分开断，不能只看空不空**（第 4.5 节、第 7 节第 2 条）：
-   - **无对家的那一侧**：`has_counterpart(ThreeD) == false`，且 `select(ThreeD)` 的条目
+6. **空与漏由谓词与名册分开断，不能只看空不空**（第 4.5 节、第 7 节第 2 条）：
+   - **域无对家的那一侧**：`has_counterpart(ThreeD) == false`，且 `select(ThreeD)` 的条目
      `realized_by` **逐条为空**——这条断言在 R2 裁决前成立，裁决后按裁决改。
-   - **有对家的那一侧**：`has_counterpart(d) == true` 的每个域（`Software`/`Video`/`Research`），
-     在相应算子块的工作完成后，其条目 `realized_by` **逐条非空**——**任一条为空即「漏 bind」**，
-     不是「刻意留空」。
+   - **有对家的域那一侧**：`has_counterpart(d) == true` 的每个域（`Software`/`Video`/`Research`），
+     在相应算子块的工作完成后，其条目 `realized_by` **除 `UNREALIZED_BY_DESIGN` 所列者外逐条非空**——
+     **任一条为空且不在该表内即「漏 bind」**，不是「刻意留空」。
+   - **例外集恰为两条，两侧都钉**（第 4.5 节）：`UNREALIZED_BY_DESIGN` 逐项等于
+     `[("software", "TDD"), ("software", "debugging")]`——期望值在用例里**写成字面**，
+     **不从该常量自身取**（否则断言恒真，是自证）；多了第三条即红。
+     同时，表内每个名**在 `seeded()` 的目录里存在**，且其 `realized_by` 此刻**确为空**——
+     名写错、或该条后来被 bind 上，都红。这样「再留空第三条而不给理由」逃不掉。
    - **这条判据在 P5b 自己的 crate 里闭不了**（四块在别的 crate、在其后运行），
      它是**交给四块各自计划的判据**（第 6 节表），并由整合作一次收口。
+
+   **为什么把「逐条非空」收窄成「除这两条外非空」（2026-10-10 协调者裁定）。**
+   事实两条（逐行实测，报出在 P5c 设计 §7.2）：
+   `TDD` 的全部内容是**次序**（先写测试、后写实现），而 `MethodEntry.realized_by` 的类型是
+   `Vec<String>`（第 4.3 节），即**算子 id 的一个集合**，**表达不了次序**——填两枚 id 会让
+   `TDD` 与「先实现后补测试」在登记面上**不可区分**，而两者的差别正是这条方法的全部内容；
+   §188（`docs/spec/04-method.md:159-206`）逐字写「TDD = Implementation Discipline」（`:166-167`）
+   并给出那条序（`:180-186`），同样不给它算子对家。`debugging` **在链上没有对应的步骤**
+   （《总纲》`:1448` 的六步与 §186 `:57-77` 的十行都没有调试）——它与切分文档 §八的
+   「`3d/` 有目录、无对家」是同一种处境。**故认这两条无算子对家**，「非空」收窄为名册外非空。
+
+   **否掉的两案与理由**（不写「取第三案」了事）：
+   - **给 `realized_by` 加「次序」维度**：改的是本设计的**冻结类型**，而「按序解释」对另外六条
+     （`planning`/`worktree`/`review`/`fuzz`/`verification` 与其它域）**没有意义**——这是**跨块**的
+     语义分歧，不该由两条条目触发。
+   - **给 `MethodEntry` 加一条非算子的承载**（如指向 P2 的 `create_task_workspace` 的函数名）：
+     同样改冻结类型，且第 3.2 节已明写本层**不解析** `realized_by`——加一个不解析的字段等于
+     加一个**死字段**（本设计已为此删过 `purpose`，第 4.3 节）。
+
+   **收件人（具名）**：本条的性质是「**两条 §187 方法名不是算子**」。若将来规范要给它们算子对家，
+   那一次改动**须先给出端口类型的来源**——**规范没有一处给过「调试的输入与产物是什么」**
+   （已读范围实测，同 P5c 设计 §7.2 第 2 条），而端口类型正是发明的实质内容。
+   **收件人：规范维护者 ＋ 协调者。**
 
 ---
 
