@@ -329,7 +329,7 @@ continuum-budget     ← continuum-semantics, continuum-persist
 | Candidate Retriever | 建：**接口在本层，来源在调用方**。`retrieve(&Mention, &CandidateSources) -> CandidateSet`，其中 `CandidateSources` 是调用方装配好的若干来源（§4.3） |
 | Reference Resolver | 建（§4） |
 | Alias Resolver | 建；作为 `CandidateRetriever` 的一个来源接入，不是独立的解析路径（§4.6） |
-| Temporal Resolver | 建：`resolve_temporal(&Mention, &Now) -> TemporalBinding`。**「Now」是入参**（本层不取系统时钟，与 P2 的入口同一条纪律） |
+| Temporal Resolver | 建：`resolve_temporal(&Mention, &Now) -> TemporalBinding`。**「Now」是入参**（本层不取系统时钟，与 P2 的入口同一条纪律）。**它的词表与日历口径是本层自定的三处判据，落在 §16 第 5c 条** |
 | Ambiguity Manager | 建：聚合同一次输入里所有 mention 的 `ResolutionResult`，产出 `CanonicalRepresentation` 或挂起（§3.3） |
 
 **「联合解析」（§198）没有落点**：§198（`docs/spec/04-method.md:552-593`）要求多个模糊引用
@@ -2316,6 +2316,18 @@ P2 的设计 §8.2（`docs/superpowers/specs/2026-10-02-p2-boundary-layer-design
     `crates/continuum-canonical/src/surface.rs` 的相应注释里。
     **收件人：规范维护者**（**§16 原第 3 条只管 `Mention.kind` 的取值域、第 5 条只管 §197 的来源零个，
     词表这一条原先两处都没有落点**——这条是补那个空位的）。
+5c. **时态解析的三处判据是本层自定的**（设计 §3.1 与 §270，**2026-10-09 补入，P4 Task 2 实现期查出**）：
+    §270 与 §196／§197 都**不给时态词表**，**§196 的十类输入里没有「时态」一类**，
+    故本层自定了三处：① `RELATIVE_DAYS` **18 条**相对时态字面表（其中 7 条是英文条目）；
+    ② **恒定 86400000 毫秒/日** 的日历假设（不处理时区、夏令时与周起始，`下周 = +7 日` 是本层的读法）；
+    ③ `TemporalBinding` 的两支形状。
+    **与本节第 5b 条同源**：那一处补的是代词与上下文指代的**词表空位**，这一处补的是时态的**词表与日历空位**——
+    **两张表都不是从规范推出来的**，是本层的发明判据。
+    **一处今天无照片**：`RELATIVE_DAYS` 的**英文半边**零照片——实测是把它删掉看门是否变红：
+    **删去 7 条英文条目后跑全量门，128 条 `test result` 行、0 红、exit 0**。
+    要钉住英文半边，须补一条英文夹具（例如 `resolve_temporal(&{text:"tomorrow"…}, &now) == At(DAY_MS)`），
+    Task 2 未补。
+    **收件人：规范维护者**（词表与日历口径）。
 5. **§197 的七种候选来源今天零个**（§4.3）：本层只定接口（`CandidateSource`），
    **不内置任何实现**；`alias registry` 是唯一在本层的来源。
    **收件人：实体注册表的持有方（P3 A/B/C/D）＋《工程》§2.1 的组件表**

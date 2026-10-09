@@ -591,6 +591,18 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
 - Create: `crates/continuum-canonical/tests/resolver.rs`
 - Create: `crates/continuum-canonical/tests/compile_fail/*.rs`（追加）
 - Modify: `crates/continuum-canonical/src/lib.rs`
+- Modify: `crates/continuum-canonical/src/ambiguity.rs`、`crates/continuum-canonical/src/canonical.rs`
+  ——**本 task 不是只新建文件**：`ResolutionResult` 与它的载荷属本 task（就写在下面的 Produces 那一行），
+  而 Task 2 只能落 **「是哪一态」那一层的前向声明**（载荷留空，`ambiguity.rs` 的文件头写明接缝）。
+  本 task 补载荷，即改 `ambiguity.rs` 的定义与 `canonical.rs` 的 `finish` 签名。
+- Modify: `crates/continuum-canonical/tests/canonical.rs`
+  ——**Task 2 的 7 条用历经 `finish` 的夹具直接构造四态**，补载荷时这 7 条要一并改（不是新增一批）。
+  > **本条来历（2026-10-09，P4 Task 2 实现期查出并交裁，裁定：写进本 task 的 Files）**：
+  > 计划 Task 2 那一节把 `finish` 排在 Task 2，而本 task 的 Produces 才给出 `ResolutionResult` 的载荷，
+  > **两处次序相抵**。Task 2 报了替代方案两条并都否掉（照录载荷⇒编不过；自定二元类型＋本 task 写映射⇒
+  > 发明计划外的公开名字、改掉简报逐字给定的签名）。**判据**：**一条跨 task 的改法只写在别处的正文里、
+  > 本 task 的 Files 不列它，brief 就看不到它**——`scripts/task-brief` 按 task 切文本，
+  > **落在 Files 之外的指令不进 brief**。
 
 **Interfaces:**
 - Consumes: Task 3 的 `EntityId` / `Candidate`
