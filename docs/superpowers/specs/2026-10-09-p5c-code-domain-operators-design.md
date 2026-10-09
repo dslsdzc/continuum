@@ -121,12 +121,15 @@
 CodeError
 ```
 
-另有一枚**常量**（不是类型）：`ALL_OPERATORS: [Operator; 9]`，它承载的正是 `Operator`（P1 的类型）。
+另有一枚**构造函数**（不是类型）：`all_operators() -> [Operator; 9]`，它承载的正是 `Operator`（P1 的类型）。
+（**这里不是 `const`**：`Operator` 在 crate 外构造不出常量值，两条理由见 §3.2。）
 **本块不新造算子类型**——§3.2 的登记形态照 P1 与 P5b。
 
 **本块持有的类型只有一枚，且它只承载注册期的两件事**（§3.2 与 §3.5 的形状校验）。
 **这不是省事**：切分 §四第 7 条要求「判据只许有一处」，而本块**独占**的判定逐条列在 §2.4（**十件**），
-本层其余每一件判定都在仓里已有落点（§3.5、§3.6 逐条给）。
+本块**用到的**其余判定都在仓里已有落点（§3.5、§3.6 逐条给）。
+**这里不写成「本层每一件判定」**：那会把本块**不持有**的那些也算进来，而它们之中有的虽属别的块、
+今天在仓里**并无落点**——见下面「本块不持有的判定」一栏里 P5a 的四件（其证据充分性判据记为 OPEN-001，尚无判据）。
 
 **不新增第二个错误类型**：切分 §二第 4 条把「第二份错误类型」的禁令写给了 `Checkpointable` 那一处（归 P5e）；
 本块同理不另造。`OperatorError`（`crates/continuum-operator/src/registry.rs:7-12`）与 `MethodError`（P5b 设计 §4.4）
@@ -140,6 +143,9 @@ CodeError
 **本块不持有的判定**：证据的充分性、覆盖、verifier 的级别、完成判定（全部 P5a）；方法的登记与选取（P5b）；
 复用的四条件（P1 的 `can_reuse`，§3.6）；端口兼容（P1 的 `compatible`，§3.5）；后端是否在候选内（P1 的
 `is_candidate_backend`，§3.5）。
+**这八件里，落到别块且今天在仓里已有落点的是后四件**（P5b 的方法登记、P1 的三件）；
+**前四件（P5a 的四件）今天在仓里没有落点**——就其中第一件（证据的充分性）而言，P5a 设计 §3 把「一堆有效证据合起来是否算满足」记为 **OPEN-001**，并明写本块**不判**它、也不宣布关闭它。
+「不持有」只说判定归谁，**不含「那个落点已存在」**。
 
 **上面那八条判定「不持有」的反面是下面的 §2.4**：规格没给、而本设计不得不定的每一处判定，
 在那里逐条给出**代价、边界、落点与具名收件人**。**没进 §2.4 那张表的判定，本块一处也没有定。**
@@ -177,7 +183,7 @@ L2 工作区的创建在 P2（第 5 层），而本块只在**声明**里命名�
 | 3 | 9 枚算子各自的 `backend_candidates` 名单 | §245 `:754-773` 只给「一个 Operator MAY 有多个 backend」与一个例（`Transcribe` 三 backend），**不给取值域** | §3.3 第 3 条（`code-workspace` 只列 §255 的两种形态，不列 §255 `:1029-1037` 的五种） | 名单是「Router 可以选的东西」，**不判**「Router 实际选哪个」（§245 `:773` 逐字把选择判给 Router） | §3.2 表的 backend 列；照片 §10.2 第 (h)(p) 条 | 规范维护者 |
 | 4 | 「逐位可复现的 backend」封闭名单（5 项）与注册期规则 | 无（§245 只说多 backend） | §3.5：远程执行不可用（性能代价，非正确性代价） | **拦不住**「候选都可复现、但真实输入不在端口上」那一类（§3.5 末已写明） | `register_code_operators`（§3.2）的核；错误臂 `CodeError::UnverifiableDeterminism`；照片 §10.2 第 (c)(d) 条 | 规范维护者（§11 第 7 条） |
 | 5 | §3.4 边表的**边判据** | §186/《总纲》§8.3 给的是**步骤名与步骤序**；§239 `:654` 只给「运行时 MUST 拒绝不兼容连接」 | 无（它是注册期的相容性核对） | 它只判**相邻两枚的 schema 相交**；**不判**「图上的边该不该存在」（那是 Planner 的构造） | §3.4 边表；照片 §10.2 第 (j) 条 | 规范维护者（以「§3.2 第 N 行」为依据的那几行） |
-| 6 | L2 工作区**落成算子**、Integration Gate **不落成算子** | §16 `:788-835` 说它是代码任务的基础，**没说它是不是算子**；§257 `:1053-1069` 说 Gate 的 MUST，**没说它的执行体** | §4.2 逐条给了两半的代价；替代方案（把 Gate 也算子化）被否的理由是「批准值没有位置装」 | 「每 Intent 一枚」这条**在类型层不可钉**（§4.2 末） | §4.2 的裁定；声明落点 `ALL_OPERATORS` 第 1 行 | 协调者（§11 第 4 条） |
+| 6 | L2 工作区**落成算子**、Integration Gate **不落成算子** | §16 `:788-835` 说它是代码任务的基础，**没说它是不是算子**；§257 `:1053-1069` 说 Gate 的 MUST，**没说它的执行体** | §4.2 逐条给了两半的代价；替代方案（把 Gate 也算子化）被否的理由是「批准值没有位置装」 | 「每 Intent 一枚」这条**在类型层不可钉**（§4.2 末） | §4.2 的裁定；声明落点 `all_operators()` 返回的第 1 行 | 协调者（§11 第 4 条） |
 | 7 | §7.1 表里 `realized_by` 的映射 | §187 `:116-142` 只给方法名；P5b 的 `MethodEntry` 只给 `Vec<String>` 的容器 | §7.2：`TDD` 与 `debugging` 填空，代价是 P5b 判据 6 在 `Software` 域变红 | 它**表达不了次序与环境**（§7.2 第 1 条） | §7.1 表；入口 `bind_code_methods`；照片 §10.2 第 (k) 条 | P5b 的持有方 ＋ 协调者（§11 第 2 条） |
 | 8 | 链上**哪几步产 `Evidence`** 的分界 | §89 `:923-945` 只说「工具结果必须转换成 Evidence」，**不说每一步都产** | §5.2：第 1–4 行四枚不产证据，故这四步在链上没有「语义成败」的证据承载——它们对不对只能靠各自的审查（§229 的 Plan Review，P4）与下游算子的证据间接体现 | 它**不判**「一条证据够不够」（那是 OPEN-001，P5a 设计 §3 的处置） | §5.2 表（第 1–4 行四枚不产证据，其制品的存在性由 §266 第 1 项判） | P5a（§11 第 1 条） |
 | 9 | 迁移档号 `150` | 切分 §二第 5 条只要求「写死后报出」，**不分配号** | §9.3：无（零表，登记的是归属不是 SQL） | 它**只声明本块那一段**；P5d/P5f/P6 三段本块无从声明 | §9.3 | 协调者（§11 第 6 条） |
@@ -242,13 +248,16 @@ backend 候选**在规范未给处由本设计定，并逐行标出「定」字�
 
 ```
 /// 本领域 9 枚算子的全集。顺序即 §3.2 表的行序。
-pub const ALL_OPERATORS: [Operator; 9];   // 不变量：id 逐枚不同、version 均为 1
+/// 不变量：id 逐枚不同、version 均为 1。
+/// **这里不是 `const`**：理由见下（`Operator` 在 crate 外构造不出常量值）。
+/// 数目 9 写在**返回类型**里，使清单个数的改动编译期可见。
+pub fn all_operators() -> [Operator; 9];
 
-/// 把给定的一批算子注册进给定注册表（`&ALL_OPERATORS` 是常规实参）。
+/// 把给定的一批算子注册进给定注册表（`&all_operators()` 是常规实参）。
 /// **先核后写**：先逐枚核 §3.5 的声明，全部通过后再逐枚注册；任一枚不成即返回 `Err`，
 /// 此时注册表的内容与调用前逐枚相同（不留半注册）。
 /// 一枚代码域算子与既有算子同 (id, version) 是注册期的错误，**不静默跳过**。
-/// **参数带一批算子**（不是只吃 `ALL_OPERATORS`）：§3.5 那条规则要能对**任意** `Operator` 触发，
+/// **参数带一批算子**（不是只吃 `all_operators()`）：§3.5 那条规则要能对**任意** `Operator` 触发，
 /// §10.2 第 (d) 条才写得出来。
 pub fn register_code_operators(
     registry: &mut OperatorRegistry,
@@ -283,9 +292,16 @@ pub enum CodeError {
 的第二套词汇表。**判定是同一件事则合并，是两件事则分开**——同一条判据在 §7.1 末用在了 `MethodError` 上，
 方向相反。
 
-`ALL_OPERATORS` 是**常量不是构造函数**：本仓的既有约定是「枚举/清单带 `ALL` 常量 + 数目断言」
-（`crates/continuum-artifact/src/artifact.rs:28`、`crates/continuum-events/src/audit.rs:38` 的
-`[AuditKind; 8]`），本块照办，并把「9」写成类型的一部分（`[Operator; 9]`），使清单个数的改动**编译期可见**。
+`all_operators()` 是**函数不是常量**。**这里不是 `const`**，两条理由各自独立成立：
+其一，本仓带 `ALL` 常量的既有做法（`crates/continuum-artifact/src/artifact.rs:28` 的
+`ArtifactType::ALL`、`crates/continuum-events/src/audit.rs:38` 的 `AuditKind::ALL`）**成立的前提是那些类型无字段**
+（实测两处都是无字段枚举，取值可在 `const` 中直接枚举），`Operator` 不满足这个前提；
+其二，`Operator` 含 `OperatorId`（`String`，**字段私有**，`new` 不是 `const fn`，
+`crates/continuum-operator/src/definition.rs:24-27`）与三枚 `Vec` 字段
+（`input_schema` / `output_schema` / `backend_candidates`，`:79-88`），
+故在 crate 外**构造不出 `Operator` 的常量值**。
+**引用一条既有约定时要连它的成立条件一起搬**。数目 9 改由**返回类型**承载
+（`[Operator; 9]`），仍使清单个数的改动**编译期可见**——这正是本行要保住的那条性质。
 
 ## 3.3 逐枚的判定理由（只写需要解释的）
 
@@ -723,10 +739,10 @@ pub fn bind_code_methods(registry: &mut MethodRegistry) -> Result<(), MethodErro
 **本函数不做二次登记**：不 `register` 方法条目（P5b 设计第六节：四块**不得**自造 `MethodEntry`），
 七条 id 由 P5b 的 `seeded()` 给出。
 
-**`bind` 的参数是文本**，故上表的值是字符串，**本块无法在编译期核对它们与 `ALL_OPERATORS` 的 id 一致**
+**`bind` 的参数是文本**，故上表的值是字符串，**本块无法在编译期核对它们与 `all_operators()` 的 id 一致**
 （P5b 设计 §3.2 末已把这条弱引用的无照片写清）。本块的补件是**运行期的一条用例**（§10.2 第 (l) 条）：
 对每一条非空 `realized_by` 里的每个串，`OperatorRegistry::resolve` 必须成功——
-这条用例**在本块的 crate 里闭得上**，因为本块同时持有 `ALL_OPERATORS` 与 `MethodRegistry`。
+这条用例**在本块的 crate 里闭得上**，因为本块同时持有 `all_operators()` 与 `MethodRegistry`。
 **这是 P5b 所说「消费块才能核」的那个消费块之一**。
 
 ## 7.2 两条**无对家**的 `software/` 条目：`TDD` 与 `debugging`
@@ -869,17 +885,17 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
 
 ## 10.1 清单的逐项守卫
 
-- `ALL_OPERATORS`：`len() == 9`，且 `id` 逐枚不同（两两比较，不是只查总数），
+- `all_operators()`：`len() == 9`，且 `id` 逐枚不同（两两比较，不是只查总数），
   且每枚的 `version == 1`。
 - `CodeError`（2 臂）：两条错误路径各被覆盖一枚（§10.2 第 (b) 与 (d) 条即它们）。
-- §3.5 的确定性名单（5 项）：一条**逐项**断言，且与 `ALL_OPERATORS` 里
+- §3.5 的确定性名单（5 项）：一条**逐项**断言，且与 `all_operators()` 里
   `determinism == Deterministic` 的那些算子的候选逐项比对（不是抽样）。
 
 ## 10.2 判定侧：正例 + 反例成对（缺一条即不算钉住）
 
 | # | 用例 | 钉的是哪一侧 |
 |---|---|---|
-| a | 以 `&ALL_OPERATORS` 调 `register_code_operators` 注册 9 枚后，逐枚 `resolve` 成功 | 注册的正例 |
+| a | 以 `&all_operators()` 调 `register_code_operators` 注册 9 枚后，逐枚 `resolve` 成功 | 注册的正例 |
 | b | 同一注册表注册两次 ⇒ `Err(CodeError::Registry(OperatorError::Duplicate { .. }))`（**不是**静默覆盖） | 注册的反例（§3.2：那一臂是 P1 的判定，本型只带出来） |
 | c | `determinism == Deterministic` 的每一枚算子，其每个 backend 都在 §3.5 的名单内 | §3.5 的规则（正例） |
 | d | 造一枚 `Deterministic` 但候选含名单外 backend 的算子，以它连同若干合法算子调 `register_code_operators` ⇒ `Err(CodeError::UnverifiableDeterminism { .. })`，**且注册表内容与调用前逐枚相同**（先核后写，不留半注册） | **fail-open 的那一侧**（§3.5）；「注册表未变」那一半钉的是同一条规则的**写入面** |
@@ -891,12 +907,12 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
 | j | §3.4 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的型**，不是「两侧相等」）。**`code-plan` 那一行除外**（其输入由装配方以 `Json` 值投射，不由任何算子提供，见 §3.4） | §239 的注册期一半（§3.4） |
 | k | 七条 `software/` 方法的 `realized_by` **逐条**等于 §7.1 表（含 `TDD` 与 `debugging` 为空 `Vec`） | §7.1 的登记（**逐条**，不是「非空即过」） |
 | l | 五条非空 `realized_by` 里的**每个串** `OperatorRegistry::resolve` 成功 | §7.1 末（P5b 的文本弱引用的运行期补件） |
-| m | `ALL_OPERATORS` 的 9 个 id 里有 **8 个**出现在 §7.1 表的非空 `realized_by` 里；**手写那 8 个的名单**（`code-workspace` `code-plan` `code-decompose` `code-spec-review` `code-quality-review` `code-test-run` `code-fuzz-run` `code-verify`），**`code-implement` 不在其中**（见下段） | §7.1 与 §3.2 之间的逐枚对应（这条钉的是「目录条目与算子集互相对得上」） |
+| m | `all_operators()` 的 9 个 id 里有 **8 个**出现在 §7.1 表的非空 `realized_by` 里；**手写那 8 个的名单**（`code-workspace` `code-plan` `code-decompose` `code-spec-review` `code-quality-review` `code-test-run` `code-fuzz-run` `code-verify`），**`code-implement` 不在其中**（见下段） | §7.1 与 §3.2 之间的逐枚对应（这条钉的是「目录条目与算子集互相对得上」） |
 | n | `CodeError` 与 `MethodError` 是两个不同的类型（`bind_code_methods` 的返回类型是 `Result<(), MethodError>`，不包进 `CodeError`） | §7.1 第 4 段（判定是两件事则分开） |
 | o | §3.6 的照片：`code-test-run` / `code-verify` 两枚的 `cache_key` 为 `Some`，且四条件齐时 `can_reuse` 为真；`code-workspace` / `code-plan` / `code-decompose` / `code-implement` / `code-spec-review` / `code-quality-review` / `code-fuzz-run` 七枚为 `None` | §3.6 的**逐枚**（不是抽样）；其中 `code-workspace` 那一枚是 §3.3 第 3 条的**照片** |
 | p | `code-workspace` 的两个 `backend_candidates` 逐名等于 `WorkspaceBackend` 两臂的编码（`crates/continuum-workspace/src/persist.rs:177-182` 的 `backend_str`，即 `"worktree"` 与 `"overlay"`） | §4.2 的「两个候选名与 P2 已落地的两臂对应」（§3.5 末：以编码为准，不取 §255 的散文形） |
 
-**一条预防**：第 (m) 条的期望清单**必须手写**。若写成遍历 `ALL_OPERATORS`、再对每枚去
+**一条预防**：第 (m) 条的期望清单**必须手写**。若写成遍历 `all_operators()`、再对每枚去
 `realized_by` 里找，它测的是「每个算子都在某个 `realized_by` 里」——**而「某条目录条目绑的算子
 是否存在」不会被它测到**（那是第 (l) 条），反过来「有没有孤儿算子」也不会被 (l) 测到。
 **语料从被测清单里取就是恒真的假照片。**
@@ -920,7 +936,7 @@ P5b 设计 §5.1 末的 R6 把「§186 的流程名（如 `spec-review`、`quali
 | **取反**：`register_code_operators` 改成边核边写（先注册前几枚，遇到违规才返回） | d 的第二个子例（注册表内容与调用前不同） | c、a（合法批次两侧都绿） |
 | **放宽**：把 `code-workspace` 的 `determinism` 改成 `Deterministic` | o 的 `code-workspace` 那一枚（`None` 变 `Some`）、g 的第 1 行 | c（`worktree` / `overlay` 两个候选**都在** §3.5 的名单里，故注册期那条规则**不响**——见 §3.5 末）、p |
 | **收紧**：把 `code-test-run` 的 `determinism` 改成 `NonDeterministic` | g 的第 7 行、o 的第二组 | c、a、p |
-| **移除**：把 `code-fuzz-run` 从 `ALL_OPERATORS` 删掉（8 枚） | `len() == 9`、a 的对应枚、k 的 `fuzz` 行、m（手写的那 8 个 id 名单里少一个） | 其余 |
+| **移除**：把 `code-fuzz-run` 从 `all_operators()` 删掉（8 枚） | `len() == 9`、a 的对应枚、k 的 `fuzz` 行、m（手写的那 8 个 id 名单里少一个） | 其余 |
 | **取反**：把 `TDD` 的 `realized_by` 从空改成 `["code-implement", "code-test-run"]` | k（§7.1 表的 `TDD` 行） | l（那两个 id 都能 resolve，故 l 仍绿——**这一档若不红，说明 k 是按「非空即过」写的**） |
 | **取反**：把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`（去掉 `Json`） | j 的第 5 行（下游的每一型都要能找到） | 其余各行 |
 | **等价变异**：把某枚算子的 `backend_candidates` 里两项**换序** | **全绿**——这是一枚**等价变异体**（候选列表无序，本块没有任何断言读它的次序）。**要打红它必须换变异体**：删掉一项，那时 c 或 p 红 | —— |
@@ -1037,7 +1053,7 @@ P5e 已把该条的成立条件记成对 P5a 的一枚假设（P5e 设计 §13 �
 8. **`code-workspace` 的每轮重建代价**（§3.3 第 3 条）：它声明 `NonDeterministic` 故不进 §305 的复用。
    **这不是缺口，是取 fail-closed 的代价**；据实记在此处，免得被读成「忘了声明 `Deterministic`」。
 9. **本块今天没有生产调用方的落点，逐类列出**：三处登记入口 `register_code_operators`（§3.2）、
-   `bind_code_methods`（§7.1）、`ALL_OPERATORS`（§3.2）；§3.2 表里的九枚 `determinism` 声明；
+   `bind_code_methods`（§7.1）、`all_operators()`（§3.2）；§3.2 表里的九枚 `determinism` 声明；
    以及 §5.2 的四条证据产出面（后者的调用方是装配方，本块不建那个包装，§6.2）。
    **这不是本块的缺口，是第 3 层的**（切分 §四第 4 条禁止 P5 自建执行路径；P1 设计 §18 已有同形的一条；
    拍照的限制见 §10.5）。
