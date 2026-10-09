@@ -816,7 +816,11 @@ G 没有可半写的副作用，而这条断言把它钉成事实而不是声明
 
 1. **G 是 Runtime 的一条路径**（§1.2，总纲 §1）。F 的归属与它同源、同址。
 2. **`continuum-runtime` 的 `ALLOWED` 条目已含 G 需要的全部 crate**（实读
-   `crates/continuum-runtime/tests/dependency_direction.rs:164-179`）：
+   `crates/continuum-runtime/tests/dependency_direction.rs` 的 `("continuum-runtime", &[…])` 那一条
+   ——**订正 2026-10-09 合入前终审实测**：本行原引 `:164-179`，而那个区间**不承载**下面这几个 crate
+   （`graph`(`:180`)／`model-registry`(`:181`)／`persist`(`:182`)／`provider`(`:183`) 全在区间之外）；
+   该条目实际在 **`:172-189`**（键在 `:173`），与本设计 §10.3 末段自己写的读数一致。
+   **行号只作当时读数**）：
    `continuum-provider`（注册表与适配器句柄）、`continuum-model-registry`（候选集与 `rank`）、
    `continuum-persist`（`Tx`）、`continuum-core`（`ModelId` / `InvokeRequest` / `ProviderError` /
    `ProviderHealth`）、`continuum-graph`（`FailureClass`）。
@@ -1050,7 +1054,7 @@ G 侧的元素类型就是 `RoutableModel`（字段私有、唯一构造点）�
 | §11 第 24 条（`:1361-1364`） | `ProviderHealth::Degraded` 的降权判据规范未给；收件人规范维护者 | **退**：降权是**排序策略**的事（D 的 `RankingPolicy`），G 不排序；但 G 是 `availability` 的**唯一生产方**，故**「这条判据缺了会让 G 送出的 `Degraded` 在 D 的基线里不产生任何效果」**据实记在此处，续指规范维护者 |
 | §7.1（`:1044-1055`） | 「失败检测与升级触发……那是**子项目 G**的活」 | **收一半、退一半**（§6.4）：收分类、退升级触发（三条判据） |
 | §6.3（`:978-1007`） | `ExecutionProfile.cost_budget` 的类型收紧未做；收件人协调者 + 语义层 | **退**：`cost_budget` 不是 G 的字段（G 只碰 `timeout_ms`，且是以值，§3.5） |
-| 计划 `## 遗留`（`:1576-1591`） | `BudgetView` 的 `None` ≠ `Some(0)` 谁守；**收件人：驱动侧的投影实现与子项目 G** | **接**（§8.2），两向对钉 |
+| 计划 `## 遗留`（`:1586-1601`；旧读 `:1576-1591`） | `BudgetView` 的 `None` ≠ `Some(0)` 谁守；**收件人：驱动侧的投影实现与子项目 G** | **接**（§8.2），两向对钉 |
 | §11 第 4、6、7、8、9、10、11、14、16、17、19、21 条 | 规范级未决（§84 的语义 / `Cost`·`Latency` 的复用 / 三处画像清单 / 子维度分层 / `failure_modes` 词表 / §19 阈值 / §249 迁移关系 / 迁移号 / 初步画像 / `version` vs `time_range` / 上下文长度 / `Tier 1 Low`） | **退（逐条一句）**：这些的收件人是**规范维护者 / 复审者 / 协调者 / D 的实现者**，**没有一条落在模型调用路径上**——G 不读画像字段、不打分、不管迁移。**本子项目一条都不发明** |
 
 **记录为「不经手」的 4 条**（收件人不是 G，我看过并判过它们不归 G）：

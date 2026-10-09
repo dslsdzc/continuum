@@ -133,7 +133,10 @@ ls crates/continuum-runtime/src/error.rs crates/continuum-runtime/src/tool_call.
 
 - 工具链固定 rustc 1.95.0 / cargo 1.95.0，edition 2024。
 - **依赖方向禁止反向。本计划不新增任何 workspace 成员之间的依赖边**：`continuum-runtime` 的 `ALLOWED` 条目
-  已含 G 需要的全部 crate（实读 `crates/continuum-runtime/tests/dependency_direction.rs:164-179`：
+  已含 G 需要的全部 crate（实读 `crates/continuum-runtime/tests/dependency_direction.rs` 的
+  `("continuum-runtime", &[…])` 那一条——**订正 2026-10-09 合入前终审实测**：原文引 `:164-179`，
+  而那个区间**不承载**下面这几个 crate（`graph`／`model-registry`／`persist`／`provider` 都在区间之外）；
+  该条目实际在 `:172-189`（键在 `:173`）。**行号只作当时读数，按内容定位**：
   `continuum-provider` / `continuum-model-registry` / `continuum-persist` / `continuum-core` / `continuum-graph`）。
   `ALLOWED` **一字不改**，`crates/continuum-runtime/Cargo.toml` 的 `[dependencies]` **一条不加**。
   本计划只改 **dev-dependencies**（`async-trait`、`futures-core`）与 **workspace 的 `tokio` feature**（加 `time`）——
@@ -668,7 +671,9 @@ pub async fn snapshot(candidates: &[Candidate]) -> Vec<(ModelId, ProviderHealth)
   `continuum-adapter` / `continuum_adapter` / `DeepSeek` / `OpenAi` / `Anthropic`。
   **更硬的一层其实已经有了**（设计 §10.3）：若 G 真想持有实现类型，它必须依赖那个 crate，
   而 `every_crate_depends_only_on_its_allowed_set` 会因为 runtime 的条目里没有它而红
-  （`crates/continuum-runtime/tests/dependency_direction.rs:246`，逐对 `assert_eq!` 在 `:276-281`）。
+  （`crates/continuum-runtime/tests/dependency_direction.rs:255`，逐对 `assert_eq!` 在 `:285-290`
+  ——**订正 2026-10-09 合入前终审实测**：原文引 `:246` 与 `:276-281` 是过期读数，
+  与设计 §10.3 那处订正块一致；**行号只作当时读数，按内容引用例名**）。
   **这一句写进文件头**：本守卫是下界，上界那条边由 `dependency_direction.rs` 兜住。
 - `the_module_touches_neither_capability_nor_effects_nor_credentials`（设计 §2.2 第一条：
   **「它没有可越的权」**）：同法，文本里**不出现**这些 **crate 路径与类型名**：
@@ -1551,14 +1556,19 @@ grep -rn "ModelId" crates/continuum-runtime/src/model_call.rs
   **本格不得被读成「两侧都覆盖了」**。
   **订正（2026-10-09，G Task 12 复核）：本格后半「只包住一次调用」的那一枚
   `the_deadline_wraps_one_call_only` 是回归护栏、不是判别式**——它今天钉的是
-  「两次调用各成功 ＋ 适配器被调两次」（`tests/model_call.rs:1821`，实测），
+  「两次调用各成功 ＋ 适配器被调两次」（`tests/model_call.rs:1830`，实测；旧读 `:1821`），
   而能把它与「截止被做成一次性的共享值」分开的那枚变异体**只能在改签名的前提下表达**
   （`&mut Option<Duration>` ＋ `.take()`：`src/` 编得过、调用侧五处 `E0308` 编不过），
   按本仓纪律「调用侧编译失败不算红」⇒ **没有判别式**（台账 **M-8-3**）。
-  **故本格后半不得被读成「有一个能把『一次一处』与『一次性共享』分开的判别式」。** |
+  **故本格后半不得被读成「有一个能把『一次一处』与『一次性共享』分开的判别式」。**
+  **再订正（2026-10-09 合入前终审；这一处推广本轮未做构造性证明）**：上面「没有判别式」**是一条全称**，
+  而 M-8-3 实测的只是**一种**编码（`&mut Option<Duration>` ＋ `.take()`）。一个用**进程内共享状态**
+  （如 `static`）承载「一次性截止」的写法**不改进程外签名**，据终审推断它会红掉
+  `the_deadline_wraps_one_call_only` 的第二次调用 ⇒ **本格的严格读法是「M-8-3 否掉的那一种编码造不出
+  判别式」，不是「不存在任何判别式」**（方向安全：低估守卫强度，不是高估）。 |
 | §3.5 截止（`call_stream` 侧） | **无照片**——见上一格的订正与本计划台账 M-9-7。**本行是「找不到证据的不得标注为覆盖」的一个实例** |
 | §3.5 「丢弃流不是取消」两侧 | Task 9 的 `dropping_a_stream_does_not_cancel` 与 `aborting_a_stream_calls_cancel_with_the_streams_own_call_id` |
-| §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 的**两处**。**订正（2026-10-09，G Task 12 复核）**：本格原写「Task 3 + Task 7 + Task 11 的三处」——**而计划 Task 11 那一条（`the_manager_of_the_availability_is_one_to_one_with_the_candidates`）实测与 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability` 同处代码、同形状入参、同一句断言（`asked == candidate_ids`），据实合并、未交付**（台账 **M-11-3**；交付文件的节头 `tests/model_call.rs:2743-2757` 记了理由与 `M6` 那枚变异体的实测）。**故「Task 11 的那一处」今天不存在**——它**不是丢掉了一个观测点，是那一个观测点本来就是等价的第二个落点**，覆盖不受影响。 |
+| §4.4 第 1 条 `availability` 覆盖候选集 | Task 3 + Task 7 的**两处**。**订正（2026-10-09，G Task 12 复核）**：本格原写「Task 3 + Task 7 + Task 11 的三处」——**而计划 Task 11 那一条（`the_manager_of_the_availability_is_one_to_one_with_the_candidates`）实测与 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability` 同处代码、同形状入参、同一句断言（`asked == candidate_ids`），据实合并、未交付**（台账 **M-11-3**；交付文件的节头 `tests/model_call.rs:2752-2766`（旧读 `:2743-2757`）记了理由与 `M6` 那枚变异体的实测）。**故「Task 11 的那一处」今天不存在**——它**不是丢掉了一个观测点，是那一个观测点本来就是等价的第二个落点**，覆盖不受影响。 |
 | §4.5 `NotRoutable` / `DuplicateModelCandidate` / `UnknownAvailability` 不可达 | 前者**构造性**（D 的样例，G 不重钉）；中者 Task 6 的 `the_candidate_set_comes_only_from_the_registry_table`；**第三（`UnknownAvailability`）走 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability`**——**订正（2026-10-09，G Task 12 复核）**：原写「第三 Task 11 的一一对应」，**而 Task 11 那一条按 M-11-3 合并、今天在交付树里不存在**（同上一格）。 |
 | §5 G 不调 `usage()` | Task 10 的第一条（**否定式**） |
 | §6.1 五变体分类表 | Task 1 的**三条**用例（其中一条把五个变体**逐臂**钉死）+ Task 8 的四条（分类落到错误类型上）。**订正（2026-10-09，G Task 12 复核；原写「Task 1 的四条」）**：这是**手数的数**（本仓点过名的形状）——实测 Task 1 交付**三条**（`tests/model_call.rs:50`／`:102`／`:128`，本计划的 Task 1 一节也列三条），**五变体的覆盖不受影响**（那一条用例在**一条用例内**逐臂断言五枚） |
@@ -1755,4 +1765,14 @@ Degraded 的降权判据                D §11 第 24 条 + 本设计 §13.2 的
                                   首个引用是 G 的 `src/error.rs` 与 `src/model_call.rs`。
                                   **对账结论不变**（`ALLOWED` 本来就含这两条，无登记动作要补），
                                   改的只是「谁是第一个用的人」这一句事实。
+                                  **再订正（2026-10-09，合入前终审复核实测；上面那段订正的原话照留）**：
+                                  上面那段订正**本身为假**——它把**分叉点**当成了**合入目标**来读数。
+                                  实测：`git merge-base --is-ancestor 9288a98 9254108` **非 0**
+                                  （`9288a98` 是 F 并入 `main` 的那次合并，**F 的合并不在分叉点上**）；
+                                  而在合入目标 `main` 上 `git grep -n continuum_provider main --
+                                  crates/continuum-runtime/` 命中 `src/error.rs:26`、`src/tool_call.rs:45`、
+                                  `src/tool_cmd.rs:31` ⇒ **`main` 上 F 早已在用这条边**。故最上面
+                                  「F 是第一个（工具侧）、G 是第二个」**成立**（设计 §10.1 判据 3 的原话是对的）。
+                                  **成因**：「开工前的状态」被默认成了「合入目标的状态」——
+                                  有别的分支先合入时，两者不是一回事。**读数的树要说清：分叉点 ≠ `main`。**
 ```

@@ -855,6 +855,12 @@ fn the_candidate_set_comes_only_from_the_registry_table() {
 /// **该半的照片归 Task 11**（端到端那一节，`select` 硬依赖 Task 7）——**订正 2026-10-08**：
 /// 原写「归 Task 7」，而实读计划全文，这条用例只在 Task 6 的简报里出现过一次，
 /// Task 7 与 Task 11 两节都没有它；协调者裁定落到 Task 11。
+/// **再订正（2026-10-09 合入前终审实测）**：上面「Task 7 与 Task 11 两节都没有它」为假——
+/// Task 11 那一节**就是它的落点**：`rank_is_never_called_when_no_candidate_survives`
+/// 在计划 Task 11 的 Step 1（`docs/superpowers/plans/2026-10-06-p3g-model-calling-path.md:1405`），
+/// 且带标记「（**订正 2026-10-07 新增，协调者裁定**）」；`an_empty_candidate_set_is_no_eligible_candidate`
+/// 本身在 Task 11 那一节也被引到（同文件 `:1407`）。而把该条写进计划的提交是 `8b2674e`、
+/// 写下本句的提交是 `f934819`——**`8b2674e` 在前**，故这句话在写下时就已为假。
 ///
 /// **红的条件（档位：移除）**：把空判定的短路删掉 → 函数返回 `Ok(vec![])`，
 /// 两条断言各在其「该是 `Err`」那一处红。
@@ -1029,7 +1035,10 @@ async fn the_snapshot_is_indexed_by_the_candidates_own_model_id() {
 /// 快照的**长度与 id 集合**都等于候选集（**不是只断 `len`**）。
 ///
 /// 这是设计 §4.5 里 `UnknownAvailability` 在 G 路径上**不可达**的那条构造性断言的一半
-/// （另一半在 Task 11 的端到端对应）。
+/// （另一半在 Task 7 的 `the_request_reaching_the_policy_carries_the_candidates_availability`——
+/// **订正 2026-10-09 合入前终审实测**：原写「Task 11 的端到端对应」，而它指的是
+/// `the_manager_of_the_availability_is_one_to_one_with_the_candidates`，那一条按 **M-11-3**
+/// 已判等价、据实合并、**交付树里不存在**）。
 ///
 /// **红的条件（档位：收紧）**：在快照里加一条「只对 `Healthy` 的候选给条目」的过滤
 /// → `len` 与 id 集合**同时**不等，红。
@@ -2753,8 +2762,9 @@ async fn the_three_negative_methods_share_one_adapter_and_the_positive_path_stil
 //
 // **订正（2026-10-09 修复轮）**：本节初稿把这一条写成「**简报列的第五条**」——**它是第 3 条**
 // （简报的用例清单与计划 Task 11 同序，计划里各条落在 `docs/superpowers/plans/2026-10-06-p3g-model-calling-path.md`
-// 的 `:1388` `rank_is_never_called…`／`:1414` `the_path_writes_nothing…`／`:1426` 本条／
-// `:1435` `a_routable_model…`／`:1440` `the_degraded_candidate…`），**旧话照留在此**。
+// 的 `:1393` `rank_is_never_called…`／`:1419` `the_path_writes_nothing…`／`:1431` 本条／
+// `:1440` `a_routable_model…`／`:1445` `the_degraded_candidate…`；旧读 `:1388`／`:1414`／`:1426`／
+// `:1435`／`:1440`——**合入前终审重取：本修复轮在计划前部插了行**），**旧话照留在此**。
 
 /// **与驱动同形的组合**：① `plan_candidates` 的 `Err` 由 `?` 短路，成功才走到 ② `select`。
 ///
@@ -2929,10 +2939,11 @@ async fn rank_is_never_called_when_no_candidate_survives() {
 /// 由 `rank` 滤光（设计 §4.5 那一行的第二条、§11 那一行的「各断言是哪一枚」）。
 ///
 /// **这条来路在今天之前没有任何照片**（2026-10-09 实测）：本 crate 里
-/// `NoEligibleCandidate` 的**断言共三处**（`tests/model_call.rs` 的 `:740`、`:877`、`:898`，
-/// 本轮之前就在的三处，全在 ① 同步段那两条用例里），**由 `select` 交回的那一枚 `Err` 上
+/// `NoEligibleCandidate` 的**断言共三处**（`tests/model_call.rs` 的 `:740`、`:883`、`:904`，
+/// 旧读 `:877`、`:898`——**合入前终审重取：本修复轮在本文件前部插了三段文档注释**；本轮之前
+/// 就在的三处，全在 ① 同步段那两条用例里），**由 `select` 交回的那一枚 `Err` 上
 /// 一条断言都没有**：全文件十六处命中里剩下的十三处是文档与断言消息的措辞
-/// （其中 `:2630` 只是文档里描述某一枚变异体的红条件，不是断言）。
+/// （其中 `:2639`（旧读 `:2630`）只是文档里描述某一枚变异体的红条件，不是断言）。
 /// **订正（2026-10-09，本 task 自审）**：本句初稿写的是「十一处命中全落在……两条用例上」——
 /// **那个数是错的**（当时读的是一份被截断的 `grep` 输出），且它把「命中」与「断言」混成了一件事。
 /// 结论未变、红集未变，错的只是那个数：**正确读法见本句的上一段**（口径：先按 `matches!`／
@@ -3337,10 +3348,12 @@ async fn a_routable_model_does_come_out_as_the_selected_candidate() {
 ///
 /// **收件人：规范维护者；G 侧＝退，G 能给的证据只有「原样带过」**——三处现成裁定同指一处
 /// （都在版控里，`grep` 得到）：计划的 Task 11 本行自己就指向落点
-/// （`docs/superpowers/plans/2026-10-06-p3g-model-calling-path.md:1445`「见 `## 遗留` 的收件人」），
-/// 同一计划 `## 遗留` §五具名「**收件人：规范维护者。**」（同文件 `:1692-1701`），
+/// （`docs/superpowers/plans/2026-10-06-p3g-model-calling-path.md:1462`「见 `## 遗留` 的收件人」，
+/// **订正 2026-10-09 合入前终审实测：原写 `:1445`**），
+/// 同一计划 `## 遗留` §五（标题在 `:1739`）具名「**收件人：规范维护者。**」——在 `:1748`
+/// （**订正 2026-10-09 合入前终审实测：原写 `:1692-1701`**），
 /// 设计 §13 处置「§11 第 24 条」那一行也具名「收件人规范维护者」并裁「**退**」
-/// （`docs/superpowers/specs/2026-10-06-p3g-model-calling-path-design.md:1050`）。
+/// （`docs/superpowers/specs/2026-10-06-p3g-model-calling-path-design.md:1054`）。
 ///
 /// **订正（2026-10-09 修复轮）**：本段初稿写「**「`Degraded` 该不该降权」这件事在本设计里
 /// 没有收件人**，据实记（简报让留给「## 遗留」的收件人，落在台账里）」——**那句话是假的**

@@ -90,6 +90,11 @@ impl Candidate {
 /// 没有 `&dyn RankingPolicy`（G 这一侧调 `rank` 的地方只有 `select`），故它拿不出一次
 /// `rank` 调用——这半的照片归端到端那一处（Task 11 的可达性用例，`select` 在它之前落地），
 /// **不在本函数**（订正 2026-10-08：原写「归 `select` 落地处」，实测 Task 7 那一节不含这条用例）。
+/// **再订正（2026-10-09，合入前终审实测）**：上面那句把「照片归 Task 11」说大了——那一条是
+/// `rank_is_never_called_when_no_candidate_survives`，**按本分支自己的 G-∅-2（台账 `:182`）**，
+/// 它对「空候选集下 `rank` 不被调」的**判别力是零增量**（任何可写变异体都红不出它），
+/// 它与 Task 6 的判别力重叠、是回归护栏，**不是本半的照片**。故本半真正承重的是**前半段那句
+/// 类型事实**（参数表里没有 `&dyn RankingPolicy`），后半段的归属是虚的。
 /// **空的判定不返回空列表**：本函数对空集返回 `Err` 而不是 `Ok(vec![])`，
 /// 故「G 交出去的候选集非空」在下游是一条构造性事实（与 D 的 `rank` 不产出空列表同形）。
 pub fn plan_candidates(
@@ -624,8 +629,16 @@ pub fn classify(e: &ProviderError) -> Option<FailureClass> {
 /// **三处今天都已落地，且各自有一条走本函数的照片**：`call`
 /// （`tests/model_call.rs` 的 `each_provider_failure_keeps_its_class_and_its_source`
 /// 与 `a_cancelled_provider_error_is_not_a_failure`）、`call_stream`
-/// （`each_provider_failure_on_abort_keeps_its_class` 里流那一侧的装配）
-/// 与 `abort`（同一条用例的 `cancel` 那一侧）。它们断的都是**经本函数**得到的类别与变体。
+/// （`each_provider_failure_on_a_stream_call_keeps_its_class`）
+/// 与 `abort`（`each_provider_failure_on_abort_keeps_its_class` 的 `cancel` 那一侧）。
+/// 它们断的都是**经本函数**得到的类别与变体。
+///
+/// **订正（2026-10-09，合入前终审实测；旧话照留）**：本段原把 `call_stream` 那一格指向
+/// 「`each_provider_failure_on_abort_keeps_its_class` 里流那一侧的装配」——**那条用例只有
+/// `cancel` 一侧、没有流那一侧**（它只经 `an_abort_failing_with` 走 `abort`）。
+/// `call_stream` 真正的照片是 `each_provider_failure_on_a_stream_call_keeps_its_class`
+/// （同一个文件在 `call_stream` 自己的文档里引对了）。这是 **M-9-5** 那处错话的
+/// **第二份、未修的副本**：Task 9 只扫了 `call_stream` 那一份，没有扫同类的这一份。
 ///
 /// **源码文本判据已落地（2026-10-09，Task 10 收口 M-9-4）**：上面那三条是**行为**照片，
 /// 各自只覆盖它走到的那一格；「三处**都**不再自己映射一遍」这句话由
