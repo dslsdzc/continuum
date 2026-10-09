@@ -111,6 +111,52 @@
 
 ---
 
+## Task 4（显式约束与「满足」判据、Reference Resolver 四态、两个数不同轴）
+
+实现 `6a74078`（父 `c490263`）；**评审后订正 `e28dcfd`**（本轮，裁决一／二／四／五改代码与注释，
+裁决三／六只在本节记账）。
+
+### 本 task 自补的公开面（本轮新记，收件人：评审与 Task 6）
+
+下面这几处是本 task 在简报逐字给出的 Produces **之外**自补的公开面，各自填一个规范空洞。
+记在这里，免得下一轮读计划的人重新问一遍「这是谁定的、Task 6 会不会另立一个竞争的入口」。
+
+- **`CandidateSet`**（`crates/continuum-canonical/src/explicit.rs`）—— 设计 §4.1.1 逐字给了
+  `qualifying` 的签名，而里面的 `CandidateSet` 只出现为**类型名**，规范**没给它的定义**。
+  本 task 取「候选与它的判定事实配对的值集合」（`&[(Candidate, CandidateFacts)]` 的口径）。
+  **Task 6 消费而不另立**：Task 6 的 Produces 是
+  `{ResolutionRisk, ExplicitBinding, BindingSource}` ＋ `binding::apply`（计划 `:887`）。
+- **`ResolutionConfidence::new`**（`crates/continuum-canonical/src/resolver.rs`）与
+  **`RequiredStrength::new`**（同文件）—— §4.4／§4.5 写死了「门槛必填、没有 `Default`、
+  不能由分数构造、没有把置信变成数的读者」，而**两枚值的公开构造入口规范没给**。
+  本 task 各给一个 `new(Opaque)`（里子是不透明值，本层不解释、不归一、不换算）。
+  **Task 6 消费而不另立**：`RequiredStrength` 出现在 Task 5 与 Task 6 的 **Consumes** 行
+  （计划 `:804` 与 `:886`）。
+- **四个载荷的只读访问器**（`Resolved::entity` / `satisfied` / `candidate_count`、
+  `ConfirmRequired::first` / `surviving` / `candidate_count`、`Ambiguous::surviving` /
+  `candidate_count`、`Unknown::reason` / `candidate_count`，全在 `src/resolver.rs`）——
+  **订正轮（裁决一）补的**：四个载荷的字段转私有、不给公开构造函数之后，crate 外**读不到**
+  判定结果；而 Task 5 的四条断言（§4.2，写在 `tests/resolver.rs`，是 crate 外）逐条要读
+  `Resolved.entity` / `Resolved.candidate_count` / `Ambiguous.surviving` / `Unknown.reason`
+  （计划 Task 5 一节逐字点了它们）。故补这一组**只读**访问器——**读得出去、构造取不回来**；
+  每一枚的读法都有照片（`tests/resolver.rs` 的 `each_of_the_four_states…` 与
+  `unknown_reason…` 两条）。**Task 6 消费而不另立**：Task 6 不新增读载荷的入口。
+
+### 仍未闭合（终审要看的）
+
+- **P-4-1「`CanonicalRepresentation` 的 mention→实体 接缝：无消费者、无照片」** ——
+  Task 2 在 `crates/continuum-canonical/src/canonical.rs:55-74` 留了一处**推测性**承诺：
+  「Task 4 给四态补上载荷后，本类型应把那一份照录进来」。**Task 4 复判后不改**（三条理由写在原处）。
+  它**今天只留在一处文件头注释里**，而这句话的读者会以为「这份规范化结果已经能用了」
+  ——实际不是：`Canonical` 支的载荷**说不出「这一枚 mention 解到了哪个实体」**。
+  **代价照实写**：`CanonicalRepresentation` 只是一个「哪些 mention 已经解出」的记录，
+  **不是一个可直接使用的规范化结果**（要拿到映射就得改 `mentions()` 的形状，而换形状本身没有判据）。
+  **归属：第一个真实消费者**——它在 P4 之后的 **Intent Compiler** 那一侧；
+  补它的那个 task **应当带一条读它的用例**来（那时才有判据）。**当前没有任何 P4 task 会读它**：
+  Task 5／6／7 的 Produces 里都没有「读 `CanonicalRepresentation` 的实体映射」这一项。
+
+---
+
 ## 本层已自定的判据（发明判据，收件人：规范维护者）
 
 设计文档里有一条统一落点：`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md` §16
