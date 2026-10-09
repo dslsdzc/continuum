@@ -257,7 +257,7 @@ CheckpointError   CheckpointOwner
 | 项 | 切分给的行号 | 本设计实测 | 一致 |
 |---|---|---|---|
 | (a) 枚举本体 | `artifact.rs:14-21` | 枚举头 `:14`，六型 `:15-20`，闭合 `:21` | 一致 |
-| (b) `ALL` | `artifact.rs:28` | 见下 | 一致（切分当时只点代码，未点 `:24` 的注记；该注记已于 2026-10-09 折入） |
+| (b) `ALL` | `artifact.rs:28-35` | 见下 | 一致（切分当时只点代码，未点 `:24` 的注记；该注记已于 2026-10-09 折入，行号亦随折入由 `:28-35` 收成 `:28`） |
 | (c) `as_str` / `parse` | `artifact.rs:47` / `:68` | `:47` 是 `pub fn as_str`，`:68` 是 `pub fn parse` | 一致 |
 | (d) 数目断言 | `tests/artifact_type.rs:23` | `:23` 逐字 `assert_eq!(ArtifactType::ALL.len(), 6, "ArtifactType 的名单与变体数不符")` | 一致 |
 
@@ -437,7 +437,7 @@ pub enum CheckpointError {
 |---|---|
 | `crates/continuum-operator/src/definition.rs:95` | `Result<Self::Checkpoint, String>` → `Result<Self::Checkpoint, CheckpointError>` |
 | 同文件 `:96` | `Result<(), String>` → `Result<(), CheckpointError>` |
-| 同文件末尾（`Checkpointable` 之后） | 加 `CheckpointOwner` 与 `CheckpointError` |
+| 同文件末尾（`Checkpointable` 之后） | 加 `CheckpointOwner`、`impl std::fmt::Display for CheckpointOwner`（§4.3）与 `CheckpointError` |
 | 同文件 `:76`（`BackendId` 之后） | 加 `impl std::fmt::Display for BackendId`——§4.3 与 §5.1 两个错误类型的格式串都以 `{backend}` 引用该字段，thiserror 要求它实现 `Display`（同文件 `:36-37`、`:57-58` 的既有注记即此规则），而该实现今天不存在（实测全 crate 只有 `OperatorId` `:38` 与 `OperatorVersion` `:59` 两个 `Display`）。实现体只依赖 `std::fmt`，**不新增 crate 依赖**，`dependency_direction.rs` 的 `continuum-operator` 那一行不动 |
 | 同文件 `:90-91` 的注记 | 「本子项目只定义接口」改为「接口在 P1，错误类型与第一枚实现在 `continuum-media`」 |
 | `crates/continuum-operator/src/lib.rs:7-9` | `pub use` 补 `Checkpointable` 与 `CheckpointError`（一并处理 P1 计划 `:5565` 记的「未 re-export」遗留） |
@@ -1219,10 +1219,11 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 
 **每条具名收件人；凡「缺的是哪一步」都写到步骤，不用「后续」「长期阶段」兜。**
 
-1. **§131 的复用判据已由 P1 落地，本块不建第二份**（§6.1）。**切分文档 §五 P5e 行把 §131 列为本块义务时，
-   没有指出这一点**（§15 第 1 条）。**收件人：协调者**（明确本块的兑现口径是「让算子满足那条判据的前提」）。
-2. **`Checkpointable` 的类型只能落在 `continuum-operator`，而切分 §一 的共写表未登记那两行**（§4.2）。
-   **收件人：协调者 + P1**。
+1. **§131 的复用判据已由 P1 落地，本块不建第二份**（§6.1）。切分 §五 P5e 行原先只把 §131 列为本块义务，
+   未指出这一点；切分文档现已改引 §305 并在补记二里写明复用条件已由 P1 落地
+   （2026-10-09 已折入，来历见 §15 第 1 条）。**收件人：协调者**（明确本块的兑现口径是「让算子满足那条判据的前提」）。
+2. **`Checkpointable` 的类型只能落在 `continuum-operator`**（§4.2）；切分 §一 的共写表原先未登记它
+   （2026-10-09 已折入，来历见 §15 第 2 条）。**收件人：协调者 + P1**。
 3. **模型型派生产物的可复现性判据不存在**（§6.3）。**缺的是「温度/种子/版本冻结三项是否构成
    「同输入同输出」的充分条件」这一步。收件人：规范维护者 + 协调者。**
 4. **§329 的 Timeline 六个字段无 schema**（§8 第 3 条）。**缺的是「六个字段的类型与 tracks↔clips 的引用关系」
