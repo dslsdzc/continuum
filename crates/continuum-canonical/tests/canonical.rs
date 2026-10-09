@@ -135,14 +135,23 @@ fn one_unresolved_mention_gives_the_needs_resolution_arm_unknown() {
 ///
 /// # 这条用例的两半，证明力不同，分开写
 ///
-/// **运行期那一半**（本条真的有照片的部分）：对一批夹具，断言
-/// `is_canonical ^ is_needs`——**恰有一支成立**。它同时钉两侧：不能两支都真
-/// （「同时为真」），也不能两支都假（「同时为假」）。
-/// 后面那半靠 `arms` 那两个断言兑现：夹具集里必须**两支都出现过**，
-/// 否则「恰有一支」会被一个恒返回同一支的实现满足。
+/// **运行期那一半**（本条真的有照片的部分）：**夹具集必须两支都走到**——
+/// 即 `arms` 那两个断言（「有落 `Canonical` 支的」「有落 `NeedsResolution` 支的」）。
+/// 它们钉的是 `finish` 对这批夹具**不是恒返回同一支**。
+/// 实测红条件：M1（`NeedsResolution` 那一支消失）下红的是
+/// `arms.contains(&"needs_resolution")` 那一条，另加三条 `one_unresolved_*`
+/// 与 `four_kinds_*`（报告 §9 的变异实测）。
+///
+/// **「恰有一支成立」不在本条的运行期照片里**——**不要**在这里写
+/// `is_canonical ^ is_needs_resolution`：`Canonicalized` 今天恰有两支，
+/// 那个异或对 `finish` 能返回的**任何**值都恒真，任何实现改动都响不了它；
+/// 一条恒真的断言比没有断言更坏（后来者会以为那里钉着互斥性）。
+/// 「不能两支都真」由**类型**给：`Canonicalized` 是和类型（一支就是一个值），
+/// 不是两个可同真的标志位。
 ///
 /// **编译期那一半**：`arm` 里的 `match` **穷尽、不带 `..`**——
-/// 给 `Canonicalized` 加第三支即**编译不过**。
+/// 给 `Canonicalized` 加第三支即**编译不过**；「不能两支都假」（没有第三支）
+/// 就是靠这一条钉在源码里的。
 /// **编译不过不算变红**（本仓纪律：那是「编译器拒绝了另一份代码」，不是「这份代码的行为变了」），
 /// 故这一半是**类型保证**，不是本用例运行期能取到的红。
 ///
@@ -198,17 +207,8 @@ fn the_two_arms_are_complements() {
         arms.contains(&"needs_resolution"),
         "夹具集里必须有落 NeedsResolution 支的：{arms:?}",
     );
-
-    for parts in &fixtures {
-        let result = finish(parts.clone());
-        let is_canonical = matches!(&result, Canonicalized::Canonical(_));
-        let is_needs_resolution = matches!(&result, Canonicalized::NeedsResolution(_));
-        assert!(
-            is_canonical ^ is_needs_resolution,
-            "两支必须恰有一支成立（不能同真、也不能同假）：{}",
-            arm(&result),
-        );
-    }
+    // 到这里为止。**不写「恰有一支」的异或断言**：见上面头注释，
+    // `Canonicalized` 恰有两支时那个异或恒真，是一条没有照片的断言。
 }
 
 /// §2.4 第 1 条（`docs/02-工程.md:130`）的落点：含**错别字／简称／中英混写／代词**
@@ -217,7 +217,7 @@ fn the_two_arms_are_complements() {
 /// # 这四条钉的是**分支机制**，不是规范化的真实质量
 ///
 /// 四条输入里被 `detect` 切出来的，**都不是那枚「脏」词本身**，而是同一句里的代词
-/// （`那个` / `这个` / `it` / `它`）——本层的两张字面表只覆盖代词与上下文引用
+/// （`那个`＋`this` / `这个` / `it` / `它`）——本层的两张字面表只覆盖代词与上下文引用
 /// （Task 1 的 `PRONOUNS` / `CONTEXT_REFERENCES`），**错别字、简称、中英混写今天
 /// 没有任何一张表**（设计 §16 第 5b 条，`design:2309-2318`）。故这四条走通的是
 /// 「输入进得来、分支照走」，**不是**「`teh` 被认成了 `the`」。
@@ -230,24 +230,50 @@ fn the_two_arms_are_complements() {
 ///
 /// 红条件（放宽档）：把两类输入吞成同一支而不区分（`finish` 恒返回 `Canonical`），
 /// 四条里「留一枚未解」的那半边全红。
+///
+/// 「半边二」的 `unresolved.len() == 1` 只在**有一条夹具切出两枚 mention** 时才可观察
+/// （否则挂起列表里本来就只有那一枚）；前提二把那件事写成断言，
+/// 第一条夹具（`那个`＋`this`）就是为它准备的。见报告 §9 的 M2 实测。
 #[test]
 fn four_kinds_of_dirty_input_each_yield_one_of_the_two_arms() {
     // 每条输入都**同时**带一处脏词与一枚代词，故四条都非空命中——
     // 否则「留一枚未解」那半边会退化成恒真的空集断言。
+    // 第一条**带两枚代词**（`那个`、`this`），理由见下面前提二。
     let inputs = [
-        ("把 teh 那个 test 删掉", "错别字（teh）＋代词（那个）"),
+        (
+            "把 teh 那个 test 和 this 都删掉",
+            "错别字（teh）＋两枚代词（那个、this）",
+        ),
         ("把 cfg 这个改掉", "简称（cfg）＋代词（这个）"),
         ("please update it 的配置", "中英混写＋代词（it）"),
         ("请把它改掉", "代词（它）"),
     ];
 
-    for (raw, why) in inputs {
-        let surface = normalize(raw);
-        let mentions = detect(&surface);
+    let fixtures: Vec<(&str, Vec<Mention>)> = inputs
+        .iter()
+        .map(|(raw, why)| (*why, detect(&normalize(raw))))
+        .collect();
 
+    // 前提一：每条都切出 mention。
+    for (why, mentions) in &fixtures {
         assert!(!mentions.is_empty(), "{why}：夹具前提，这句要切出 mention");
+    }
+    // 前提二：**至少有一条切出两枚**。`unresolved.len() == 1` 这条断言只在
+    // `resolved` 侧非空时才可观察：单 mention 夹具下挂起列表里本来就只有那一枚，
+    // 「已解的不能混进挂起列表」这件事**无从发生**（报告 §9 的 M2 实测：
+    // 全用单 mention 夹具时，把已解的并进挂起列表的变异体在这一条上不红）。
+    assert!(
+        fixtures.iter().any(|(_, mentions)| mentions.len() >= 2),
+        "夹具集里必须有一条切出两枚 mention，否则 len==1 是平凡断言：{:?}",
+        fixtures
+            .iter()
+            .map(|(why, m)| (*why, m.len()))
+            .collect::<Vec<_>>(),
+    );
+
+    for (why, mentions) in &fixtures {
         // 「**不产出空 mention 的 `Canonical`**」：切出来的每一枚都要有非空 text。
-        for m in &mentions {
+        for m in mentions {
             assert!(
                 !m.text.is_empty(),
                 "{why}：mention 的 text 不得为空（不产出空 mention）",
@@ -338,4 +364,76 @@ fn temporal_resolution_takes_now_as_an_argument() {
     // 两侧都断：两个 `Now` 下都是 `Unbound`。
     assert_eq!(resolve_temporal(&pronoun, &now), TemporalBinding::Unbound);
     assert_eq!(resolve_temporal(&pronoun, &far), TemporalBinding::Unbound);
+
+    // 注：**英文那一半**（`RELATIVE_DAYS` 里 `// 英文` 块下的 7 条）不在这条里，
+    // 它们逐条有照片，在 `english_relative_expressions_each_resolve_to_a_hand_written_offset`。
+}
+
+/// 一枚手写的时态 mention（`detect` 切不出时态表达——见上一条的「夹具为什么是手写的」）。
+///
+/// `span` 取整串的字节区间；`resolve_temporal` 今天只看 `text`，
+/// 这里给一个**与 text 相符**的 span，免得夹具自身写着一处假坐标。
+fn temporal_mention(text: &str) -> Mention {
+    Mention {
+        span: 0..text.len(),
+        text: text.to_owned(),
+        kind: MentionKind::from_str("temporal"),
+    }
+}
+
+/// `RELATIVE_DAYS`（`src/temporal.rs:106-127`）的**英文那一半**：7 条逐条有照片。
+///
+/// # 期望值为什么是本文件手写的
+///
+/// 下面 7 个期望值是**本文件里独立写下的字面常量**，**不是**从 `RELATIVE_DAYS` 读出来的。
+/// 从被测清单里取语料的「正控制」是恒真的假照片——那样写的话，把表里的值改错
+/// 甚至删掉整条，用例仍旧全绿（报告 §4 的 M7 实测正是这个形态）。
+///
+/// # 红条件
+///
+/// 改掉 `RELATIVE_DAYS` 里任一英文条目的**值**，或删掉那一条，本条对应行即红；
+/// 报告 §9 记了其中一条的实测。基准 `Now` 取**非零**（1000 日），
+/// 使「恒返回 `At(0)`」或「恒返回基准」这两种写法也各自会红。
+#[test]
+fn english_relative_expressions_each_resolve_to_a_hand_written_offset() {
+    // 1000 日。这三条「偏移 0」的条目（today / this week / now）与基准同值，
+    // 但它们与「偏移非 0」的四条同处一表，后者能把「表根本没被读」挡下来。
+    let now = Now::from_millis(1000 * DAY_MS);
+
+    // 每条一个手写字面期望值，7 条不漏。
+    assert_eq!(
+        resolve_temporal(&temporal_mention("today"), &now),
+        TemporalBinding::At(1000 * DAY_MS),
+        "today = +0 日",
+    );
+    assert_eq!(
+        resolve_temporal(&temporal_mention("tomorrow"), &now),
+        TemporalBinding::At(1001 * DAY_MS),
+        "tomorrow = +1 日",
+    );
+    assert_eq!(
+        resolve_temporal(&temporal_mention("yesterday"), &now),
+        TemporalBinding::At(999 * DAY_MS),
+        "yesterday = -1 日",
+    );
+    assert_eq!(
+        resolve_temporal(&temporal_mention("this week"), &now),
+        TemporalBinding::At(1000 * DAY_MS),
+        "this week = +0 日",
+    );
+    assert_eq!(
+        resolve_temporal(&temporal_mention("next week"), &now),
+        TemporalBinding::At(1007 * DAY_MS),
+        "next week = +7 日",
+    );
+    assert_eq!(
+        resolve_temporal(&temporal_mention("last week"), &now),
+        TemporalBinding::At(993 * DAY_MS),
+        "last week = -7 日",
+    );
+    assert_eq!(
+        resolve_temporal(&temporal_mention("now"), &now),
+        TemporalBinding::At(1000 * DAY_MS),
+        "now = +0 日",
+    );
 }
