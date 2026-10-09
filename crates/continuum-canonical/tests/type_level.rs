@@ -18,10 +18,12 @@
 //!   （(a) 半边的运行期断言在 `tests/candidate.rs` 的同名用例里）。
 //!   预期是「元组结构体构造子是私有的」那一类；**判据是实跑产出的那份 `.stderr` 本身**，
 //!   不是某个码——本项目为「凭记忆写错误码」付过代价。
-//! - **`candidate_source_has_no_single_entity_method`** —— crate 外调 `source.pick_one(&m)`
+//! - **`candidate_source_has_no_pick_one_method`** —— crate 外调 `source.pick_one(&m)`
 //!   编不过（那份同名 `.stderr` 逐字比对的正是 `E0599: no method named \`pick_one\``）。
-//!   **它钉的是这个名字**，不是「本层没有任何单实体方法」那句更宽的话——方法名是开放集，
-//!   枚举不完（详见 `src/candidate.rs` 的「这条守卫的限度」）。
+//!   **名字与它钉的东西相等**：它钉的就是 `pick_one` 这个名字不存在，不是
+//!   「本层没有任何单实体方法」那句更宽的话——方法名是开放集，枚举不完
+//!   （详见 `src/candidate.rs` 的「这条守卫的限度」；样例文件名曾叫
+//!   `…_has_no_single_entity_method`，那句比照片宽，已按本仓判据「用例名也是一种断言」订正）。
 //!   它是简报里 `a_candidate_source_can_only_return_a_set` 的**反例那半边**。
 //! - **`canonical_representation_is_not_constructible_outside`** ——
 //!   `CanonicalRepresentation` 的字段私有、唯一构造入口 `new` 是 `pub(crate)`
@@ -73,7 +75,7 @@
 /// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**三份**。
 const COMPILE_FAIL_SAMPLES: [&str; 3] = [
     "entity_id_has_no_public_literal_construction",
-    "candidate_source_has_no_single_entity_method",
+    "candidate_source_has_no_pick_one_method",
     "canonical_representation_is_not_constructible_outside",
 ];
 

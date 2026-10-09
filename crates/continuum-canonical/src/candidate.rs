@@ -120,7 +120,7 @@ pub struct Candidate {
 }
 
 /// §197 的候选来源接口。**返回值只能是 `Vec<Candidate>`；本层没有 `pick_one` 这个口子**
-/// （这一句由 `tests/compile_fail/candidate_source_has_no_single_entity_method.rs` 的样例
+/// （这一句由 `tests/compile_fail/candidate_source_has_no_pick_one_method.rs` 的样例
 /// 与它那份 `.stderr` 逐字钉住——`E0599: no method named \`pick_one\``）。
 ///
 /// # 为什么方法集就这么大

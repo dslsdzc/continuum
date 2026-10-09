@@ -1,5 +1,5 @@
 error[E0599]: no method named `pick_one` found for struct `ABlindSource` in the current scope
-  --> tests/compile_fail/candidate_source_has_no_single_entity_method.rs:36:20
+  --> tests/compile_fail/candidate_source_has_no_pick_one_method.rs:36:20
    |
 21 | struct ABlindSource;
    | ------------------- method `pick_one` not found for this struct
