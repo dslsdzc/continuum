@@ -613,7 +613,14 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
 - Modify: `crates/continuum-canonical/src/ambiguity.rs`、`crates/continuum-canonical/src/canonical.rs`
   ——**本 task 不是只新建文件**：`ResolutionResult` 与它的载荷属本 task（就写在下面的 Produces 那一行），
   而 Task 2 只能落 **「是哪一态」那一层的前向声明**（载荷留空，`ambiguity.rs` 的文件头写明接缝）。
-  本 task 补载荷，即改 `ambiguity.rs` 的定义与 `canonical.rs` 的 `finish` 签名。
+  本 task 补载荷，即**改 `ambiguity.rs` 里 `ResolutionResult` 的定义**（把那一态的前向声明换成带载荷的真定义）。
+  > **订正（2026-10-10，Task 4 实现期实测、评审核实）：原文此处还写着「与 `canonical.rs` 的 `finish` 签名」——
+  > 那是错的，两处都错**：① `finish` **不在 `canonical.rs`**，它在 `ambiguity.rs`（实测签名收 `Vec<(Mention, ResolutionResult)>`）；
+  > ② **它的签名不需要改**——载荷装在 `ResolutionResult` **里面**，签名本来就装得下，
+  > 实际只把 `Resolved` 写成 `Resolved(_)` 一处。
+  > **错的是这句话，不是活**：`ambiguity.rs` 的定义**确实改了**，而且改得更彻底（类型体整段移出）。
+  > **判据**：**「改某文件的签名」这类指令，要核那个签名是否真的装不下**——
+  > 装得下而要求改签名，会让人去动一个本来正确的界面。
 - Modify: `crates/continuum-canonical/tests/canonical.rs`
   ——**Task 2 的 7 条用历经 `finish` 的夹具直接构造四态**，补载荷时这 7 条要一并改（不是新增一批）。
 - Modify: `crates/continuum-canonical/src/canonical.rs`（`UnresolvedMention` 的那一处，见下）
