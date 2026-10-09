@@ -109,7 +109,7 @@
 EditRegionKind   EditRegion   EditMask   Raster   RegionDetector   ImageError
 ```
 
-其中 `Raster` 是 §5 的两个确定性函数（合成与比较）的**图像**像素载体，其字段与「为什么是本块定的」见 §5.2；`EditMask`（§4.1）是同一对函数的**掩码**载体——单通道位图，故它与 `Raster` 不是同一型；`RegionDetector` 是 §4.2 的 `resolve_edit_region` 收的那个**接口**——本块定义它，其实现在 backend 一侧（第 3 层选定的后端）。另有**两枚常量**（不是类型）：`ALL_OPERATORS: [Operator; 5]` 与 `V01_OPERATOR_IDS: [&str; 1]`（§9），它们承载的是 P1 的 `Operator`。**本块不新造算子类型**——§3.1 的登记形态照 P1。
+其中 `Raster` 是 §5 的两个确定性函数（合成与比较）的**图像**像素载体，其字段与「为什么是本块定的」见 §5.2；`EditMask`（§4.1）是同一对函数的**掩码**载体——单通道位图，故它与 `Raster` 不是同一型；`RegionDetector` 是 §4.2 的 `resolve_edit_region` 收的那个**接口**——本块定义它，其实现在 backend 一侧（第 3 层选定的后端）。另有**一枚构造函数与一枚常量**（都不是类型）：`all_operators() -> [Operator; 5]` 与 `V01_OPERATOR_IDS: [&str; 1]`（§9），它们承载的是 P1 的 `Operator`。（**`all_operators()` 这里不是 `const`**：`Operator` 在 crate 外构造不出常量值，理由见 §3.1。）**本块不新造算子类型**——§3.1 的登记形态照 P1。
 
 **判定**（本块是它们的唯一落点）：
 
@@ -148,25 +148,34 @@ EditRegionKind   EditRegion   EditMask   Raster   RegionDetector   ImageError
 ```
 /// 本域五枚算子的全集。顺序即 §3.2 表的行序。
 /// 不变量：id 逐枚不同、version 均为 1。
-pub const ALL_OPERATORS: [Operator; 5];
+/// **这里不是 `const`**：`Operator` 在 crate 外构造不出常量值（两条理由见本段下）。
+/// 数目 5 写在**返回类型**里，故清单个数的改动**编译期可见**。
+pub fn all_operators() -> [Operator; 5];
 
 /// §343 的 v0.1 批（§9）：本域在 v0.1 内要注册的那些算子的 id。
-/// 判据：每一项都能在 `ALL_OPERATORS` 里找到；且补集恰为其余四枚（逐枚断言，不是只看长度）。
+/// 判据：每一项都能在 `all_operators()` 里找到；且补集恰为其余四枚（逐枚断言，不是只看长度）。
 pub const V01_OPERATOR_IDS: [&str; 1] = ["generate-image"];
 
-/// 把给定的一批算子注册进给定注册表（`&ALL_OPERATORS` 是常规实参）。
+/// 把给定的一批算子注册进给定注册表（`&all_operators()` 是常规实参）。
 /// **先查重后写**：先逐枚核「注册表里是否已有同 (id, version)」（判定在 P1 的
 /// `OperatorRegistry::register`，`crates/continuum-operator/src/registry.rs:24-34`），
 /// 全部通过后再逐枚注册；任一枚被拒即返回 `Err`，
 /// 此时注册表的内容与调用前逐枚相同（不留半注册）。
 /// 一枚图像算子与既有算子同 (id, version) 是注册期的错误，**不静默跳过**。
-/// **参数带一批算子**（不是只吃 `ALL_OPERATORS`）：§9 的批次边界要能按 §343 换，
+/// **参数带一批算子**（不是只吃 `all_operators()`）：§9 的批次边界要能按 §343 换，
 /// 且 §11.2 第 (c) 条（重复注册）才写得出来。
 pub fn register_image_operators(
     registry: &mut OperatorRegistry,
     operators: &[Operator],
 ) -> Result<(), ImageError>;
 ```
+
+**`all_operators()` 是函数不是常量（订正过；原写 `pub const ALL_OPERATORS: [Operator; 5];`）**。**这里不是 `const`**，两条理由各自独立成立：
+
+1. **本仓带 `ALL` 常量的既有做法，成立前提是「无字段」**——取值可在 `const` 里直接枚举。本设计 §11.1 援引的那两处（`crates/continuum-artifact/src/artifact.rs:28` 的 `ArtifactType::ALL`、同文件 `:100` 的 `PrivacyClass::ALL`）都是**无字段枚举**，而 `Operator` 不是。**援引一条既有约定时要连它的成立条件一起搬。**
+2. **`Operator` 在 crate 外构造不出常量值**：它的 `id` 型为 `OperatorId`，而 `OperatorId(String)` 的**字段私有**、`OperatorId::new` **不是 `const fn`**（`crates/continuum-operator/src/definition.rs:24-27`）；它另含三枚 `Vec` 字段（`input_schema` / `output_schema` / `backend_candidates`，同文件 `:79-88`）。两条都使 crate 外的 `const` 构造不成立。
+
+**保住的正是原行要的那条性质**：数目 5 改由**返回类型**承载（`[Operator; 5]`），清单个数的改动仍**编译期可见**（写少一枚而不改返回类型，直接编不过）。**`V01_OPERATOR_IDS` 不动**：它的元素型是 `&str`，`const` 成立。
 
 **「先查重后写」这一句也是订正过的**：原先的注写的是「**先核后写**：先逐枚核 §3.5 的前提，全部通过后再逐枚注册」。**§3.5 自述本块没有那条注册期前提**（两枚 `Deterministic` 算子的候选集合是单元集，「名单内／名单外」在本块没有可触发的形态），故「先核」的内容落不下来。**以查重为准的理由**：§11.2 第 (c2) 条要拍的正是「不留半注册」，而它是查重（`crates/continuum-operator/src/registry.rs:24-34` 的 `contains_key`）与写入（`:32` 的 `insert`）之间的**次序**——核的东西只能是注册表现状，不可能是 §3.5 那条本块没有的规则。
 
@@ -594,7 +603,7 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 
 1. **不调 `bind`，也不登记 `continuum-method` 依赖边**（§2.1）。本块**没有** `bind` 目标——这不是漏填，是没有可落入的目录名。
 2. **不发明 `image/` 目录，也不借 `3d/` 域**。P5b 的设计 §6 的表对 P5f 那一行逐字写「不得自行建域或借 `3d/` 域」；切分 §八 的「`image/` 没有目录，而 P5f 声称有」那一条逐字写「**不在本文件里发明一个 `image/` 目录**」。
-3. **本块能供的只有算子 id**。若协调者裁决补一个 `image/` 目录，**`MethodDomain` 加一臂与 `seeded()` 加条目都归 P5b**（切分 §四第 3 条：方法条目的登记形态归 P5b，四块只填内容）；那一刻本块经 `bind` 填入的内容是**本域算子的 id**（§3.1 的 `ALL_OPERATORS` 里的 id），而**方法名本身属 §187 的名单**，不由本块编。
+3. **本块能供的只有算子 id**。若协调者裁决补一个 `image/` 目录，**`MethodDomain` 加一臂与 `seeded()` 加条目都归 P5b**（切分 §四第 3 条：方法条目的登记形态归 P5b，四块只填内容）；那一刻本块经 `bind` 填入的内容是**本域算子的 id**（§3.1 的 `all_operators()` 里的 id），而**方法名本身属 §187 的名单**，不由本块编。
 
 **为什么不「借 `3d/`」也不「并入 `video/`」**：两者都会让同一个 `MethodId` 落在两块的手里，而 `bind` 的语义是「重复 bind 覆盖旧值」（P5b 设计 §4.5）——**覆盖即静默丢掉先写的那一块的贡献**（P5b 设计 §5.1 把这条失效方向写明）。本块**不制造那个形态**。
 
@@ -627,9 +636,9 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 
 **故次序是**：先落 `generate-image`（§323 那一条链），再落局部修改的四枚（§324–§326 那一条链）。**这不改变分块**（切分 §五末原话）——五枚都在 P5f 之内，只是批次不同。
 
-**一轮的边界要能被断出来**（§11.2 第 (q) 条）：`V01_OPERATOR_IDS` 逐项能在 `ALL_OPERATORS` 里找到；且它的补集**恰为**上表「其后批」的四枚（**逐枚断言，不是只看长度**——只看长度的话，把两批的成员对调也能过）。
+**一轮的边界要能被断出来**（§11.2 第 (q) 条）：`V01_OPERATOR_IDS` 逐项能在 `all_operators()` 里找到；且它的补集**恰为**上表「其后批」的四枚（**逐枚断言，不是只看长度**——只看长度的话，把两批的成员对调也能过）。
 
-**本块不做的事**：不为「其后批」预留空条目（`ALL_OPERATORS` 的五枚都是完整的 `Operator` 值，没有占位项），也不在 v0.1 批里塞一枚「将来会换成别的」的算子。**这里不是「照 §343 只定义 v0.1 那一枚」**：`Operator` 是数据，写全五枚**不产生任何执行路径**、不产生表、不产生迁移，而少写四枚会让 `ALL_OPERATORS` 的长度随批次反复改（那是切分 §四第 2 条反对的「分次改动同一个枚举」的同形形态，只是对象换成了清单）。
+**本块不做的事**：不为「其后批」预留空条目（`all_operators()` 的五枚都是完整的 `Operator` 值，没有占位项），也不在 v0.1 批里塞一枚「将来会换成别的」的算子。**这里不是「照 §343 只定义 v0.1 那一枚」**：`Operator` 是数据，写全五枚**不产生任何执行路径**、不产生表、不产生迁移，而少写四枚会让 `all_operators()` 的返回类型随批次反复改（那是切分 §四第 2 条反对的「分次改动同一个枚举」的同形形态，只是对象换成了清单）。
 
 ---
 
@@ -692,16 +701,16 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 
 ## 11.1 枚举与清单的逐臂守卫
 
-- `EditRegionKind`：四臂（§325 `:2354-2357`）各一条往返 + 数目断言（`as_str` / `parse` 两枚穷尽 `match` + `ALL` 常量，形状照 `crates/continuum-artifact/src/artifact.rs:28` / `:47` / `:68` 的既有做法）。
-- `V01_OPERATOR_IDS`：数目断言（1），且逐项在 `ALL_OPERATORS` 里找得到、补集逐枚是其余四枚——**这一条的用例在 §11.2 第 (q) 条，此处不重开一条**（同一判据两处即两处维护）。
-- `ALL_OPERATORS`：`len() == 5`，且 `id` 逐枚不同（两两比较，不是只查总数）。
+- `EditRegionKind`：四臂（§325 `:2354-2357`）各一条往返 + 数目断言（`as_str` / `parse` 两枚穷尽 `match` + `ALL` 常量，形状照 `crates/continuum-artifact/src/artifact.rs:28` / `:47` / `:68` 的既有做法）。**本型的 `ALL` 是 `const` 成立的**（与那两处同样是无字段枚举，取值可在 `const` 中直接枚举）——**这一条与下面 `all_operators()` 那条的差别就在此**，`Operator` 有字段，故它不能是 `const`（§3.1）。
+- `V01_OPERATOR_IDS`：数目断言（1），且逐项在 `all_operators()` 里找得到、补集逐枚是其余四枚——**这一条的用例在 §11.2 第 (q) 条，此处不重开一条**（同一判据两处即两处维护）。
+- `all_operators()`：`id` 逐枚不同（两两比较，不是只查总数）。**数目不再由一条 `len() == 5` 的断言承载**：它写在返回类型 `[Operator; 5]` 里，清单个数的改动**编译期就可见**（§3.1），比运行时断言强；补一条 `len() == 5` 的断言测的是 Rust 的 `len()`——本设计 §11.2 的「一条预防」对同形写法已有判据，故**不补**。
 
 ## 11.2 判定侧：正例 + 反例成对（缺一条即不算钉住）
 
 | # | 用例 | 钉的是哪一侧 |
 |---|---|---|
 | a | 五枚算子的端口类型、`determinism`、`side_effect_class`、backend 候选**逐枚**断言（期望值手写） | §3.2 表的五行（不是抽样） |
-| b | 以 `&ALL_OPERATORS` 调 `register_image_operators` 注册五枚后，逐枚 `resolve` 成功 | 注册的正例 |
+| b | 以 `&all_operators()` 调 `register_image_operators` 注册五枚后，逐枚 `resolve` 成功 | 注册的正例 |
 | c | 同一注册表注册两次 ⇒ `Err(ImageError::Registry(OperatorError::Duplicate { .. }))`（**不是**静默覆盖） | 注册的反例（§3.1：那一臂是 P1 的判定，本型只带出来） |
 | c2 | 上一子例之后，注册表的内容与调用前**逐枚相同**（先查重后写，不留半注册） | 同一条规则的**写入面**（只看 `Err` 的话，「边查重边写」也能返回 `Err`） |
 | d | `Box` → 掩码的**投影**：给定手写的 `source_dims`，四个角落在预期像素上（手写期望） | §4.2 的 `Box` 支 |
@@ -721,7 +730,7 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 | r | `hard-composite` 与 `verify-outside-mask` 的 `backend_candidates.len() == 1` | §3.5 的「本块无名单检查的可触发形态」这一主张；**这一条红即说明本块需要自己那份名单检查** |
 | s | §3.4 边表**逐行**：下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，且那一枚的 `output_schema` 含该型（**交集中的型**，不是「两侧相等」） | §239 `:654` 的注册期一半（§3.4） |
 
-**一条预防**：第 (a)、(b) 的期望清单**必须手写**。若 (a) 写成遍历 `ALL_OPERATORS` 去比 `ALL_OPERATORS`，它测的是恒等式；若 (b) 写成 `ALL_OPERATORS.len()`，它测的是 Rust 的 `len()`。**语料从被测清单里取就是恒真的假照片**（本仓已有此判据）。
+**一条预防**：第 (a)、(b) 的期望清单**必须手写**。若 (a) 写成遍历 `all_operators()` 去比 `all_operators()`，它测的是恒等式；若 (b) 写成 `all_operators().len()`，它测的是 Rust 的 `len()`。**语料从被测清单里取就是恒真的假照片**（本仓已有此判据）。
 
 **另一条预防**：第 (f)、(g)、(h) 三条的 detector **必须是用例自己写的桩**（一个返回固定掩码 / 一个返回空），**不得**取本块的任何名单或常量作语料——否则三条都在测「桩与它自己一致」。
 
@@ -737,7 +746,7 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 | **收紧**：把 `generate-image` 的 `determinism` 改成 `Deterministic` | p 的第一枚（`cache_key` 由 `None` 变 `Some`）；**a 的那一行**（它的期望值是手写的） | o、q（另两枚 `Deterministic` 的判据与批次边界不受影响） |
 | **取反**：`register_image_operators` 改成边查重边写（先注册前几枚，遇到违规才返回） | c2（注册表内容与调用前不同） | b、c（`Err` 那一半仍绿） |
 | **等价变异**：把某个 backend 候选串改成另一个同样合法的串（如 `builtin` → `core`） | **全绿**——这是一枚**等价变异体**（候选是文本，没有跨表约束）。要打红它必须换变异体：把 `hard-composite` 的候选加一个，那时 r 红 | —— |
-| **放宽**：`ALL_OPERATORS` 少定义一枚（4） | `len() == 5` 的断言、b 的对应枚、q 的补集断言 | 其余（**这一档若不红，说明 b 是按 `ALL_OPERATORS` 自己遍历的**——即假照片） |
+| **放宽**：`all_operators()` 里少写一枚 | **编译失败**（返回类型是 `[Operator; 5]`，与实际元素数不符）——这一档不是用例红，是**编不过**（§3.1 的「数目改动编译期可见」）；**若连返回类型也改成 `[Operator; 4]`**，则 b 的对应枚与 q 的补集断言红 | 其余（`len()` 已不是断言，故不列；**这一档若在改类型后仍不红，说明 b 是按 `all_operators()` 自己遍历的**——即假照片） |
 
 ## 11.4 结构层的照片（`trybuild`）
 
@@ -746,7 +755,7 @@ P5e 的设计 §9.2 给 `continuum-media` 定义了一个 `evidence_from_media_o
 1. **`resolve_edit_region` 少传 `detector`（或少传 `source_dims`）⇒ 编不过**（§4.4）。这条钉的是「`Point` 那一支没有 detector 就调不动」与「`Box` 那一支没有源图尺寸就投不出掩码」。
 2. **`Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）在 `continuum-image` 里编不过** ⇒ 在本块的 crate 里**造不出** `Evidence`（P5a 设计 §4.4 的「唯一产生点」是结构事实）。**这一条在本块的分量比在 P5e 小**：本块不写域包装（§7.2），故它是本块侧唯一的一条证据面照片。
 
-**原先拟列在这里的第一条已移出本块的照片清单**：原写「`Operator { .. , determinism: Deterministic }` 的构造不带 `backend_candidates` ⇒ 编不过」。那是 P1 的 `Operator`（`crates/continuum-operator/src/definition.rs:79-88`，七个 pub 字段、无 `Default`）的**结构事实**，不是本块造出来的照片——本块只是照它构造 `ALL_OPERATORS`。
+**原先拟列在这里的第一条已移出本块的照片清单**：原写「`Operator { .. , determinism: Deterministic }` 的构造不带 `backend_candidates` ⇒ 编不过」。那是 P1 的 `Operator`（`crates/continuum-operator/src/definition.rs:79-88`，七个 pub 字段、无 `Default`）的**结构事实**，不是本块造出来的照片——本块只是照它构造 `all_operators()`。
 
 ## 11.5 拍不出照片的地方
 
