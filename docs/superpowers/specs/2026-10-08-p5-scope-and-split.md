@@ -70,6 +70,14 @@ OperatorRegistry::{register, resolve}
 2. **`VerificationPolicy` 的形状**——今天 `Node.verification_policy` 是 `serde_json::Value`
    （字段在 `crates/continuum-graph/src/node.rs:20`，其上一行 `:19` 的注记是「结构保存，判定属 P5」）。
    P5a 冻结它的类型，形状由 P5a 的设计定。
+   > **P5a 的设计实际走的是这一条的另一读法（2026-10-09，协调者已裁：接受）**：
+   > **`Node.verification_policy` 的字段类型不动**（保持 `Value`），**定型落在新 crate 的严格解析上**。
+   > **理由**：给字段定型会造出**「执行层 ↔ 跨领域」的 2-环**（§9.1 要求单向无环），
+   > 而**同一份文件相邻一行 `execution_policy` 已有 P4 的同一处置先例**（那条注记写的是「判定属 P4」）。
+   > **对 `node.rs` 只改 `:19` 那一行注记。**
+   > **判据（本条比原措辞更有用）**：**「冻结一个类型」不一定意味着「改那个字段的类型」**——
+   > **若那个字段住在别的层、而那份文件的相邻字段已有一条同名先例，则定型落在**消费侧**，
+   > 原字段保持 `Value`**。这一条已被 P4 与 P5a 各执行一次，是**本层的既定处置**。
 3. **`ArtifactType` 的 P5 扩展清单**——今天六型（`SourceTree` / `Patch` / `TestResult` / `Text` / `Json` / `Blob`，
    `crates/continuum-artifact/src/artifact.rs:14-21`），
    §239 举的 `Image` / `Video` / `Timeline` 等**都不在枚举里**。清单由 P5e 一次性落地。
@@ -78,10 +86,24 @@ OperatorRegistry::{register, resolve}
    （`docs/superpowers/plans/2026-10-01-p1-execution-layer.md:1142`）。
    **指给 P5e**：§308 点名的第一项长任务就是视频生成。其余块**不得**再造第二个错误类型。
 
+5. **迁移号段（六块与 P6 必须统一划；2026-10-09 补入，P5a 的设计报出并占下第一档）。**
+   本层要落库（证据、覆盖面判定等），而 P3 之后各子项目各占一档（口径见
+   `2026-10-05-p3d-model-registry-router-design.md:480`「一个子项目一个十位档」）。
+   **P5a 已实测取 130（该档为空）**，并**把这个划分列进了它 §14 的对账项**。
+   **其余五块与 P6 的档须在各自的块里写死后报出，不许各自挑**——
+   **两处都要落库而共用一个档，会在合入时撞。**
+   **判据**：**「我没占它」不等于「它没人占」**——**六块与 P6 同时开工时，各块都会以为自己挑的档是空的**。
+
 ### 与 P4 的接口面：**照设计写，不照实现写**
 
-P5a 要接的是 P4 的 `TaskContract.requirements[].verification_requirement`、`constraints`、
-`verification_policy` 与预算面。**P4 的实现尚未开始**（三个 crate `continuum-canonical` /
+P5a 要接的是 P4 的 `TaskContract.requirements[].verification_requirement` 与预算面。
+> **订正（2026-10-09，P5a 的设计实测；本行原先把两个 Node 字段写成了 TaskContract 的）**：
+> **`constraints` 与 `verification_policy` 都不是 `TaskContract` 的字段**——
+> §224 的 `TaskContract` 只有 `id/version/intent_id/requirements[]/preferences[]/prohibitions[]/budget/`
+> `authority_limit/data_policy/model_policy/node_policy/acceptance_predicate`；
+> **那两个字段在 §236 的 `Node` 上**（`crates/continuum-graph/src/node.rs`）。
+> **判据**：「A 的字段 X」这种话，**要核 X 在 A 上**——**本行是照着「都跟验证有关」的印象写的**，
+> 而字段归属不看印象。**P4 的实现尚未开始**（三个 crate `continuum-canonical` /
 `continuum-semantics` / `continuum-budget` 在 `crates/` 下都不存在，其计划 21 个 task 停在 Task 1），
 而 P4 的**设计仍在动**（2026-10-06 当日有多次改动，见 `git log -- docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md`）。
 **故 P5a 对着 P4 的设计 §X 写，并在设计里写明所据的是哪一节**；P4 的设计若再改，
@@ -128,8 +150,13 @@ P5 的四个领域算子块**都只经 `Operator` / `OperatorRegistry` 与第 3 
    ——它们委托到 `ArtifactType::parse`（唯一产生点），故不含自己的表；
    以及 `crates/continuum-port/src/port.rs:94` 的 `compatible`（按 `ArtifactType` 等值判定）。
 3. **P5b 的方法登记接口先冻。** §187 的四个目录（`software/` `video/` `research/` `3d/`）
-   与四个领域算子块是**多对多**：`software/` 对 P5c、`research/` 对 P5d、`video/` 对 P5e，
-   而 `3d/` **在四个具名算子里没有对家**（见 §八）。故 P5c/P5d/P5e/P5f 的「方法」条目的
+   与四个领域算子块**在已配对的那三对上是一对一**：`software/` 对 P5c、`research/` 对 P5d、
+   `video/` 对 P5e，而 `3d/` **在四个具名算子里没有对家**（见 §八）、P5f 则没有目录（见 §八）。
+   （**订正 2026-10-09，由 P5b 的设计查出**：本句原写「多对多」，与它自己列出的配对、
+   以及本文件 §八「目录与算子块不是一一对应，而是「四对四减去两处错位」」相抵；
+   实测是一对一的三对配对 ＋ 两处无对应。**若不改，「多对多」会读成同一 id 被两块写**，
+   而 `bind` 的「重复 bind 覆盖旧值」会因此静默丢贡献。）
+   故 P5c/P5d/P5e/P5f 的「方法」条目的
    登记形态归 P5b，四块只填内容；**在 P5b 的设计过审前，四个算子块不得自造方法登记形态**。
 4. **P5 不得自建执行路径。** 算子的执行、`Queued → Running` 的迁移、`OperatorRegistry::resolve`
    的调用点都在第 3 层（P1 的设计第 18 节把「算子解析的落点」列为 P1 的已知缺口，
@@ -218,6 +245,14 @@ P3 的实测：这一做法推翻了作者自扫保留的一条断言，以及�
   **本文件不替它决定**，只把这条错位记全。
   **判据**：**一条「X 有 Y」的断言，要同时核「Y 存在吗」与「X 存在吗」**——
   **本文件原先只核了后者（`3d/` 有目录但无块），漏了前者（P5f 有块但无目录）。**
+
+- **《工程》§8.3 与 §9.2 对同一事实一记一漏（2026-10-09 补入，P5b 的复审查出的）。**
+  §8.3 写 `Execution Method Library ← 无`（`docs/02-工程.md:526`），**而 §9.2 的「入度为零」那张表独缺层 8 那一行**
+  （`docs/02-工程.md:590-602`）。**同一事实，一处记了、一处漏了**——**故「EML 零依赖」这件事在两个地方读到的结论不同。**
+  **本层取 §8.3 那一处**（它与同表 `:527` 的跨层行一致：`领域算子 ← 第 3 层 Operator 注册表 + 第 4 层 Router`），
+  **并把 §9.2 那处漏记记为缺口**。
+  **判据**：**同一份文档里对同一事实有两处表述时，要核它们是否一致**——
+  **而「一处有、一处无」比「两处矛盾」更难发现**（矛盾会被读的人当场撞见，漏记不会）。
 
 - **`ArtifactType` 的 P5 清单尚无权威来源。** P1 的设计 `:168` 举 `Image`/`Video`/`Timeline`/`Scene` 四例，
   §328 举七种（`Video` `Audio` `ShotSet` `Transcript` `Timeline` `SubtitleTrack` `Render`），
