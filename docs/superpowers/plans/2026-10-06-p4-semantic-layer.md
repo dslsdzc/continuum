@@ -526,8 +526,14 @@ git commit -m "feat(canonical): Canonicalized 两支互斥、Temporal Resolver �
   （a）`EntityId` 经 `as_str` / `from_str` 往返（多条，含空串的处置断言**具体**是哪一种）；
   （b）trybuild 编译失败样例：**在 crate 外**用元组构造写 `EntityId("x".to_owned())`（`.stderr` 实跑取值，
   不许凭记忆写）＋ 正控制 `EntityId::from_str("x")` 编译通过。
-  **红条件**：把 `EntityId` 的第 0 个字段改成 `pub`（**移除档**——那时 (b) 的样例从「编译失败」变成「编译通过」，
-  观测方式是「样例不再产出旧的 `.stderr`」，**这与「用例变红」不是一回事**，报告里要分清）。
+  **红条件**：把 `EntityId` 的第 0 个字段改成 `pub`（**移除档**——那时 (b) 的样例从「编译失败」变成「编译通过」）。
+  **观测方式是两层，要分清的是这两层**（**订正 2026-10-10，Task 3 实现期实测**）：
+  ① **跑 trybuild 的那条驱动用例当场变红**——实测 trybuild 报
+  `Expected test case to fail to compile, but it succeeded.`；
+  ② 与它**同名的运行期用例仍绿**（实测 `entity_id_round_trips_… ok`）。
+  **原稿写「观测方式是『样例不再产出旧的 `.stderr`』，这与『用例变红』不是一回事」，与实测不符**：
+  驱动用例确实红了，故那句会被读成「这一档红不了、因此不必指望它」。
+  改动本身（把 `EntityId` 的字段改成 `pub`）仍然是对的档位，错的只是**观测描述**。
   **「没有指向 `ToolId` / `ModelId` / `ConnectorId` 的转换」那一半不靠 trybuild 钉**——
   本 crate 的 `ALLOWED` 条目里没有 `continuum-core`，**那三个类型在本 crate 里根本写不出来**
   （写了即 `E0432` 未解析导入，**那是编译不过、不算变红**）；故这一半的判据是
