@@ -942,10 +942,19 @@ git commit -m "feat(canonical): 风险门槛必填与 ExplicitBinding 的取值�
 ### Task 7: Alias 存储（迁移 100）、四作用域与「不自动永久化」
 
 **Files:**
-- Create: `crates/continuum-canonical/src/{alias.rs,persist.rs}`
+- Create: `crates/continuum-canonical/src/persist.rs`
+- **Modify: `crates/continuum-canonical/src/alias.rs`（续写，不是新建）**
+  ——`AliasScope` 与四作用域那一半**已由 Task 4 提前落在这个文件里**（Task 4 的 Produces 有两条以它为入参／出参的映射函数，
+  而计划原本把它排在本 task）。**本 task 只在这个文件上续写**，**不另起名字、不换家**。
 - Create: `crates/continuum-canonical/tests/alias.rs`
 - Modify: `crates/continuum-canonical/{src/lib.rs,src/error.rs,Cargo.toml}`（导出、`AliasError`、dep `continuum-persist`）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 加 `continuum-persist`）
+  > **本条来历（2026-10-10，P4 Task 4 实现期查出并交裁，裁定：写进本 task 的 Files）**：
+  > 计划把 `AliasScope` 排在本 task（`:942`、`:1000`，家是 `src/alias.rs`），而 Task 4 的 Produces（`:635`）
+  > 有两条映射函数以它为入参／出参——**两处次序相抵**。Task 4 的处置是把四枚词汇那一半**提前**落在 `src/alias.rs`。
+  > **故本 task 的 Files 原先写「Create」会与那半相撞**：照字面执行会新建一个已被写过的文件。
+  > **判据同 Task 2→Task 4 那一笔**：**一条跨 task 的改法只写在别处的正文里、本 task 的 Files 不列它，
+  > brief 就看不到它**——`scripts/task-brief` 按 task 切文本，**落在 Files 之外的指令不进 brief**。
 
 **Interfaces:**
 - Produces: `continuum_canonical::{AliasScope, Alias, AliasError, p4_canonical_migrations, save_alias, load_alias, list_aliases, promote_alias}`
