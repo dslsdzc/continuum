@@ -757,7 +757,7 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 | 变异 | 该红 | 不该红 |
 |---|---|---|
 | **取反**：`research-source-set` 的 `determinism` 改成 `NonDeterministic` | k 的第一枚（`Some` → `None`） | j（候选列表与 determinism 无关）、其余各条 |
-| **取反**：`research-search` 的 `determinism` 改成 `Deterministic` | k 的第二组（该枚由 `None` 变 `Some`） | j、l、m（它们不看 determinism） |
+| **放宽**：`research-search` 的 `determinism` 改成 `Deterministic`（**订正 2026-10-10**：原记「取反」） | k 的第二组（该枚由 `None` 变 `Some`） | j、l、m（它们不看 determinism） |
 | **移除**：`register_research_operators` 的「先核后写」删掉（边核边写） | d 的第二个子例、e 的第二个子例（表内容与调用前不同） | c（合法批次两侧都绿） |
 | **移除**：`bind` 的 `retrieval` 那一条 | f 对 `research-search` / `research-source-set` 两个串的解析（它们从 `realized_by` 里消失）、g（`select` 那一条的 `realized_by` 变空） | 其余三条 `bind`、a–e、j–m（i 已撤销） |
 | **放宽**：把 `research-question` 的 `input_schema` 改成 `[Text]` | l 的第 1 行（无输入的来源不存在了）、m 仍绿（`Text` 是既有型） | 其余各行 |

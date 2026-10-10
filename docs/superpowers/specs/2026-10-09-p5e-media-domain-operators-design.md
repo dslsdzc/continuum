@@ -1157,7 +1157,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 | **取反**：`register_media_operators` 改成边核边写（先注册前几枚，遇到违规才返回） | i 的第二个子例（注册表内容与调用前不同） | h、f（合法批次两侧都绿） |
 | **移除**：`RestoreRejected` 的身份比对删掉（一律 `Ok`） | q 的第一个子例 | o、p（有进度/无进度与身份无关）、r 全组 |
 | **收紧**：`required_permission` 对四枚生成算子**都**返回 `Broll` | l 的后三条 | j、k、m（它们不看具体是哪一枚） |
-| **取反**：`transcribe` 的 `determinism` 改成 `Deterministic` | r 的第二组（`cache_key` 由 `None` 变 `Some`）；**同时该轮 h 会红**（`local-whisper` 等三个候选不在 §5.4 的名单里） | r 的第一组、i |
+| **放宽**：`transcribe` 的 `determinism` 改成 `Deterministic`（**订正 2026-10-10**：原记「取反」） | r 的第二组（`cache_key` 由 `None` 变 `Some`）；**同时该轮 h 会红**（`local-whisper` 等三个候选不在 §5.4 的名单里） | r 的第一组、i |
 | **放宽**：`all_operators()` 少注册一枚（16） | `len() == 17` 的断言、f 的对应枚 | 其余（这**一档若不红，说明 f 是按 `all_operators()` 自己遍历的**——即假照片） |
 | **等价变异**：把某个新型的串改成另一个**同样合法**的小写串（如 `shot_set` → `shotset`） | **全绿**——这是一枚**等价变异体**（编码是自洽的，往返仍成立）。**要打红它必须换变异体**：改成与 `artifact_type.rs:40` 的表外取值相撞的串（如 `nope`），那时 b 红 | —— |
 
