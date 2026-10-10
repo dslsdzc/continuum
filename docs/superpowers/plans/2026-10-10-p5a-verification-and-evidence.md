@@ -24,11 +24,11 @@
 |---|---|---|
 | P0 `continuum_persist::{Db, Migration, Tx, Value, PersistError}`（`crates/continuum-persist/src/db.rs:14`、`:72`、`src/tx.rs:26`、`src/lib.rs:12-18`） | **已交付** | 迁移 130（Task 9）与全部写入路径 |
 | P0 `continuum_events::{EventType, Event, Event::new}`（`crates/continuum-events/src/event.rs:13`、`:25`、`:63`、`:81`） | **已交付** | `VerificationFailed` 是本块唯一的写事件（Task 9） |
-| **`EventType::VerificationFailed` 今天零个写入方**（实测 `grep -rn VerificationFailed crates/`：只有 `event.rs:25` 的定义、`:41` 的 `ALL`、`:54` 的 `as_str` 三处，加上 `crates/continuum-events/tests/event_envelope.rs:17` 的 `ALL` 名表与 `:28` 的往返用例） | **已交付的类型，本块是第一个产生点** | Task 9 |
+| **`EventType::VerificationFailed` 今天零个写入方**（实测 `grep -rn VerificationFailed crates/`：只有 `event.rs:25` 的定义、`:41` 的 `ALL`、`:54` 的 `as_str` 三处，加上 `crates/continuum-events/tests/event_envelope.rs:18` 的名表那一行与 `:27` 的往返用例） | **已交付的类型，本块是第一个产生点** | Task 9 |
 | P1 `continuum-artifact` 的 `Artifact` / `ArtifactId` / `ArtifactType`（`src/artifact.rs:151`、`:170`、`:172`）、`load_artifact`（`src/persist.rs:90`） | **已交付** | `Evidence.artifact_refs`、§266 第 1 项的 `artifact_exists`（Task 9） |
-| P1 `continuum-graph` 的 `NodeId`（`src/ids.rs`）、`Node`（`src/node.rs:20` 的 `verification_policy` 字段、`:19` 的注记）、`AdfirGraph`（`src/graph.rs:41` 的 `terminal_nodes` `:70`）、`Edge` / `EdgeKind`（`src/edge.rs:47`、`:28`）、`ExecutionProfile`（`src/execution.rs:20`，`model` `:21`、`provider` `:22`、`backend` `:24`） | **已交付** | 生产者与受验节点的身份、EVIDENCE 边核对、Worker 身份（Task 4 / 6 / 9） |
+| P1 `continuum-graph` 的 `NodeId`（`src/ids.rs`）、`Node`（`src/node.rs:20` 的 `verification_policy` 字段、`:19` 的注记）、`AdfirGraph`（`src/graph.rs:41`，`terminal_nodes` 访问器在 `:70`）、`Edge` / `EdgeKind`（`src/edge.rs:47`、`:9`）、`ExecutionProfile`（`src/execution.rs:20`，`model` `:21`、`provider` `:22`、`backend` `:24`） | **已交付** | 生产者与受验节点的身份、EVIDENCE 边核对、Worker 身份（Task 4 / 6 / 9） |
 | P1 `continuum-operator` 的 `BackendId`（`src/definition.rs:66`，导出在 `src/lib.rs:7-9`） | **已交付** | 候选 backend 与 `EvidenceProducer::Node`（Task 2 / 6） |
-| P1 `trybuild` 的既有做法（`crates/continuum-node/tests/type_level.rs` 与 `tests/compile_fail/*.rs`，`dev-dependencies` 里的 `trybuild` 在 `crates/continuum-node/Cargo.toml:24` 之后） | **已交付** | Task 10 照它的形状写（含 `LISTED_SAMPLES` 与目录对钉的那条用例） |
+| P1 `trybuild` 的既有做法（`crates/continuum-node/tests/type_level.rs` 与 `tests/compile_fail/*.rs`，`dev-dependencies` 里的 `trybuild` 就在 `crates/continuum-node/Cargo.toml:24`） | **已交付** | Task 10 照它的形状写（含 `LISTED_SAMPLES` 与目录对钉的那条用例） |
 | **P4 `continuum-semantics`（`RequirementId` / `RequirementClass`）** | **未交付**：实测 `crates/` 下无 `continuum-semantics`，`p4` 分支上亦无；全仓 `grep -rn 'RequirementId\|RequirementClass' crates/` **零命中** | 见第二节 |
 | **P4 的设计本体**（`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md`） | **已定稿、仍在动** | 只作读法来源（§7.1 §7.2 §16），不作依赖 |
 | **本块的新 crate `continuum-verify`** | **不存在**（实读 `ls crates/` 无该目录；`grep -rn 'continuum-verify\|continuum_verify' crates/ Cargo.toml` 零命中——**`docs/superpowers/specs/2026-10-09-p5d-…-design.md` 有命中，那是 P5d 的设计文本，不是代码**） | 本计划的全部交付物 |
@@ -45,8 +45,8 @@
 - 设计 §2.1 的依赖边表**不含** `continuum-semantics`，且 §6.1 逐字写「**不登记到 `continuum-semantics` 的边**，也不造第二个 `TaskContract`」。
 - 而 `语义层 (2) → 执行层 (3)`、`执行层 (3) → 跨领域 (8)`（`docs/02-工程.md:573-586`），**故 `跨领域 (8) → 语义层 (2)` 会闭成 2-环**，与 `:588` 的「依赖方向单向，无环」直接相抵。
 
-**结论（本计划据此办）**：**不得**登记 `continuum-verify ← continuum-semantics` 的边；`Contract` 与 `Requirement` 的身份由本块**以值承载**（`RequirementId` 在 Task 2 落、`RequirementClass` 与 `ContractView` 在 Task 5 落），`RequirementClass` 的四值照 §224 的四个规范名取（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED`）。
-**代价据实写明**：这是本块的**第二个 `RequirementId`**（第一个在 P4，尚未落地），而设计 §4.3.1 逐字说过不定义第二个——**这一处相抵由本计划报出**（`## 遗留` 第一节），不在这里就地改设计。两枚类型同形（`String` 承载的 id ＋ 四臂封闭枚举），**值相等**，跨层由装配方在边界处转换。
+**结论（本计划据此办）**：**不得**登记 `continuum-verify ← continuum-semantics` 的边；`Contract` 与 `Requirement` 的身份由本块**以值承载**（`RequirementId` 在 Task 2 落，`RequirementClass` / `ContractRequirement` / `ContractView` 在 Task 5 落），`RequirementClass` 的四值照 §224 的四个规范名取（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED`）。
+**代价据实写明**：这是本块的**第二个 `RequirementId`**（第一个在 P4，尚未落地），而设计 §4.3.1 逐字说过不定义第二个——**这一处相抵由本计划报出**（`## 遗留` 第一节），不在这里就地改设计。两枚类型在**臂的集合**上一致（`String` 承载的 id ＋ 四臂封闭枚举），取值可以一一对应，跨层由装配方在边界处转换；**但「同形」在 `RequirementClass` 上不成立**：P4 计划的那一枚带声明序（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1303` 的用例逐字断言 `UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`），本块的没有（Task 5 不给 `Ord`、无该用例），**故跨层只转值、不转序**。
 
 ### 三、哪些 task 在 P4 未合入前动不了
 
@@ -54,6 +54,7 @@
   **两重后果**：（i）冲突落在 `ALLOWED` 与迁移清单这两处逐行敏感的文本上；（ii）`startup.rs` 与 `migrations.rs` 的计数断言会互相踩——**计数断言的判别力依赖「作者按实际输出改断言」**（`crates/continuum-runtime/tests/migrations.rs:1-10` 已写明这一点），两个改动方各按自己那一刻的输出改，合起来谁也说不清哪个数是对的。
   **故排期上本块的 Task 11 排在 P4 合入之后**；Task 1 对 members 与 `ALLOWED` 的那一次改动同理（它是本块的第二处多写者改动）。
 - **其余九个 task 只新建 `continuum-verify` 与它自己的测试，一个既有文件都不碰**（唯一例外是 Task 1 改 members 与 `ALLOWED` 加**空条目**——`every_crate_depends_only_on_its_allowed_set`（`:288`）与它的互为覆盖断言（`:291-305`）要求**每个** workspace 成员都在表里，漏了即红；以及 Task 4 改 `crates/continuum-graph/src/node.rs:19` 的一行注记——P4 的计划明写不碰 `crates/continuum-graph/**`，故那一行不与 P4 相撞）。
+- **推论：整块排在 P4 合入之后。** 上面点名的两处是**动到既有文件的**两个 task，但可开工时刻不由改动面决定：Task 2–10 **全部**依赖 Task 1 建出的 `continuum-verify`（Task 1 才把它加进 workspace `members`），故 Task 1 一推迟，其余九个 task 一个都开不了。**「其余九个 task 一个既有文件都不碰」讲的是它们的改动面，不是它们可以先做。**
 - **计数与迁移号一律以「当时工作树上的实际输出」为准，不许预判**：本计划给的是**预期值**（`startup.rs` 今天两处 `迁移应用 9 项`（`:24`、`:90`）与一处 `7 项`（`:79`），加本块一条后各加一），落地时以实跑读出的数字为准。
 
 ### 四、本块对既有之物的请求（**本计划只作消费方／依赖方写，一处都不实施**）
@@ -88,7 +89,7 @@
   **外部 crate（`serde` / `serde_json` / `thiserror` / `trybuild` / `tempfile`）按需加，不进 `ALLOWED`**——那张表只逐对断言 workspace 成员之间的边。
 - **`--depth 1` 只钉直接边，这就是这条规则的完整粒度，本计划不另设闭包断言。** `cargo_tree_direct` 带 `--depth 1`（`crates/continuum-runtime/tests/dependency_direction.rs:270-275`），故它**看不到传递可达**；而 Rust 的 crate 可见性要求**直接声明**才能 `use`，未写进 `Cargo.toml` 的传递依赖**写不出** `use continuum_semantics::…`。**写这一段的用途**：免得把上面那条约束读成「任何指向语义层的边都会变红」——**那会是一条假保证**。
 - **枚举列的落库编码一律小写、多词以 `_` 连接**，经本 crate 的显式 `*_str` / `parse_*` 辅助函数读写（与类型同址），**不依赖 serde、不用 `Debug`**。**表外取值读回得具体 `Err`**（照 P3D 与 P1 的枚举列纪律：`NodeState` 的 serde 是 `SCREAMING_SNAKE_CASE`，直接反序列化会失败）。本块要编码的列：`EvidenceType`（`evidence.evidence_type`）、`Validity`（`test_validity.verdict`）、`TestValidityCheck`（`test_validity_check.check_name`）、`CheckVerdict`（`test_validity_check.verdict`）、`VerdictAggregate`（`verification_round.aggregate`）、`IndependenceVerdict`（`verification_round.independence`）、`AdversaryOutcome`（`verification_round.strategy_verdict`）。
-- **迁移编号取 `130`，取用前现场核对空号**（设计 §10.1 已实测取 130）。**实测占用**（2026-10-10 逐 crate 读 `Migration::new(` 的第一个参数）：`10`（artifact，`crates/continuum-artifact/src/persist.rs:9`）、`20`（graph，`crates/continuum-graph/src/persist.rs:15`）、`30`（workspace，`crates/continuum-workspace/src/persist.rs:22`）、`40`（effect，`crates/continuum-effect/src/persist.rs:28`）、`41`（policy，`crates/continuum-policy/src/persist.rs:31`）、`50`（capability，`crates/continuum-capability/src/persist.rs:54`）、`80`（model-registry，`crates/continuum-model-registry/src/persist.rs:107`），加上 `continuum-persist` 内建的 `1` / `2`（`src/db.rs:29`、`:46`）。**两处干扰项不许误判为空号被占**：`60` 在 `crates/continuum-persist/src/bin/crash-writer.rs:17`（测试夹具），`100` 在 `crates/continuum-persist/tests/migrations.rs`。**两处都在测试／工具的 `Db` 里，不进生产链**（`Db::open_with` 的迁移集由调用方给）。**P5 其余五块与 P6 的档由协调者统一划**（设计 §14 第 9 条），本块只声明自己用的号。
+- **迁移编号取 `130`，取用前现场核对空号**（设计 §10.1 已实测取 130）。**实测占用**（2026-10-10 逐 crate 读 `Migration::new(` 的第一个参数）：`10`（artifact，`crates/continuum-artifact/src/persist.rs:9`）、`20`（graph，`crates/continuum-graph/src/persist.rs:15`）、`30`（workspace，`crates/continuum-workspace/src/persist.rs:22`）、`40`（effect，`crates/continuum-effect/src/persist.rs:28`）、`41`（policy，`crates/continuum-policy/src/persist.rs:31`）、`50`（capability，`crates/continuum-capability/src/persist.rs:54`）、`80`（model-registry，`crates/continuum-model-registry/src/persist.rs:107`），加上 `continuum-persist` 内建的 `1` / `2`（`src/db.rs:29`、`:46`）。**四个号不许误判为空号被占**：`60` 在 `crates/continuum-persist/src/bin/crash-writer.rs:17`（测试夹具），`100`、`101`、`102` 在 `crates/continuum-persist/tests/migrations.rs`（实测分别在 `:45`、`:68`、`:69`）。**四个都在测试／工具的 `Db` 里，不进生产链**（`Db::open_with` 的迁移集由调用方给）。**P5 其余五块与 P6 的档由协调者统一划**（设计 §14 第 9 条），本块只声明自己用的号。
 - **迁移 130 的 SQL 在 Task 9 内一次写齐五张表，Task 11 之后不得再改它的 SQL。** 依据两条：（i）设计 §10.2 规定 130 含五张表；（ii）**在 Task 11 之前 130 只被测试库应用过**（`runtime_migrations()` 到 Task 11 才含它），故那时改是安全的；**Task 11 之后改 130 的 SQL 就是设计 §13.2 第 2 条点名的那处静默失效**（`migrate()` 跳过已记录的 version，对已建库完全无效）。**本计划不许在任何 task 里改迁移 1／2／10／20／30／40／41／50／80 的 SQL。**
 - **代码注释、错误信息、测试断言信息用中文。** 标识符用英文。
 - `cargo test --workspace --no-fail-fast` 必须全绿、**0 warning**；`cargo build --workspace --all-targets` 同样 0 warning。
@@ -118,7 +119,7 @@
 ### 本计划特有的「签名即判据」，照抄前须对源
 
 - `Migration::new(version: i64, name: &'static str, sql: &'static str)` 与 `Db::open_with(path, Vec<Migration>)`（`crates/continuum-persist/src/db.rs:14`、`:72`）；`Tx::query(&self, sql, params: &[Value]) -> Result<Vec<Vec<Value>>, PersistError>`、`Tx::execute`、`Tx::commit`、`Tx::append_event(&self, event: &Event)`（`src/tx.rs:26`、`:30`、`:41`、`:49`）。
-  **本块的写函数一律不自己 `commit`**（照 P1 的 `apply_transition` 形状，`crates/continuum-graph/src/transition_tx.rs:72` 起）：写入函数返回 `Err` 之后调用方必须回滚、不得提交，Task 9 的失败路径照片以这条为前提。
+  **本块的写函数一律不自己 `commit`**（照 P1 的 `apply_transition` 形状，`crates/continuum-graph/src/transition_tx.rs:47`；「不自行开启或提交事务，提交由调用方负责」的原文在 `:26`，`Err` 之后须回滚在 `:31`，不代劳回滚在 `:39`）：写入函数返回 `Err` 之后调用方必须回滚、不得提交，Task 9 的失败路径照片以这条为前提。
 - `Event::new(event_type: EventType, event_id: impl Into<String>, occurred_at: i64, payload: serde_json::Value) -> Event`，配 `with_intent` / `with_node`（`crates/continuum-events/src/event.rs:81`、`:105`、`:110`）；**`with_ignorable` 只有新增的事件类型才需要置为 true，九类既有事件不得调用**（`:99` 的原话）——`VerificationFailed` **是九类之一，故不调它**。
 - `continuum_artifact::load_artifact(tx, id) -> Result<Option<Artifact>, PersistError>`（`crates/continuum-artifact/src/persist.rs:90`）；`Artifact` 的字段（`src/artifact.rs:170-178`：`id` / `artifact_type` / `content_hash` / `size` / `producer_node` / `privacy_class` / `version` / `metadata: Value` / `provenance: Value`）。
   **`Artifact.metadata` 是 `serde_json::Value`，其 schema 规范未给**（设计 §15 第 9 条）——故**本块不许读它的任何字段**：§266 第 1 项的 `artifact_exists` 只判存在，不读内容。
@@ -129,10 +130,12 @@
 
 ---
 
-## 三条已付过代价的纪律
+## 已付过代价的纪律
+
+**本节照 P4 计划的纪律清单逐条对源**（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:181-241`），**只承袭与本块实情相符的那些**；本块与 P4 对不上的一处（变异口径分层）单独申报，见本节末。
 
 1. **变异必须在全量 `cargo test --workspace --no-fail-fast` 下得出否定结论**（「不变红」）；正向的「变红」跑全量是加分。**变异分四档，每一处「预期谁红」都要标档位**：**取反**（把判定反过来）／**放宽**（少判一半条件）／**收紧**（多判一半条件）／**移除**（删掉整条守卫）。**三条失效形态都要防**：
-   (a) **锚点不唯一** → 变异没落到实现体却报 GREEN（改之前先 `grep -n` 数锚点，落在唯一处）；
+   (a) **锚点不唯一** → 变异没落到实现体却报 GREEN（改之前先 `grep -n` 数锚点，落在唯一处）。**本块的「删一臂」类变异一律以该枚举的 `ALL` 常量数组为锚点**：删数组里的一项 ⇒ 数目断言与逐字点名红（运行期红）；**删枚举定义里的那一臂不是这条的锚点**——用例文件与 `as_str` 里的 `Xxx::Arm` 引用会编译不过，那是编译失败、不是变红（见 (c)）；
    (b) **等价变异体**——判据是「**这两版在哪个入参上会给出不同结果**」，举不出即是等价，处理是**换真变异体而非补用例**。本块已预先识别的等价变异体有三处：**`AdfirGraph::edges()` 的索引序**（EVIDENCE 边核对的用例若只断集合相等，「改成不排序」是等价的）、**`Vec<EvidenceType>` 的顺序**（`MissingRequiredTypes.missing` 若只断「非空」，「改成不排序」是等价的——故 Task 5 的 (c) 断**恰是 `[Fuzz]`**）、**`Option::None` 与 `Some(false)` 在夹具里恰好同值**（若夹具漏了「`None` 与 `false` 各一条」，两者可互写）。
    (c) **变异导致编译失败**——那不是「变红」（判据用 `could not compile` 或 `error[E….`；cargo 在**用例失败**时也打印 `error: test failed, to rerun pass …`，不能拿它当判据）。**本块有三条性质只有编译期照片**（Task 10 的五个 `compile_fail` 样例、Task 4 的字段清单穷尽解构、Task 6 的输入面字段清单），**照实写成「编译期照片」，并写明观测方式是「该样例从编译失败变成编译通过」或「编译不过」**，不假称它们会跑红。
    **变异脚本必须带还原护栏**（本仓出过一次「变异留在源码里」的事故）：每次变异**用 `trap` 装还原**、**变异前与还原后各核一次 `sha256sum`**、**每轮用独立日志路径**，报告里逐轮附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位」。模板（`MUT` 是改的文件、`BAK` 是备份）：
@@ -148,6 +151,12 @@
    **`trap` 那一行不许省。**
 2. **凡注释写绝对措辞，必须有对应用例；且要带时点**——「唯一／一律／只有／全部／没有任何／逐个」这类词，要么有可写出的照片，要么**明写为什么没有**。**断言的作用域要与事实同宽**：「整张表的唯一 X」≠「某个字段的唯一 X」；「本 crate 的源码文本里零命中」≠「全仓零命中」；「在本 task 结束时」≠「永远」。**枚举式绝对断言须逐项有照片**——「A/B/C/D 都…」的每条臂各要一条照片，不抽代表（手写分支能各自漂移）。**本块适用这条的地方**：`EvidenceType` 的十四臂（Task 1）、十三型「需要制品」的逐型拒绝（Task 2）、五检查逐臂（Task 3）、四 class 逐值（Task 5）、`VerdictAggregate` 五臂（Task 6）、`Conjunct` 十项（Task 7）、`AdversaryOutcome` 两臂（Task 8）。**「唯一产生点」这句话的照片只有编译期那两条**（Task 10），**本计划不写「运行期也证明不了第二个构造点」**。
 3. **门读数要自证覆盖**。**判据是日志里 `Running` 的行数与 `test result:` 的行数**（Doc-tests 算一条），**不是** `Compiling` 的行数——`Compiling` 挡不住射程与截断。`cargo test` **不收 `--keep-going`**（那是 `cargo build` / `cargo check` 的），要用 **`--no-fail-fast`**，否则会在第一个失败目标处停住、后面的目标一行不跑。**每轮变异与每次全量门都要留日志路径**，报告里附「`Running` 行数 / `test result:` 行数 / 与上一轮的差」。**变异窗口与验证窗口互斥**：实现者与协调者**共用同一个工作区**，而变异是「改源码 → 跑全量 → 还原」；**实现者报告完成之前，协调者不得在该工作区里跑 cargo**。
+4. **失败路径的用例要断言是哪一种 `Err`**，不只「返回了 `Err`」；**并断言没有半写的副作用。** 本块的失败面是 `VerifyError` 的变体，**逐变体至少一条用例**：`EvidenceWithoutArtifact`（Task 2 的十三型逐型）、`HumanConfirmationFromNonHuman`（Task 2）、`IncompleteTestValidityChecks`（Task 3，缺臂与重复臂各一条）、`UnknownVerificationPolicy`（Task 4 的四种输入逐条）、`ProfileMissing`（Task 4）、`NoAvailableVerifier` 与 `NoIndependentVerifier`（Task 6 各两条）、`EvidenceFromVerifiedNode`（Task 6 与它的 (n) 另一侧）、`MissingEvidenceEdge`（Task 9 与它的另一侧）。**副作用面**：Task 9 的 `an_evidence_row_is_insert_only`（第二次写不得改动原行）与 `record_verification_round` 的失败路径（`Err` 之后由调用方回滚，见「签名即判据」那一条）。**本块不写「事务已回滚」的运行期照片**——`Tx` 没有保存点接口、回滚只能由调用方丢弃句柄（`transition_tx.rs:39-40` 的同一条），这一点在 Task 9 的文档注释里写明。
+5. **纯数据／纯投影的类型没有运行期照片，只钉类型与签名（编译期）；钉的机制写死为「编译器强制的穷尽解构／结构体字面量」且不得带 `..`。** 判据：**Rust 没有反射**——若「把字段名各列一遍」被理解成手写两份名单，那条断言恒真（名单是手抄的，类型改了它不会红），它钉的只是「抄的时候两边一样」。**`..` 豁免会让变异成为等价变异体**（第 1 条 (b) 的同一回事）：在被改处留了 `..` 的穷尽解构照过。**本块适用这条的地方**：`VerificationProfile` 的六字段（Task 4 的 `the_six_fields_of_261_are_all_present`）与 `InitialVerifierInput` 的三类输入（Task 6 的 `the_initial_input_names_exactly_the_three_inputs_of_263`）——两处用**穷尽解构**，都写了「不带 `..`」。`Evidence` 的八字段走的是**另一条编译期通道**（结构体字面量与缺失的 `Default` 实现，即 Task 10 的两份 `compile_fail` 样例），不涉及解构，故「`..` 豁免」那一句对它不适用。
+6. **「守卫」要两侧都钉；缺的那侧往往是 fail-open 的那侧。** 本计划逐处标出「**另一侧**」是哪一个用例：Task 2 的 `human_confirmation_needs_no_artifact` 与 `a_human_producer_on_another_type_is_accepted`、Task 3 的 `five_passes_give_valid` 与 `a_record_with_a_repeated_check_is_rejected`、Task 4 的 `a_well_formed_policy_parses_field_by_field` 与 `a_present_profile_is_returned_field_by_field`、Task 5 的 (d)／(f)、Task 6 的 `the_highest_available_level_wins` 的下半与 (n)、Task 7 的 (s) 第二条、Task 9 的 `the_producer_node_of_human_evidence_is_null_and_is_not_edge_checked` 与 `a_failed_round_writes_…`。
+7. **「删掉 X 即红」要先问「删掉之后行为真的变了吗」**——索引序、稳定排序、可推断的字面量、`..` 豁免都会让它成为**等价变异体**（见第 1 条）。凡本计划标了「移除档」的地方，都已先答过这一问。
+
+**变异口径分层：本块取收紧的一档，据实申报偏离。** P4 模板把变异分两档——承重守卫跑全量套件，其余分支跑受影响 crate 的包级套件并**标明证据强度较低**（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:238-241`）。**本块不用那一档**：第 1 条与 Task 11 Step 5 一律要求全量 `cargo test --workspace --no-fail-fast`。**这是收紧，不触任何规则**；**代价**：每轮变异更慢；**理由**：本块的承重守卫里有若干条只在跨 crate 处可见（迁移编号与 `startup.rs` 的计数、`ALLOWED` 与实际依赖一致、`EvidenceType` 的新臂对 `continuum-events` 侧名表的影响），包级套件看不到这些观察点，而它们正是本块要钉的那几条。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），**命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志。
 
@@ -255,17 +264,27 @@ crates/continuum-runtime/tests/startup.rs                两处「迁移应用 N
     ("continuum-verify", &[]),
 ```
 
+**与设计 §2.1 的一处偏离（据实写明）**：设计 §2.1（`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:87`）写「新 crate 会**先让该门变红再被补齐**（`:288` 的用例），这是**刻意的**」。本计划把「建 crate」与「加空条目」放在同一步，**故那次红在本计划里不发生**——本块对这条门的可见形态是「条目与实际依赖逐对相等」（Task 11 Step 3 (f)），不是「先红一次」。**代价**：少一次「漏登记即红」的自然演示；**收益**：Task 1 的提交不会在序列里留下一个已知变红的门。
+
 - [ ] **Step 2: 写用例**
 
 `tests/evidence_type.rs`（设计 §4.2 的十四臂与它的编码）：
 
 - `the_type_list_names_the_fourteen_arms_in_one_place`：`assert_eq!(EvidenceType::ALL.len(), 14, ...)`，并把 **`ALL` 的十四项逐字列出**（`assert_eq!(EvidenceType::ALL, [EvidenceType::Test, EvidenceType::Fuzz, …])`——十四臂一项不抽代表）。红条件：删掉 `ALL` 里一臂（**移除档**）⇒ 数目断言与逐字比对同时红。**不许写成 `EvidenceType::ALL.len()` 与另一个从 `ALL` 派生的量比较**（那是恒真的假照片，见设计 §12.2 的「一条预防」）。
-- `every_evidence_type_round_trips_through_its_encoding`：遍历 `ALL`，逐型断言 `parse(t.as_str()) == Some(t)`（与 `crates/continuum-artifact/tests/artifact_type.rs` 同形）。红条件：把 `as_str` 或 `parse` 里某一型的串改错（**取反档**）⇒ 该型那一条红。
+- `every_evidence_type_round_trips_through_its_encoding`：遍历 `ALL`，逐型断言 `parse(t.as_str()) == Some(t)`（与 `crates/continuum-artifact/tests/artifact_type.rs` 同形）。红条件：改 `as_str` 里那一型的那一行，**或**改 `parse` 里那一型的那个字面量（**取反档**；两处各自是唯一锚点，不共用）⇒ 该型那一条红。
 - `the_three_arms_reported_by_the_domain_blocks_carry_their_designated_encodings`：**逐枚一条**（不抽代表）——`ModelReview → "model_review"`、`ContradictionCheck → "contradiction_check"`、`CitationVerification → "citation_verification"`（设计 §4.2 末三行）。红条件：改其中一枚的串（**取反档**）⇒ 该条红。**这一条单独存在**是因为这三臂的出处与前十一臂不是同一种（领域算子块报出），串名是**本设计的命名**，不是规范逐字。
 - `an_out_of_table_string_is_rejected`：`parse("unknown_evidence") == None`、`parse("Test") == None`（编码一律小写）、`parse("") == None`。红条件：`parse` 末支返回某个默认型而不是 `None`（**放宽档**）⇒ 三条全红。
 - **这份清单要求「每一枚枚举的每一臂」都有数目断言**（设计 §12.1 首段）：本枚是十四臂，上面第一条即它的数目断言。**每个后续 task 建一枚枚举时都要照办**——本计划在 Task 3（`TestValidityCheck` 5 / `CheckVerdict` 3 / `Validity` 3）、Task 4（`VerifierLevel` 5）、Task 5（`CoverageVerdict` 2 / `IncompleteReason` 2 / `RequirementClass` 4）、Task 6（`VerifierVerdict` 3 / `VerdictAggregate` 5 / `IndependenceVerdict` 3 / `BlindVerdict` 3）、Task 7（`Conjunct` 10 / `CompletionVerdict` 2）、Task 8（`AdversaryOutcome` 2）各写一条。
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: 运行，确认失败**
+
+```bash
+TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test evidence_type
+```
+
+**预期形态是编译失败**：`src/evidence_type.rs` 的 `EvidenceType` 要 Step 4 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「**确认编译失败**」。
+
+- [ ] **Step 4: 实现**
 
 ```rust
 /// §258 的 `type` 字段（字段名不叫 `type`：Rust 保留字；与 `Artifact.artifact_type` 同形）。
@@ -292,7 +311,7 @@ impl EvidenceType {
 }
 ```
 
-- [ ] **Step 4: 运行全部测试并提交**
+- [ ] **Step 5: 运行全部测试并提交**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test evidence_type
@@ -328,15 +347,17 @@ git commit -m "feat(verify): crate 骨架与 EvidenceType 的十四臂"
 - `human_confirmation_needs_no_artifact`：`HumanConfirmation` ＋ 空 `artifact_refs` ＋ `producer: Human` ⇒ `Ok`。**这是上一条的对照侧**（只钉拒绝那侧会让「一律拒绝」漂过去）。
 - `human_confirmation_from_a_node_is_rejected`：`HumanConfirmation` ＋ `producer: Node{..}` ⇒ `Err(VerifyError::HumanConfirmationFromNonHuman)`。红条件：删掉该检查（**移除档**）⇒ 红。
 - `a_human_producer_on_another_type_is_accepted`：`Test` ＋ `producer: Human` ＋ 一件制品 ⇒ `Ok`。**另一侧**：上一条不许被实现成「`producer` 必须是 `Node`」。
-- `the_two_subjects_are_distinguishable`：`EvidenceSubject::Requirement(id)` 与 `EvidenceSubject::Unattached` 各构造一条，断言读回的 `subject` 是哪一臂（穷尽 `match`，不抽代表）。红条件：把 `Unattached` 挤进 `Requirement("")`（**取反档**）⇒ 红。**理由**：失配的方向是静默漏配（一条证据谁都不要，覆盖判定看到空集合，把「有证据但没挂上」误判成「没证据」）。
+- `the_two_subjects_are_distinguishable`：`EvidenceSubject::Requirement(id)` 与 `EvidenceSubject::Unattached` 各构造一条，断言读回的 `subject` 是哪一臂（穷尽 `match`，不抽代表）。红条件：把 `from_tool_result` 里构 `Evidence` 的**那一处 `subject` 字段初始化**改成恒写 `EvidenceSubject::Unattached`（**取反档**）⇒ 本条红。**锚点是唯一的**：`Evidence` 只有一个构造点，八个私有字段各只在那处初始化一次。**改枚举定义那一处不是本条锚点**——用例文件里的 `EvidenceSubject::Unattached` 引用会编译不过，那是编译失败、不是变红（纪律 1(c)）。**理由**：失配的方向是静默漏配（一条证据谁都不要，覆盖判定看到空集合，把「有证据但没挂上」误判成「没证据」）。
 - `the_eight_accessors_read_back_what_was_constructed`：一次构造，八个访问器逐字段断言。**这条是编译期照片**（删掉某个访问器即编译不过），**不是运行期红**——照实写。
 - `strength_and_scope_are_opaque_values`：`EvidenceStrength` / `EvidenceScope` 只有 `as_value` / `from_value`，**逐枚断言 `as_value()` 读回构造时给的那个 `serde_json::Value`**（含一个非标量值）。**并写明限度**：把某枚改成命名档枚举（例如加了 `Ord` 或阈值）会让本用例**编译不过**——**编译不过不算变红**（纪律 1(c)），故本条的守卫是**运行期往返**，它钉的是「取值域不由本块封闭」（设计 §4.3.4）。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test evidence
 ```
+
+**预期形态是编译失败**：`src/evidence.rs` 与 `src/error.rs` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -381,7 +402,7 @@ pub enum VerifyError {
 }
 ```
 
-`EvidenceSubject::Requirement(RequirementId)` 里的 `RequirementId` 在 **Task 5** 定义。**本 task 先落它**：把 `RequirementId` 的**定义**放在 `src/contract_view.rs`（Task 5 建全 `ContractView`），本 task 只声明该类型——**故 Task 5 与 Task 2 之间有一步：先建 `RequirementId` 的新type**。**排期说明**：`RequirementId` 是「用它的 task 先建」的一个具体例子，本 task 只建它一枚（`String` 承载、`as_str` / `from_str`），`RequirementClass` 与 `ContractView` 仍在 Task 5。
+`EvidenceSubject::Requirement(RequirementId)` 里的 `RequirementId` **由本 task 定义**，落在 `src/contract_view.rs`（Task 5 再往同一文件追加 `RequirementClass` / `ContractRequirement` / `ContractView`）。**排期**：类型按「用它的 task 先建」——本 task 只用它一枚（`String` 承载、`as_str` / `from_str`），另三枚 Task 5 才用得到；Task 5 的 `Files` 行「`RequirementId` 已由 Task 2 落在此文件」是这一处的权威说法，**本 task 不把它推到 Task 5**。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -416,13 +437,15 @@ git commit -m "feat(verify): Evidence 数据模型与唯一产生点 from_tool_r
 - `no_fail_with_an_unknown_gives_unknown`：无 `Fail`，四条 `Pass` ＋ 一条 `Unknown` ⇒ `Validity::Unknown`（**不是 `Invalid`**）。红条件：把 `Unknown` 也算作 `Invalid`（**收紧档**）⇒ 红。**这一条是「更严的读法」被明确否掉的落点**（§6.4：那会把 §123 的正式未知降格成「判为无效」）。
 - `a_record_missing_a_check_is_rejected`：只给四条（缺 `MissingBoundary`）⇒ `Err(VerifyError::IncompleteTestValidityChecks { .. })`。红条件：构造点不检查臂数（**移除档**）⇒ 红。
 - `a_record_with_a_repeated_check_is_rejected`：**另一侧**——给五条但某臂重复（另一臂缺席）⇒ 同样 `Err`。**理由**：只钉「少于五条」会让「重复补齐五条」漂过去，而那条路把缺臂静默填平。
-- `the_three_enums_each_name_their_arms`：`assert_eq!(TestValidityCheck::ALL.len(), 5)`（逐臂点名 §191 的五个检查名与它们的编码串）、`CheckVerdict::ALL.len() == 3`、`Validity::ALL.len() == 3`；三枚各做一次 `parse(as_str(t)) == Some(t)` 往返。红条件：改某一枚的串或删一臂（**取反／移除档**）⇒ 对应用例红。
+- `the_three_enums_each_name_their_arms`：`assert_eq!(TestValidityCheck::ALL.len(), 5)`（逐臂点名 §191 的五个检查名与它们的编码串）、`CheckVerdict::ALL.len() == 3`、`Validity::ALL.len() == 3`；三枚各做一次 `parse(as_str(t)) == Some(t)` 往返。红条件：改某一枚的串（**取反档**，锚点取 `as_str` 里那一型的那一行）⇒ 该型那一条红；删该枚举的 **`ALL` 常量数组**里的一臂（**移除档**）⇒ 数目断言与逐字点名红。**「删一臂」的锚点只取 `ALL`**——删枚举定义里那一臂是用例侧的编译失败，不是变红（纪律 1(a)、(c)）。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test test_validity
 ```
+
+**预期形态是编译失败**：`src/test_validity.rs` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -491,11 +514,13 @@ git commit -m "feat(verify): Test Validity 的五检查、聚合与五臂齐"
 - `the_five_levels_are_declared_in_the_262_priority_order`：`assert_eq!(VerifierLevel::ALL.len(), 5)`，逐臂点名，并**逐对断言相邻两级的 `<`**（`DeterministicChecker < FormalStaticChecker`、`FormalStaticChecker < IndependentModelVerifier`、`IndependentModelVerifier < CrossFamilyVerifier`、`CrossFamilyVerifier < HumanReview`——**四条，不抽代表**）。红条件：把枚举声明序改一处（**取反档**）⇒ 该对红。**理由**：`Ord` 由声明序派生，声明序即 §262 的优先序，改一次声明序就改一次选择结果。
 - `the_four_class_values_each_have_a_case` 的下半（`RequirementClass`）在 Task 5。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test policy
 ```
+
+**预期形态是编译失败**：`src/{verifier_level.rs,policy.rs,profile.rs}` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -566,7 +591,7 @@ git commit -m "feat(verify): VerifierLevel 五级序、VerificationPolicy 的严
 
 **Interfaces:**
 - Consumes: Task 2 的 `Evidence` / `EvidenceSubject`；Task 3 的 `TestValidity` / `Validity`；Task 4 的 `VerificationProfile`；Task 1 的 `EvidenceType`
-- Produces: `continuum_verify::{RequirementId, RequirementClass, ContractRequirement, ContractView, RequirementCoverage, CoverageVerdict, IncompleteReason, counts, coverage}`
+- Produces: `continuum_verify::{RequirementClass, ContractRequirement, ContractView, RequirementCoverage, CoverageVerdict, IncompleteReason, counts, coverage}`（`RequirementId` 由 Task 2 产出，本 task 不重复列）
 
 **为什么输入是 `ContractView` 而不是 `TaskContract`**：本块对 Contract 只读 `requirements[].{id, class}` 与 `verification_requirement`（只读不判），故取一个**视图**，其字段以**值**传入——**不给 `continuum-semantics` 登记边，也不造第二个 `TaskContract`**（设计 §6.1、§2.1）。**这是跨计划前置第二节那处相抵的具体形态**：`RequirementId` 与 `RequirementClass` 在本块各有一枚承载类型。
 
@@ -587,13 +612,15 @@ git commit -m "feat(verify): VerifierLevel 五级序、VerificationPolicy 的严
 - `a_non_test_evidence_counts_without_a_validity_record`（§6.3 第 5 条）：一条 `Fuzz` 证据、无任何 `TestValidity` 记录 ⇒ 计数。红条件：把非测试证据也要求有效性记录（**收紧档**）⇒ 红。**判据**：§191 的判据只覆盖测试证据，规范未给非测试证据的「不计数」判据，本设计不发明。
 - `evidence_of_another_requirement_does_not_count`（§6.3 第 1 条）：证据 `subject == Requirement(other)` ⇒ 本条 requirement 的计数集为空 ⇒ `NoValidEvidence`。红条件：`counts` 忽略 `subject`、把每条证据都算给每条 REQUIRED（**放宽档**）⇒ 红。
 - `unattached_evidence_does_not_count`（**另一侧**）：`subject == Unattached` 的证据同样不计数。**两条都要**：`Unattached` 是 §4.3.1 的显式臂，漏了它会让「挂错 requirement」静默。
-- `the_four_class_values_each_round_trip`：`assert_eq!(RequirementClass::ALL.len(), 4)`，四臂逐字点名，并各做一次编码往返（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED` 照 §224 的四个规范名，编码取小写）。红条件：改某一臂的串或删一臂（**取反／移除档**）⇒ 红。
+- `the_four_class_values_each_round_trip`：`assert_eq!(RequirementClass::ALL.len(), 4)`，四臂逐字点名，并各做一次编码往返（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED` 照 §224 的四个规范名，编码取小写）。红条件：改某一臂的串（**取反档**）⇒ 该臂的往返红；删 **`RequirementClass::ALL`** 里的一臂（**移除档**）⇒ `len()` 断言与逐字点名红。**「删一臂」的锚点只取 `ALL`**（纪律 1(a)）。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test coverage
 ```
+
+**预期形态是编译失败**：`src/coverage.rs` 与 `contract_view.rs` 里 Task 5 追加的三枚类型要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -685,13 +712,15 @@ git commit -m "feat(verify): Requirement Coverage 的逐项判定与计数规则
 - `pass_and_fail_together_require_adjudication`（(p)）：`VerdictAggregate::from_verdicts(&[Pass, Fail{..}]) == AdjudicationRequired`（**不是** `Failed`、**不是**多数票的 `Passed`）。红条件：把 `AdjudicationRequired` 与 `Failed` 的次序互换、或把 `Failed` 写成「至少一条 `Fail`」（**取反档**）⇒ 红。**这一档若不红，说明 p 只拍了单项 `Fail`**（设计 §12.2 的预告）。
 - `each_of_the_five_aggregate_arms_has_one_case`：**逐臂一条**——`[]` ⇒ `Unknown`（空集落在「无 `Fail`、无 `Pass`」那一臂；**本计划取这条读法并在此写明**）、`[Unknown]` ⇒ `Unknown`、`[Pass]` ⇒ `Passed`、`[Pass, Unknown]` ⇒ `PassedWithUnknown`、`[Fail]` ⇒ `Failed`。红条件：改任一臂的判据（**取反档**）⇒ 该条红。**`[]` 那一条的理由**：空与「全是 `Unknown`」都落在 `Unknown` 臂，而**不许**落在 `Passed`（fail-closed 的一侧）。
 - `a_blind_verdict_comes_from_a_verifier_verdict`：`BlindVerdict::from(VerifierVerdict::Pass) == BlindVerdict::Pass`，三臂**逐条**。红条件：`from` 里把某一臂映射错（**取反档**）⇒ 该条红。**并写明来历**：规范**未给** `BlindVerdict` 的臂（§29 只规定顺序），本设计取「与 `VerifierVerdict` 同形的三臂」，唯一构造点是这个 `From`。
-- `the_four_enums_each_name_their_arms`：`VerifierVerdict::ALL.len() == 3`、`VerdictAggregate::ALL.len() == 5`、`IndependenceVerdict::ALL.len() == 3`、`BlindVerdict::ALL.len() == 3`，逐臂点名；`VerdictAggregate` 与 `IndependenceVerdict` 各做一次编码往返（它们要落列，见 Task 9）。红条件：改某一枚的串或删一臂（**取反／移除档**）⇒ 对应用例红。
+- `the_four_enums_each_name_their_arms`：`VerifierVerdict::ALL.len() == 3`、`VerdictAggregate::ALL.len() == 5`、`IndependenceVerdict::ALL.len() == 3`、`BlindVerdict::ALL.len() == 3`，逐臂点名；`VerdictAggregate` 与 `IndependenceVerdict` 各做一次编码往返（它们要落列，见 Task 9）。红条件：改某一枚的串（**取反档**）⇒ 该枚那一条红；删**该枚举的 `ALL` 常量数组**里的一臂（**移除档**）⇒ 数目断言红。**「删一臂」的锚点只取 `ALL`**（纪律 1(a)）。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test verifier
 ```
+
+**预期形态是编译失败**：`src/{selection.rs,verdict.rs,input.rs}` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -706,7 +735,7 @@ pub struct AvailableVerifier {
 }
 
 /// §7.2 的 Worker 身份：受验节点最近一次尝试的 `ExecutionProfile` 的**三项**
-/// （`crates/continuum-graph/src/execution.rs:21-24` 的 `model` / `provider` / `backend`）。
+/// （`crates/continuum-graph/src/execution.rs:21`、`:22`、`:24` 的 `model` / `provider` / `backend`；`:23` 是 `tool`）。
 pub struct WorkerIdentity { pub model: Option<String>, pub provider: Option<String>, pub backend: Option<BackendId> }
 
 pub struct VerifierSelection { pub level: VerifierLevel, pub backend: BackendId, pub independence: IndependenceVerdict }
@@ -809,7 +838,7 @@ git commit -m "feat(verify): Verifier 的五级序选择、独立性判定与两
 
 `tests/completion.rs`（设计 §8.1 的并集、§8.2 的两臂、§8.3 的逐项、§8.4 的输入面）：
 
-- `the_ten_conjuncts_come_from_the_union_of_266_and_195`：`assert_eq!(Conjunct::ALL.len(), 10)`，**逐臂点名**，并逐条断言它的出处（前五项 §266 的第 1–5 项、后五项 §195）。红条件：删掉一臂（**移除档**）⇒ 数目断言红。**并写明两条去重**：`AllRequiredRequirementsVerified` ≈ §195 的 `requirement_coverage_sufficient`（合并只在**方向**上安全：合并后的臂恒 `Undetermined`，故即便两者本非同义也不会放行任何一项——这是 fail-closed 的方向，不是同义性论证）、`ContractSatisfied` ≈ §195 的 `task_contract_satisfied`（判据同一：§225 的 Constraint Validator 的结论）。
+- `the_ten_conjuncts_come_from_the_union_of_266_and_195`：`assert_eq!(Conjunct::ALL.len(), 10)`，**逐臂点名**，并逐条断言它的出处（前五项 §266 的第 1–5 项、后五项 §195）。红条件：删掉 **`Conjunct::ALL`** 里的一臂（**移除档**）⇒ 数目断言红（锚点只取 `ALL`，纪律 1(a)）。**并写明两条去重**：`AllRequiredRequirementsVerified` ≈ §195 的 `requirement_coverage_sufficient`（合并只在**方向**上安全：合并后的臂恒 `Undetermined`，故即便两者本非同义也不会放行任何一项——这是 fail-closed 的方向，不是同义性论证）、`ContractSatisfied` ≈ §195 的 `task_contract_satisfied`（判据同一：§225 的 Constraint Validator 的结论）。
 - `a_none_option_is_undetermined_and_a_false_option_is_blocked`（(q)，**六项逐条 + 两侧**）：对 `contract_satisfied` / `mandatory_effects_completed` / `mandatory_tests_pass` / `applicable_properties_hold` / `applicable_fuzz_budget_complete` / `applicable_mutation_quality_sufficient` **逐一**：`None` ⇒ 该项列入 `Undetermined.undecidable`；`Some(false)` ⇒ 该项列入 `Blocked.failing`。红条件：把 `Option<bool>` 换成 `bool`（`None` 与 `false` 合流，**取反档**）⇒ 十二条里的第一条红。**两侧都钉，缺哪一侧都会让「没判」与「判为假」互写**——而压缩的方向是把不放行说成失败，会让调用方去查一个不存在的失败。
   **并写明**：设计 §12.1 (q) 写的是「四项」，而 §8.4 的 `Option<bool>` 字段**实有六项**（第 3、4、6、7、8、9 项各一）——**本计划按 §8.4 的字段定义取六项**（正文优先于它的用例表），见 `## 遗留` 第一节。
 - `a_declared_predicate_with_content_adds_one_undecidable_item`（(r)）：`Some(json!({"x": 1}))` ⇒ 结果里**多一项不可判**；并且**两个不同的非空值给出同一种结果**（本块**不解析**它的内容——解析就是发明语法）。`None` 与 `Some(Value::Null)` ⇒ **不追加**。红条件：把「有内容」判成「无内容」（**放宽档**）⇒ 第一条红；把「一律追加」写死（**取反档**）⇒ `None` 那一条红。
@@ -818,15 +847,17 @@ git commit -m "feat(verify): Verifier 的五级序选择、独立性判定与两
 - `independence_not_established_makes_the_tenth_item_undecidable`（(s) 第一子例）：`independence = NotEstablished` ⇒ 第 10 项**列入 `undecidable`**，**不是** `Blocked`。红条件：写成 `NotIndependent`，即「没判」写成「判为假」（**取反档**）⇒ 红。**这正是 §8.4 警告过的「让调用方去查一个不存在的失败」**。
 - `not_independent_blocks_the_tenth_item`（(s) 第二子例，**另一侧**）：`NotIndependent` ⇒ `Blocked { failing: [IndependentVerificationPass] }`。红条件：与上一条同一次变异反向（**取反档**）⇒ 红。
 - `an_independent_pass_makes_the_tenth_item_true`（第 10 项的正例）：`Independent` ＋ `VerdictAggregate::Passed` ⇒ 第 10 项**既不在 `failing` 也不在 `undecidable`**；`PassedWithUnknown` 同样为真。红条件：把它写成恒不可判（**收紧档**）⇒ 红（`undecidable` 里多一项）。
-- `a_failed_aggregate_makes_the_tenth_item_false`：`Failed` ⇒ 第 10 项为假（**不管独立性是 `Independent` 还是 `NotEstablished`**——`IndependentVerificationPass` 的三臂判据是 `NotIndependent` 优先还是 `Failed` 优先？**本计划取：`NotIndependent` ⇒ 假；`NotEstablished` ⇒ 不可判；`Independent` ∧ 聚合 ∈ {`Passed`,`PassedWithUnknown`} ⇒ 真；其余（`Independent` 而聚合非通过）⇒ **假**）。**该判定写进实现并在本条逐格列出**（§8.3 第 10 项的判据表）。红条件：把「`Independent` 而聚合为 `Failed`」写成不可判（**收紧档**）⇒ 红。
+- `a_non_passing_aggregate_makes_the_tenth_item_false`：**第 10 项判据表的第四格，三臂逐条**——`independence = Independent` 而聚合取 `Failed`、`AdjudicationRequired`、`Unknown` 各一条 ⇒ 第 10 项**为假**（列入 `failing`）。**判据表**（§8.3 第 10 项只给了前三行，第四行由本计划补）：`NotIndependent` ⇒ 假；`NotEstablished` ⇒ 不可判；`Independent` ∧ 聚合 ∈ {`Passed`,`PassedWithUnknown`} ⇒ 真；`Independent` 而聚合非通过 ⇒ 假。**该表写进实现的文档注释，本条只拍第四格**——前三格的照片是 (s) 的第一／二子例与 `an_independent_pass_makes_the_tenth_item_true`。红条件：把「`Independent` 而聚合非通过」写成不可判（**收紧档**）⇒ 三条全红。
 - `the_fifth_conjunct_follows_the_aggregate_arm_by_arm`：**五臂逐条**——`Failed` ⇒ 第 5 项为假；`AdjudicationRequired` ⇒ 为假；`Passed` / `PassedWithUnknown` / `Unknown` ⇒ 为真（判据是「不出现 `Failed`，且无 `AdjudicationRequired`」）。红条件：把 `Unknown` 也算作阻断（**收紧档**）⇒ 该臂红。
 - `the_two_verdict_arms_are_named`：`CompletionVerdict::ALL.len() == 2`，逐臂点名。**并写明**：**没有「完成」这一臂**，理由是 `AllRequiredRequirementsVerified` 的输入是 `CoverageVerdict`，而那个枚举没有正臂，故合取**不可能为真**——**这是构造性论证，不是实测**；它的实测补件是 Task 10 的 `CompletionVerdict::Complete` 编译失败样例。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test completion
 ```
+
+**预期形态是编译失败**：`src/{conjunct.rs,completion.rs}` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -901,14 +932,16 @@ git commit -m "feat(verify): Completion Predicate 的十项合取判定"
 
 - `a_counterexample_forbids_a_passing_aggregate`：**四条逐条**——`(CounterexampleFound{..}, Passed)` ⇒ 不允许；`(CounterexampleFound{..}, PassedWithUnknown)` ⇒ 不允许；`(CounterexampleFound{..}, Failed)` ⇒ 允许；`(NoCounterexample, Passed)` ⇒ 允许。红条件：谓词写成恒真（**移除档**）⇒ 前两条红；写成恒假（**取反档**）⇒ 后两条红；写成只拒 `Passed`（**放宽档**）⇒ 第二条红。**四条一起才钉住「不得」的边界**。
 - `the_two_arms_round_trip_through_their_encoding`：`AdversaryOutcome` 两臂各一次 `parse(as_str(x)) == Some(x)`（它落到 `verification_round.strategy_verdict` 列，见 Task 9；**`CounterexampleFound` 的载荷里含 `passed_verifier: BackendId` 与 `counterexample: Claim`，编码只覆盖判别串**——`## 遗留` 第二节记这一处的取舍）。红条件：改某一臂的串（**取反档**）⇒ 红。
-- `the_two_arms_are_named`：`assert_eq!(AdversaryOutcome::ALL.len(), 2)`，两臂逐字点名。红条件：删一臂（**移除档**）⇒ 红。
+- `the_two_arms_are_named`：`assert_eq!(AdversaryOutcome::ALL.len(), 2)`，两臂逐字点名。红条件：删掉 **`AdversaryOutcome::ALL`** 里的一臂（**移除档**）⇒ 数目断言红（锚点只取 `ALL`，纪律 1(a)）。
 - `the_mutation_slot_is_the_test_arm_and_a_threshold_that_nobody_reads`：**本 task 不判 mutation**（§9.2）——它落成一条**源码面**的核对（Task 11 执行，这里只留一条注释指向它）：本 crate 里 **`mutation_score` 零命中**、**`EvidenceStrength` 上没有 `Ord`**、`VerificationProfile.mutation_threshold` **没有任何读者**。**本 task 不写一条会跑的用例来覆盖这三条**，因为它们是「不存在的东西」——**照实写成「由 Task 11 的 grep 与人工通读钉，无运行期照片」**。「`mutation_threshold` 没有读者」另有一条编译期照片：给它写一个读者即编译过，而**今天没有**——**这一条没有守卫**，明写在此。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test adversary
 ```
+
+**预期形态是编译失败**：`src/adversary.rs` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -970,11 +1003,13 @@ git commit -m "feat(verify): Verifier Adversary 的类型与消费规则（本�
 - `artifact_exists_over_an_empty_terminal_set_is_true_and_that_is_a_fail_open_shape`：**终端集为空** ⇒ `true`（「各自至少有一个」空洞为真）。**并写明**：这是一处 **fail-open 的形状**，上游没有守卫（实测 `AdfirGraph::validate()`（`crates/continuum-graph/src/graph.rs:87`）不要求 `terminal_nodes` 非空）——**本计划照实钉住它，不改它的取值**（改它就要替 §266 第 1 项发明一条「空图不算存在」的判据），并把它报给设计作者（`## 遗留` 第一节）。红条件：把它写成「终端集为空 ⇒ 假」（**取反档**）⇒ 本条红（**这正是「钉住」的意义**：值一旦被改，有人会知道）。
 - `the_migration_is_the_only_producer_of_version_130`：`p5a_verify_migrations()` 返回的 version 恰是 `[130]`，名字是 `p5a_verify` 一类；五张表都在它的 SQL 里（逐表名断言）。红条件：改成 131（**取反档**）⇒ 与 Task 11 的 `runtime_migrations()` / `expected_migrations()` 对不上时红。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认失败（预期形态是编译失败，不是运行期红）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-verify --test persist
 ```
+
+**预期形态是编译失败**：`src/persist.rs` 要 Step 3 才建，故此时报的是 `error[E0433]`／`cannot find …`。按纪律 1(c)，**编译失败不是「变红」**，故这一步照实写成「确认编译失败」。
 
 - [ ] **Step 3: 实现**
 
@@ -1095,7 +1130,7 @@ git commit -m "test(verify): 五份类型层照片与清单对钉"
 
 - `crates/continuum-runtime/Cargo.toml` 的 `[dependencies]` 加 `continuum-verify = { path = "../continuum-verify" }`（**按字母序落位**，它的邻居是 `continuum-secrets` / `continuum-workspace` 之间）——**这一条也写进 `dependency_direction.rs` 的 `ALLOWED`**：`("continuum-runtime", …)` 那一行加上 `"continuum-verify"`（数组按字母序）。
 - `crates/continuum-runtime/src/main.rs` 的 `runtime_migrations()`（`:98-108`，**现有八行**：`builtin` 起、到 `p3d_model_migrations()` 止）追加一行 `migrations.extend(continuum_verify::p5a_verify_migrations());`。**「谁的表谁注册」**。
-- `crates/continuum-runtime/tests/migrations.rs` 的 `expected_migrations()`（`:33-40`）同步追加同一行——那是 `main.rs` 装配处的**第二份转录**，比对由 `the_runtime_applies_…` 拿实际落库的集合做。
+- `crates/continuum-runtime/tests/migrations.rs` 的 `expected_migrations()`（`pub` 面在 `:29`，函数体 `:30-38`）同步追加同一行——那是 `main.rs` 装配处的**第二份转录**，比对由 `the_runtime_applies_…` 拿实际落库的集合做。
 - `crates/continuum-runtime/tests/startup.rs` 的两处「迁移应用 N 项」（今天 `:24` 与 `:90` 各写 9，`:79` 写 7）——**按实跑输出改数，不许预判**（该文件 `:88-90` 的注释已写明这几个计数同时是「迁移编号不重复」的守卫）。
 
 - [ ] **Step 2: 全量验证**
@@ -1188,7 +1223,13 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 
 **这些条目分两类**：一类是「同一份设计里两处不能同真」（相抵或指错），一类是「漏项」。
 
-1. **`RequirementId` 的第二份 vs 不给语义层登记边**（**相抵，且开工前必须知道**）：§4.3.1 写「本设计**不**定义第二个 `RequirementId`」并把来源指给 P4 的 `continuum-semantics`，§14 第 1 条把「由 P4 提供」列为假设；而 §2.1 的边表不含 `continuum-semantics`、§6.1 逐字写「**不登记到 `continuum-semantics` 的边**」。**两者不能同真**：不登记边就 `use` 不到 P4 的类型，而「以值承载」需要一个本块的类型。**更硬的一条**：`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，登记反向边会闭成 2-环，与 §9.1 的「依赖方向单向，无环」相抵——**故「不登记边」那一侧是硬约束，要改的是 §4.3.1 那句话**。本计划的取舍见跨计划前置第二节（本块定义 `RequirementId` / `RequirementClass` / `ContractView`）。**另**：P4 的 `continuum-semantics` **今天不存在**（实测 `crates/` 与 `p4` 分支都没有），故「以 P4 的 `RequirementId` 为准」在今天是一句无法执行的话。**收件人：设计作者 ＋ 协调者。**
+1. **`RequirementId` 的第二份 vs 不给语义层登记边**（**相抵；这是开工前须知**）：§4.3.1（`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:270`）写「本设计**不**定义第二个 `RequirementId`」并把来源指给 P4 的 `continuum-semantics`，§14 第 1 条把「由 P4 提供」列为假设；而 §2.1 的边表不含 `continuum-semantics`、§6.1 逐字写「**不登记到 `continuum-semantics` 的边**」。**两者不能同真**：不登记边就 `use` 不到 P4 的类型，而「以值承载」需要一个本块的类型。
+
+   **相抵的最尖处在 §4.3.1 内部，不只在 §4.3.1 与 §2.1／§6.1 之间**：同一段里「**不**定义第二个 `RequirementId`」（`:270`）＋「本块以**值**承载它」＋理由 3（`:268` 逐字「**必须是强类型。** 若取 `String`，归属判定退化成字符串比较，且**失配的方向是静默漏配**」）**三者无解**——不登记边 ⇒ 拿不到 P4 的类型；强类型 ⇒ 不能是裸 `String`；剩下一枚本块类型 ⇒ 就是「第二个 `RequirementId`」。三条读法各自违反至少一处。
+
+   **设计 §4.3.1 需要改的一句（改哪一句、为什么）**：改 `:270` 的「本设计**不**定义第二个 `RequirementId`」——改成「本块以一枚承载类型持有它，P4 落地后由 P4 的类型为准」一类。**为什么**：**「定型落消费侧」那条既有先例消解不了本条**——§2.3 那条裁决成立的前提是**源侧本来没有类型**（`crates/continuum-graph/src/node.rs:20` 是 `pub verification_policy: Value`，故本块的 `VerificationPolicy` 不是第二个同概念类型）；而 `RequirementId` 的**源侧有类型**：P4 计划 Task 11 的产出面逐字含 `continuum_semantics::{… RequirementId …}`（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1223`，落在 `src/ids.rs`，同文件 `:295`），故「不登记反向边 ＋ 以值承载」**必然**造出一枚与 P4 同名的第二枚。**硬约束那一侧实测成立、且要保留**：`docs/02-工程.md` 的 `:570`（`语义层 (2) → 执行层 (3)`）、`:575`（`执行层 (3) → 跨领域 (8)`）、`:588`（「依赖方向单向，无环。」）——`continuum-verify ← continuum-semantics` 即 `8 → 2`，闭成 2-环。
+
+   **同一条的另一半**：§2.2 的冻结清单还须把该承载类型与 `RequirementClass` / `ContractView` 补进去，否则上面那一句改完、漏项仍在（本节**第 10 条**已报，此处只作指针）。**设计那一份由协调者另行处置，本计划不改设计。** 本计划的取舍见跨计划前置第二节（本块定义 `RequirementId` / `RequirementClass` / `ContractRequirement` / `ContractView`）。**另**：P4 的 `continuum-semantics` **今天不存在**（实测 `crates/` 与 `p4` 分支都没有），故「以 P4 的 `RequirementId` 为准」在今天是一句无法执行的话。**收件人：设计作者 ＋ 协调者。**
 2. **§12.1 (q) 的「四项」 vs §8.4 的六个 `Option<bool>` 字段**（**相抵**）：§8.4 的 `CompletionInput` 里 `Option<bool>` 实有**六项**（第 3、4、6、7、8、9 项），而 §12.1 (q) 逐字写「**四项** `Option` 为 `None`」、§8.3 第 10 项也写「与下面**四项** `Option` 的 `None` 同一条纪律」。**按「四项」写计划会漏钉第 3、4 项（`contract_satisfied` / `mandatory_effects_completed`）两侧**，而漏掉的正是「没判写成判为假」最容易漂的那两项。本计划按 §8.4 的字段定义取**六项**（正文优先于它的用例表）。**收件人：设计作者 ＋ 复审者。**
 3. **`Undecidable` vs `Undetermined`**（**措辞相抵**）：§8.2 定义的是 `CompletionVerdict::Undetermined { undecidable }`，而 §12.1 (q) 写 `Undecidable{undecidable: […4 项…]}`（(r)(s) 只用「不可判」这个词，不涉变体名）。同一份设计里两个名字。本计划取 §8.2（类型定义那一处）。**收件人：设计作者。**
 4. **§8.4 末段把「两侧都要钉」指到 §12.1 (c)/(d)**（**指错**）：(c)/(d) 是 `MissingRequiredTypes` 的缺项判据用例，与 `Option` 的 `None` vs `false` 是两条不相干的纪律；该指的应是 §12.1 **(q)**。**收件人：设计作者。**
@@ -1200,6 +1241,9 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 10. **§2.2 的冻结清单漏了五枚本块定义的类型**（**漏项，而清单自称是跨块合同**）：清单收尾逐字写「它们是另外四块照本清单接线的合同的一部分」，而 `ContractView` / `RequirementId` / `RequirementClass` / `VerificationProfileSource` / `WorkerIdentity` **五枚都由本块定义、且都是本块判定函数的入参形状**，却不在清单里（其中 `WorkerIdentity` 还是 `select_verifier` 的形参类型）。**这不改变任何判定，只改变清单的射程**——读到它的人会以为那五枚由别处提供。**收件人：设计作者。**
 11. **`strategy_verdict` 列没有承载类型**（**漏项**）：§10.2 给了 `verification_round.strategy_verdict` 这个列名，§9.1 只说「一条 finding 记录 + `verification_strategy` 的标注」，**§2.2 的冻结清单里没有任何一枚类型承载它**，而规范只给了一枚取值（§264 的 `insufficient`），不构成完整取值域。本计划取 `AdversaryOutcome` 的编码填这一列（Task 8／9），**不为它新造一个取值域**。**收件人：设计作者。**
 
+12. **§6.2 末段的「两臂的严重度有序」在本块无落点、无用例**（**绝对措辞，在本块不可观察**）：`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:468` 逐字写「**两臂的严重度有序**（`Incomplete` 严于 `NotEstablished`）」，并自称「这是本设计的一处刻意余量」。本计划的 `CoverageVerdict`（Task 5）把 `Incomplete` 声明在前，**但既不给 `Ord`、也没有一条用例断言这个序**。**本计划不补 `Ord`**——给一个规范没给的 `Ord` 就是发明（与 §4.3.4 对 `EvidenceStrength` 的处置同向），故这一条在本块**据实不落**，记在此以免被读成漏项。**收件人：设计作者 ＋ 复审者。**
+13. **§12.3 的「本块用三条」与它下列的四条不符**（**内部计数不符**）：设计 `:970` 逐字写「本块用**三条**：」，其下 `:972-975` 列了**四条**（第 3 条 `CompletionVerdict::Complete`；第 4 条 `Evidence { .. }` 与 `Evidence::default()`）。本计划落成**五份**样例——Task 10 把第 4 条的两条通道拆开，理由是它们是两条不同的编译失败通道（字段私有 vs 无 `Default` 实现）。**设计那句的计数与它自己的列举不符**，此处报出。**收件人：设计作者。**
+
 ### 二、本计划自定的形状与取值（**申报**，逐条说清代价）
 
 - **`VerificationProfileSource` 取「有档案 / 没有档案」两臂**（Task 4）：设计 §5.3 明写「它的形态**本轮不决定**」，而 `profile_for` 必须有一个入参类型。**代价**：这一枚的形状是本计划定的，`OPEN-009` 解出之后多半要改；**收益**：`Missing ⇒ Err` 那条 fail-open 侧有照片。
@@ -1208,10 +1252,12 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - **`Evidence` 的八个只读访问器**（Task 2）：八字段私有是设计的硬要求（§4.4），故必须另给读取面。**代价**：多八个公开读者；**收益**：不必把字段开成 `pub`。
 - **`Evidence` 禁止 `Serialize` / `Deserialize` 派生**（Task 2）：见第一节第 8 条。**代价**：想序列化 `Evidence` 的地方要自己拼字段；**收益**：唯一产生点是结构事实。
 - **`declared_completion_predicate`「有内容」的判据**（Task 7）：**无内容 ⟺ `None` 或 `Value::Null`**，其余（含 `{}` / `[]` / `""`）算有内容 ⇒ 追加一项不可判。**理由**：另一方向是把用户声明的追加谓词静默丢掉，触 §342 第 1 条的方向。**代价**：空容器被当成有内容。
-- **第 10 项的判据表**（Task 7）：`NotIndependent` ⇒ 假；`NotEstablished` ⇒ 不可判；`Independent` ∧ 聚合 ∈ {`Passed`,`PassedWithUnknown`} ⇒ 真；`Independent` 而聚合非通过（`Failed` / `AdjudicationRequired` / `Unknown`）⇒ 假。设计 §8.3 第 10 项只给了前三条，**第四条（`Independent` 而聚合非通过）是我补的**——不补它，「`Independent` ＋ `Failed`」这一格无判据。**代价**：这一格是本计划定的；**方向**：取假（fail-closed）。
+- **第 10 项的判据表**（Task 7）：`NotIndependent` ⇒ 假；`NotEstablished` ⇒ 不可判；`Independent` ∧ 聚合 ∈ {`Passed`,`PassedWithUnknown`} ⇒ 真；`Independent` 而聚合非通过（`Failed` / `AdjudicationRequired` / `Unknown`）⇒ 假。设计 §8.3 第 10 项只给了前三条，**第四条（`Independent` 而聚合非通过）由本计划补**——不补它，「`Independent` ＋ `Failed`」这一格无判据。**代价**：这一格是本计划定的；**方向**：取假（fail-closed）。**照片**：Task 7 的 `a_non_passing_aggregate_makes_the_tenth_item_false`（三臂逐条，`Failed` / `AdjudicationRequired` / `Unknown`）。
 - **空 `VerdictAggregate` 落在 `Unknown` 臂**（Task 6）：§7.5 的措辞是「无 `Fail`、无 `Pass`（全是 `Unknown`）」，空集是否落在这一臂未写。取「落在此臂」**而不是** `Passed`。**代价**：这一处的读法是本计划定的。
 - **`AdversaryOutcome` 的编码只覆盖判别串**（Task 8）：`CounterexampleFound` 的载荷（`passed_verifier` / `counterexample`）不进 `strategy_verdict` 列。**代价**：反例的文本与它的出处不落库；**收益**：不为一列新造一套 JSON 约定（规范未给）。
 - **`producer_node` 列可空**（Task 9）：见第一节第 7 条。
+- **`ContractRequirement` 这一枚类型名**（Task 5）：设计给了「一条 requirement 的两个字段（`id` / `class`）＋ `verification_requirement` 只读不判」这条读法（§4.3.1、§6.1），**没给承载类型**。本块取一枚三字段结构体。**该名在本设计与 P4 设计里都零命中**（实测两份 `grep -c ContractRequirement` 均为 0），故它是本计划的**发明**，不是从设计里抄来的名字。**代价**：名字是本计划定的；**收益**：`ContractView.requirements` 有一个具名元素类型，而不是一枚三元组。
+- **四个持久层函数名 `insert_evidence` / `insert_test_validity` / `record_verification_round` / `artifact_exists`**（Task 9）：设计 §10.2 给了表与列、§4.1 给了「只追加」、§9.1 给了「消费规则落在写行处」，**一个函数名都没给**。本计划取这四个（严重度低于上一条：设计给了列，只是没给名）。**代价**：名字是本计划定的；**收益**：Task 9 的照片与 Task 11 的装配都有具名调用点。
 - **迁移 130 的 SQL 一次写齐五张表**（Task 9）：设计与 P4 的先例允许逐表追加，但本块的五个表同属一次判定链，一次写齐比五次追加少四次「改同一条 SQL」的机会。**Task 11 之后不得再改它的 SQL**（理由见 Global Constraints）。
 
 ### 三、拍不到的照片（设计 §12.4 已列 5 条，**逐条照原文，本计划不发明**）；本计划另补几处
@@ -1260,7 +1306,7 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - **交给执行器（第 3 层，未建）**：`Evidence::from_tool_result` 的调用、`InitialVerifierInput::assemble` 的装配、`record_verification_round` 的调用，以及 `Blocked` / `Undetermined` 的路由（节点 `FAILED`？重试？升 `Decision`？——**本块只给两个返回值**）。
 - **交给 P5c / P5d / P5e / P5f**：**一律不写域包装**（协调者 2026-10-10 的裁定），证据由宿主执行代码直接调 `from_tool_result`，`subject` 取 `Unattached`；四块的产出面（算子 → `EvidenceType`）是**声明**。四块对 `continuum-verify` 的生产代码调用为零。
 - **交给第 7 层（长期循环，未建）**：`EvidenceId` 与只追加的证据表（§10）。**本块不提供 `ProductReadiness`**，**也不建 `Evidence` 的读取路径**（设计未给消费者，见 `## 遗留` 第三节）。
-- **交给协调者**：本计划查出的**各条设计问题**（`## 遗留` 第一节）——其中**第 1 条是开工前必须知道的一条**（`RequirementId` 的第二份 vs 不给语义层登记边，且 P4 的 crate 今天不存在）；**排期上 Task 1 与 Task 11 两处多写者改动排在 P4 合入之后**（跨计划前置第三节）。
+- **交给协调者**：本计划查出的**各条设计问题**（`## 遗留` 第一节）——其中**第 1 条是开工前必须知道的一条**（`RequirementId` 的第二份 vs 不给语义层登记边，且 P4 的 crate 今天不存在）；**排期上整块排在 P4 合入之后**——不只是 Task 1 与 Task 11 这两处多写者改动：Task 2–10 全部依赖 Task 1 建出的 crate（跨计划前置第三节）。
 - **交给规范维护者（本项目无此角色）**：设计 §15 的十八条与 §14 的十条对账条目，**逐条照原文**，收件人归类见 `## 遗留` 第五节。
 
 
