@@ -465,7 +465,12 @@ pub enum IncompleteReason {
 
 **为什么没有第三臂（`Satisfied`）**：§3.2。**`NotEstablished` 这个名字是刻意的**：它不叫 `Unknown`，因为「未知」听起来像信息不足；它说的是**本层没有判据、因而不放行**。§123（`docs/spec/02-positioning.md:1778`）允许正式表达 `UNKNOWN`，但这个枚举的语义比 `UNKNOWN` 更强：它连「可能满足」都不声明。
 
-**两臂的严重度有序**（`Incomplete` 严于 `NotEstablished`），且**两臂都不得完成**——这条使 §6.3 的计数规则即使取错，代价也只落在「哪一种不放行」上，不落在「放不放行」上。**这是本设计的一处刻意余量，写出来是为了让复审不必为它重建论证。**
+**两臂都不得完成**，且**就本层今天的载体而言，只有这一半是可拍的**——
+它使 §6.3 的计数规则即使取错，代价也只落在「哪一种不放行」上，不落在「放不放行」上。
+> **订正（2026-10-10，P5a 的计划评审查出）**：原文写的是「**两臂的严重度有序**（`Incomplete` 严于 `NotEstablished`），且两臂都不得完成」——
+> **前半那一条今天没有载体**：本层**没有一处代码依赖该序**（既无 `Ord`、也没有按序比较的判定；§6.3 的计数规则用的是「两臂都不得完成」，不是这个序）。
+> **故它是本设计的一句表述，不是一条可拍的判据**——按本仓体例，**这种话要么指出载体、要么显式标明无载体**（否则复审会去为它找一条不存在的证据）。
+> **两臂的语义差异仍在**（§3.2 已写：`NotEstablished` 说的是「本层没有判据、因而不放行」），但那是一处**命名与语义**的说明，**不是一条序**。
 
 ## 6.3 计数规则（§190 的「有效证据」）
 
@@ -967,7 +972,7 @@ verification_round    round_id PK, graph_id, verified_node, selection(JSON),
 
 ## 12.3 结构层的照片（`trybuild`）
 
-本仓已有 `trybuild` 的既有做法（`crates/continuum-connector/Cargo.toml:53` 的 `trybuild` 与 `crates/continuum-connector/tests/type_level.rs` 的 `compile_fail`；`continuum-workspace`、`continuum-secrets`、`continuum-model-registry`、`continuum-capability`、`continuum-node` 的 `Cargo.toml` 同样登记了它）。本块用三条：
+本仓已有 `trybuild` 的既有做法（`crates/continuum-connector/Cargo.toml:53` 的 `trybuild` 与 `crates/continuum-connector/tests/type_level.rs` 的 `compile_fail`；`continuum-workspace`、`continuum-secrets`、`continuum-model-registry`、`continuum-capability`、`continuum-node` 的 `Cargo.toml` 同样登记了它）。本块用**四条**：
 
 1. `InitialVerifierInput` 塞 `WorkerCompletionDeclaration` ⇒ 编不过（§7.4 第 1 条）。
 2. `PostBlindVerifierInput::new(declaration)`（无 `BlindVerdict`）⇒ 编不过（§7.4 第 2 条）。
