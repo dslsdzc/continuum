@@ -5,7 +5,7 @@
 **Goal:** 建一个新 crate `continuum-verify`，落《工程》§8.1 的**前九行**（`docs/02-工程.md:485-493`，即 `Evidence 数据模型` / `Requirement Coverage Graph` / `VerificationProfile` / `Verifier 优先级判定` / `Independent Verifier` / `Verifier Adversary` / `Mutation Verification` / `Completion Predicate 判定` / `Test Validity Verifier`）：
 `Evidence`（§258）与其唯一产生点 `from_tool_result`（§89）、Requirement Coverage 的逐项判定（§260 §190 §261）、`VerificationPolicy` 的严格解析（§236）与 `VerificationProfile` 的取得点（§261 §194）、Verifier 的五级序选择与隔离输入面（§262 §263 §29 §120）、Completion Predicate 的十项合取判定（§266 §195）、Test Validity 的五检查与聚合（§191），连同它们的落库（迁移 130）与 `EventType::VerificationFailed` 的第一个产生点。
 
-**Architecture:** 本块是**第 8 层（跨领域）**的新 crate，依赖 `执行层 (3)` 与更下层（§9.1 的 `执行层 (3) → 跨领域 (8)`，`docs/02-工程.md:573-586`），**不给语义层（P4 的 `continuum-semantics`）登记任何边**——`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，反向登记即成环，而 `:588` 逐字写着「依赖方向单向，无环」。凡跨层输入（Contract 的字段、候选 verifier、`mandatory_effects_completed`、独立于 Worker 的判定值）一律以**值**由装配方传入（P4 设计 §1.2.3 的规则）。
+**Architecture:** 本块是**第 8 层（跨领域）**的新 crate，依赖 `执行层 (3)` 与更下层（§9.1 的 `执行层 (3) → 跨领域 (8)`，`docs/02-工程.md:573-586`），**不给语义层（P4 的 `continuum-semantics`）登记任何边**——**理由不是成环，是落地顺序**（**订正 2026-10-10**，见跨计划前置第二节那条订正）：`continuum-semantics` **今天在 `crates/` 下不存在**。凡跨层输入（Contract 的字段、候选 verifier、`mandatory_effects_completed`、独立于 Worker 的判定值）一律以**值**由装配方传入（P4 设计 §1.2.3 的规则）。
 **本块是判定，不是执行**：「工具结果绕过 `Evidence` 进入判定」不可表达（`Evidence` 八字段私有、无 `Default`、**不派生 `Deserialize`**，§4.4）；「Worker 的完成声明进初判输入」不可表达（`InitialVerifierInput` 的字段里没有那个类型，§7.4）；「完成」不可表达（`CompletionVerdict` 只有 `Blocked` / `Undetermined` 两臂，§8.2）；「覆盖充分」不可表达（`CoverageVerdict` 没有正臂，§6.2）；「非阻断失败」不可表达（`VerifierVerdict::Fail` 没有 `blocking: bool`，§7.5）。
 
 **Tech Stack:** Rust 1.95.0 / edition 2024；`continuum-persist`（`Tx` / `Migration` / `Db` / `Value` / `PersistError`）、`continuum-graph`（`NodeId` / `Node` / `AdfirGraph` / `ExecutionProfile`）、`continuum-artifact`（`Artifact` / `ArtifactId` / `ArtifactType` / `load_artifact`）、`continuum-operator`（`BackendId`）、`continuum-events`（`EventType::VerificationFailed` / `Event`）；`serde`、`serde_json`、`thiserror`；dev：`trybuild`、`tempfile`。
@@ -43,7 +43,16 @@
 
 - 设计 §4.3.1 写「`RequirementId` 的来源：§224 的 `Requirement.id`，属 P4 的 `continuum-semantics`」，并写「本设计**不**定义第二个 `RequirementId`」；§14 第 1 条把「`RequirementId` 由 P4 提供」列为待对账的假设。
 - 设计 §2.1 的依赖边表**不含** `continuum-semantics`，且 §6.1 逐字写「**不登记到 `continuum-semantics` 的边**，也不造第二个 `TaskContract`」。
-- 而 `语义层 (2) → 执行层 (3)`、`执行层 (3) → 跨领域 (8)`（`docs/02-工程.md:573-586`），**故 `跨领域 (8) → 语义层 (2)` 会闭成 2-环**，与 `:588` 的「依赖方向单向，无环」直接相抵。
+- ~~而 `语义层 (2) → 执行层 (3)`、`执行层 (3) → 跨领域 (8)`，**故 `跨领域 (8) → 语义层 (2)` 会闭成 2-环**，与 `:588` 的「依赖方向单向，无环」相抵。~~
+  > **本条已订正（2026-10-10，P5a 的设计订正者量出、协调者核实）：那个「成环」推不出来，且原文的箭头读法与 §9.1 相反。**
+  > **§9.1 的箭头约定是 `A → B` 读作「B 依赖 A」**（同设计 §2.3 自己就是这么读的：由 `执行层 (3) → 跨领域 (8)` 推出「跨领域依赖执行层」）。
+  > **故「本块（第 8 层）依赖语义层（第 2 层）」在图上写作 `语义层 (2) → 跨领域 (8)`，而它本来就已经由 `2 → 3 → 8` 传递成立——直连不成环。**
+  > 原文把箭头当成「A 依赖 B」来写，于是把一条**沿链**的边读成了反链的环。
+  > **真理由是落地顺序**：`continuum-semantics` 今天在 `crates/` 下不存在（`ls crates/` 实测），故这一轮不登记它。
+  > **对照（那条是真成环、不要一起改）**：`continuum-graph`（第 3 层）`use` `continuum-verify`（第 8 层）⇒ 3 依赖 8，
+  > 而图上 8 已依赖 3 ⇒ **真闭成 2-环**。**两处的差别正在边的方向**——
+  > **判据：走「成环」这条理由之前，先按 §9.1 的箭头约定把那条边画出来**；
+  > **箭头读法一反，沿链的边就被读成环。**
 
 **结论（本计划据此办）**：**不得**登记 `continuum-verify ← continuum-semantics` 的边；`Contract` 与 `Requirement` 的身份由本块**以值承载**（`RequirementId` 在 Task 2 落，`RequirementClass` / `ContractRequirement` / `ContractView` 在 Task 5 落），`RequirementClass` 的四值照 §224 的四个规范名取（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED`）。
 **代价据实写明**：这是本块的**第二个 `RequirementId`**（第一个在 P4，尚未落地），而设计 §4.3.1 逐字说过不定义第二个——**这一处相抵由本计划报出**（`## 遗留` 第一节），不在这里就地改设计。两枚类型在**臂的集合**上一致（`String` 承载的 id ＋ 四臂封闭枚举），取值可以一一对应，跨层由装配方在边界处转换；**但「同形」在 `RequirementClass` 上不成立**：P4 计划的那一枚带声明序（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1303` 的用例逐字断言 `UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`），本块的没有（Task 5 不给 `Ord`、无该用例），**故跨层只转值、不转序**。
@@ -85,7 +94,7 @@
   - Task 2：`continuum-verify ← continuum-artifact, continuum-graph, continuum-operator`（`ArtifactId`、`NodeId`、`BackendId`）；
   - Task 9：再加 `continuum-persist`（迁移 130 与写入路径经 `Tx`）与 `continuum-events`（写 `VerificationFailed`）；
   - Task 11：`continuum-runtime ← continuum-verify`（装配迁移）。
-  **上表之外一条边都不登记**——尤其**没有指向 `continuum-semantics`（会成环，见跨计划前置第二节）**、`continuum-core`、`continuum-port`、`continuum-policy`、`continuum-effect`、`continuum-capability`、`continuum-model-registry`、`continuum-connector`、`continuum-provider`、`continuum-workspace` 的边。
+  **上表之外一条边都不登记**——尤其**没有指向 `continuum-semantics`（因为该 crate 今天不存在，见跨计划前置第二节的订正——**不是**因为成环）**、`continuum-core`、`continuum-port`、`continuum-policy`、`continuum-effect`、`continuum-capability`、`continuum-model-registry`、`continuum-connector`、`continuum-provider`、`continuum-workspace` 的边。
   **外部 crate（`serde` / `serde_json` / `thiserror` / `trybuild` / `tempfile`）按需加，不进 `ALLOWED`**——那张表只逐对断言 workspace 成员之间的边。
 - **`--depth 1` 只钉直接边，这就是这条规则的完整粒度，本计划不另设闭包断言。** `cargo_tree_direct` 带 `--depth 1`（`crates/continuum-runtime/tests/dependency_direction.rs:270-275`），故它**看不到传递可达**；而 Rust 的 crate 可见性要求**直接声明**才能 `use`，未写进 `Cargo.toml` 的传递依赖**写不出** `use continuum_semantics::…`。**写这一段的用途**：免得把上面那条约束读成「任何指向语义层的边都会变红」——**那会是一条假保证**。
 - **枚举列的落库编码一律小写、多词以 `_` 连接**，经本 crate 的显式 `*_str` / `parse_*` 辅助函数读写（与类型同址），**不依赖 serde、不用 `Debug`**。**表外取值读回得具体 `Err`**（照 P3D 与 P1 的枚举列纪律：`NodeState` 的 serde 是 `SCREAMING_SNAKE_CASE`，直接反序列化会失败）。本块要编码的列：`EvidenceType`（`evidence.evidence_type`）、`Validity`（`test_validity.verdict`）、`TestValidityCheck`（`test_validity_check.check_name`）、`CheckVerdict`（`test_validity_check.verdict`）、`VerdictAggregate`（`verification_round.aggregate`）、`IndependenceVerdict`（`verification_round.independence`）、`AdversaryOutcome`（`verification_round.strategy_verdict`）。
@@ -260,7 +269,8 @@ crates/continuum-runtime/tests/startup.rs                两处「迁移应用 N
     // continuum-artifact / continuum-graph / continuum-operator（Task 2 加）、
     // continuum-persist / continuum-events（Task 9 加）。
     // **不含 continuum-semantics**：`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，
-    // 反向登记会闭成 2-环，与工程 §9.1「依赖方向单向，无环」相抵（跨计划前置第二节）。
+    // **不是**因为成环（见跨计划前置第二节的订正：按 §9.1 的箭头约定，本块依赖语义层沿链、不成环），
+    // 而是因为 `continuum-semantics` 今天在 `crates/` 下不存在。
     ("continuum-verify", &[]),
 ```
 
@@ -1227,7 +1237,10 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 
    **相抵的最尖处在 §4.3.1 内部，不只在 §4.3.1 与 §2.1／§6.1 之间**：同一段里「**不**定义第二个 `RequirementId`」（`:270`）＋「本块以**值**承载它」＋理由 3（`:268` 逐字「**必须是强类型。** 若取 `String`，归属判定退化成字符串比较，且**失配的方向是静默漏配**」）**三者无解**——不登记边 ⇒ 拿不到 P4 的类型；强类型 ⇒ 不能是裸 `String`；剩下一枚本块类型 ⇒ 就是「第二个 `RequirementId`」。三条读法各自违反至少一处。
 
-   **设计 §4.3.1 需要改的一句（改哪一句、为什么）**：改 `:270` 的「本设计**不**定义第二个 `RequirementId`」——改成「本块以一枚承载类型持有它，P4 落地后由 P4 的类型为准」一类。**为什么**：**「定型落消费侧」那条既有先例消解不了本条**——§2.3 那条裁决成立的前提是**源侧本来没有类型**（`crates/continuum-graph/src/node.rs:20` 是 `pub verification_policy: Value`，故本块的 `VerificationPolicy` 不是第二个同概念类型）；而 `RequirementId` 的**源侧有类型**：P4 计划 Task 11 的产出面逐字含 `continuum_semantics::{… RequirementId …}`（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1223`，落在 `src/ids.rs`，同文件 `:295`），故「不登记反向边 ＋ 以值承载」**必然**造出一枚与 P4 同名的第二枚。**硬约束那一侧实测成立、且要保留**：`docs/02-工程.md` 的 `:570`（`语义层 (2) → 执行层 (3)`）、`:575`（`执行层 (3) → 跨领域 (8)`）、`:588`（「依赖方向单向，无环。」）——`continuum-verify ← continuum-semantics` 即 `8 → 2`，闭成 2-环。
+   **设计 §4.3.1 需要改的一句（改哪一句、为什么）**：改 `:270` 的「本设计**不**定义第二个 `RequirementId`」——改成「本块以一枚承载类型持有它，P4 落地后由 P4 的类型为准」一类。**为什么**：**「定型落消费侧」那条既有先例消解不了本条**——§2.3 那条裁决成立的前提是**源侧本来没有类型**（`crates/continuum-graph/src/node.rs:20` 是 `pub verification_policy: Value`，故本块的 `VerificationPolicy` 不是第二个同概念类型）；而 `RequirementId` 的**源侧有类型**：P4 计划 Task 11 的产出面逐字含 `continuum_semantics::{… RequirementId …}`（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1223`，落在 `src/ids.rs`，同文件 `:295`），故「不登记反向边 ＋ 以值承载」**必然**造出一枚与 P4 同名的第二枚。**「不登记那条边」这一侧要保留，但它的理由不是成环、是落地顺序**（**订正 2026-10-10**，见跨计划前置第二节那条订正）：
+按 §9.1 的箭头约定（`A → B` 读作「B 依赖 A」），「本块依赖语义层」在图上即 `语义层 (2) → 跨领域 (8)`，**沿链、不成环**；
+原文写成「`8 → 2` 闭成 2-环」是**把箭头读反了**。真理由：`continuum-semantics` 今天在 `crates/` 下不存在。
+（**真成环的那条对照**：`continuum-graph`（3）`use` `continuum-verify`（8）⇒ 3 依赖 8，而 8 已依赖 3 ⇒ 才是环。）
 
    **同一条的另一半**：§2.2 的冻结清单还须把该承载类型与 `RequirementClass` / `ContractView` 补进去，否则上面那一句改完、漏项仍在（本节**第 10 条**已报，此处只作指针）。**设计那一份由协调者另行处置，本计划不改设计。** 本计划的取舍见跨计划前置第二节（本块定义 `RequirementId` / `RequirementClass` / `ContractRequirement` / `ContractView`）。**另**：P4 的 `continuum-semantics` **今天不存在**（实测 `crates/` 与 `p4` 分支都没有），故「以 P4 的 `RequirementId` 为准」在今天是一句无法执行的话。**收件人：设计作者 ＋ 协调者。**
 2. **§12.1 (q) 的「四项」 vs §8.4 的六个 `Option<bool>` 字段**（**相抵**）：§8.4 的 `CompletionInput` 里 `Option<bool>` 实有**六项**（第 3、4、6、7、8、9 项），而 §12.1 (q) 逐字写「**四项** `Option` 为 `None`」、§8.3 第 10 项也写「与下面**四项** `Option` 的 `None` 同一条纪律」。**按「四项」写计划会漏钉第 3、4 项（`contract_satisfied` / `mandatory_effects_completed`）两侧**，而漏掉的正是「没判写成判为假」最容易漂的那两项。本计划按 §8.4 的字段定义取**六项**（正文优先于它的用例表）。**收件人：设计作者 ＋ 复审者。**
