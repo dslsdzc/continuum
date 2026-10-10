@@ -55,7 +55,8 @@
   > **箭头读法一反，沿链的边就被读成环。**
 
 **结论（本计划据此办）**：**不得**登记 `continuum-verify ← continuum-semantics` 的边；`Contract` 与 `Requirement` 的身份由本块**以值承载**（`RequirementId` 在 Task 2 落，`RequirementClass` / `ContractRequirement` / `ContractView` 在 Task 5 落），`RequirementClass` 的四值照 §224 的四个规范名取（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED`）。
-**代价据实写明**：这是本块的**第二个 `RequirementId`**（第一个在 P4，尚未落地），而设计 §4.3.1 逐字说过不定义第二个——**这一处相抵由本计划报出**（`## 遗留` 第一节），不在这里就地改设计。两枚类型在**臂的集合**上一致（`String` 承载的 id ＋ 四臂封闭枚举），取值可以一一对应，跨层由装配方在边界处转换；**但「同形」在 `RequirementClass` 上不成立**：P4 计划的那一枚带声明序（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1303` 的用例逐字断言 `UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`），本块的没有（Task 5 不给 `Ord`、无该用例），**故跨层只转值、不转序**。
+**`RequirementClass` 与另三枚不同**：设计 §2.2 的冻结清单**明确不登记**它（设计 `:109`「一枚据此不登记」：它的家在 P4，本块只经 `ContractView.class` 读四个值、只做 `match`），而 `ContractView` 的**字段类型**设计全文没有写出——故本块这一枚是**本计划自定**，申报见 `## 遗留` 第二节。
+**代价据实写明**：这是本块的**第二个 `RequirementId`**（第一个在 P4，尚未落地）。设计 §4.3.1 原写「不定义第二个」，**该处相抵已由设计自行处置**——设计现逐字写「本块**确实**定义一枚 `RequirementId`……与 P4 的是两个类型」（设计 `:281`，原句照留在 `:277` 的订正块里），**本计划的取舍与之一致**（细节与引文见 `## 遗留` 第一节第 1 条）。两枚类型在**臂的集合**上一致（`String` 承载的 id ＋ 四臂封闭枚举），取值可以一一对应，跨层由装配方在边界处转换；**但「同形」在 `RequirementClass` 上不成立**：P4 计划的那一枚带声明序（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1303` 的用例逐字断言 `UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`），本块的没有（Task 5 不给 `Ord`、无该用例），**故跨层只转值、不转序**。
 
 ### 三、哪些 task 在 P4 未合入前动不了
 
@@ -603,7 +604,7 @@ git commit -m "feat(verify): VerifierLevel 五级序、VerificationPolicy 的严
 - Consumes: Task 2 的 `Evidence` / `EvidenceSubject`；Task 3 的 `TestValidity` / `Validity`；Task 4 的 `VerificationProfile`；Task 1 的 `EvidenceType`
 - Produces: `continuum_verify::{RequirementClass, ContractRequirement, ContractView, RequirementCoverage, CoverageVerdict, IncompleteReason, counts, coverage}`（`RequirementId` 由 Task 2 产出，本 task 不重复列）
 
-**为什么输入是 `ContractView` 而不是 `TaskContract`**：本块对 Contract 只读 `requirements[].{id, class}` 与 `verification_requirement`（只读不判），故取一个**视图**，其字段以**值**传入——**不给 `continuum-semantics` 登记边，也不造第二个 `TaskContract`**（设计 §6.1、§2.1）。**这是跨计划前置第二节那处相抵的具体形态**：`RequirementId` 与 `RequirementClass` 在本块各有一枚承载类型。
+**为什么输入是 `ContractView` 而不是 `TaskContract`**：本块对 Contract 只读 `requirements[].{id, class}` 与 `verification_requirement`（只读不判），故取一个**视图**，其字段以**值**传入——**不给 `continuum-semantics` 登记边，也不造第二个 `TaskContract`**（设计 §6.1、§2.1）。**这是跨计划前置第二节那处相抵的具体形态**：`RequirementId` 与 `RequirementClass` 在本块各有一枚承载类型——设计对前者已写下「本块**确实**定义一枚」（§4.3.1 的处置，`bfe1df8`），对后者**明确不登记**且 `ContractView` 的字段类型未写（设计 `:109`），故后者是本计划自定（申报见 `## 遗留` 第二节）。
 
 - [ ] **Step 1: 写用例**
 
@@ -650,6 +651,9 @@ pub struct RequirementCoverage { pub requirement: RequirementId, pub verdict: Co
 
 /// **只有两臂，没有正臂**（§6.2、§3.2）。`NotEstablished` 这个名字是刻意的：
 /// 它不叫 `Unknown`——它说的是**本层没有判据、因而不放行**。
+/// **不给 `Ord`、也不写该序的用例**：设计 §6.2 原写「两臂的严重度有序」，设计已自行订正为
+/// 「**前半那一条今天没有载体**」（`:496-499`）——本层没有一处代码依赖该序。**本块与之同处置**：
+/// 给一个规范没给的 `Ord` 就是发明（与 §4.3.4 对 `EvidenceStrength` 的处置同向）。
 pub enum CoverageVerdict {
     /// **确定的欠缺**。§260 的 `verification = INCOMPLETE` 落在这一臂。
     Incomplete { reason: IncompleteReason },
@@ -1088,6 +1092,8 @@ git commit -m "feat(verify): 迁移 130、只追加的证据表与 VerificationF
 
 `tests/type_level.rs`：**照 `crates/continuum-node/tests/type_level.rs` 的形状**，含 `t.compile_fail("tests/compile_fail/*.rs")`、手写常量 `LISTED_SAMPLES: [&str; 5]`、以及与之配套的 `the_sample_list_matches_the_directory`（清单 ↔ 目录 ↔ 文件头点名三处对钉）。**本文件的文件头那段点名要逐份点名这五份**（点名项数必须等于目录里 `.rs` 的份数）。
 
+**与设计 §12.3 的条数对齐**：设计 `:1001` 现写「本块用**四条**」并逐条列出（`:1003-1006`），**其第 4 条把 `Evidence { .. }` 与 `Evidence::default()` 并作一条**；本 task 把它拆成**两份**样例，理由是它们是两条不同的编译失败通道（字段私有 vs 无 `Default` 实现）。**故设计列四条、本 task 落五份**，两者不矛盾。
+
 五份样例**逐份钉一件事**（名字即它钉的那条通道）：
 
 1. `initial_verifier_input_has_no_place_for_a_worker_declaration`：`InitialVerifierInput { contract, artifacts, evidence, worker_declaration }`（多出第四项）⇒ 编不过。**钉的是 §7.4 第 1 条**：初判输入的字段清单里**没有那个位置**。
@@ -1227,22 +1233,19 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 ## 遗留
 
 **凡设计未给判据的，下标「规范未给判据」；凡本计划自己定了的，下标「本计划自定」。**
-设计 §15 的十八条与 §14 的十条对账条目**本计划一条都不发明**——收件人照原文，见第五节。
+设计 §15 的十九条与 §14 的十条对账条目**本计划一条都不发明**——收件人照原文，见第五节。
 
 ### 一、设计问题：**本计划查出的各条**（发现即报，一处都不替设计补写）
 
 **这些条目分两类**：一类是「同一份设计里两处不能同真」（相抵或指错），一类是「漏项」。
 
-1. **`RequirementId` 的第二份 vs 不给语义层登记边**（**相抵；这是开工前须知**）：§4.3.1（`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:270`）写「本设计**不**定义第二个 `RequirementId`」并把来源指给 P4 的 `continuum-semantics`，§14 第 1 条把「由 P4 提供」列为假设；而 §2.1 的边表不含 `continuum-semantics`、§6.1 逐字写「**不登记到 `continuum-semantics` 的边**」。**两者不能同真**：不登记边就 `use` 不到 P4 的类型，而「以值承载」需要一个本块的类型。
+1. **`RequirementId` 的第二份 vs 不给语义层登记边**（**相抵；开工前须知——设计已自行处置**，下引**现在文本**）：§4.3.1（`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:275`）写「`RequirementId` 的来源：§224 的 `Requirement.id`，属 P4 的 `continuum-semantics`」；而 §2.1 的边表不含 `continuum-semantics`、§6.1 逐字写「**不登记到 `continuum-semantics` 的边**」。
 
-   **相抵的最尖处在 §4.3.1 内部，不只在 §4.3.1 与 §2.1／§6.1 之间**：同一段里「**不**定义第二个 `RequirementId`」（`:270`）＋「本块以**值**承载它」＋理由 3（`:268` 逐字「**必须是强类型。** 若取 `String`，归属判定退化成字符串比较，且**失配的方向是静默漏配**」）**三者无解**——不登记边 ⇒ 拿不到 P4 的类型；强类型 ⇒ 不能是裸 `String`；剩下一枚本块类型 ⇒ 就是「第二个 `RequirementId`」。三条读法各自违反至少一处。
+   **相抵的最尖处在这一节内部**：「本设计**不**定义第二个 `RequirementId`」这一句现在**照留**在 `:277` 的订正块里、且被那一块引为**已假**；它与「本块以**值**承载它」及读法 3（`:273` 逐字「**必须是强类型。** 若取 `String`，归属判定退化成字符串比较，且**失配的方向是静默漏配**」）**三者无解**——不登记边 ⇒ 拿不到 P4 的类型；强类型 ⇒ 不能是裸 `String`；剩下一枚本块类型 ⇒ 就是「第二个 `RequirementId`」。
 
-   **设计 §4.3.1 需要改的一句（改哪一句、为什么）**：改 `:270` 的「本设计**不**定义第二个 `RequirementId`」——改成「本块以一枚承载类型持有它，P4 落地后由 P4 的类型为准」一类。**为什么**：**「定型落消费侧」那条既有先例消解不了本条**——§2.3 那条裁决成立的前提是**源侧本来没有类型**（`crates/continuum-graph/src/node.rs:20` 是 `pub verification_policy: Value`，故本块的 `VerificationPolicy` 不是第二个同概念类型）；而 `RequirementId` 的**源侧有类型**：P4 计划 Task 11 的产出面逐字含 `continuum_semantics::{… RequirementId …}`（`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1223`，落在 `src/ids.rs`，同文件 `:295`），故「不登记反向边 ＋ 以值承载」**必然**造出一枚与 P4 同名的第二枚。**「不登记那条边」这一侧要保留，但它的理由不是成环、是落地顺序**（**订正 2026-10-10**，见跨计划前置第二节那条订正）：
-按 §9.1 的箭头约定（`A → B` 读作「B 依赖 A」），「本块依赖语义层」在图上即 `语义层 (2) → 跨领域 (8)`，**沿链、不成环**；
-原文写成「`8 → 2` 闭成 2-环」是**把箭头读反了**。真理由：`continuum-semantics` 今天在 `crates/` 下不存在。
-（**真成环的那条对照**：`continuum-graph`（3）`use` `continuum-verify`（8）⇒ 3 依赖 8，而 8 已依赖 3 ⇒ 才是环。）
-
-   **同一条的另一半**：§2.2 的冻结清单还须把该承载类型与 `RequirementClass` / `ContractView` 补进去，否则上面那一句改完、漏项仍在（本节**第 10 条**已报，此处只作指针）。**设计那一份由协调者另行处置，本计划不改设计。** 本计划的取舍见跨计划前置第二节（本块定义 `RequirementId` / `RequirementClass` / `ContractRequirement` / `ContractView`）。**另**：P4 的 `continuum-semantics` **今天不存在**（实测 `crates/` 与 `p4` 分支都没有），故「以 P4 的 `RequirementId` 为准」在今天是一句无法执行的话。**收件人：设计作者 ＋ 协调者。**
+   **设计的处置**（`bfe1df8`）：`:281` 逐字「本块**确实**定义一枚 `RequirementId`（与本块其余类型同处 `continuum-verify`，§2.2）。它与 P4 的 `RequirementId` **是两个类型**：不共享 `From` / `Deref`」；`:279` 逐字给出「『定型落消费侧』那条先例消解不了本条」的理由（先例的前提是**源侧无类型**——`crates/continuum-graph/src/node.rs:20` 是 `serde_json::Value`；而 `RequirementId` 的源侧有类型，P4 计划 Task 11 的产出面含 `continuum_semantics::RequirementId`，落 `src/ids.rs`，`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:295`、`:1223`）；`:292-295` 列了两条**不取**的替代方案（引用型 `RequirementIdRef`；登记 `语义层 → 跨领域` 的直连边）**并各给不取的理由**。
+   **「不给语义层登记边」这一侧保留，但它的理由不是成环、是落地顺序**（**订正 2026-10-10**）：`:295` 逐字「把这条边称作『反向边』**推不出**」——§9.1 的箭头读「**被依赖者 → 依赖者**」（`docs/02-工程.md:563-567`），故「本块（第 8 层）依赖语义层（第 2 层）」在图上即 `语义层 (2) → 跨领域 (8)`，**沿链、不成环**；真理由是 `continuum-semantics` 今天在 `crates/` 下不存在。**真成环的对照**：`continuum-graph`（3）`use` `continuum-verify`（8）⇒ 3 依赖 8，而图上 8 已依赖 3 ⇒ 才是环。
+   **本计划的取舍与设计一致**（跨计划前置第二节：本块定义 `RequirementId`）。**同一条的另一半已消**：§2.2 的冻结清单 `:104` 已补入 `ContractView` / `RequirementId` / `VerificationProfileSource` / `WorkerIdentity` 四枚（见本节第 10 条）。**剩下的开口**是 §15 第 **19** 条（`:1080`，收件人 协调者 ＋ P4）——两条 id 的对应今天没有判据。**收件人：设计作者 ＋ 协调者。**
 2. **§12.1 (q) 的「四项」 vs §8.4 的六个 `Option<bool>` 字段**（**相抵**）：§8.4 的 `CompletionInput` 里 `Option<bool>` 实有**六项**（第 3、4、6、7、8、9 项），而 §12.1 (q) 逐字写「**四项** `Option` 为 `None`」、§8.3 第 10 项也写「与下面**四项** `Option` 的 `None` 同一条纪律」。**按「四项」写计划会漏钉第 3、4 项（`contract_satisfied` / `mandatory_effects_completed`）两侧**，而漏掉的正是「没判写成判为假」最容易漂的那两项。本计划按 §8.4 的字段定义取**六项**（正文优先于它的用例表）。**收件人：设计作者 ＋ 复审者。**
 3. **`Undecidable` vs `Undetermined`**（**措辞相抵**）：§8.2 定义的是 `CompletionVerdict::Undetermined { undecidable }`，而 §12.1 (q) 写 `Undecidable{undecidable: […4 项…]}`（(r)(s) 只用「不可判」这个词，不涉变体名）。同一份设计里两个名字。本计划取 §8.2（类型定义那一处）。**收件人：设计作者。**
 4. **§8.4 末段把「两侧都要钉」指到 §12.1 (c)/(d)**（**指错**）：(c)/(d) 是 `MissingRequiredTypes` 的缺项判据用例，与 `Option` 的 `None` vs `false` 是两条不相干的纪律；该指的应是 §12.1 **(q)**。**收件人：设计作者。**
@@ -1251,11 +1254,11 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 7. **§10.2 第 3 条的不变量与 `EvidenceProducer::Human` 相抵**（**相抵**）：不变量逐字是「一行 `evidence` 对应图上一枚 `producer_node → verified_node` 的 `EdgeKind::Evidence` 边」，而 `HumanConfirmation` 的证据由人给出、**没有产生者节点**（§10.2 也没给 `producer_node` 的可空性）。本计划取「列可空 ＋ 按支核对」并在 Task 9 各钉一条。**收件人：设计作者。**
 8. **§4.4 未点名 `Deserialize`**（**漏项，而它是第二个构造点**）：§4.4 的「唯一产生点」列的是「八字段全私有、无 `Default`、无 `From` / `FromStr`、无第二构造点」，没提 serde。而 `#[derive(Deserialize)]` **正是一个绕过 `from_tool_result` 的构造路径**，且 `EvidenceStrength` / `EvidenceScope` 两个载荷已经是 `serde_json::Value`，加派生的成本很低。本计划在 Task 2 明写禁止它（`## 遗留` 第二节）。**收件人：设计作者。**
 9. **`artifact_exists` 在空终端集上空洞为真**（**漏项，fail-open 的形状**）：§8.3 第 1 项的判据是「受验图的终端节点**各自**至少有一个产出制品」，而实测 `AdfirGraph::validate()`（`crates/continuum-graph/src/graph.rs:87-107`）**不要求 `terminal_nodes` 非空**，故「终端集为空 ⇒ 真」是一条可达路径。本计划照实钉住它（Task 9 有一条用例写死这个值），**不改它的取值**——改它就要替 §266 第 1 项发明一条「空图不算存在」的判据。**收件人：设计作者 ＋ 执行层。**
-10. **§2.2 的冻结清单漏了五枚本块定义的类型**（**漏项，而清单自称是跨块合同**）：清单收尾逐字写「它们是另外四块照本清单接线的合同的一部分」，而 `ContractView` / `RequirementId` / `RequirementClass` / `VerificationProfileSource` / `WorkerIdentity` **五枚都由本块定义、且都是本块判定函数的入参形状**，却不在清单里（其中 `WorkerIdentity` 还是 `select_verifier` 的形参类型）。**这不改变任何判定，只改变清单的射程**——读到它的人会以为那五枚由别处提供。**收件人：设计作者。**
+10. **§2.2 的冻结清单：四枚已补入，`RequirementClass` 明确不登记，剩下的是 `ContractView` 的字段类型**（**原为漏项，设计已处置一半**）：
+    **已补**：清单 `:104` 现列 `ContractView` / `RequirementId` / `VerificationProfileSource` / `WorkerIdentity` 四枚，`:107` 逐枚附了使用点并写明漏它们的共同原因（「以值传入」说的是**值的来路**，不是**类型的家**）。清单收尾那句「它们是另外四块照本清单接线的合同的一部分」仍在 `:111`。
+    **明确不登记**：`:109` 逐字「**一枚据此不登记**：`RequirementClass`」——实测设计全文对它零命中，它的家在 P4，本块只经 `ContractView.class` 读它的四个值、只做 `match`（§6.1）。
+    **剩下的开口**：`:109` 自己写明「**这一处的类型归属本设计未写**：`ContractView` 的字段类型全文没有一处给出……故 `class` 那一字段取 P4 的 `RequirementClass` 还是本块的镜像……记在 §14 第 1 条与 §15 第 19 条」（另见 `:463`、`:1039`）。**本计划因此自定了一枚本块的 `RequirementClass`**，申报见第二节。**收件人：设计作者 ＋ 协调者。**
 11. **`strategy_verdict` 列没有承载类型**（**漏项**）：§10.2 给了 `verification_round.strategy_verdict` 这个列名，§9.1 只说「一条 finding 记录 + `verification_strategy` 的标注」，**§2.2 的冻结清单里没有任何一枚类型承载它**，而规范只给了一枚取值（§264 的 `insufficient`），不构成完整取值域。本计划取 `AdversaryOutcome` 的编码填这一列（Task 8／9），**不为它新造一个取值域**。**收件人：设计作者。**
-
-12. **§6.2 末段的「两臂的严重度有序」在本块无落点、无用例**（**绝对措辞，在本块不可观察**）：`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:468` 逐字写「**两臂的严重度有序**（`Incomplete` 严于 `NotEstablished`）」，并自称「这是本设计的一处刻意余量」。本计划的 `CoverageVerdict`（Task 5）把 `Incomplete` 声明在前，**但既不给 `Ord`、也没有一条用例断言这个序**。**本计划不补 `Ord`**——给一个规范没给的 `Ord` 就是发明（与 §4.3.4 对 `EvidenceStrength` 的处置同向），故这一条在本块**据实不落**，记在此以免被读成漏项。**收件人：设计作者 ＋ 复审者。**
-13. **§12.3 的「本块用三条」与它下列的四条不符**（**内部计数不符**）：设计 `:970` 逐字写「本块用**三条**：」，其下 `:972-975` 列了**四条**（第 3 条 `CompletionVerdict::Complete`；第 4 条 `Evidence { .. }` 与 `Evidence::default()`）。本计划落成**五份**样例——Task 10 把第 4 条的两条通道拆开，理由是它们是两条不同的编译失败通道（字段私有 vs 无 `Default` 实现）。**设计那句的计数与它自己的列举不符**，此处报出。**收件人：设计作者。**
 
 ### 二、本计划自定的形状与取值（**申报**，逐条说清代价）
 
@@ -1269,6 +1272,7 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - **空 `VerdictAggregate` 落在 `Unknown` 臂**（Task 6）：§7.5 的措辞是「无 `Fail`、无 `Pass`（全是 `Unknown`）」，空集是否落在这一臂未写。取「落在此臂」**而不是** `Passed`。**代价**：这一处的读法是本计划定的。
 - **`AdversaryOutcome` 的编码只覆盖判别串**（Task 8）：`CounterexampleFound` 的载荷（`passed_verifier` / `counterexample`）不进 `strategy_verdict` 列。**代价**：反例的文本与它的出处不落库；**收益**：不为一列新造一套 JSON 约定（规范未给）。
 - **`producer_node` 列可空**（Task 9）：见第一节第 7 条。
+- **本块的 `RequirementClass`（Task 5）**：设计 §2.2 的清单**明确不登记**它（`:109`：「一枚据此不登记」——它的家在 P4，本块只经 `ContractView.class` 读四个值、只做 `match`），而 `ContractView` 的**字段类型**设计全文没有写出（`:109`／`:463`／`:1039`，设计自己记为 §14 第 1 条 (ii) 与 §15 第 19 条）。本块要穷尽 `match` 那四个值，故**自定一枚四臂枚举**。**它与 P4 那枚的关系**：与 `RequirementId` 同一处境（同名、不同型）——设计对 `RequirementId` 已写下「本块确实定义一枚」（§4.3.1），对 `class` 那一字段的类型则留作待对账。**代价**：`ContractView.class` 取哪一枚今天未定，若 P4 落地后取 P4 的类型，本块这一枚要么被替换、要么加一层转换；**收益**：`ContractView.class` 有一个本块可穷尽 `match` 的类型，而不是裸 `String`（后者会把归属判定退化成字符串比较，见 §4.3.1 读法 3）。
 - **`ContractRequirement` 这一枚类型名**（Task 5）：设计给了「一条 requirement 的两个字段（`id` / `class`）＋ `verification_requirement` 只读不判」这条读法（§4.3.1、§6.1），**没给承载类型**。本块取一枚三字段结构体。**该名在本设计与 P4 设计里都零命中**（实测两份 `grep -c ContractRequirement` 均为 0），故它是本计划的**发明**，不是从设计里抄来的名字。**代价**：名字是本计划定的；**收益**：`ContractView.requirements` 有一个具名元素类型，而不是一枚三元组。
 - **四个持久层函数名 `insert_evidence` / `insert_test_validity` / `record_verification_round` / `artifact_exists`**（Task 9）：设计 §10.2 给了表与列、§4.1 给了「只追加」、§9.1 给了「消费规则落在写行处」，**一个函数名都没给**。本计划取这四个（严重度低于上一条：设计给了列，只是没给名）。**代价**：名字是本计划定的；**收益**：Task 9 的照片与 Task 11 的装配都有具名调用点。
 - **迁移 130 的 SQL 一次写齐五张表**（Task 9）：设计与 P4 的先例允许逐表追加，但本块的五个表同属一次判定链，一次写齐比五次追加少四次「改同一条 SQL」的机会。**Task 11 之后不得再改它的 SQL**（理由见 Global Constraints）。
@@ -1289,9 +1293,9 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - **执行器的路由**：`Verifying → Completed` 允许而本块不产出许可（§8.2）。**收件人：执行层（P1）＋ 协调者。**
 - **本块的判定今天没有生产调用方**：第 3 层未建。**据实记录以免被读成「忘了接线」**（P1 设计 §18 已有同形的一条）。**收件人：执行器的接线 task ＋ 协调者。**
 
-### 五、设计 §15 的十八条与 §14 的十条：**本计划一条都不发明，收件人照原文**
+### 五、设计 §15 的十九条与 §14 的十条：**本计划一条都不发明，收件人照原文**
 
-设计 §15 的十八条**逐条以「收件人」结尾**，本计划**不重述其内容**（重述就是第二份转录，正是本项目出错最多之处）。**逐条照收件人归类**，以便「核过」可查：
+设计 §15 的十九条**逐条以「收件人」结尾**，本计划**不重述其内容**（重述就是第二份转录，正是本项目出错最多之处）。**逐条照收件人归类**，以便「核过」可查：
 
 - **收件人：规范维护者**——第 **1**（`strength` 的取值域与比较规则）、**2**（`claim` 的语法或形态约束）、**4**（§191 五检查的聚合规则）、**5**（`optional_evidence_types` 的用途）、**8**（`A5`/`OPEN-004` 的降级路径）、**12**（`B1`「高价值任务」）条。
 - **收件人：规范维护者 ＋ 协调者**——第 **3**（OPEN-001 / `ENG-004` 的显式处置）、**11**（`A6`/`OPEN-009` 的生成者）、**17**（**§189 的 `Verification → 判断证据是否充分` 与本设计「不判充分」相抵**——**这是规范正文里直接要求判充分的那一句**，设计给了两种读法而**不替规范取**）条。
@@ -1301,6 +1305,7 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - **收件人：规范维护者 ＋ P5a 的下一轮**——第 **16** 条（Test Validity Verifier 的产生者与输入面：§8.3 逐字给「测试代码 + Requirement」，而「测试代码」在本设计里零命中）。
 - **收件人：P5c ＋ 协调者**——第 **14** 条（「测试是否通过」的承载处未定义）。
 - **收件人：协调者**——第 **6**（§262 的 SHOULD 被当 MUST 用，本块实现成严格取最高可用级——**这是收紧**）、**18**（P5c–P5f 的六行共写由谁加齐；**设计自己已订正过本条的两半**）条。
+- **收件人：协调者 ＋ P4**——第 **19** 条（`:1080`：本块定义的 `RequirementId` 与 P4 那枚同名、不同型，**两者的对应今天没有任何判据**，也没有不变量或用例拍得到；同一个问题在 `ContractView.class` 的字段类型上同样存在。**这是第一节第 1 条的收束处**：那处相抵已由设计处置为「本块确实定义一枚同名、不同型的」，剩下来的开口就是本条）。
 - **收件人：协调者 ＋ P3d**——第 **13** 条（`C3`：本设计按「§340 属计划审查段、不约束验证侧」读，**这是一条读法**；若该读法被否，缺的是「更强」的判据与它的持有方）。
 - **第 15 条**（本块的判定今天没有生产调用方）**设计未给具名收件人**，它自陈「这不是本块的缺口，是第 3 层的」——本计划把它归在第四节，**不替它补收件人**。
 - **另有一条不是 §15 的条目**：设计 §12.1 首段把 `BlindVerdict` / `CompletionVerdict` / `AdversaryOutcome` 三枚枚举补进「每臂都要有数目断言」的清单——**本计划 Task 6／7／8 已各落一条**，此处留痕以便「核过」可查。
@@ -1319,8 +1324,8 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - **交给执行器（第 3 层，未建）**：`Evidence::from_tool_result` 的调用、`InitialVerifierInput::assemble` 的装配、`record_verification_round` 的调用，以及 `Blocked` / `Undetermined` 的路由（节点 `FAILED`？重试？升 `Decision`？——**本块只给两个返回值**）。
 - **交给 P5c / P5d / P5e / P5f**：**一律不写域包装**（协调者 2026-10-10 的裁定），证据由宿主执行代码直接调 `from_tool_result`，`subject` 取 `Unattached`；四块的产出面（算子 → `EvidenceType`）是**声明**。四块对 `continuum-verify` 的生产代码调用为零。
 - **交给第 7 层（长期循环，未建）**：`EvidenceId` 与只追加的证据表（§10）。**本块不提供 `ProductReadiness`**，**也不建 `Evidence` 的读取路径**（设计未给消费者，见 `## 遗留` 第三节）。
-- **交给协调者**：本计划查出的**各条设计问题**（`## 遗留` 第一节）——其中**第 1 条是开工前必须知道的一条**（`RequirementId` 的第二份 vs 不给语义层登记边，且 P4 的 crate 今天不存在）；**排期上整块排在 P4 合入之后**——不只是 Task 1 与 Task 11 这两处多写者改动：Task 2–10 全部依赖 Task 1 建出的 crate（跨计划前置第三节）。
-- **交给规范维护者（本项目无此角色）**：设计 §15 的十八条与 §14 的十条对账条目，**逐条照原文**，收件人归类见 `## 遗留` 第五节。
+- **交给协调者**：本计划查出的**各条设计问题**（`## 遗留` 第一节）——其中**第 1 条是开工前必须知道的一条**（`RequirementId` 的第二份 vs 不给语义层登记边；**设计已自行处置**为「本块确实定义一枚同名、不同型的」（`bfe1df8`），剩下的开口是设计 §15 第 **19** 条）；**排期上整块排在 P4 合入之后**——不只是 Task 1 与 Task 11 这两处多写者改动：Task 2–10 全部依赖 Task 1 建出的 crate（跨计划前置第三节）。
+- **交给规范维护者（本项目无此角色）**：设计 §15 的十九条与 §14 的十条对账条目，**逐条照原文**，收件人归类见 `## 遗留` 第五节。
 
 
 
