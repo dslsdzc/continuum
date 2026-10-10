@@ -37,10 +37,10 @@
 | 依赖 | 状态 | 本块用在哪 |
 |---|---|---|
 | **`crates/continuum-method`** | **不存在**（实测 `ls crates/`：无此目录） | 本计划的全部交付物 |
-| `continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`）、`workspace_crates()`（`:234`）、逐对 `assert_eq!`（`:307-325`）与「每个成员都在表里」那一组断言（`:295-298`） | **已交付** | Task 1 加一行 `("continuum-method", &[])`；**那一行不能省**（`:295-300` 漏了即红） |
+| `continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`）、`workspace_crates()`（`:234`）、逐对 `assert_eq!`（`:307-325`）与「每个成员都在表里」那一组断言（`:295-298`） | **已交付** | Task 1 加一行 `("continuum-method", &[])`；**那一行不能省**（`:295-298` 漏了即红） |
 | workspace `Cargo.toml` 的 `[workspace] members` | **已交付** | Task 1 加 `"crates/continuum-method"` |
 | `continuum-operator` 的 `OperatorError`（`registry.rs:7-12`）、`OperatorRegistry`（`:15`）与它的 `register` / `resolve`（`:24`、`:36`） | **已交付** | **只作形状参照**（设计 §4.4「同形」）；**不登记依赖边**，本 crate 一处都不 `use` 它 |
-| `continuum-artifact` 的 `ArtifactType::{ALL, as_str, parse}`（`artifact.rs:28`、`:47`、`:68`） | **已交付** | **只作形状参照**（判据 2 的两处穷尽 `match`）；**不登记依赖边** |
+| `continuum-artifact` 的 `ArtifactType::{ALL, as_str, parse}`（`artifact.rs:28`、`:47`、`:68`） | **已交付** | **只作形状参照**（`as_str` 是判据 2 那个**穷尽 `match`** 的形状来源；`parse` 是**有兜底臂**的对照，见「签名即判据」）；**不登记依赖边** |
 | `continuum-graph` 的 `OperatorRef`（`node.rs:42`，经 `src/lib.rs:24` 再导出） | **已交付** | **刻意不用**（设计 §3.2 第 1、2 条：用它的直接边是 `continuum-graph`，即 EML 被要求从中分出来的那一侧） |
 | P5c／P5d／P5e／P5f 的四份设计 | **已定稿**（`docs/superpowers/specs/2026-10-09-p5{c,d,e,f}-*-design.md`） | 它们是 `bind` 的消费方；P5c 已在 §7.1 给出具名入口 `bind_code_methods` |
 | P4 的三个 crate（`continuum-canonical` / `continuum-semantics` / `continuum-budget`） | **不存在**（实测 `ls crates/`） | **与本块无接口**（设计 §11：P4 无接口面） |
@@ -124,18 +124,23 @@
   `MethodRegistry` 的三处判定照此形状。
 - **`ArtifactType::as_str` / `parse` 的形状**（`crates/continuum-artifact/src/artifact.rs:47`、`:68`）：
   `as_str` 是**穷尽 `match`、无通配臂**；`parse` 是 `Some(match s { …, _ => return None })`。
-  `MethodDomain` 的两处照此形状。
-- **`dependency_direction.rs` 的登记形状**（`:25` 起的表、`:289-325` 的两条断言）：
-  条目形如 `("crate-name", &[…])`，**数组按字母序**；`:295-300` 要求 `ALLOWED` 与 `workspace_crates()` **互为覆盖**。
+  `MethodDomain` 的 `as_str` / `parse` 两处照此形状；`has_counterpart` 另是一个**穷尽 `match`**
+  （域级谓词，形状来源是设计 §4.1 的签名，不在 `ArtifactType` 里）。
+- **`dependency_direction.rs` 的登记形状**（`:25` 起的表、`:295-304` 的两条覆盖断言与 `:307-325` 的逐对断言）：
+  条目形如 `("crate-name", &[…])`，**数组按字母序**；`:295-298` 与 `:301-304` 两条断言
+  要求 `ALLOWED` 与 `workspace_crates()` **互为覆盖**（前者管「成员都在表里」，后者管「表里都是成员」）。
   新条目的数组是**空数组**，故字母序无约束。
 - **`MethodId` 的 `Display` 是必需的**：`MethodError` 的格式串以 `{id}` 引用该字段，理由与写法同
-  `crates/continuum-operator/src/definition.rs:37-42`（那段注释与 `impl Display` 本体）。
+  `crates/continuum-operator/src/definition.rs:36-42`（注释本体 `:36-37`，`impl Display` 本体 `:38-42`）。
 
-### 三条已付过代价的纪律（照抄 P4 那份，按本块实情改写）
+### 已付过代价的纪律（照抄 P4 那份，按本块实情改写）
 
 1. **变异必须在全量 `cargo test --workspace --no-fail-fast` 下得出否定结论**（「不变红」）；
-   正向的「变红」跑全量是加分。**变异分四档，每一处「预期谁红」都要标档位**：
-   **取反**（把判定反过来）／**放宽**（少判一半条件）／**收紧**（多判一半条件）／**移除**（删掉整条守卫）。
+   正向的「变红」跑全量是加分。**变异分五档，每一处「预期谁红」都要标档位**：
+   **取反**（把判定反过来）／**放宽**（少判一半条件）／**收紧**（多判一半条件）／**移除**（删掉整条守卫）／
+   **加反例**（被守卫的是数据或行为、**没有判定可改**时，往那里加一条与所钉性质相反的东西——
+   如往 `crates/continuum-method/Cargo.toml` 加一条被禁的依赖、往 `UNREALIZED_BY_DESIGN` 加第三条、
+   让 `seeded()` 预填一条绑定）。**前四档都假定「有一条判定可改」；被守卫处若是数据或行为，用第五档。**
    **三条失效形态都要防**：
    (a) **锚点不唯一** → 变异没落到实现体却报 GREEN；
    (b) **等价变异体**——判据是「**这两版在哪个入参上会给出不同结果**」，举不出即是等价，
@@ -146,9 +151,15 @@
    **本块已预先识别的等价变异体有一处**：`MethodDomain::ALL` 的**元素顺序**——若用例只断「集合相等」，
    「把 `ALL` 的两项对调」是等价的。故 Task 2 的往返用例**逐值断言**而不是对 `ALL` 做集合比较，
   并**另有一条**断言 `ALL` 的次序。
-   **本块的编译期照片有两处**（**照实写成编译期照片，不假称它们会跑红**）：
-   `MethodDomain::as_str` / `parse` 的穷尽 `match`（加第五个目录时编译失败）、
-   `MethodError` 的两枚变体（加第三枚时穷尽解构处编译失败）。这两处**没有运行期红**。
+   **本块的编译期照片逐处列于下**（**照实写成编译期照片，不假称它们会跑红**；各 task 的用例里逐处标明）：
+   `MethodDomain::as_str` 与 `MethodDomain::has_counterpart` 两个**穷尽 `match`**（加第五个目录时编译失败）、
+   `MethodError` 的两枚变体（加第三枚时穷尽解构处编译失败）、
+   `MethodEntry` 的三字段（加字段或删字段时，Task 3 那个**不带 `..` 的结构体字面量**编译失败）。
+   **以上都没有运行期红。**
+   **`MethodDomain::parse` 不是编译期照片**：它按设计 §4.1 带兜底臂 `_ => return None`（Task 2 Step 3），
+   **加臂不会编译失败**——它的照片在运行期，即 Task 2 的往返用例与逐串 `None` 用例。
+   （设计 §4.1 自己写了「**必须有通配臂**」，与设计 §4.1 末「`as_str` / `parse` 是两个穷尽 `match`」
+   一句相抵；本计划按前者写，设计那一句的处置见报告。）
 2. **变异脚本必须带还原护栏**（本仓出过一次「变异留在源码里」的事故）：
    每次变异**用 `trap` 装还原**、**变异前与还原后各核一次 `sha256sum`**、**每轮用独立日志路径**，
    报告里逐轮附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径」。模板（`MUT` 是改的文件、`BAK` 是备份）：
@@ -176,10 +187,16 @@
    本块的失败面只有两枚：`MethodError::Duplicate`（`register` 撞同名）与 `MethodError::NotFound`
    （`resolve` 未注册、`bind` 未注册）——逐变体至少一条用例；副作用面是「撞名时不覆盖既有条目」与
    「`bind` 未注册时不新建条目」（Task 3）。
-5. **「守卫」要两侧都钉；缺的那侧往往是 fail-open 的那侧。** 本块逐处标出「另一侧」是哪一个用例：
+5. **一个纯数据声明／纯投影的类型没有运行期照片，只钉类型与签名（编译期）；钉类型的机制必须写死为
+   「编译器强制穷尽的解构／结构体字面量」，且不得带 `..`。** 判据是：Rust 没有反射——
+   「把字段名各列一遍」若被写成手抄的两份名单，那条断言恒真（名单是手抄的，类型改了它不会红），
+   它钉的只是「抄的时候两边一样」。**本块适用这条的类型**：`MethodError`（Task 1 的穷尽解构、无 `..`）
+   与 `MethodEntry`（Task 3 的 `method_entry_has_exactly_three_public_fields`，用**不带 `..` 的结构体字面量**
+   构造——加字段即编译失败，这是 `MethodEntry` 字段集今天唯一的照片）。
+6. **「守卫」要两侧都钉；缺的那侧往往是 fail-open 的那侧。** 本块逐处标出「另一侧」是哪一个用例：
    `register` 的「不覆盖」、`bind` 未注册时的「不新建条目」（两处都在 Task 3，且都是 fail-open 侧）、
    名册的「多一条也红」（Task 4）。
-6. **「删掉 X 即红」要先问「删掉之后行为真的变了吗」**——`ALL` 的次序、`HashMap` 的迭代序、
+7. **「删掉 X 即红」要先问「删掉之后行为真的变了吗」**——`ALL` 的次序、`HashMap` 的迭代序、
    可推断的字面量都会让它成为**等价变异体**（见第 1 条）。凡本计划标了「移除档」的地方，都已先答过这一问。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），
@@ -209,17 +226,22 @@
 
 本项目的既有事实：**手写的计划代码块错误率很高**，且已确立「**代码块是示意，正文的措辞才是约束**」。
 因此本计划只给**类型签名、常量取值与关键判定**，**不给整段可粘贴实现**；
-凡与既有 crate 交互的形状（`OperatorError` 的派生与格式串、`ArtifactType::as_str` / `parse` 的穷尽 `match`、
+凡与既有 crate 交互的形状（`OperatorError` 的派生与格式串、`ArtifactType::as_str` 的穷尽 `match`
+（`parse` 有兜底臂，是它的对照）、
 `dependency_direction.rs` 的条目形状），实现前须先读该处源码确认，不符时以源码为准并回报。
 
-**本计划不使用 `trybuild`，理由写明**：本块的两处编译期性质（`MethodDomain` 的穷尽 `match`、
-`MethodError` 的变体数）都是**穷尽性**断言，不是**不可构造性**断言——`MethodEntry` 的三个字段全 `pub`，
+**本计划不使用 `trybuild`，理由写明**：本块的编译期性质（`MethodDomain` 的两个穷尽 `match`、
+`MethodError` 的变体数、`MethodEntry` 的字段集）都是**穷尽性**断言，不是**不可构造性**断言——`MethodEntry` 的三个字段全 `pub`，
 `MethodRegistry::entries` 私有但设计没有对它作任何「crate 外不能构造」的承诺，
 故没有可写的 `compile_fail` 样例。**凡本计划写「加一个目录／加一枚变体会编译失败」处，那是编译期照片**，
 各 task 的用例里已逐处标明，**不假称它会跑红**。
 
-**Step 2「运行，确认失败」在本块的形态是编译期失败**：各 task 的首跑都是
-「该包尚不存在、或新符号尚未定义 ⇒ `could not compile`」。
+**Step 2「运行，确认失败」在本块的形态是编译期失败**：**除 Task 1 Step 2 与 Task 1 Step 3b 之外**，
+各 task 的首跑都是「新符号尚未定义 ⇒ `could not compile`」。**Task 1 Step 2 是另一形态**：
+此时 `continuum-method` 尚未列入 `[workspace] members`（Step 3b 才登记），
+`cargo test -p continuum-method` 失败于**包选择**（`error: package ID specification … did not match any
+packages` 一类），**既不是 `could not compile` 也不是 `error[E…`**——纪律 1(c) 的两条判据都不覆盖它，
+故它**不作为任何用例的红**，只是首跑记录。
 **照实记为编译期失败，不假称它是运行期红。** 运行期的红由每条用例的「红条件」行给出，
 那是**变异判据**，不是首跑判据。**唯一的例外是 Task 1 Step 3b 的依赖门**——它的首跑是真的**运行期断言红**。
 
@@ -275,20 +297,32 @@ crates/continuum-runtime/tests/dependency_direction.rs  ALLOWED 加 ("continuum-
 
 `tests/identity.rs`：
 
-- `method_id_returns_the_string_it_was_built_from`：`MethodId::new("TDD").as_str() == "TDD"`；
-  **另取一个含非 ASCII 与大小写混合的串**（如 `"planning/规划"`）断言逐字往返。
-  红条件：`as_str` 返回常量、或对串做任何折叠／截断（**取反档**）——含非 ASCII 那一枚即红，
-  **故夹具必须含非 ASCII**，否则这条与索引序一样是等价的。
+- `method_id_returns_the_string_it_was_built_from`：**两枚夹具、各钉一侧**——
+  `"TDD"`（含大写字母，照 §187 里 `software/TDD` 的真实形态）与
+  `"planning/规划"`（含非 ASCII 与斜杠），各断言 `as_str()` 逐字往返。
+  红条件（**取反档**）：`as_str` 返回常量、或对串做**大小写折叠**（`to_lowercase` 一类）⇒
+  **`"TDD"` 那一枚即红**（`"TDD"` ≠ `"tdd"`）；`as_str` 对串做**截断／按字节切**
+  （不用 `.chars()`、按字节下标切一类）⇒ **含非 ASCII 那一枚即红**。
+  **两枚都不省**：只留 `"TDD"` 漏掉截断那一面，只留非 ASCII 那枚漏掉大小写折叠那一面。
+  **红条件的射程到此为止**：`"planning/规划"` 无大写字母、两枚首尾都无空白，故本用例
+  **抓不到 `trim()` 一类**——「对串做任何折叠」是过宽的说法，不写。
 - `method_error_renders_its_id_in_the_message`：`MethodError::NotFound { id: MethodId::new("nope") }.to_string()`
   **含子串 `"nope"`**；`MethodError::Duplicate { id: MethodId::new("dup") }` 同形。
   红条件：格式串改写成不带 `{id}` 的固定文案（**移除档**）——两枚变体照旧编译得过，只有本用例红。
-  **本条钉的是 `MethodId: Display` 的必需性**，来历同 `crates/continuum-operator/src/definition.rs:37` 那段注释。
+  **本条钉的是 `MethodId: Display` 的必需性**，来历同 `crates/continuum-operator/src/definition.rs:36-37` 那段注释。
 - `method_error_has_exactly_two_variants`：**穷尽解构、不带 `..`**（对一枚 `&MethodError` 写两臂 `match`）。
   红条件：**加第三枚变体** ⇒ 本处**编译失败**。**照实标注为编译期照片**（纪律 1(c)：编译不过不算变红）；
   **本条没有运行期红**。
-- `method_error_variants_are_distinguishable`：两枚变体各构造一枚、`assert_ne!` 断言两者不相等。
-  红条件：把两枚折叠成同一个值（**取反档**）。**本条的作用是给上一条补一个运行期可观察面**——
-  上一条只有编译期照片，本条的相等性判定在运行期成立。
+- `method_error_equality_is_payload_sensitive`：**同一变体、不同 `id` 的两枚**
+  （`NotFound { id: "a" }` 与 `NotFound { id: "b" }`）断言 `assert_ne!`；
+  **不同变体、同一 `id` 的两枚**（`NotFound` 与 `Duplicate`）也断言 `assert_ne!`。
+  红条件（**放宽档**）：把 `PartialEq` 从派生改成手写、**只比变体判别式不比载荷**
+  （`NotFound` 之间恒相等）⇒ 前一条断言红。
+  **后一条（跨变体）是类型上的恒真断言**：Rust 里两个不同变体恒不相等，**它的红条件不存在**；
+  保留只为把「跨变体不相等」这一事实写下，不计入本块的判据。
+  **原写的「把两枚变体折叠成同一个值」不是可编译的变异体**（合成一枚＝删变体 ⇒ 编译失败，
+  正是纪律 1(c) 排除的形态，见上一条），故本用例的红条件只能落在载荷比较上。
+  **本条钉的是 `PartialEq` 对载荷敏感**（上一条只有编译期照片，给不出运行期可观察面）。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -296,15 +330,20 @@ crates/continuum-runtime/tests/dependency_direction.rs  ALLOWED 加 ("continuum-
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-method --test identity
 ```
 
-预期：**`could not compile`**（`continuum-method` 这个包尚不存在）。**这是编译期失败，不是运行期红**，照实记录。
+预期：**包选择错误**——`continuum-method` 此时既未列入 `[workspace] members` 也无目录，
+cargo 在选包这一步就失败（`error: package ID specification \`continuum-method\` did not match any
+packages` 一类，退出码非零）。**这既不是 `could not compile`，也不是 `error[E….`**——
+纪律 1(c) 的两条判据都不覆盖它，**故它不作为任何用例的红**。
+**照实记为「首跑失败于包选择」**，不假称它是运行期红，也不写成 `could not compile`。
 
 - [ ] **Step 3: 建骨架**
 
 `crates/continuum-method/Cargo.toml` 的依赖：**只声明 `thiserror`**（workspace 依赖）。两处落点：
 - `MethodId` 是包 `String` 的 newtype，内部串私有，构造入口只有 `new`。
-  **派生 `Debug, Clone, PartialEq, Eq, Hash`**——设计 §4.2 的签名列里没有列派生，这四枚是由**两处必需**倒推的：
-  `MethodRegistry` 的 `HashMap<MethodId, MethodEntry>` 要 `Eq + Hash`，`MethodError` 的
-  `PartialEq / Eq / Clone` 派生要 `MethodId` 有同派生（**本计划自定**，记在 `## 遗留` 第三节）。
+  **派生 `Debug, Clone, PartialEq, Eq, Hash`**——设计 §4.2 的签名列里没有列派生，这五枚是由**两处必需**倒推的：
+  `MethodRegistry` 的 `HashMap<MethodId, MethodEntry>` 要 `Eq + Hash`（两枚），
+  `MethodError` 的 `Debug, Clone, PartialEq, Eq` 派生要 `MethodId` 有同四项（四枚）——
+  两处取并集恰是这五枚（**本计划自定**，记在 `## 遗留` 第三节）。
   **不加 `Ord` / `PartialOrd`**（`select` 的排序键取 `as_str`，见 Task 3）、**不加 serde 派生**（本 crate 不序列化）。
 - `MethodError` 照 `OperatorError`（`registry.rs:7-12`）的形状：`#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]`，
   两枚变体各带 `#[error("…")]` 格式串，格式串以 `{id}` 引用 `MethodId`（故须有 `Display`）。
@@ -377,7 +416,8 @@ git commit -m "feat(method): continuum-method 骨架、MethodId 与 MethodError"
 - `parse_rejects_every_string_outside_the_catalog`：**逐串**断言 `None`——含 `""`、`"Software"`（大小写）、
   `"3D"`、`"3d "`（尾空格）、`"software/"`（带斜杠的目录写法）、`"image"`、`"images"`。
   红条件（**放宽档**）：给 `parse` 加一条通配臂 `_ => Some(MethodDomain::Software)` ⇒ 逐串红。
-  红条件（**收紧档**）：把 `"image"` 加成一个新臂（**本块未裁决，不得发明**）⇒ 该串那一条红。
+  红条件（**放宽档**）：把 `"image"` 加成一个新臂（**本块未裁决，不得发明**）⇒ 该串那一条红
+  （实现比所钉的**少判一条**：原本该判 `None` 的串被收下了）。
   **`"image"` 的来历写在断言的注释里**：它是设计 §8 R3 点名的缺口（§187 没有 image 目录而 P5f 需要它），
   不是为了凑数加的样例串。
 - `has_counterpart_is_true_for_each_paired_domain_and_false_for_three_d`：**逐臂四条断言**——
@@ -396,7 +436,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-method --test domain
 
 - [ ] **Step 3: 实现**
 
-四处落点：
+落点如下：
 - `MethodDomain` 四臂（`Software` / `Video` / `Research` / `ThreeD`），派生 `Debug, Clone, Copy, PartialEq, Eq, Hash`。
 - `pub const ALL: [MethodDomain; 4]`，次序照 §187 原文。
 - `as_str`：**穷尽 `match`、无通配臂**。
@@ -404,7 +444,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-method --test domain
 - `has_counterpart`：**穷尽 `match`**，`Software` / `Video` / `Research` 为 `true`，`ThreeD` 为 `false`。
 
 **类型的文档注释要写明封闭的来历**：§187 在列目录前写了「例如：」（`docs/spec/04-method.md:114`），
-《总纲》§8.1 又以四行界定（`docs/01-总纲.md:1331-1336`）——**没有规范说这四个是穷尽的**；
+《总纲》§8.1 又以**四行**界定（`docs/01-总纲.md:1332-1335`；`:1331`／`:1336` 是围栏行）——**没有规范说这四个是穷尽的**；
 取封闭是为了给四个算子块一个共同的词汇表（设计 §4.1），**这是设计决定，不是规范断言**。
 
 - [ ] **Step 4: 运行全部测试并提交**
@@ -439,12 +479,21 @@ git commit -m "feat(method): MethodDomain 的四个目录名与 has_counterpart"
   红条件（**移除档**，fail-open 侧）：把 `contains_key` 判定删掉、直接 `insert` ⇒ 第一次 `register` 变 `Ok`
   且 `resolve` 读回 A' ⇒ **两条断言都红**。
   **「另一侧」是不覆盖**：只断「返回了 `Duplicate`」会漏掉「同时也把旧值覆盖了」。
+  **照实写明本用例的射程**：`seeded()` 的十八个 id 互不相同（§187 的清单无重名），
+  `register` 在本 crate 里的**唯一生产调用者**就是 `seeded()`，**故 `Duplicate` 在生产路径上不可达**——
+  它的照片只能是本用例里**手建**的两条同 id 条目。这不是缺口，是判据 4 的射程，
+  与 Task 4 Step 3 的 `seeded()` 那一段各写一处（Task 5 Step 4 的判据 4 一行亦标注）。
 - `resolve_returns_not_found_for_an_unregistered_id`：`resolve(&MethodId::new("nope"))` ⇒ `Err(MethodError::NotFound { id })`。
   红条件（**取反档**）：改成返回 `Ok`（panic 不是本用例要的错型）⇒ 红。
 - `bind_returns_not_found_for_an_unregistered_id_and_creates_nothing`：
   `bind(&MethodId::new("nope"), &["op"])` ⇒ `Err(NotFound { id })`；
   **并断言这次调用之后 `resolve(&MethodId::new("nope"))` 仍是 `NotFound`**（没有半写：`bind` 不新建条目）。
-  红条件（**放宽档**，fail-open 侧）：让 `bind` 对未注册 id 走 `entry(id).or_default()` 一类的插入路径 ⇒ 后一条断言红。
+  红条件（**放宽档**，fail-open 侧）：让 `bind` 对未注册 id 走插入路径、替掉存在性判定 ⇒ **两条断言都红**
+  （`Err(NotFound)` 变成 `Ok`，且条目被新建）。
+  **写变异体时注意**：`entry(id).or_default()` 需要 `MethodEntry: Default`，而 `MethodEntry` **没有**派生
+  `Default`（Task 3 Step 3 只给 `Debug, Clone, PartialEq, Eq`）——**字面照抄那一句是编译失败**，
+  按纪律 1(c) 不算红。变异体要显式构造，如
+  `entry(id).or_insert_with(|| MethodEntry { id: id.clone(), domain: MethodDomain::Software, realized_by: vec![] })`。
   **这是本 task 的第二处 fail-open 侧**：只断「返回了 `Err`」会漏掉「顺手把条目建出来了」。
 - `binding_twice_overwrites_the_previous_value`：同一 id 先 `bind(&["a"])` 再 `bind(&["b", "c"])`，
   断言 `realized_by` **等于** `["b", "c"]`（不是 `["a", "b", "c"]`）；**并断言 `id` / `domain` 两个字段未变**。
@@ -464,6 +513,16 @@ git commit -m "feat(method): MethodDomain 的四个目录名与 has_counterpart"
   「两次同序」那一半据实记为无判据的加强句**（写进 `## 遗留`）。
 - `select_of_a_domain_without_entries_is_empty`：对一个只含 software 条目的 registry 调 `select(ThreeD)` ⇒ 空 `Vec`
   （不 panic、不造条目）。
+  红条件（**放宽档**）：把 domain 过滤删掉（与 `select_returns_only_the_entries_of_the_requested_domain`
+  同一个变异）⇒ 本用例返回非空、红。**这一条与那一条同源，但两侧射程不同**：那一条钉「只要对的」，
+  本一条钉「没有时给空而不是造条目」。
+- `method_entry_has_exactly_three_public_fields`——**`MethodEntry` 字段集的编译期照片**
+  （纪律 5：纯数据声明只钉类型，机制是**不带 `..` 的结构体字面量**）：
+  对三个字段全写一次的 `MethodEntry { id: …, domain: …, realized_by: vec![…] }` 断言其三个字段读回原值。
+  红条件：**加第四个字段** ⇒ 该字面量**编译失败**（缺字段 `E0063`）；**删一个字段** ⇒ 同样编译失败
+  （多出的字段名 `E0560`）。**照实标注为编译期照片，本条没有运行期红**（纪律 1(c)）。
+  **不得写成 `MethodEntry { id: …, ..Default::default() }` 一类带 `..` 的写法**——
+  `..` 会让加字段的变异照过（纪律 1）。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -476,7 +535,9 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-method --test registry
 - [ ] **Step 3: 实现**
 
 - `MethodEntry { pub id: MethodId, pub domain: MethodDomain, pub realized_by: Vec<String> }`——三字段全 `pub`
-  （设计 §4.3），派生 `Debug, Clone, PartialEq, Eq`。
+  （设计 §4.3），派生 `Debug, Clone, PartialEq, Eq`。**这一字段集由
+  `tests/registry.rs` 的 `method_entry_has_exactly_three_public_fields` 用不带 `..` 的结构体字面量钉住**
+  （纪律 5：纯数据声明只钉类型；加字段即编译失败）。
   **不带** `input_schema` / `output_schema` / `determinism` / `side_effect_class` / `backend_candidates`
   （那些是 `Operator` 的字段，`crates/continuum-operator/src/definition.rs:79`）；
   **不带** `purpose`（设计 §4.3 三条理由；本设计近期删过这个字段，来历见 `## 遗留` 第四节）。
@@ -524,11 +585,14 @@ git commit -m "feat(method): MethodEntry 与 MethodRegistry 的登记、解析�
 
   红条件：**漏一名即红、多一名即红**（逐名比较，不是计数比较）。
   **并逐 domain 断言条数**（`software=7` / `video=4` / `research=4` / `3d=3`，字面量）。
-  **两条断言不是同一件事，两条都写**：逐名比较的是**排序后的两个集合**，
-  条数断言是**字面量**——前者抓不到「同一次改动里既加一名又把清单也补上」，后者抓得到。
+  **两条断言都写，但条数断言不是「另一件事」**：逐名相等**蕴含**条数相等（反之不成立），
+  故条数断言是逐名断言的**弱化式**，逐名断言抓得到的它不一定抓得到，它抓得到的逐名断言全抓得到。
+  两条都写的理由是**设计 §10 判据 3 同时要求计数与逐名**（设计:554-555），不是因为逻辑上互补。
+  **该计数不违纪律 3 的「自指计数不写数值」**：它数的是 §187 的清单（外部事实），
+  不是本计划的用例数／task 数（自指）。
   十八个名的出处**逐字**是 `docs/spec/04-method.md:118-141`。
 - `seeded_entries_all_have_an_empty_realized_by`：`seeded()` 之后**逐条**断言 `realized_by.is_empty()`。
-  红条件（**取反档**）：在 `seeded()` 里给某一条预填一个算子 id ⇒ 红。
+  红条件（**加反例档**）：在 `seeded()` 里给某一条预填一个算子 id ⇒ 红。
   作用：钉住「`seeded()` 不预填任何绑定」。
 
 `tests/roster.rs`（判据 6 的条目级侧）：
@@ -538,17 +602,22 @@ git commit -m "feat(method): MethodEntry 与 MethodRegistry 的登记、解析�
   否则断言恒真、是自证的正控制。
   红条件**三条各写一处**：**少一条**（表只剩一项）⇒ 红；**多一条**（表变三项）⇒ 红；
   **改一个名或一个域** ⇒ 红。不合并成「表不对即红」。
+  **「少一条」与「多一条」这两条变异含类型长度，即各要改两处**：常量类型是
+  `[(&str, &str); 2]`，**数组长度是类型的一部分**——只把字面量改成一项或三项而不改类型里的 `;2`，
+  得到的是 `error[E0308]`（expected an array with a fixed size of 2 elements），
+  按纪律 1(c) **那是编译失败，不是红**。故变异体要把类型写成 `;1` / `;3` **并且**改字面量。
+  「改一个名或一个域」那一条长度不变，照旧编译得过，逐项比较即红。
 - `every_roster_name_exists_in_the_seeded_catalog_and_is_empty_today`：对表内每一项 `(domain, id)`——
   `MethodDomain::parse(domain)` 是 `Some`；`select(d)` 里**含**该 id（故名没写错）；
   `resolve(&id)` 的 `realized_by` **此刻确为空**。
   红条件（**取反档**）：把表里的 `"TDD"` 写成 `"tdd"` ⇒ 第二条断言红（目录里没有这个名字）。
-  红条件（**取反档**）：让 `seeded()` 预先把 `software/TDD` bind 上 ⇒ 第三条断言红。
+  红条件（**加反例档**）：让 `seeded()` 预先把 `software/TDD` bind 上 ⇒ 第三条断言红。
 - `three_d_entries_are_empty_because_the_domain_has_no_counterpart`：
   断言 `has_counterpart(ThreeD) == false`，**且** `select(ThreeD)` 的**逐条** `realized_by` 为空，
   **且** `has_counterpart` 对其余三个域为真——第三半不能省：没有那个谓词时「空是刻意的」与「漏 bind」不可区分
   （设计 §7 第 2 条）。
   红条件（**取反档**）：`has_counterpart(ThreeD)` 给 `true` ⇒ 红。
-  红条件（**取反档**）：`seeded()` 给 `3d/` 的任一条预填绑定 ⇒ 第二条断言红。
+  红条件（**加反例档**）：`seeded()` 给 `3d/` 的任一条预填绑定 ⇒ 第二条断言红。
 - `no_counterpart_entry_outside_the_roster_stays_empty`——**「名册外的空仍红」在本 crate 内的可闭形态**：
   取 `seeded()`，对 `has_counterpart == true` 的三个域（`Software` / `Video` / `Research`）里
   **每一条不在名册里的条目**调 `bind(&id, &["placeholder"])`；然后收集这三个域里**仍为空**的条目，
@@ -556,6 +625,8 @@ git commit -m "feat(method): MethodEntry 与 MethodRegistry 的登记、解析�
   红条件**三条各写一处**：**（a）名册多一条** ⇒ 该条被跳过不绑 ⇒ 空集多一项 ⇒ 红；
   **（b）名册少一条** ⇒ 另一条被绑上 ⇒ 空集少一项 ⇒ 红；
   **（c）名册写错名**（`"TDD"` → `"tdd"`）⇒ 真 `TDD` 被绑上、假名不在目录里 ⇒ 空集里没有 `"TDD"` ⇒ 红。
+  **（a）与（b）同样含类型长度**（`[(&str, &str); 2]` 的数组长度是类型的一部分）：
+  各要改两处——类型里的 `;2` 与字面量；只改字面量得 `E0308`，那是编译失败不是红（同前一条用例的说明）。
   **并照实写明射程**：本用例**不**覆盖「生产里某块漏 bind」——它在用例内部自己把非名册条目全绑上了。
   那一侧 `continuum-method` 看不到（四块在别的 crate、在其后运行，设计 §4.5 末），
   交给 P5c／P5d／P5e 各自的计划并由整合作收口（`## 交付给谁`）。
@@ -582,7 +653,9 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-method --test roster
   常量文档注释照设计 §4.5 写清三件事：形状是 `(领域名, 方法 id)`、领域名与 `MethodDomain::as_str` 的取值对齐；
   今日**恰为**这两条（`TDD` 的全部内容是次序、`Vec<String>` 表达不了；`debugging` 在链上没有对应步骤——
   报出方是 P5c 设计 §7.2，协调者 2026-10-10 裁定）；**这张表是判据 6 的例外集，是判据的输入，
-  不是「注释里的一句豁免」**——表必须恰为两条，多一条、少一条、写错一个名，Task 4 的 roster 用例都红。
+  不是「注释里的一句豁免」**——表必须恰为两条，多一条、少一条、写错一个名，Task 4 的 roster 用例都红
+  （**「多一条」「少一条」这两处变异各含类型长度**：类型里的 `;2` 与字面量都要改，
+  否则是 `E0308` 编译失败而非红）。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -647,9 +720,9 @@ grep -rn "SystemTime::now\|Instant::now" crates/continuum-method/src
 | 设计 §10 的判据 | 证据 |
 |---|---|
 | 1. 依赖门：`ALLOWED` 含 `("continuum-method", &[])`，且逐对断言为「未出现」 | Task 1 Step 3b（首跑运行期红）＋ Task 5 Step 2 |
-| 2. 目录封闭而可往返：`ALL.len() == 4`、四值逐一往返、四值之外逐项 `None`（含 `"image"`） | Task 2 的三条用例 |
+| 2. 目录封闭而可往返：`ALL.len() == 4`、四值逐一往返、四值之外逐项 `None`（含 `"image"`） | Task 2 的 `every_domain_round_trips_through_its_encoding`（内含 `ALL.len() == 4`）与 `parse_rejects_every_string_outside_the_catalog`（**`all_is_in_the_order_of_the_specs_directories` 不在本判据内**，它补的是纪律 1(b) 的集合比较缺口） |
 | 3. 名册逐项有照片：逐 domain 计数 ＋ 四条目录的 id 集合逐名等于 §187 | Task 4 的 `seeded_builds_each_domain_catalog_with_exactly_the_named_methods` |
-| 4. 两条错误路径各一枚：`register` 撞名 → `Duplicate`；`resolve` 未注册 → `NotFound`；`bind` 未注册 → `NotFound` | Task 3 的前三条用例（`Duplicate` 那条另带「不覆盖」断言） |
+| 4. 两条错误路径各一枚：`register` 撞名 → `Duplicate`；`resolve` 未注册 → `NotFound`；`bind` 未注册 → `NotFound` | Task 3 的前三条用例（`Duplicate` 那条另带「不覆盖」断言）。**射程照实写明**：`NotFound` 有生产照片（`resolve` / `bind` 对未注册 id），**`Duplicate` 没有**——`register` 在本 crate 的唯一生产调用者是 `seeded()`，而它建的十八个 id 互不相同，故 `Duplicate` 的照片只能是手建的同 id 两条 |
 | 5. 选取确定性：同一 domain 两次 `select` 同序，且按 id 升序 | **一半**：升序由 Task 3 的 `select_is_ordered_by_id_ascending` 兑现；**「两次同序」那一半据实记为无判据的加强句**（同进程内不排序的 `HashMap` 迭代序也稳定） |
 | 6. 空与漏由谓词与名册分开断 | **域级侧**：Task 2 的 `has_counterpart_…` ＋ Task 4 的 `three_d_entries_…`；**条目级名册侧**：Task 4 的两条 roster 用例（字面期望、两侧都钉）。**「有对家域的条目除名册外逐条非空」那一半本 crate 闭不了**，据实标注为**未完整成立**，收件人见 `## 交付给谁` |
 
@@ -659,27 +732,33 @@ grep -rn "SystemTime::now\|Instant::now" crates/continuum-method/src
 
 按纪律 1／2 跑**承重守卫**，每轮：`trap` 装还原 → 变异前 `sha256sum` → 跑全量 `--no-fail-fast` → 读红位 →
 还原后 `sha256sum` → 独立日志路径。**逐轮在报告里附
-「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位（取反／放宽／收紧／移除）」**。
+「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位（取反／放宽／收紧／移除／加反例）」**。
 
 **必跑的变异体（逐条标档位与预期谁红）**：
 
 | 变异 | 档位 | 预期红在 |
 |---|---|---|
-| `crates/continuum-method/Cargo.toml` 加一条 `continuum-graph` 依赖 | 收紧 | **跨 crate**：`continuum-runtime` 的 `dependency_direction`（**必须跑全量**） |
+| `crates/continuum-method/Cargo.toml` 加一条 `continuum-graph` 依赖 | 加反例 | **跨 crate**：`continuum-runtime` 的 `dependency_direction`（**必须跑全量**） |
 | `register` 删掉 `contains_key` 判定、直接 `insert` | 移除 | Task 3 的 `register_rejects_…`（两条断言都红） |
-| `bind` 对未注册 id 走插入路径 | 放宽 | Task 3 的 `bind_returns_not_found_…` 的「不新建」断言 |
+| `bind` 对未注册 id 走插入路径（**显式构造条目**，不能照抄 `or_default()`，见 Task 3） | 放宽 | Task 3 的 `bind_returns_not_found_…` 的**两条**断言（`Err(NotFound)` 与「不新建」） |
 | 覆盖改追加（`bind` 用 `extend`） | 取反 | Task 3 的 `binding_twice_overwrites_…` |
 | `select` 的排序键取反 | 取反 | Task 3 的 `select_is_ordered_by_id_ascending` |
 | `has_counterpart(ThreeD)` 给 `true` | 取反 | Task 2 的 `has_counterpart_…` 第四条 |
 | `parse` 加通配臂 `_ => Some(Software)` | 放宽 | Task 2 的 `parse_rejects_…` |
-| `seeded()` 给 `software/TDD` 预填绑定 | 取反 | Task 4 的 `every_roster_name_…` 第三条 |
-| `UNREALIZED_BY_DESIGN` 删一条（只剩 `TDD`） | 移除 | Task 4 的 `the_unrealized_roster_…` 与 `no_counterpart_entry_outside_…`（b） |
-| `UNREALIZED_BY_DESIGN` 加第三条 | 收紧 | Task 4 的 `the_unrealized_roster_…` 与 `no_counterpart_entry_outside_…`（a） |
+| `seeded()` 给 `software/TDD` 预填绑定 | 加反例 | Task 4 的 `every_roster_name_…` 第三条 |
+| `UNREALIZED_BY_DESIGN` 删一条（只剩 `TDD`；**类型里的 `;2` 与字面量一并改成 `;1`**） | 移除 | Task 4 的 `the_unrealized_roster_…` 与 `no_counterpart_entry_outside_…`（b） |
+| `UNREALIZED_BY_DESIGN` 加第三条（**类型里的 `;2` 与字面量一并改成 `;3`**） | 加反例 | Task 4 的 `the_unrealized_roster_…` 与 `no_counterpart_entry_outside_…`（a） |
 | `seeded()` 少 register 一条（如 `3d/render-comparison`） | 移除 | Task 4 的逐名与条数两条断言 |
 | `as_str` 把 `ThreeD` 返回 `"3D"` | 取反 | Task 2 的往返用例 |
 
 **不列入的变异体及理由**：删掉 `select` 的排序（**弱变异体**，`HashMap` 迭代序可能偶然升序，见 Task 3）；
-给 `MethodError` 加第三枚变体（**编译不过不是变红**，纪律 1(c)；它的照片是 Task 1 的穷尽解构）。
+给 `MethodError` 加第三枚变体（**编译不过不是变红**，纪律 1(c)；它的照片是 Task 1 的穷尽解构）；
+给 `MethodEntry` 加第四个字段（同上，**编译不过不是变红**；它的照片是 Task 3 的
+`method_entry_has_exactly_three_public_fields`）；
+把「两枚变体折叠成同一个值」（同上，合成一枚＝删变体，**编译不过不是变红**；见 Task 1 那条用例的说明）。
+**表内标「加反例档」各行的理由**（档位定义见纪律 1）：它们被守卫的是**数据或行为**
+（`Cargo.toml` 的依赖表、`UNREALIZED_BY_DESIGN` 的项、「`seeded()` 不预填」这条行为），
+**没有一条判定可改**，故前四档无对应；用第五档。
 
 - [ ] **Step 6: 提交**
 
@@ -742,8 +821,19 @@ git commit -m "feat(method): P5b 执行方法库的收尾与复核"
 ### 三、本计划自定的形状与取值（**申报**，逐条说清代价）
 
 - **`MethodId` 的派生集**（Task 1）：设计 §4.2 只给了 `new` / `as_str` / `Display`，**派生由两处必需倒推**
-  （`HashMap` 的键要 `Eq + Hash`、`MethodError` 的派生要 `PartialEq / Eq / Clone`）。
+  （`HashMap` 的键要 `Eq + Hash`、`MethodError` 的 `Debug, Clone, PartialEq, Eq` 派生要 `MethodId` 有同四项；
+  两处并集恰是 `Debug, Clone, PartialEq, Eq, Hash` 这五枚）。
   **不加 `Ord` / `PartialOrd`、不加 serde 派生。代价**：派生集是本计划定的；**收益**：不引入设计未要求的接口面。
+- **`MethodDomain` 的派生集**（Task 2）：设计 §4.1 只给了 `ALL` / `as_str` / `parse` / `has_counterpart`，未列派生。
+  **必需的四枚**是 `Debug, Clone, PartialEq, Eq`——`MethodEntry` 的同四项派生要求其字段 `domain` 有它们。
+  **`Copy` 与 `Hash` 今天没有必需方**（`MethodDomain` 不作 `HashMap` 的键、不参与集合，
+  `select` 也可以按引用收参）；加这两枚是为了与 `MethodId` 的派生集取齐、免掉调用处的借用。
+  **代价**：多两枚设计未要求的 trait 实现；**收益**：两个公开枚举的派生面一致。
+- **`MethodRegistry` 的 `#[derive(Debug, Default)]`**（Task 3）：设计 §4.5 的签名列里只有 `new`，
+  未提派生。**照 `OperatorRegistry` 逐字同形**（`crates/continuum-operator/src/registry.rs:14-21`）：
+  `Debug` 让用例失败时可打印，`Default` 使 `new()` 取 `Self::default()`。
+  **代价**：`MethodRegistry::default()` 随之成为公开入口，与 `new()` 并存（设计未承诺也不禁止）；
+  **收益**：与既有 `OperatorRegistry` 的形状一致。
 - **`select` 的排序键取 `id.as_str()`**（Task 3）：设计 §4.5 只写「按 id 升序」，没给排序依据。
   **取 `as_str` 而非给 `MethodId` 派生 `Ord`**——后者是超出设计的一步。
   **代价**：`select` 的实现里多一次 `as_str` 调用；**收益**：`MethodId` 的形状与设计逐字一致。
@@ -772,6 +862,20 @@ git commit -m "feat(method): P5b 执行方法库的收尾与复核"
   - 经 `bind(id, &[…])` 填各自领域目录里**每一条已 seed 的 id**（设计第六节的表：
     P5c 填 `software/` 的 `planning` `worktree` `review` `fuzz` `verification` 五条，
     `TDD`／`debugging` 两条**本轮不 bind**；P5d 填 `research/` 四条；P5e 填 `video/` 四条）。
+  - **设计 §六那张表的「边界」栏一并转述，派单时不许只给 id 清单**（该栏在
+    `docs/superpowers/specs/2026-10-08-p5b-execution-method-library-design.md:408-413`，
+    本节按该栏逐条转录；节号已实测：§16 在 `docs/spec/01-concepts.md:788`（`docs/spec/05-normative.md`
+    无 §16）、§32 在 `docs/spec/01-concepts.md:1359`、§328／§329／§330 在 `docs/spec/05-normative.md:2408`／
+    `:2426`／`:2447`）：
+    - **P5c**：`worktree` 指 §16 的 git worktree，填 `realized_by` 时须与 §16 的 `git worktree` 语义一致；
+      `verification` **只填代码域的验证算子 id**，不是 P5a 的完成判定（后者不注册为算子）。
+    - **P5d**：`contradiction-check`／`citation-verification` 对应 §330 的 `ContradictionCheck`／
+      `CitationVerification`；`realized_by` 填的是**算子 id**，证据本身走 P5a（四块**只产出** Evidence）。
+    - **P5e**：与 §32 剪辑链、§328 的七种 Artifact 对齐；`timeline-compose` 的产物是 `Timeline`（§329），
+      其 `ArtifactType` 变体由 P5e 一次性落地。
+    - **P5f**：**无目录可填**（§187 没有 `image/`），**不得**自行建域或借 `3d/` 域（设计 §8 R3）。
+  - **四块都不得**：定义自己的「方法」类型或注册表；把方法登记进 `OperatorRegistry`；
+    在 `MethodEntry` 上加字段；把 Worker 的完成声明塞进方法内容（设计 §六表末行）。
   - **判据 6 的「有对家域除名册外逐条非空」这一半**（本 crate 闭不了，见 `## 遗留` 第二节）。
   - **`realized_by` 文本内容的核对**——本 crate 看不到 `OperatorRegistry`（设计 §3.2 末）。
 - **交给 P5f**：**无 `bind` 目标**这一事实（§187 没有 `image/` 目录；设计 §8 R3）。本计划不发明目录。
@@ -781,5 +885,6 @@ git commit -m "feat(method): P5b 执行方法库的收尾与复核"
 - **交给 P4 的设计者与协调者**：设计 §8 的 **R4**（「领域」从何而来无规范来源）、**R5**（`select` 的消费点未定）。
 - **交给复审者**：设计 §8 的 **R1**（`realized_by` 取文本的读法，其编译期照片是 `ALLOWED` 的空数组）、
   **R8**（两表不一致以哪一张为准的残留）。
-- **交给本块的复审者（本计划自身的三处）**：`## 遗留` 第二节的三条「闭不了／无判据」、
-  第三节的四处「本计划自定」、以及 Task 5 Step 4 里**判据 6 第 2 条标注的「未完整成立」**。
+- **交给本块的复审者（本计划自身的三类）**：`## 遗留` 第二节的「闭不了／无判据」各条、
+  第三节的「本计划自定」各条（**不写条数**，见纪律 3）、
+  以及 Task 5 Step 4 里**判据 6 第 2 条标注的「未完整成立」**。
