@@ -256,6 +256,10 @@ CheckpointError   CheckpointOwner
 
 切分 §四第 2 条已给出待改的处所与「不改但要重跑」的那几处。**本设计在当前树里逐条复测，并补它当时漏记的那一处**：
 
+**本节用的 (a)–(e) 是本节自己的一套**（(a) 枚举本体 / (b) `ALL` / (c) `as_str`·`parse` / (d) 数目断言 /
+(e) `compatibility.rs`）；**§12.2 另用一套 (a)–(t)（用例编号），两套不同**——同一个字母在两节里是两件事
+（(e) 在本节是 `compatibility.rs`，在 §12.2 是两个多词串的往返），读时按节取。
+
 > **注记（2026-10-09）**：本节的复测写在切分文档接受这些发现**之前**——正文的「切分当时…」与下表
 > 「切分给的行号」一栏描述的是**折入前**的切分文档（当时待改的是 (a)–(d) 四处）。切分文档现已折入
 > (e) 与 `:24` 的注记（来历见 §15 开头的注记），故那几处读时应以切分文档**现在**的文本为准；
@@ -463,14 +467,27 @@ pub enum CheckpointError {
 - **实现的算子**：`generate-broll`（§308 `:2048` 点名的第一项长任务「video generation」）与 `render`（§5.2 第 11 行）。
   两枚都是本领域的长任务；§308 的「尤其」清单是**举例**（`:2045` 逐字「尤其：」），
   故 `render` 按同一条 SHOULD 一并实现，**不是**把它读成 §308 的穷尽清单。
-- **`type Checkpoint`**：两枚各自定义一个检查点结构，字段是本算子的**进度状态**（例如已完成的片段区间与
-  已确定的后端选择）。**字段清单不在本设计的约束范围内**：它随算子的实现走，本设计只约束下面三条判据。
+- **承载 `impl Checkpointable` 的类型名（2026-10-10 补）**：`continuum_media::GenerateBroll` 与 `continuum_media::Render`。
+  **原写只给了「哪两枚算子」，没给类型名，也没说这两枚类型与 §5.2 那 17 个 `Operator` 值（纯数据）之间的对应由谁维持**
+  （订正 2026-10-10）。两枚类型各带 `operator_id() -> OperatorId`，其返回值**必须**与 §5.2 表里那两枚 `Operator` 值的 `id` 相同；
+  这条对应是**纯数据关系**（`Operator` 是七个字段的值），编译期核不了，须由一条用例逐枚核——**它落在实现面，本设计不把它列为 §12.2 的条目**。
+- **`type Checkpoint`**：两枚各自定义一个检查点结构（本设计取一枚字段全 `pub` 的结构体），字段是本算子的**进度状态**
+  （已完成片段区间与已确定的后端选择），身份字段取 §4.3 的 `CheckpointOwner`。
+  **字段清单不在本设计的约束范围内**：它随算子的实现走，本设计只约束下面三条判据。
+- **测试侧的读写面（2026-10-10 补）**：判据 1 与判据 3 要求用例能**推进进度**、能**指定选中的 backend**，
+  而按原文写不出那两条用例——**原写只给三条判据，没给测试侧的写入面**（订正 2026-10-10）。故本设计给出这一组：
+  `new`（建一枚零进度的实例）、`record_completed_segment`（推进进度）、`select_backend`（指定选中的 backend）、
+  `progress`（读回进度）。**代价**：本块的外部面多了这五项；**收益**：三条判据在用例里真的写得出来，
+  而不是「定义了一个没人实现它的类型」（切分 §八 要求写明落点与判据）。
 - **判据（两侧都要，缺一条即不算钉住）**：
   1. `checkpoint()` 在**有进度**时返回 `Ok`，且 `restore` 该检查点后算子的进度与存前一致（正例）；
      在**尚无进度**时返回 `Err(NothingToCheckpoint { .. })`（反例）。
   2. 用**另一版本**（`OperatorVersion` 不同）的同一算子的检查点去 `restore` ⇒ `Err(RestoreRejected { .. })`，
      **且恢复失败后算子状态与调用前逐字段相同**（半恢复比不恢复更坏）。
   3. 选中的 backend 不支持检查点时 ⇒ `Err(UnsupportedByBackend { .. })`；支持时 ⇒ `Ok`（两侧）。
+     **「支不支持」的判据（2026-10-10 补）**：**选中的那枚 backend 是否在 `operator.backend_candidates` 内**——
+     `Operator` 的字段里没有第二份「支持检查点的 backend」名单，故不另立一份（同 §2.2 的「不建第二份判据」）。
+     两侧的落点因此是：选中候选内的一枚 ⇒ `Ok`；选中候选外的一枚 ⇒ `Err`。
 - **调用点不在本块**（据实写明）：谁在什么时候调 `checkpoint()` / `restore()`，规范未给；它属第 3 层的
   恢复路径（§311 / §312 那一组）。故「无调用点」这件事在 P5e 落地之后**仍然成立**，只是从「无实现、无调用点、
   无测试」变成「有实现、有测试、无生产调用点」。切分 §八「算子解析的落点仍无人认领」那一条记的
@@ -733,6 +750,11 @@ pub enum MediaError {
 `verify-multimodal` 是第 3 级（`IndependentModelVerifier`）。**这是本设计的声明**——§32 只说这两步在链尾，
 没说级别；本设计按 §262 的两级定义对应，并把「这一对应要不要由装配方持有」记为对账条目（§13 第 5 条 (ii)）。
 
+**这两条声明的载体（2026-10-10 补）**：**§5.2 第 16、17 行两枚算子值上的文档注释**——**原写只给出这两条声明，
+未说它落在哪**（订正 2026-10-10；§9.3 与 `## 跨计划前置` 都照抄了「本块交付这两条声明」这一笔，只有它没给落点）。
+`Operator` 的七字段里没有级别，故文档注释是它**唯一**的落点。**据此记一处：这是纯数据声明，没有运行期照片**——
+级别序、候选过滤与独立性判定都属 P5a（上表第一行），本块交付的就是那两条声明本身；照片的缺席不是漏拍。
+
 ---
 
 # 6. §131 派生产物的复用：**不建第二份判据**
@@ -823,9 +845,12 @@ Embeddings。表头据此改为此形，两行的出处照实留在格里，不�
 「系统不得擅自使用生成内容替换原始素材。」。
 
 ```
-/// §34 的五个旗标（docs/spec/01-concepts.md:1424-1428），逐条照录。
-// Debug：`MediaError` 自身 `derive(Debug)`，且其 `NotPermitted` 臂以 `{required:?}` 引用本型。
-#[derive(Debug)]
+/// §34 的五个旗标（docs/spec/01-concepts.md:1424-1428），逐条照录；编码面（`ALL` / `as_str` / `parse`）见 §12.1。
+/// `Debug`：`MediaError` 自身 `derive(Debug)`，且其 `NotPermitted` 臂以 `{required:?}` 引用本型。
+/// `PartialEq`：§12.1 的逐臂往返用例要与 `parse` 的结果比——**原写只给 `#[derive(Debug)]`（订正 2026-10-10）**，
+/// 那一行与 §12.1 的断言不齐（往返比的是值，没有 `PartialEq` 写不出来）。
+/// `Clone` / `Eq` 照本仓枚举的既有做法；**不取 `Copy`**：本型不是可复制值。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerativePermission {
     Broll,               // allow_generated_broll
     Voice,               // allow_generated_voice
@@ -835,7 +860,19 @@ pub enum GenerativePermission {
 }
 
 /// Contract 里**已声明为真**的旗标集合。以**值**从 Contract 传入（P4 的规则：凡跨层输入以值传入）。
-pub struct PermittedGenerativeContent { /* ... */ }
+/// **原写只有 `{ /* ... */ }`，成员、构造函数与查询方法一处未给（订正 2026-10-10）**：
+/// §7.2 的 fail-closed 判据正是关于它的**缺省构造**，故它必须有一个可被用例指认的产生点。
+/// **不给 `Default`**：见 §7.2 末。
+pub struct PermittedGenerativeContent { /* 私有字段：已声明为真的旗标集合 */ }
+
+impl PermittedGenerativeContent {
+    /// 空集：什么都不放行。这是 §7.2 fail-closed 的缺省。
+    pub fn none() -> Self;
+    /// 由已声明为真的旗标构造。
+    pub fn from_permissions(granted: &[GenerativePermission]) -> Self;
+    /// 本集合是否含该旗标。
+    pub fn contains(&self, p: &GenerativePermission) -> bool;
+}
 ```
 
 ## 7.2 判定：算子 → 所需旗标的映射，与 fail-closed 的默认
@@ -1113,22 +1150,32 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 - `ArtifactType`：加型后 `ALL.len() == 17`，且**逐型**往返
   （`crates/continuum-artifact/tests/artifact_type.rs:21-43` 的既有用例改了数目断言后即覆盖新型）；
   **11 枚新串逐条断非空、小写、`_` 连接**（同用例 `:32-35` 的既有断言，遍历 `ALL` 即覆盖）。
-- `CheckpointError`（3 臂）、`GenerativePermission`（5 臂）：各一条**臂数与往返**用例
-  （`as_str` / `parse` 两枚穷尽 `match` + 一条数目断言，形状照 `ArtifactType` 的既有做法）。
+- `GenerativePermission`（5 臂）：一条**臂数与往返**用例
+  （`ALL` ＋ `as_str` / `parse` 两枚穷尽 `match` ＋ 一条数目断言，形状照 `ArtifactType` 的既有做法）。
+- `CheckpointError`（3 臂）：**只有三臂各自的 `Display` 断言，没有 `as_str` / `parse` / `ALL`**。
+  **原写把它与 `GenerativePermission` 并列要求「臂数与往返」（订正 2026-10-10）**：§4.3 的三臂**都带载荷**
+  （`BackendId` / `CheckpointOwner`），带载荷的错误枚举没有「字符串往返」这一说——本仓的 `OperatorError`
+  （`crates/continuum-operator/src/registry.rs:6-12`）正是同形，只有 thiserror 的 `Display`。
+  **故这一节的两枚类型不是同一形状的守卫**：一枚有编码面（`ALL` / `as_str` / `parse`），一枚没有。
+  **翻转条件**：若判这一句适用于 `CheckpointError`，则须先给它一个**无载荷**的臂集（那会改掉 §4.3 的形状与三臂理由中的两条）。
 - `all_operators()`：`len() == 17`，且 `id` 逐枚不同（两两比较，不是只查总数）。
 
 ## 12.2 判定侧：正例 + 反例成对（缺一条即不算钉住）
+
+**本表的 (a)–(t) 是本节自己的一套（用例编号）；§3.5 另用一套 (a)–(e)（「一次改动要同时碰的处所」）。
+两套不同**——同一个字母在两节里是两件事（例如 (e)：§3.5 的 (e) 是 `compatibility.rs`，本表的 (e) 是两个多词串）。
+读时按节取，本节内不再标注。
 
 | # | 用例 | 钉的是哪一侧 |
 |---|---|---|
 | a | 11 枚新型的 `as_str` 串逐条 `parse` 回自身 | §3.2 的编码（正例） |
 | b | 六个既有「表外取值」（`artifact_type.rs:40`）仍一律 `None` | 解码侧的**另一侧**（新串没把表外取值吞掉） |
 | c | 新型写入 `artifact_type` 列再读回，得到同一型 | 落库往返（§3.5 的「不改但要重跑」） |
-| d | 改过的 `crates/continuum-port/tests/compatibility.rs:47` 用例改为**遍历 `ArtifactType::ALL`**，逐型断言 serde 往返（17 型，不是 6 型） | §3.5 的 (e)（本块改的唯一一处**不会自己变红**的遗漏） |
+| d | 改过的 `crates/continuum-port/tests/compatibility.rs:47` 用例改为**遍历 `ArtifactType::ALL`**，逐型断言**两件事**：serde 往返，且 `serde_json::to_string(&t)` 去引号后与 `t.as_str()` **逐字相同**（17 型，不是 6 型） | §3.5 的 (e)（本块改的唯一一处**不会自己变红**的遗漏）。**后半句是本块加进来的（订正 2026-10-10）**：原写只要求「serde 往返」——按那个语料，删 `crates/continuum-artifact/src/artifact.rs` 的 `rename_all` **不红**（`serde` 串与该型的 `as_str` 串各自成立、互不参照）；加上「serde 串 == `as_str()`」这一条它才红（§12.3 的等价变异行据此一并订正） |
 | e | `shot_set` / `subtitle_track` 两个多词串的往返 | 多词型的编码（唯一两条带 `_` 的新串） |
 | f | 以 `&all_operators()` 调 `register_media_operators` 注册 17 枚后，逐枚 `resolve` 成功 | 注册的正例 |
 | g | 同一注册表注册两次 ⇒ `Err(MediaError::Registry(OperatorError::Duplicate { .. }))`（**不是**静默覆盖） | 注册的反例（§5.1：那一臂是 P1 的判定，本型只带出来） |
-| h | `Deterministic` 的每一枚算子，其每个 backend 都在 §5.4 的名单内 | §5.4 的规则（正例） |
+| h | `Deterministic` 的每一枚算子，其每个 backend 都在 §5.4 的名单内 | §5.4 的规则（正例）。**本条按 `determinism` 的取值挑选要遍历的算子，但不断言那个取值**（订正 2026-10-10）：把一枚 `Deterministic` 改成 `NonDeterministic` 只让它少遍历一枚，本条仍绿。故 `determinism` 的承担者只有 (r) 的六枚；**其余十一枚的 `determinism` 取值在本节没有照片**（17 − 6），据实记在 §12.5 第 6 条 |
 | i | 造一枚 `Deterministic` 但候选含名单外 backend 的算子，以它连同若干合法算子调 `register_media_operators` ⇒ `Err(MediaError::UnverifiableDeterminism { .. })`，**且注册表内容与调用前逐枚相同**（先核后写，不留半注册） | **fail-open 的那一侧**（§5.4）；「注册表未变」那一半钉的是同一条规则的**写入面** |
 | j | 未授权 `Broll` 时 `authorize_generative` ⇒ `Err(MediaError::NotPermitted { .. })` | §34（反例侧） |
 | k | 授权 `Broll` 时 ⇒ `Ok` | 上一条的**另一侧**（否则 j 可由「一律 Err」满足） |
@@ -1154,12 +1201,12 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 |---|---|---|
 | **取反**：`authorize_generative` 改成「未声明 ⇒ 放行」 | j | k（授权那一侧不受影响）、l、m |
 | **取反**：§5.4 的名单判定改成恒真 | i 的第一个子例 | h（名单内的候选仍然通过） |
-| **取反**：`register_media_operators` 改成边核边写（先注册前几枚，遇到违规才返回） | i 的第二个子例（注册表内容与调用前不同） | h、f（合法批次两侧都绿） |
+| **移除**：`register_media_operators` 改成边核边写（先注册前几枚，遇到违规才返回）（**订正 2026-10-10**：原记「取反」） | i 的第二个子例（注册表内容与调用前不同） | h、f（合法批次两侧都绿） |
 | **移除**：`RestoreRejected` 的身份比对删掉（一律 `Ok`） | q 的第一个子例 | o、p（有进度/无进度与身份无关）、r 全组 |
 | **收紧**：`required_permission` 对四枚生成算子**都**返回 `Broll` | l 的后三条 | j、k、m（它们不看具体是哪一枚） |
-| **取反**：`transcribe` 的 `determinism` 改成 `Deterministic` | r 的第二组（`cache_key` 由 `None` 变 `Some`）；**同时该轮 h 会红**（`local-whisper` 等三个候选不在 §5.4 的名单里） | r 的第一组、i |
+| **放宽**：`transcribe` 的 `determinism` 改成 `Deterministic`（**订正 2026-10-10**：原记「取反」） | r 的第二组（`cache_key` 由 `None` 变 `Some`）；**同时该轮 h 会红**（`local-whisper` 等三个候选不在 §5.4 的名单里） | r 的第一组、i |
 | **放宽**：`all_operators()` 少注册一枚（16） | `len() == 17` 的断言、f 的对应枚 | 其余（这**一档若不红，说明 f 是按 `all_operators()` 自己遍历的**——即假照片） |
-| **等价变异**：把某个新型的串改成另一个**同样合法**的小写串（如 `shot_set` → `shotset`） | **全绿**——这是一枚**等价变异体**（编码是自洽的，往返仍成立）。**要打红它必须换变异体**：改成与 `artifact_type.rs:40` 的表外取值相撞的串（如 `nope`），那时 b 红 | —— |
+| **等价变异**：把某个新型的串改成另一个**同样合法**的小写串（如 `shot_set` → `shotset`；`as_str` 与 `parse` 两处一起改） | (a) 与 (d)——**原写「全绿——这是一枚等价变异体」（订正 2026-10-10）**：那是按「只断 serde 往返」的旧语料写的；本表已按 (a)（逐条手写串）与 (d)（serde 串 == `as_str()`）加强，两处即红，**不必再换变异体**（原句的处置随之删）。**若变的是 `shot_set` 那一枚，(e) 同红**（它的语料也手写了 `shot_set`）。**只在一处改（`as_str` 改了、`parse` 没改）则往返也红**——两档不是同一枚变异体 | b、c（表外取值与落库路径不看这一串） |
 
 ## 12.4 结构层的照片（`trybuild`）
 
@@ -1171,7 +1218,9 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
 
 1. `Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）在 `continuum-media` 里编不过
    ⇒ 在本块的 crate 里**造不出** `Evidence`（字段私有、无 `Default`／`From`），绕过构造点在类型上写不出来。
-   这是 P5a 设计 §4.4（`:319`）「唯一产生点」那条结构事实在本块的**使用侧**照片。
+   这是 P5a 设计 §4.4 里「**唯一产生点**」那条**结构事实**在本块的**使用侧**照片。
+   （**订正 2026-10-10**：原引 `:319`。**该处已不指向那句话**——P5a 的设计其后被改过（`bfe1df8`），行号随之移；
+   按本仓体例，**指进别人会改的文档一律按内容指、不写行号**，故此处改为按内容指。）
    **这一条证不到「产出只能经本块的某枚函数」**：`Evidence::from_tool_result` 是 `pub`
    （P5a 设计 `:324`），构造由**宿主**直接调它完成（§9.2），**调用点不在本 crate 里**——
    **（2026-10-10 订正）原句写「本块的生产代码可以直接调它……只是不经过本块的包装」，
@@ -1200,6 +1249,12 @@ P5a 的 `RequirementId` 归属上（该条自承的那条假设）：
    「无执行点的机制」里），且 `CacheKey` 无存储。故只能拍到「判据的返回值」（r 条），
    拍不到「少跑了一次」。
 5. **Timeline 的六个字段**：schema 未定义（§8 第 3 条），故拍不到「一份 Timeline 建得出、读得回」。
+6. **「17 枚的 `determinism` / `side_effect_class` 都对」这句话没有照片（2026-10-10 补）**：
+   `determinism` 只有 (r) 的六枚有承担者（(h) 按取值挑要遍历的算子、**不判那个取值**），其余**十一枚**无照片；
+   `side_effect_class` 只有 (n) 点名的五枚有承担者，其余**十二枚**无照片。
+   **这里不是「用例漏写了」**：给 17 枚各写一条断言只是把 §5.2 的表转录一遍（第二份转录），
+   而被点名的那些已各自逐枚钉住。**故这两条是「只钉住枚举到的那些」的判据，不是那个全称本身**。
+   **缺的是「要不要把 §5.2 的表落成一条表驱动用例、并给一份逐行可读的对照」这一步；收件人：复审者。**
 
 ---
 
