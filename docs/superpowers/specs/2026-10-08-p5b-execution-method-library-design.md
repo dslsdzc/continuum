@@ -182,7 +182,7 @@ pub enum MethodDomain {
 impl MethodDomain {
     pub const ALL: [MethodDomain; 4];
     pub fn as_str(&self) -> &'static str;        // "software" | "video" | "research" | "3d"
-    pub fn parse(s: &str) -> Option<MethodDomain>; // 穷尽 match，无通配臂
+    pub fn parse(s: &str) -> Option<MethodDomain>; // **必须有通配臂**（`_ => None`），见下
 
     /// 本轮**是否有算子块作它的对家**（第 7 节、第 8 节 R2）。
     /// Software/Video/Research → true；ThreeD → false。
@@ -193,9 +193,17 @@ impl MethodDomain {
 }
 ```
 
-- `as_str` / `parse` 是**两个穷尽 `match`**，与 `ArtifactType` 的用法同形
-  （`crates/continuum-artifact/src/artifact.rs` 的 `as_str`/`parse`，切分文档 §四第 2 条 (c) 提到的那一对）。
-  加目录时编译失败，不会静默。
+- **「加一个目录即编译失败」这张照片的承担者不是 `parse`**（**订正 2026-10-10，P5b 的计划评审查出**）：
+  - **`as_str`**：`match self`，**无通配臂** ⇒ 加一臂即编译不过。**它是照片之一。**
+  - **`parse`**：签名是 `parse(s: &str) -> Option<MethodDomain>`——**`match` 在 `&str` 上，必须有通配臂**
+    （`_ => None`），故**加目录不会让它编译失败**。仓库里的同形函数正是这样
+    （`crates/continuum-artifact/src/artifact.rs` 的 `parse`：`Some(match s { … _ => return None })`）。
+  - **`has_counterpart`**：`match self` ⇒ **加一臂即编译不过。它是这张照片的另一位承担者。**
+  > **原稿写「`as_str` / `parse` 是**两个穷尽 `match`**……加目录时编译失败」——对 `parse` 那半是假的**：
+  > 一个返回 `Option<Self>`、入参是 `&str` 的解析函数**不可能没有通配臂**。
+  > **判据**：**「某函数是穷尽 `match`」这句话要连它的入参类型一起核**——
+  > **`match` 的是枚举自身、还是别的东西（`&str` / `&Value`）**，决定了加臂会不会编译失败。
+  > （同一句错话曾被抄进 P5b 的实现计划，那一份仍须各自改——来历见本节。）
 - **封闭**是设计决定，不是规范断言：§187 在列目录前写了「例如：」（`docs/spec/04-method.md:114`），
   《总纲》§8.1 又以四行界定（`docs/01-总纲.md:1331-1336`）。**没有规范说这四个是穷尽的**；
   取封闭是为了给四个算子块一个共同的词汇表（开放目录会让「未知域」到运行期才失败，
