@@ -195,9 +195,12 @@ P5e 设计 §3.2 的取法是「三份清单的并集」，`SourceSet` 对那份
 **这里不是「§330 没提 Artifact 所以不收」**：判据是**有没有类型学出处的清单**，不是「这一节里有没有 Artifact 这个词」——
 同一节里的六个名字与本条走的是同一条判据（它们都不是类型，故都不是变体）。
 
-**代价据实记（本块为这一读法付的那一份）**：`research-search → research-source-set →
-research-evidence-extraction` 三条相邻边的端口因此都是 `Json`，§239 `:654`「运行时 MUST 拒绝不兼容连接」
+**代价据实记（本块为这一读法付的那一份）**：`research-question → research-search → research-source-set →
+research-evidence-extraction` 三条相邻边（§4.5 第 2、3、4 行）的端口因此都是 `Json`，§239 `:654`「运行时 MUST 拒绝不兼容连接」
 在这三条边上退化为「`Json` 接 `Json`」，**没有区分力**（§4.5 的边表逐行标出了这一点）。
+**订正 2026-10-10**：原写「`research-search → research-source-set → research-evidence-extraction` 三条相邻边」——
+那条链只有三个名字、两条边，「三条」与它不符；这里按 §4.3 与 §4.5 都引的那一组（第 2、3、4 行）把链首的
+`research-question` 补上，三个名字变四个、边数才是三条。
 **若协调者事后裁定 `SourceSet` 该收成一型**，改动是「向 P5e 报出一次枚举变体（按切分 §四第 2 条的『一次改动』惯例）
 ＋ §4.2 三行算子表的端口从 `Json` 改成 `SourceSet`」，本块的判定归属不变。
 
@@ -408,8 +411,11 @@ P5e 的那个类型承载的是它自己的两条领域规则（§5.4 的注册�
 **依据栏的读法**：写 §330 的，出处是**该节的链**（相邻两名之间的 `↓`）；写「§4.2 第 N 行」的，
 出处是**该行的 `input_schema` 与全表 `output_schema` 的对应**（即本设计的判定，规范未给边）。
 
-**「区分力」一栏是据实的自陈，不是形式**：七条边里有**六条**落在 `Json`↔`Json` 上（§3.2 的代价），
-故 §239 的检查在这六条上没有区分力——它只能拒掉「把 `Report` 接到只收 `Json` 的端口」这一类错。
+**「区分力」一栏是据实的自陈，不是形式**：本表逐行逐来源共 **八条来源边**（第 2–5 行各一条、第 6 行两条、第 7 行两条），
+其中 **七条**落在 `Json`↔`Json` 上（与 §3.2 记的三条相邻边同源），第 7 行那条 `Report` 是唯一不是的一条。
+**原写「七条边里有**六条**落在 `Json`↔`Json` 上」（订正 2026-10-10）**：那两个数既不是来源边数（八/七），
+也不是「有上游的行数」（六行、其中五行 `Json`↔`Json`）——两种数法都数不出来，是本句与本表的不符。
+故 §239 的检查在这七条上没有区分力——它只能拒掉「把 `Report` 接到只收 `Json` 的端口」这一类错。
 **这一栏存在的目的是让下一轮的复审不必自己重新推一遍「本表能查出什么」**。
 
 **判据（§9.2 第 (l) 条）**：逐行断言下游 `input_schema` 的**每一个型**都能在该行列出的上游里找到，
@@ -734,10 +740,10 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 | a | 七枚算子的 `id` 逐枚断言（手写七个串，按 §4.2 的行序） | 清单的正例；**语料手写**（见下方预防） |
 | b | 七枚的 `(input_schema, output_schema, determinism, side_effect_class, backend 候选)` **逐格**断言（手写期望表，不由 `all_operators()` 自身推出） | §4.2 全表；**七行逐行，不是抽样** |
 | c | 以 `&all_operators()` 调 `register_research_operators` 注册 7 枚后，逐枚 `resolve` 成功 | 注册的正例 |
-| d | 同一批注册两次 ⇒ `Err(OperatorError::Duplicate { .. })`（**不是**静默覆盖），**且注册表内容与第一次之后逐枚相同** | 注册的反例；「表未变」那一半钉的是**先核后写**（§4.1 的失效方向） |
+| d | 同一批注册两次 ⇒ `Err(OperatorError::Duplicate { .. })`（**不是**静默覆盖），**且注册表内容与第一次之后逐枚相同** | 注册的反例（「`Err` 而不是静默覆盖」）。**「表未变」那一半在本夹具下不承重**（2026-10-10 复核）：第二批的**首枚**即与表里那枚撞车 ⇒ 边核边写的实现也在第一枚上返回 `Err`、一个字都没写，表因此也变不了 ⇒ 该半**恒真**（与「索引序」「可推断的字面值」同型的假照片）。「先核后写」在本夹具下的**承重**判据见 (e) 与 §9.3 下方那条尚缺的夹具 |
 | e | 一批里含两枚同 `(id, version)` 的算子（批内自撞）⇒ `Err`，**且注册表内容与调用前逐枚相同**（不留半注册） | §4.1「先核后写」的**批内**那一侧 |
 | f | 四条 `research/` 方法的 `realized_by` **逐条非空**，且每个串 `OperatorRegistry::resolve` 成功（先经 `bind_research_methods` 填入，§7） | §7（P5b 设计 §4.5 交办的判据）+ 弱引用的运行期补件 |
-| g | `bind_research_methods` 之后，`select(MethodDomain::Research)` 返回**四条**（数目手写） | §7 的覆盖；**这一条钉的是「四条的 id 都被 bind 过」而不是「四条都存在」** |
+| g | `bind_research_methods` 之后，`select(MethodDomain::Research)` 返回**四条**（数目手写） | §7 的覆盖。**这一条钉的是「`seeded()` 在 `research/` 域恰四条」（四条都存在），不是「四条都被 bind 过」——原句两半写反了（订正 2026-10-10）**：P5b 设计 §4.5 写死 `select` **返回该领域的全部条目、按 id 升序**，与 `realized_by` 是否绑过无关（`bind` 只改 `realized_by`，不改条目的存否），故一个 `select` 的数目断言钉不到「都被 bind 过」；后者是 (f) 的「逐条非空」钉的 |
 | h | 对未 seed 的 `MethodId` 调 `bind` ⇒ `MethodError::NotFound` | §7 的反例（错透了 `MethodError`，本块没有自己的错误类型） |
 | i | （**已撤销，2026-10-10**）原为「两枚判定算子各产一条证据：`evidence_from_research_finding` 的返回的 `subject == Unattached`、`evidence_type` 与 §5.1 的两臂逐枚对应」。**那一枚函数已按协调者裁定删去**（§5.2），构造在宿主侧，本 crate 里没有可断言的调用点——故本条**没有主体**。§5.1 的两臂对应随之成为**声明**，其照片改动记在 §9.5 第 7 条 | —— |
 | j | `research-source-set` 的 `backend_candidates == ["builtin"]`（**逐元素断言**，不是「非空」） | §6.2 第 1 条那半句可断言的事实 |
@@ -756,15 +762,23 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 
 | 变异 | 该红 | 不该红 |
 |---|---|---|
-| **取反**：`research-source-set` 的 `determinism` 改成 `NonDeterministic` | k 的第一枚（`Some` → `None`） | j（候选列表与 determinism 无关）、其余各条 |
-| **取反**：`research-search` 的 `determinism` 改成 `Deterministic` | k 的第二组（该枚由 `None` 变 `Some`） | j、l、m（它们不看 determinism） |
-| **移除**：`register_research_operators` 的「先核后写」删掉（边核边写） | d 的第二个子例、e 的第二个子例（表内容与调用前不同） | c（合法批次两侧都绿） |
-| **移除**：`bind` 的 `retrieval` 那一条 | f 对 `research-search` / `research-source-set` 两个串的解析（它们从 `realized_by` 里消失）、g（`select` 那一条的 `realized_by` 变空） | 其余三条 `bind`、a–e、j–m（i 已撤销） |
+| **收紧**：`research-source-set` 的 `determinism` 改成 `NonDeterministic`（**订正 2026-10-10**：原记「取反」） | k 的第一枚（`Some` → `None`） | j（候选列表与 determinism 无关）、其余各条 |
+| **放宽**：`research-search` 的 `determinism` 改成 `Deterministic`（**订正 2026-10-10**：原记「取反」） | k 的第二组（该枚由 `None` 变 `Some`） | j、l、m（它们不看 determinism） |
+| **移除**：`register_research_operators` 的「先核后写」删掉（边核边写） | e 的第二个子例（表内容与调用前不同）——**原写「d 的第二个子例、e 的第二个子例」，订正 2026-10-10**：d 用「同一批注册两次」这一夹具，该夹具下「表未变」那一半**恒真**（第二批首枚即撞车，边核边写也一字不写，见 §9.2 (d)）⇒ d 不红 | c（合法批次两侧都绿） |
+| **移除**：`bind` 的 `retrieval` 那一条 | f 对 `research-search` / `research-source-set` 两个串的解析（它们从 `realized_by` 里消失） | g、其余三条 `bind`、a–e、j–m（i 已撤销）。**原写把 g 列在该红栏（「`select` 那一条的 `realized_by` 变空」），订正 2026-10-10**：`select` 返回该领域的全部条目、与 `realized_by` 是否绑过无关，故删一条 `bind` 不改 `select` 的返回数目，g 不红 |
 | **放宽**：把 `research-question` 的 `input_schema` 改成 `[Text]` | l 的第 1 行（无输入的来源不存在了）、m 仍绿（`Text` 是既有型） | 其余各行 |
 | **收紧**：把 `research-citation-verification` 的 `input_schema` 的 `Report` 删掉（只留 `Json`） | b（该行的端口断言）、**l 的第 7 行会变绿**（`Json` 在上游找得到）——**故 l 单独不足以钉住这一格**，b 与 l 要一起看 | j、k |
 | **（已撤销，2026-10-10）取反**：`evidence_from_research_finding` 的 `subject` 从 `Unattached` 改成 `Requirement(..)` | ——（那一枚函数已删，§5.2；本条随 i 一并撤销） | 其余全部 |
 | **等价变异**：把 `research-source-set` 的候选从 `["builtin"]` 改成 `["Builtin"]`（大小写不同） | j 红（逐元素断言），**但这不是等价变异体**：`BackendId` 是大小写敏感的 `String`（`crates/continuum-operator/src/definition.rs:66`），改串即改身份 | —— |
-| **等价变异**：把 `research-question` 的 `backend_candidates` 从 `["primary-model"]` 改成 `["primary_model"]` | **全绿**——这是一枚**等价变异体**（两个串在表里等价，都是本设计定的名字，无外部消费者）。要打红它必须换变异体：把它改成与另一枚算子共用的串以外的任意值，那时 b 红 | —— |
+| **等价变异**：把 `research-question` 的 `backend_candidates` 从 `["primary-model"]` 改成 `["primary_model"]` | b（该格的 `assert_eq!` 失败）——**原写「全绿——这是一枚等价变异体」，订正 2026-10-10**：§9.2 (b) 要求**手写期望表**逐格断言 `backend_candidates`，源码里的串一改那格即失败 ⇒ 这不是等价变异体；上一行（`builtin` → `Builtin`）是同一形状、同一处置——**两个串在本设计定的表里不是等价物** | j（另一枚算子的候选列表）、k、l、m（它们不看这一格） |
+
+**「先核后写」的承重守卫：一处尚缺的夹具（2026-10-10 复核，记录在此）**。本表「移除先核后写」那一行原预告
+d 的第二个子例也红；而 d 的「表未变」那一半在它的夹具下恒真（§9.2 (d)）。「先核后写」与「边核边写」的分野因此
+只由 (e)（**批内自撞**那一侧）与 §9.2 (d) 的「`Err` 而不是静默覆盖」那一半承担；**「漏核既有表」那一侧今天没有承重用例**。
+补它需要一个**先写了几枚、随后才撞上既有表**的批次（批 = `[新算子, 已注册的那一枚]`），
+它才把「漏核对既有表」露出来，且与 (e) 不可互换。**缺的是「这一条夹具的落点」这一步；收件人：实现者。**
+**这里不是「d 的两半都得留着」**：d 第二条断言在本夹具下恒真，留着不承重；照实标明它不承重、另立夹具，
+才是把守卫钉在能红的那一侧。
 
 ## 9.4 结构层的照片（`trybuild`）
 
