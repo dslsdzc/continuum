@@ -10,7 +10,7 @@
 //!
 //! # 本目录的样例**逐份点名**（便于对数：这段点名的项数必须等于目录里 `.rs` 的份数）
 //!
-//! `tests/compile_fail/`（**六份**，应编不过）：
+//! `tests/compile_fail/`（**九份**，应编不过）：
 //!
 //! - **`entity_id_has_no_public_literal_construction`** —— `EntityId` 的里子串私有，
 //!   故 crate 外写不出元组构造 `EntityId("x".to_owned())`。它是简报里
@@ -47,8 +47,22 @@
 //!   与 `src/resolver.rs` 的 `#[cfg(test)]` 里；**逐支穷尽解构**那张照片在 crate 内的
 //!   `every_arm_carries_exactly_its_declared_fields` 里（见 `src/resolver.rs` 文件头）。
 //!   （Task 4 订正轮追加，裁决一。）
+//! - **`required_strength_has_no_default`** —— `RequiredStrength::default()` 编不过：
+//!   本类型**没有 `Default`**（§4.5 写死「必填入参，没有默认值」；`Default` 会是一条
+//!   本层凭空造出来的门槛——四维之间的序与量纲都没有给，见 `src/risk.rs`）。
+//!   （Task 6 追加。）
+//! - **`required_strength_has_no_from_risk`** —— **公开面清单逐条**：
+//!   `RequiredStrength::from_risk(&risk)` 与 `RequiredStrength::from(risk)` 都编不过
+//!   ——本层**不提供**任何把 `ResolutionRisk` 映射成门槛的基线（§4.5；
+//!   无中生有的序会把「高成本」判成「低风险」，基线比没有更坏）。**限度**：它钉的是
+//!   那两个**名字**，方法名是开放集、枚举不完（同一限度也写在 `tests/risk.rs` 的源码扫描里）。
+//!   （Task 6 追加。）
+//! - **`resolve_requires_the_strength_argument`** —— 门槛是 `resolve` 的**必填入参**：
+//!   少传它、或把它传成 `None::<RequiredStrength>`，两种都编不过（§4.5 的
+//!   「签名层面可断言」那两句：不收 `Option<RequiredStrength>`、且没有默认值）。
+//!   （Task 6 追加。）
 //!
-//! `tests/compile_pass/`（**三份**，**应编得过**，是上面那几份**反例的正控制**）：
+//! `tests/compile_pass/`（**四份**，**应编得过**，是上面那几份**反例的正控制**）：
 //!
 //! - **`entity_id_from_str_is_constructible`** —— `EntityId::from_str` 是公开构造入口，
 //!   crate 外编得过。**没有这一条**，上面第一份样例的绿可以来自「整个 crate 的 API 名字都对不上」
@@ -60,6 +74,13 @@
 //!   公开可用，且两枚值各有公开构造入口。**它是上面两份 `ResolutionConfidence` 反例的
 //!   正控制**：没有它，那两份的绿可以来自「这个名字整个不存在」这类与判据无关的原因。
 //!   （Task 4 追加。）
+//! - **`the_risk_and_binding_surface_is_usable`** —— Task 6 加进来的公开面确实可用：
+//!   `ResolutionRisk` 可构造（四字段 `pub`）、`RequiredStrength::new` 可用、
+//!   `resolve` 的五参数签名可用、`ExplicitBinding` 可构造、`binding::apply` 可达。
+//!   **它是上面三份 Task 6 反例的正控制**（`required_strength_has_no_default` /
+//!   `required_strength_has_no_from_risk` / `resolve_requires_the_strength_argument`）：
+//!   没有它，那三份的绿可以来自「这个名字整个不存在」这类与判据无关的原因。
+//!   （Task 6 追加。）
 //!
 //! # 本 crate 为何有 `tests/compile_pass/`（另两个 crate 没有）
 //!
@@ -100,21 +121,25 @@
 // **公开 API 从 crate 外真的拿得到**那一侧的证据因此不在这里，而在
 // `tests/candidate.rs`（它整份都是 crate 外代码）＋ 两份 `compile_pass` 样例。
 
-/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**六份**。
-const COMPILE_FAIL_SAMPLES: [&str; 6] = [
+/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**九份**。
+const COMPILE_FAIL_SAMPLES: [&str; 9] = [
     "entity_id_has_no_public_literal_construction",
     "candidate_source_has_no_pick_one_method",
     "canonical_representation_is_not_constructible_outside",
     "resolution_confidence_has_no_numeric_reader",
     "resolution_confidence_cannot_be_built_from_a_score",
     "resolution_result_is_not_constructible_outside",
+    "required_strength_has_no_default",
+    "required_strength_has_no_from_risk",
+    "resolve_requires_the_strength_argument",
 ];
 
-/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**三份**。
-const COMPILE_PASS_SAMPLES: [&str; 3] = [
+/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**四份**。
+const COMPILE_PASS_SAMPLES: [&str; 4] = [
     "entity_id_from_str_is_constructible",
     "a_candidate_source_with_only_retrieve",
     "resolution_confidence_meets_is_usable",
+    "the_risk_and_binding_surface_is_usable",
 ];
 
 /// 两份清单与它们各自的目录对钉——**加样例时此清单要同步，本用例会告诉你**。

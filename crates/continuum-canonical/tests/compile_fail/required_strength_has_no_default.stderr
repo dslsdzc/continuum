@@ -1,0 +1,11 @@
+error[E0599]: no function or associated item named `default` found for struct `RequiredStrength` in the current scope
+  --> tests/compile_fail/required_strength_has_no_default.rs:18:31
+   |
+18 |     let _ = RequiredStrength::default();
+   |                               ^^^^^^^ function or associated item not found in `RequiredStrength`
+   |
+note: if you're trying to build a new `RequiredStrength`, consider using `RequiredStrength::new` which returns `RequiredStrength`
+  --> src/resolver.rs
+   |
+   |     pub fn new(value: Opaque) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

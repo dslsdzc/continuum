@@ -84,6 +84,7 @@ fn req(level: &str) -> RequiredStrength {
 fn resolved() -> ResolutionResult {
     let r = resolve(
         &[fixture_pair("entity.resolved", EntityKind::Tool)],
+        None,
         &project_scope(),
         &conf("l"),
         &req("l"),
@@ -99,6 +100,7 @@ fn resolved() -> ResolutionResult {
 fn confirm_required() -> ResolutionResult {
     let r = resolve(
         &[fixture_pair("entity.first", EntityKind::Tool)],
+        None,
         &project_scope(),
         &conf("l"),
         &req("other"),
@@ -117,6 +119,7 @@ fn ambiguous() -> ResolutionResult {
             fixture_pair("entity.a", EntityKind::Tool),
             fixture_pair("entity.b", EntityKind::Skill),
         ],
+        None,
         &project_scope(),
         &conf("l"),
         &req("l"),
@@ -130,7 +133,7 @@ fn ambiguous() -> ResolutionResult {
 
 /// 夹具：`Unknown`（零个合格候选；这里取「候选集为空」那一枚）。
 fn unknown() -> ResolutionResult {
-    let r = resolve(&[], &project_scope(), &conf("l"), &req("l"));
+    let r = resolve(&[], None, &project_scope(), &conf("l"), &req("l"));
     assert!(
         matches!(r, ResolutionResult::Unknown(_)),
         "夹具前提：这一份输入该落 `Unknown`，实得 {r:?}",

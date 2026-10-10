@@ -47,6 +47,17 @@
 //! 而**断言 A 拿的是「检索集 ∪ 注入的那一枚」，不是工作集**——两者的差别正是注入守卫钉的东西）。
 //! **`ExplicitBinding` 的注入点本身归 Task 6**，故今天工作集 ≡ 检索集。
 //!
+//! Task 6 落 §276 的**风险事实**（[`ResolutionRisk`]，`risk` 模块）、§277 的 `ExplicitBinding`
+//! 与 §4.6 的**唯一注入点**（[`ExplicitBinding`] / [`BindingSource`] / [`binding::apply`]，
+//! `binding` 模块），并给 [`resolve`] 接上第五个入参 `injection`（工作集 =
+//! 检索集 ＋ 至多一次 binding 注入）。以 `tests/risk.rs` 钉住：门槛必填且**本层不提供**
+//! 风险到门槛的基线、四个风险字段名逐字、绑定的「缩而不加权」、集合外注入的两侧照片
+//! （(a) 注入并解出、(b) 注入的那一枚**同样**过显式约束）。**注入是调用方传参**，
+//! 不是由 `BoundTo` 约束自动发生——两条读法的分岔与理由写在 `src/binding.rs` 的文件头。
+//! 以 `tests/type_level.rs` 追加的三份编译失败样例与一份编译通过样例钉住
+//! 「`RequiredStrength` 没有 `Default`」「少传门槛参数编不过」「没有 `from_risk` 一类的基线」
+//! 与它们的正控制。
+//!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-node` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
 //!
@@ -65,6 +76,7 @@ mod canonical;
 mod candidate;
 mod error;
 mod explicit;
+mod risk;
 mod surface;
 mod temporal;
 // **`resolver` 是 `pub mod`**（其余模块私有 ＋ 根重导出）：Task 4 的 Interfaces 逐字把入口
@@ -73,9 +85,15 @@ mod temporal;
 // 使 `continuum_canonical::ResolutionResult` 与 `continuum_canonical::resolver::ResolutionResult`
 // 是**同一个**类型（不是两份）。
 pub mod resolver;
+// **`binding` 同样是 `pub mod`**：Task 6 的 Interfaces 把 §4.6 的注入点逐字写作
+// `binding::apply`（计划同文件 Task 6 的 Produces），故那个模块本身可从 crate 外按名字取到；
+// 其类型（`ExplicitBinding` / `BindingSource`）仍在根上重导出。
+// **`risk` 是私有模块**：`ResolutionRisk` 就是它全部的公开面，同 `candidate` / `explicit` 的体例。
+pub mod binding;
 
 pub use alias::{AliasScope, alias_scope_to_resolution_scope, resolution_scope_to_alias_scope};
 pub use ambiguity::finish;
+pub use binding::{BindingSource, ExplicitBinding, USER_EXPLICIT_EVIDENCE};
 pub use canonical::{CanonicalRepresentation, Canonicalized, UnresolvedMention};
 pub use candidate::{Candidate, CandidateSource, CandidateSources, EntityId};
 pub use error::CanonicalError;
@@ -87,6 +105,7 @@ pub use resolver::{
     Ambiguous, ConfirmRequired, RequiredStrength, ResolutionConfidence, ResolutionResult, Resolved,
     Unknown, UnknownReason, resolve,
 };
+pub use risk::ResolutionRisk;
 pub use surface::{Mention, MentionKind, Surface, detect, normalize};
 pub use temporal::{Now, TemporalBinding, resolve_temporal};
 

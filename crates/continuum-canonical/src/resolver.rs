@@ -344,15 +344,17 @@ impl RequiredStrength {
 ///
 /// `candidates` 是**检索集**：`CandidateSources` 交出的那一集，调用方给什么就是什么。
 /// §4.6 的 `ExplicitBinding` 会在**过滤之前**把一个检索没给出的实体**注入**进来，
-/// 而那是**唯一允许的注入点**（`binding::apply`，Task 6）——除它之外本层**没有第二个**
+/// 而那是**唯一允许的注入点**（[`crate::binding::apply`]）——除它之外本层**没有第二个**
 /// 能把实体放进判定的来源。这个式子就是**工作集**：
 ///
 /// ```text
 /// 工作集 = 检索集 ＋ binding 注入（至多一次）
 /// ```
 ///
-/// **本函数今天收不到 binding**（Task 6 才给它入口），故今天工作集 ≡ 检索集，
-/// 注入点的位置在这里留白。
+/// **本函数收 `injection`**（Task 6 给它入口；此前工作集 ≡ 检索集）。
+/// **注入是调用方传参、不是由 `BoundTo` 约束自动发生**——理由与两条读法的分岔写在
+/// `src/binding.rs` 的文件头。`injection` 为 `None` 时工作集 ≡ 检索集，
+/// 故 §4.2 那组用例（它们一律传 `None`）的判据一字未变。
 ///
 /// **§4.2 的断言 A 拿的不是这个工作集，而是「检索集 ∪ 注入的那一枚」这两个来源的并**
 /// ——注入是 A 里**显式列出的第二个来源**，故 A 既不因注入而失效（注入后它仍只约束这两个来源），
@@ -361,14 +363,27 @@ impl RequiredStrength {
 /// 「解析器自造一个既不在检索集、也没有 binding 背书的实体」必须让 A 变红，
 /// 而「A 拿工作集」那个版本对自造实体**永不响**（设计 §4.2 的订正，`design:616-635`）。
 ///
+/// # 判定的输入怎么来（Task 6 之后）
+///
+/// 1. **检索集**：`candidates`，调用方给什么就是什么；
+/// 2. **注入**：`injection` 是 `Option<(&ExplicitBinding, EntityKind)>`——§4.6 的
+///    `ExplicitBinding` 与**被点名实体的种类**。为何种类要单独来（§277 的四个字段里没有它）、
+///    以及「已在检索集里就缩、不在就追加」这两条路，逐条写在 [`crate::binding::apply`]。
+///    本函数只把它的输出当**工作集**，不重复那一层判断；
+/// 3. **过滤与门槛**：步骤见下。
+///
 /// # 判定顺序（每一格的依据都在上面）
 ///
-/// 1. 用 [`qualifying`] 取出**合格**的候选：
+/// 1. 用 [`qualifying`] 从**工作集**里取出**合格**的候选：
 ///    满足**全部**显式约束的那些；
-/// 2. 零个 ⟹ [`Unknown`]，`reason` 看**输入候选集**空不空
+/// 2. 零个 ⟹ [`Unknown`]，`reason` 看**工作集**空不空
 ///    （空 ⟹ [`UnknownReason::NoCandidate`]，非空 ⟹ [`UnknownReason::AllCandidatesRejected`]）；
 /// 3. 一个 ⟹ 看门槛：过 ⟹ [`Resolved`]，不过 ⟹ [`ConfirmRequired`]；
 /// 4. 多于一个 ⟹ [`Ambiguous`]。
+///
+/// **第 2 格的界线是「工作集」不是「检索集」**：注入之后工作集非空而检索集为空是可能的
+/// （§4.6 的照片 (a) 就是这一格），那时 `reason` 该是 `AllCandidatesRejected`
+/// ——工作集里确实有候选，是约束把它们否掉了。
 ///
 /// **第 4 格不看门槛**：`Ambiguous` 的判据是「多个合格」（§4.1 的表），
 /// 与门槛无关——故门槛的**可观察后果只有第 3 格那一处**。这一句要写出来：
@@ -410,26 +425,29 @@ impl RequiredStrength {
 ///
 /// # 今天没有真实的调用方
 ///
-/// [`crate::CandidateSources`] 交出的候选集要经过 Task 6 的 `ExplicitBinding` 注入
+/// [`crate::CandidateSources`] 交出的候选集要经过 [`crate::binding::apply`] 的注入
 /// 才是**工作集**（§4.6），而真实候选来源今天**零个**（设计 §16 第 5 条）。
 /// 故本函数今天只被本 crate 的用例走到，钉的是**分支机制**
 /// （与设计 §15.2 第 3 条同一体：能拍的只有机制）。**本条不是「四态已接通」**：
 /// 上面那张表里的七条用例（Task 5）钉住了 §4.2 的四条断言与两侧守卫，
-/// 而**注入点本身**归 Task 6 的 `binding::apply`。
+/// 而**注入点本身**归 Task 6 的 [`crate::binding::apply`]（它的三条路与照片在 `src/binding.rs`）。
 /// 两者不是一件事：四条断言核的是**判定产出的值**，注入点决定**判定看哪一集**。
 pub fn resolve(
     candidates: &[(Candidate, CandidateFacts)],
+    injection: Option<(&crate::ExplicitBinding, crate::EntityKind)>,
     constraints: &[ExplicitConstraint],
     confidence: &ResolutionConfidence,
     required: &RequiredStrength,
 ) -> ResolutionResult {
-    // 工作集 = 检索集 ＋ binding 注入（至多一次；见文档）。今天没有注入点，
-    // 故这一行取到的规模就是**检索集**的规模——它正是断言 A 的第二个读数：
-    // 解出的结果里那个数**不得超过**「检索集 ＋ 至多一次注入」的应有大小。
-    let candidate_count = candidates.len();
+    // 工作集 = 检索集 ＋ binding 注入（至多一次；见文档与 `src/binding.rs`）。
+    // 注入点是**唯一**能把实体放进判定的地方，而注入**只来自调用方传进来的 binding**。
+    let working = crate::binding::apply(candidates, injection);
+    // 这个数就是断言 A 的第二个读数：解出的结果里那个数**不得超过**工作集的应有大小
+    // （`|检索集| + [有注入且不在检索集里]`）。它数的是**判定输入**的规模，不是分数。
+    let candidate_count = working.len();
     // 过滤施加在**工作集**上：由 `ExplicitBinding` 注入的那一枚**同走这一道**
     // ——binding 只提高**检索**这一侧，不豁免 `ExplicitConstraint`（§4.6 第 3 条）。
-    let surviving = qualifying(candidates, constraints);
+    let surviving = qualifying(&working, constraints);
 
     match surviving.len() {
         0 => {
@@ -581,7 +599,7 @@ mod tests {
         let empty: Vec<(Candidate, CandidateFacts)> = Vec::new();
 
         // —— `Resolved`：**不带 `..`** ——
-        match resolve(&one, &k, &conf("l"), &req("l")) {
+        match resolve(&one, None, &k, &conf("l"), &req("l")) {
             ResolutionResult::Resolved(Resolved {
                 entity,
                 satisfied,
@@ -595,7 +613,7 @@ mod tests {
         }
 
         // —— `ConfirmRequired`：**不带 `..`** ——
-        match resolve(&one, &k, &conf("l"), &req("other")) {
+        match resolve(&one, None, &k, &conf("l"), &req("other")) {
             ResolutionResult::ConfirmRequired(ConfirmRequired {
                 first,
                 surviving,
@@ -609,7 +627,7 @@ mod tests {
         }
 
         // —— `Ambiguous`：**不带 `..`** ——
-        match resolve(&two, &k, &conf("l"), &req("l")) {
+        match resolve(&two, None, &k, &conf("l"), &req("l")) {
             ResolutionResult::Ambiguous(Ambiguous {
                 surviving,
                 candidate_count,
@@ -621,7 +639,7 @@ mod tests {
         }
 
         // —— `Unknown`：**不带 `..`** ——
-        match resolve(&empty, &k, &conf("l"), &req("l")) {
+        match resolve(&empty, None, &k, &conf("l"), &req("l")) {
             ResolutionResult::Unknown(Unknown {
                 reason,
                 candidate_count,
@@ -661,7 +679,7 @@ mod tests {
             facts(ResolutionScope::Project, EntityKind::Tool),
         )];
 
-        match resolve(&cs, &k, &conf("high"), &req("high")) {
+        match resolve(&cs, None, &k, &conf("high"), &req("high")) {
             // **不带 `..`**：这一行就是本用例的机制（清单里没有第四个字段）。
             ResolutionResult::Resolved(Resolved {
                 entity,
@@ -712,7 +730,7 @@ mod tests {
             cand("e-res", None),
             facts(ResolutionScope::Project, EntityKind::Tool),
         )];
-        match resolve(&cs, &k, &conf("high"), &req("high")) {
+        match resolve(&cs, None, &k, &conf("high"), &req("high")) {
             ResolutionResult::Resolved(Resolved {
                 entity,
                 satisfied,

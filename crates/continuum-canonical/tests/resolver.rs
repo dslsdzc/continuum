@@ -121,13 +121,13 @@ fn each_of_the_four_states_has_a_photo_and_the_state_is_asserted() {
         cand("e-only", Some(0.9)),
         facts(ResolutionScope::Project, EntityKind::Tool),
     )];
-    let resolved_case = match resolve(&one_qualified, &k, &conf("high"), &met) {
+    let resolved_case = match resolve(&one_qualified, None, &k, &conf("high"), &met) {
         ResolutionResult::Resolved(r) => r,
         other => panic!("唯一合格且门槛已过应落 `Resolved`，实得 {other:?}"),
     };
 
     // —— 二：同一份输入、门槛未过 ⟹ `ConfirmRequired` ——
-    let confirm_case = match resolve(&one_qualified, &k, &conf("high"), &unmet) {
+    let confirm_case = match resolve(&one_qualified, None, &k, &conf("high"), &unmet) {
         ResolutionResult::ConfirmRequired(r) => r,
         other => panic!("占优候选存在但门槛未过应落 `ConfirmRequired`，实得 {other:?}"),
     };
@@ -143,20 +143,20 @@ fn each_of_the_four_states_has_a_photo_and_the_state_is_asserted() {
             facts(ResolutionScope::Project, EntityKind::Skill),
         ),
     ];
-    let ambiguous_case = match resolve(&two_qualified, &k, &conf("high"), &met) {
+    let ambiguous_case = match resolve(&two_qualified, None, &k, &conf("high"), &met) {
         ResolutionResult::Ambiguous(r) => r,
         other => panic!("两个合格候选应落 `Ambiguous`，实得 {other:?}"),
     };
     // **门槛在这一格不可观察**：换成「门槛未过」仍是 `Ambiguous`
     // （`Ambiguous` 的判据是「多个合格」，与门槛无关——见 `resolve` 的文档第 4 格）。
-    let ambiguous_with_unmet_gate = match resolve(&two_qualified, &k, &conf("high"), &unmet) {
+    let ambiguous_with_unmet_gate = match resolve(&two_qualified, None, &k, &conf("high"), &unmet) {
         ResolutionResult::Ambiguous(r) => r,
         other => panic!("门槛变不变，多个合格都该是 `Ambiguous`，实得 {other:?}"),
     };
 
     // —— 四：零个合格（候选集为空）⟹ `Unknown` ——
     let empty: Vec<(Candidate, CandidateFacts)> = Vec::new();
-    let unknown_case = match resolve(&empty, &k, &conf("high"), &met) {
+    let unknown_case = match resolve(&empty, None, &k, &conf("high"), &met) {
         ResolutionResult::Unknown(r) => r,
         other => panic!("零个合格候选应落 `Unknown`，实得 {other:?}"),
     };
@@ -244,7 +244,7 @@ fn unknown_reason_distinguishes_an_empty_set_from_all_rejected() {
 
     // 一：候选集为空 ⟹ `NoCandidate`，规模 0。
     let empty: Vec<(Candidate, CandidateFacts)> = Vec::new();
-    let empty_reason = match resolve(&empty, &k, &conf("high"), &met) {
+    let empty_reason = match resolve(&empty, None, &k, &conf("high"), &met) {
         ResolutionResult::Unknown(u) => u,
         other => panic!("空候选集应落 `Unknown`，实得 {other:?}"),
     };
@@ -266,7 +266,7 @@ fn unknown_reason_distinguishes_an_empty_set_from_all_rejected() {
             facts(ResolutionScope::Session, EntityKind::Skill),
         ),
     ];
-    let rejected_reason = match resolve(&all_rejected, &k, &conf("high"), &met) {
+    let rejected_reason = match resolve(&all_rejected, None, &k, &conf("high"), &met) {
         ResolutionResult::Unknown(u) => u,
         other => panic!("全不合格应落 `Unknown`，实得 {other:?}"),
     };
@@ -323,7 +323,7 @@ fn resolve_returns_the_result_type_with_no_err_arm() {
     )];
 
     // 类型注解即断言（返回类型不是 `Result`）。
-    let r: ResolutionResult = resolve(&cs, &k, &conf("high"), &req("high"));
+    let r: ResolutionResult = resolve(&cs, None, &k, &conf("high"), &req("high"));
 
     // 穷尽四支、**不带 `..`**、没有 `Err` 臂。
     let which = match r {
@@ -379,7 +379,7 @@ fn resolution_confidence_has_no_reader_that_yields_a_number() {
         cand("e-gate", None),
         facts(ResolutionScope::Project, EntityKind::Tool),
     )];
-    let r = resolve(&cs, &k, &conf("high"), &req("high"));
+    let r = resolve(&cs, None, &k, &conf("high"), &req("high"));
     assert!(
         matches!(&r, ResolutionResult::Resolved(_)),
         "门槛过了才落 `Resolved`（门槛唯一能改变结果的地方是「唯一合格」那一格）：{r:?}",
@@ -444,7 +444,7 @@ fn the_two_numbers_are_not_on_the_same_axis() {
         scored.clone(),
         facts(ResolutionScope::Project, EntityKind::Tool),
     )];
-    let r = resolve(&cs, &k, &conf("calibrated"), &req("calibrated"));
+    let r = resolve(&cs, None, &k, &conf("calibrated"), &req("calibrated"));
     assert!(
         matches!(&r, ResolutionResult::Resolved(_)),
         "门槛那一格读的是 `confidence.meets(required)` 这两个不透明值：{r:?}",
@@ -558,7 +558,7 @@ fn assertion_a_a_resolved_entity_is_a_member_of_the_retrieved_set_or_the_injecte
     // 今天没有第二个来源（注入点是 Task 6）。
     let injected: Option<EntityId> = None;
 
-    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
     let x = match &r {
         ResolutionResult::Resolved(x) => x,
         other => panic!("恰一个合格候选、门槛已过应落 `Resolved`，实得 {other:?}"),
@@ -633,7 +633,7 @@ fn assertion_a_injection_guard() {
     // 今天没有第二个来源：`ExplicitBinding` 的注入点（`binding::apply`）是 Task 6。
     let injected: Option<EntityId> = None;
 
-    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
     match &r {
         // —— 这一支就是守卫本身 ——
         ResolutionResult::Resolved(x) => {
@@ -723,6 +723,7 @@ fn assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved()
         // —— 这一枚单独喂进去：它是该次唯一的候选，且不合格 ——
         let r = resolve(
             std::slice::from_ref(&candidates[i]),
+            None,
             &k,
             &conf("high"),
             &req("high"),
@@ -748,7 +749,7 @@ fn assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved()
     }
 
     // —— 三枚一起喂：仍然全部不合格 ⟹ 仍不是 `Resolved`，且规模是 3 ——
-    let all = resolve(&candidates, &k, &conf("high"), &req("high"));
+    let all = resolve(&candidates, None, &k, &conf("high"), &req("high"));
     assert!(
         !matches!(&all, ResolutionResult::Resolved(_)),
         "断言 B（全集）：三枚各违反一条，没有一枚合格，结果不许是 `Resolved`——实得 {all:?}",
@@ -784,7 +785,7 @@ fn assertion_c_an_empty_candidate_set_is_unknown_with_no_candidate() {
     let k = [ExplicitConstraint::Scope(ResolutionScope::Project)];
     let empty: Vec<(Candidate, CandidateFacts)> = Vec::new();
 
-    let r = resolve(&empty, &k, &conf("high"), &req("high"));
+    let r = resolve(&empty, None, &k, &conf("high"), &req("high"));
     let u = match &r {
         ResolutionResult::Unknown(u) => u,
         other => panic!(
@@ -839,7 +840,7 @@ fn assertion_d_1_the_qualified_candidate_is_selected_even_when_an_unqualified_on
         "夹具前提：e-unqualified 违反 K",
     );
 
-    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
     let x = match &r {
         ResolutionResult::Resolved(x) => x,
         other => panic!("恰一个合格候选、门槛已过应落 `Resolved`，实得 {other:?}"),
@@ -918,7 +919,7 @@ fn assertion_d_2_multiple_qualified_candidates_give_ambiguous() {
         "夹具前提：c3 **违反** K（它分数最高，故它正是「按分数选」会选中的那一枚）",
     );
 
-    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
 
     // —— 第 1 条 ——
     assert!(
@@ -1004,7 +1005,7 @@ fn the_other_side_a_nonempty_set_with_exactly_one_qualified_candidate_is_resolve
         "夹具前提：三枚里**恰一枚**（e-only）满足 K",
     );
 
-    let r = resolve(&retrieved, &k, &conf("high"), &req("high"));
+    let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
     let x = match &r {
         ResolutionResult::Resolved(x) => x,
         other => panic!(

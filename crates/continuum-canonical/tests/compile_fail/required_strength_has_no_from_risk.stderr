@@ -1,0 +1,25 @@
+error[E0599]: no function or associated item named `from_risk` found for struct `RequiredStrength` in the current scope
+  --> tests/compile_fail/required_strength_has_no_from_risk.rs:30:31
+   |
+30 |     let _ = RequiredStrength::from_risk(&risk);
+   |                               ^^^^^^^^^ function or associated item not found in `RequiredStrength`
+   |
+note: if you're trying to build a new `RequiredStrength`, consider using `RequiredStrength::new` which returns `RequiredStrength`
+  --> src/resolver.rs
+   |
+   |     pub fn new(value: Opaque) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0308]: mismatched types
+  --> tests/compile_fail/required_strength_has_no_from_risk.rs:33:36
+   |
+33 |     let _ = RequiredStrength::from(risk);
+   |             ---------------------- ^^^^ expected `RequiredStrength`, found `ResolutionRisk`
+   |             |
+   |             arguments to this function are incorrect
+   |
+note: associated function defined here
+  --> $RUST/core/src/convert/mod.rs
+   |
+   |     fn from(value: T) -> Self;
+   |        ^^^^
