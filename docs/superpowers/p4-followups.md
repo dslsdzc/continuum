@@ -216,6 +216,31 @@
 
 ---
 
+## Task 7（alias 表（迁移 100）、四作用域与显式提升）
+
+实现 `e2b11d7`（门 115 `Running` ／ 134 `test result:` ／ 876 passed ／ 0 failed ／ 0 warning）；评审判 **Approved**。
+
+- **P-7-1（已核实的无照片，据实记）**：设计 §4.6 第 2 条那句「**没有任何函数会顺带调用 `promote_alias`**」
+  **只被一半照片支撑**——设计要求的 (a)(b) 两张都拍了（三条用例逐条对上），
+  但**整句话**还差一个**扫 `src/` 的源码扫描**（照 `continuum-capability/tests/single_writer.rs` 的体例）。
+  **处置**：实现者**没有把这句绝对措辞写进任何注释**，缺口写在 `crates/continuum-canonical/src/persist.rs:75-86`
+  与 `crates/continuum-canonical/tests/alias.rs:29-35`。**收件人：设计维护者（补扫描，或把那句收窄）。**
+  > **判据**：**「不写」也是一种处置，但要写在能被 grep 到的地方**——本台账的执行判据正是「在版控里 `grep` 得到吗」；
+  > 该缺口在两个被跟踪文件的注释里，故**已满足**。本条补的只是把它**再登记一次在这个按条可查的位置**。
+- **本 task 的落点决定（申报）**：`Alias { alias, target, scope }` 与那三列（`alias` 为主键）——
+  §278 只给四个作用域名、设计 §4.6 只给「一张表 ＋ `scope` 封闭枚举」，**字段与列都没给**。
+  `target` 取 `EntityId`（与 `Candidate`/`Resolved` 同类型）的理由写在 `src/alias.rs`：
+  免得「别名指向什么」与「候选集里装什么」成为两个各有一个串的类型。
+- **一处偏离（已写明）**：四条 I/O（`save_alias`／`load_alias`／`list_aliases`／`promote_alias`）同落在 `src/persist.rs`
+  （计划的文件结构原把 `promote_alias` 列在 `alias.rs`）——**裁定：以代码为准，计划那一行已改**（`611c251`）。
+  理由：四条都要 `Tx`，而 `alias.rs` 是不碰持久化的类型与映射那一层。
+- **一处「本 task 的改动把别处的句子变假」**：本轮加的 `continuum-canonical ← continuum-persist` 那条边，
+  把 `src/candidate.rs` 与 `tests/candidate.rs` 里「本 crate 的 `ALLOWED` 是**空条目**」改假了（行号由 `:156` 漂到 `:162`）。
+  实现在 Files 之外改了那两处注释（**只改注释**），按体例留了旧说法。**裁定：正当**——
+  **那句话在自己 crate 的文件里，而本 task 的改动使它为假。**
+
+---
+
 ## 本层已自定的判据（发明判据，收件人：规范维护者）
 
 设计文档里有一条统一落点：`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md` §16

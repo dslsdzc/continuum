@@ -62,7 +62,8 @@
 //! `persist` 模块）与四条读写路径（[`save_alias`] / [`load_alias`] / [`list_aliases`] /
 //! [`promote_alias`]），加上 §278 四值的落库编码与记录体（[`AliasScope`] 的
 //! `as_str` / `parse` 与 [`Alias`]，`alias` 模块——**这个文件是 Task 4 提前起的头**）。
-//! [`AliasError`] 落在 `error.rs`。以 `tests/alias.rs` 的十条用例钉住四值逐枚往返与编码、
+//! [`AliasError`] 落在 `error.rs`。以 `tests/alias.rs` 的那组用例钉住四值逐枚往返与编码、
+//! （**订正 2026-10-10**：原写「十条」，实名十一条——**自指计数不写数值**）
 //! 两条读路径各拒表外取值、「写侧不升级作用域」的两侧、提升路径的两侧、
 //! 列清单恰是三列且无过期列。**迁移 100 进驱动装配归 Task 20**（本 task 只交出它）。
 //!

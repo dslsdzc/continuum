@@ -4,9 +4,11 @@
 //!
 //! `alias.rs` 是 **§278 的词汇与记录体**（`AliasScope` 及其编码、`Alias`），
 //! 本文件是**表与 I/O**（迁移、`save_alias` / `load_alias` / `list_aliases` / `promote_alias`）。
-//! 计划「文件结构」一节正是这么分的：`src/alias.rs` 记 `AliasScope、Alias、promote_alias`，
-//! `src/persist.rs` 记「alias 表（迁移 100）」
-//! （`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:280-281`）。
+//! 计划「文件结构」一节**现在**这么分：`src/alias.rs` 记 `AliasScope、Alias、children 式的读函数`，
+//! `src/persist.rs` 记「alias 表（迁移 100）、save_alias / load_alias / list_aliases / promote_alias」
+//! （`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:280-283`）。
+//! （**订正 2026-10-10**：原引的旧文把 `promote_alias` 列在 `alias.rs`——**那一行已由 `611c251` 改掉**，
+//! 故这里的引文随之陈旧。**引用一处正在被改的地方，改完要回头扫引用**。）
 //! **本文件把 `promote_alias` 与另三个 I/O 函数放在一起**（那里把它列在 `alias.rs`）：
 //! 它是四条写／读路径里的一条，与 `save_alias` 共享同一列清单与同一张表，
 //! 拆开会让「提升改的是哪一列」这件事在文件层面看不出来。
@@ -39,9 +41,13 @@ const COLUMNS: &str = "alias, target, scope";
 ///
 /// 编号 **100**：1、2 是 `continuum-persist` 的内建（events、audit_log），10 是 P1 的
 /// artifact，20 是 P1 的 graph，30 是 P2 的 workspace，40 是 P2 的 effect，41 是 P2 的
-/// policy，50 是 P3 的 capability，80 是 P3D 的模型表——八条。
+/// policy，50 是 P3 的 capability，80 是 P3D 的模型表。
+/// （**订正 2026-10-10**：原写「——八条」，而上面列的是**九个**号；**自指计数不写数值**。）
 /// **100 在驱动装配的那个集合里未被占用**（本 task 现场核对：`grep -rn "Migration::new("
-/// crates/*/src/` 命中的 version 只有 1 / 2 / 10 / 20 / 30 / 40 / 41 / 50 / 80）。
+/// crates/*/src/` 除本文件那一处外命中的 version 为 1 / 2 / 10 / 20 / 30 / 40 / 41 / 50 / 80，
+/// **另加 `continuum-persist/src/bin/crash-writer.rs:17` 的 `60`**——
+/// 那是工具 bin，不进装配链，见下一段的干扰项说明。**订正**：原只列了那九个，
+/// 与命令的输出不符；**引一条命令就要让它复现得出你列的输出**）。
 ///
 /// **现场还逐条核过两处干扰项**（计划「全局约束」点名的那两处，本 task 复量）：
 /// `60` 出现在 `crates/continuum-persist/src/bin/crash-writer.rs:17` 与
