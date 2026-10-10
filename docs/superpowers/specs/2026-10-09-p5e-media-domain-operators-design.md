@@ -1176,7 +1176,7 @@ pub fn bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodErr
 
 | # | 用例 | 钉的是哪一侧 |
 |---|---|---|
-| a | 11 枚新型的 `as_str` 串逐条 `parse` 回自身 | §3.2 的编码（正例） |
+| a | 11 枚新型的 `as_str` 串，**逐条手写期望串**断言 `t.as_str() == 期望串`，且 `parse(期望串) == t`（**订正 2026-10-10**：原只写「逐条 `parse` 回自身」） | §3.2 的编码（正例）。**原写的那一半是自证的**：期望值从 `as_str` 自身来，故改 `as_str` 的输出它照样绿——**而 §12.3 的等价变异行一直按「(a) 已手写」立论**。两处措辞不齐，**弱的是本条**，故按「**正控制不得自证**」加强 |
 | b | 六个既有「表外取值」（`artifact_type.rs:40`）仍一律 `None` | 解码侧的**另一侧**（新串没把表外取值吞掉） |
 | c | 新型写入 `artifact_type` 列再读回，得到同一型 | 落库往返（§3.5 的「不改但要重跑」） |
 | d | 改过的 `crates/continuum-port/tests/compatibility.rs:47` 用例改为**遍历 `ArtifactType::ALL`**，逐型断言**两件事**：serde 往返，且 `serde_json::to_string(&t)` 去引号后与 `t.as_str()` **逐字相同**（17 型，不是 6 型） | §3.5 的 (e)（本块改的唯一一处**不会自己变红**的遗漏）。**后半句是本块加进来的（订正 2026-10-10）**：原写只要求「serde 往返」——按那个语料，删 `crates/continuum-artifact/src/artifact.rs` 的 `rename_all` **不红**（`serde` 串与该型的 `as_str` 串各自成立、互不参照）；加上「serde 串 == `as_str()`」这一条它才红（§12.3 的等价变异行据此一并订正） |
