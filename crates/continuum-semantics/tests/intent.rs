@@ -12,6 +12,7 @@
 //! | `a_child_list_is_not_itself_stored` | (a) `list_children` 按 id 升序返回两个孩子；(b) `PRAGMA table_info(intent)` 没有 `child_intents` 列 | 把子列表落成一个列（**移除档**——两份真值会漂移） |
 //! | `version_increments_only_on_a_semantic_change` | (a) 改 `goal` ⇒ `version` +1 **且** `updated_at` 变；(b) 只做状态迁移 ⇒ `version` **不变**、`updated_at` 变（**两侧都钉**） | 状态迁移也 +1（**放宽档**，(b) 红）；语义变化不 +1（**移除档**，(a) 红） |
 //! | `version_increments_for_each_of_the_five_semantic_fields` | §5.2 的五个语义字段**逐项各一条** +1，不抽代表 | 只对 `goal` +1（**收紧档**，其余四条红） |
+//! | `version_does_not_increment_for_the_non_semantic_fields` | **非**语义字段**逐项**（`status` / `priority` / `active_plan_id` / `graph_id` / `product_id`）变化**不** +1，且 `created_at` 不被更新改写 | 把其中任一算进语义字段（**放宽档**——那一条红） |
 //! | `history_does_not_accumulate_in_the_intent_table` | 两次语义改动后 `intent` 表**行数仍是 1**（一行一 Intent） | 改成「每次改动插一行」（**移除档**——行数变 3） |
 //! | `contract_id_carries_a_version` | `Intent.contract_id` 是 `ContractRef { id, version }`（穷尽解构） | 少一字段即**编译不过** |
 //! | `graph_id_and_product_id_are_opaque_strings` | 两枚不透明串各往返一次 ＋ 本 crate 的 `src/` 里执行层 crate 的下划线拼法零命中 | 取执行层的类型即多一条依赖边（由 `dependency_direction.rs` 的 `ALLOWED` 与 Task 21 的 grep 捕） |
@@ -325,6 +326,54 @@ fn version_increments_for_each_of_the_five_semantic_fields() {
             back.version, 2,
             "改 `{field}` 之后版本应 +1（停在 {} 说明它没被算进语义字段）",
             back.version
+        );
+        tx.commit().unwrap();
+    }
+}
+
+/// §5.2 的**非**语义字段**逐项各一条**：改了它们，`version` **不** +1。
+///
+/// 五个：`status` / `priority` / `active_plan_id` / `graph_id` / `product_id`
+/// （[`save_intent`] 的文档逐字列了这五个，并说它们「变**不** +1」——
+/// 那句绝对措辞的用例就是本条）。另断言 `created_at` **不被一次更新改写**
+/// （同一句文档承诺的另一半）。
+///
+/// **红条件**：把其中任一算进语义字段（**放宽档**）——那一条红（版本从 1 变 2）。
+/// 五条**各起一个库**：否则「改哪一项」与「上一项留下的状态」会互相纠缠。
+#[test]
+fn version_does_not_increment_for_the_non_semantic_fields() {
+    let cases: [(&str, fn(&mut Intent)); 5] = [
+        ("status", |i| i.status = IntentStatus::Running),
+        ("priority", |i| i.priority = Priority::from_str("low")),
+        ("active_plan_id", |i| {
+            i.active_plan_id = Some(PlanId::from_str("p-1"))
+        }),
+        ("graph_id", |i| i.graph_id = Some(GraphIdRef::from_str("g-1"))),
+        ("product_id", |i| {
+            i.product_id = Some(ProductIdRef::from_str("prod-1"))
+        }),
+    ];
+
+    for (field, mutate) in cases {
+        let (_d, db) = db();
+        let tx = db.begin().unwrap();
+
+        save_intent(&tx, &sample("i-1")).unwrap();
+        let mut changed = sample("i-1");
+        mutate(&mut changed);
+        changed.updated_at = 2_000;
+        save_intent(&tx, &changed).unwrap();
+
+        let back = load_intent(&tx, &IntentId::from_str("i-1")).unwrap().unwrap();
+        assert_eq!(
+            back.version, 1,
+            "改 `{field}` 之后版本不该 +1（变成 {} 说明它被算进了语义字段）",
+            back.version
+        );
+        assert_eq!(back.updated_at, 2_000, "改 `{field}` 仍要改 updated_at");
+        assert_eq!(
+            back.created_at, 1_000,
+            "改 `{field}` 不该改写 created_at（创建时刻不因一次更新而变）"
         );
         tx.commit().unwrap();
     }
