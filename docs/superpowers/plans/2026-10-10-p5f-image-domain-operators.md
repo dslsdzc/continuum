@@ -45,7 +45,7 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
 | 依赖 | 状态 | 本块用在哪 |
 |---|---|---|
 | P1 `continuum-operator`：`Operator` 七个 pub 字段（`crates/continuum-operator/src/definition.rs:79-88`）、`OperatorId`（`:24-31`，字段私有、`new` 非 `const fn`）、`OperatorVersion`（`:45-53`）、`BackendId`（`:66-73`）、`Determinism`（`:8-11`）、`SideEffectClass`（`:16-20`）、`OperatorRegistry::{register, resolve}`（`crates/continuum-operator/src/registry.rs:24`、`:36`）、`OperatorError::{NotFound, Duplicate}`（`:7-12`） | **已交付** | 五枚算子的类型、注册入口、`ImageError::Registry` 的来源臂 |
-| P1 `continuum-artifact`：`ArtifactType` 六型（`crates/continuum-artifact/src/artifact.rs:14-21`）、`ALL`（`:28`，带数目字面量 `[ArtifactType; 6]`）、`as_str`（`:47`）/ `parse`（`:68`）、`ArtifactId`（`:151`）、`Artifact`（`:173-184`，含 `input_artifacts`、`version`、`provenance`）、`ContentHash::of`（`src/content.rs:11`）、`save_artifact`（`src/persist.rs:45`）/ `load_artifact`（`:90`）/ `p1_artifact_migrations`（`:7`）；**`ArtifactType` 今天没有 `Image`** | **已交付**（**但缺 `Image`**） | 五枚算子的端口类型（Task 2）；`resolve_edit_region` 的 `source` 实参与 detector 的接口（Task 5）；Task 7 的写读路径 |
+| P1 `continuum-artifact`：`ArtifactType` 六型（`crates/continuum-artifact/src/artifact.rs:14-21`）、`ALL`（`:28`，带数目字面量 `[ArtifactType; 6]`）、`as_str`（`:47`）/ `parse`（`:68`）、`ArtifactId`（`:151`）、`Artifact`（`:169-181`：derive 在第 169 行、`pub struct Artifact {` 在第 170 行，含 `input_artifacts`、`version`、`provenance`）、`ContentHash::of`（`src/content.rs:11`）、`save_artifact`（`src/persist.rs:45`）/ `load_artifact`（`:90`）/ `p1_artifact_migrations`（`:7`）；**`ArtifactType` 今天没有 `Image`** | **已交付**（**但缺 `Image`**） | 五枚算子的端口类型（Task 2）；`resolve_edit_region` 的 `source` 实参与 detector 的接口（Task 5）；Task 7 的写读路径 |
 | P1 `continuum-graph`：`CacheKey`（`crates/continuum-graph/src/reuse.rs:9`）、`cache_key`（`:16`）、`can_reuse`（`:29`）；另 `OperatorImpl::execute`（`src/execution.rs:76`）、`is_candidate_backend`（`:87`） | **已交付** | Task 7 的 §3.5 复用照片（**dev 边**） |
 | P1 `continuum-persist`：`Db::{open, open_with, migrate, begin}`（`crates/continuum-persist/src/db.rs:68`、`:72`、`:96`、`:147`）、`Tx::{query, execute, commit}`（`src/tx.rs:26`、`:30`、`:41`）、`builtin_migrations`（`src/db.rs:27`）、`PersistError` | **已交付** | Task 7 的 §6 谱系照片要起真库（**dev 边，本计划自定**，见 `## 遗留` 第一节第 1 条） |
 | **P5e 的 `ArtifactType::Image`**（P5e 设计 §3.2 第 1 行：`Image` / `image`；落地后 `ALL` 是 `[ArtifactType; 17]`） | **未交付**（实测 `crates/` 下无 `continuum-media`；`ArtifactType` 六型里没有 `Image`；`docs/spec/05-normative.md:645` 的 `Artifact<Image>` 今天不可表达） | **Task 2 的端口类型；Task 2 的硬前置** |
@@ -64,20 +64,25 @@ P1 的接口按实测写；后两者的接口**只能照设计写**，落地时�
   而**那个变体今天不存在**（上表实测）。写它即 `error[E0599]`／把类型写成别的型即语义错。
   **硬前置：P5e 已落地 `ArtifactType::Image`**（P5e 设计 §3.2 第 1 行）。
   **本块不因此加一个本地占位型**：端口类型是 `Vec<ArtifactType>`，占位型会改掉 `Operator` 的形状与 P1 的判据。
-- **Task 8（两张结构层的编译期照片）** 的两份样例里有一份要写 `continuum_verify::Evidence`
+- **Task 8（两张结构层的编译期照片）** 的三份样例里有一份要写 `continuum_verify::Evidence`
   ——**那个 crate 今天不存在**（上表实测）。`use` 不到、编不过、`cargo test` 也起不来。
   **硬前置：P5a 的 `continuum-verify` 已交付**（P5a 设计 §4.4）。
-- **其余七个 task 一个未交付的 crate 都不依赖**：它们只新建 `crates/continuum-image/**`，
-  改两处**共写文件**（`Cargo.toml` 的 `members` 与 `crates/continuum-runtime/tests/dependency_direction.rs`
-  的 `ALLOWED`），两处都在切分 §一 的共写文件表里。**它们今天就可以开工**。
-- **Task 7 与 Task 8 会改 `ALLOWED` 里同一个内层数组**（`("continuum-image", &[…])` 那一项：
-  Task 1 起是两项，Task 2 加 `continuum-artifact`，Task 7 加 `continuum-graph` 与 `continuum-persist`，
-  Task 8 加 `continuum-verify`）。**并行执行会让该行互相覆盖**——这是文件所有权问题，不是依赖关系问题：
+- **除 Task 2 与 Task 8 外，其余各 task 不直接依赖任何未交付的 crate**：它们只新建
+  `crates/continuum-image/**`，改两处**共写文件**（`Cargo.toml` 的 `members` 与
+  `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`），两处都在切分 §一 的共写文件表里。
+  **但「不直接依赖未交付的 crate」不等于「今天可以开工」**：**今天可开工的只有 Task 1**，
+  以及随后只依赖 Task 1 的类型的 **Task 5 与 Task 6**；
+  **Task 3、Task 4、Task 7 的夹具都是 Task 2 的 `all_operators()`**（下一段与各自的 `Interfaces` 逐条写明），
+  故它们**随 Task 2 一起被 P5e 的 `ArtifactType::Image` 挡住，今天动不了**。
+- **各 task 会改 `ALLOWED` 里同一个内层数组**（`("continuum-image", &[…])` 那一项）：
+  Task 1 建起时只有 `continuum-operator`，Task 2 加 `continuum-artifact`，
+  Task 7 加 `continuum-graph` 与 `continuum-persist`，Task 8 加 `continuum-verify`
+  （终态见上文 `Global Constraints`）。**并行执行会让该行互相覆盖**——这是文件所有权问题，不是依赖关系问题：
   需要并行时须**串行化对那一行的改动**，或由最后合入的一方核对五项都在。
 - **Task 1 与 Task 2 之间有真依赖**（Task 2 的 `ImageError` 臂、`EditMask` 都在 Task 1），
-  其余各 task 之间**除下面这一条外没有硬序**：Task 3 的语料取自 Task 2 的声明，
-  Task 5／Task 6 用 Task 1 的类型。**Task 8 排在最后**，只是为了让「前七个 task 可立即开工」这件事
-  在计划里是**可执行的**，不是一条风格偏好。
+  其余各 task 之间**除下面这一条外没有硬序**：**Task 3、Task 4、Task 7 的夹具都取自 Task 2 的声明
+  （`all_operators()`）**，Task 5／Task 6 用 Task 1 的类型。**Task 8 排在最后、Task 2 紧跟 Task 1**，
+  是两条硬前置（Task 2 要 P5e 的变体、Task 8 要 P5a 的 crate）的直接后果，不是一条风格偏好。
 
 ### 三、本块对既有之物的请求（**本计划只作消费方写，一处都不实施**）
 
@@ -262,7 +267,9 @@ P1 的接口按实测写；后两者的接口**只能照设计写**，落地时�
    守卫本身一字未动——那一类按**把被断言的取值改成与期望不是同一枚**读，档位记**取反**，
    并写清它改的是哪一列；**同一形状的变异在全篇用同一个档位**。
    **唯一带宽紧方向的是 `determinism` 那一列**：`Deterministic` **放宽** §305 的复用面、
-   `NonDeterministic` **收紧**它（本层另一份设计的表逐字如此，本计划照同一口径）。
+   `NonDeterministic` **收紧**它（本层同层设计的预告表里只有 P5c 那一份逐字如此；
+   P5d 与 P5e 记「取反」、本块设计记「收紧」——**口径不一**，逐条见 `## 遗留` 第一节第 5 条。
+   本计划按 §305 的实质统一记「放宽」）。
    **故「把 `generate-image` 的 `determinism` 改成 `Deterministic`」记「放宽」，不记「收紧」**
    ——设计 §11.3 那一行的档位与之相反，**本计划按放宽记**，见 `## 遗留` 第一节第 5 条。
    **三条失效形态都要防**：
@@ -270,10 +277,13 @@ P1 的接口按实测写；后两者的接口**只能照设计写**，落地时�
    （哪一枚算子的哪一列、哪个函数的哪一行）；凡变异点的字面量在 `all_operators()` 里出现多次的，
    红条件写清是**哪一枚算子的哪一列**（不写行号——用例按 id 取行，行号会随表的重排漂）。
    (b) **等价变异体**——判据是「**这两版在哪个入参上会给出不同结果**」，举不出即是等价，处理是**换真变异体而非补用例**。
+   **先排除一处易误判的**：**把某枚算子的候选串换成另一个同样合法的串**（如 `builtin` → `core`）
+   **不是等价变异体**——Task 2 的 (a) 对 `backend_candidates` **逐枚断言、期望值手写**，故它**会红那一枚**。
+   本块设计 §11.3 的预告表把它记作「全绿」，那一行与设计自己的 §11.2 第 (a) 条相抵，
+   **本计划按「取反」记**（见 Task 2 的用例注释与 `## 遗留` 第一节第 12 条）。
    **本块已预先识别的等价变异体逐处列出**：
-   （i）**把某枚算子的 `backend_candidates` 里的串换成另一个同样合法的串**（如 `builtin` → `core`）
-   ——候选是文本、没有跨表约束，故**全绿**；要打红它必须换变异体：**给 `hard-composite` 的候选加一项**
-   （那时 Task 2 的 (r) 红）；
+   （i）**把某枚算子的 `backend_candidates` 里的两项换序**（`[builtin, core]` → `[core, builtin]`）
+   ——本块的断言把候选读作**集合**（`backend_candidates` 的次序不是判据，见 Task 2 的用例注释），故**全绿**；
    （ii）**把 `all_operators()` 五行的次序换一下**——本计划要求用例**按 id 取行**、不按下标取，
    故换序是**全绿的等价变异体**（唯一能打红它的是「某条用例按下标取」，而那种写法本计划不许）；
    （iii）**`Assertion` 里手抄的期望清单与被测清单同源**——Task 2 的 (a) 与 Task 3 的两组语料
@@ -285,13 +295,15 @@ P1 的接口按实测写；后两者的接口**只能照设计写**，落地时�
    否则那些用例都在测「桩与它自己一致」）。**三件要一起断**：漏掉的那个方向、多出来的那个取值、
    以及它在表里的位置——Task 3 的（A1）断漏、（A2）断多、（B）断位置。
    **`all_operators()` 的返回类型里的数目 `5` 不在此列**：删一枚算子必须同步把返回类型写成
-   `[Operator; 4]`，而那一处改动**会让 Task 2 的 (a) 与 id 清单断言红**
-   （设计 §11.3 的「放宽」那一行预告的正是这一枚，见 Task 2 的用例注释）。
+   `[Operator; 4]`，而那一处改动**会让 Task 2 的 (a) 的对应行、手写的 id 清单断言与 (q) 的补集断言红**
+   （设计 §11.3 的「放宽」那一行预告的是 `b` 与 `q`；本计划把 `b` 那一枚换成了手写 id 清单，
+   理由见 Task 9 Step 5 与 `## 遗留` 第一节第 10 条）。
    (c) **变异导致编译失败**——那不是「变红」（判据用 `could not compile` 或 `error[E….`；
    cargo 在**用例失败**时也打印 `error: test failed, to rerun pass …`，不能拿它当判据）。
-   **本计划里有四处照片本身是编译期照片，照实写成编译期照片，不冒充运行期红**：
+   **本计划的编译期照片逐处列出，照实写成编译期照片，不冒充运行期红**：
    Task 1 的 `EditRegionKind::as_str` 穷尽 `match`、Task 1 与 Task 6 的字段清单穷尽解构、
-   Task 2 的 `all_operators()` 返回类型数目、Task 8 的两份 trybuild 样例。
+   Task 2 的 `all_operators()` 返回类型数目、Task 8 的三份 trybuild 样例（对应设计 §11.4 的两条照片，
+   其中一条被拆成两份样例，理由见 Task 8）。
    **注意 `match` 的入参是不是枚举自身**决定了它成不成立：**收 `&str` 的解析函数一定有通配臂**
    （如 `ArtifactType::parse`，`crates/continuum-artifact/src/artifact.rs:68`），故它**不是**那张照片；
    `EditRegionKind::as_str` 是。
@@ -324,8 +336,8 @@ P1 的接口按实测写；后两者的接口**只能照设计写**，落地时�
    （手写分支能各自漂移）。**枚举式判据的通病是它钉的是「枚举到的那些」，而不是「那个全称」**：
    某一半只能靠枚举承担时，**照实写明那一半的射程，不许写成全称**。
    本块的两处落点：`EditRegion` 的**四支**（设计 §11.2 的 (d)–(h) 只覆盖三支，第四支由 Task 5 补一条，
-   见 `## 遗留` 第一节第 2 条）、**§3.4 的表→下游**那一个方向（设计 §11.2 的 (s) 只写了另一个方向，
-   由 Task 3 的（A2）补，见第一节第 6 条）。
+   见 `## 遗留` 第一节第 2 条）、**§3.4 的表→下游**那一个方向（设计 §11.2 的 (s) 写的是「下游 → 表」
+   那一个方向，表→下游这一侧由 Task 3 的（A1）补，见第一节第 6 条）。
    **本块的绝对措辞逐处落点**：`operators.rs` 里「五枚都不含 `NonIdempotent`」→ Task 2 的 (a) 的
    `side_effect_class` 列（逐枚）；「第 4、5 行是 `Deterministic`，其余三枚不是」→ Task 2 的 (a)；
    「mask 外像素直接从原图复制」→ Task 6 的 (j)；「`EditRegion` 的四个支共用同一个函数、
@@ -369,7 +381,7 @@ P1 的接口按实测写；后两者的接口**只能照设计写**，落地时�
 9. **编译期性质照实写成编译期照片，不冒充运行期红。** 本块的编译期照片逐处标出：
    `EditRegionKind::as_str` 的穷尽 `match` 与 `EditRegionKind::ALL` 的数目、
    四个类型（`EditMask` / `Raster` / `Operator` 的端口、`PixelDiff`）的字段清单穷尽解构、
-   `all_operators()` 的返回类型数目、Task 8 的两份 trybuild 样例。
+   `all_operators()` 的返回类型数目、Task 8 的三份 trybuild 样例（对应设计 §11.4 的两条照片）。
 10. **各 task 的「运行，确认失败」一步要写清量到的是哪一种失败。** 只有**该用例引用的符号已经存在**时，
    那一步才可能量到运行期的红；否则量到的是 `error[E0432]`／`error[E0433]` 一类的**编译失败**，
    按本纪律第 1(c) 条**不算红**，那一步是空转的——凡属此类的步骤，本计划**照实标注为编译期照片**，
@@ -764,8 +776,9 @@ git commit -m "feat(image): crate 骨架、ImageError 四臂与编辑区域的�
   **两条预防写进注释**（设计 §11.2）：期望清单**必须手写**——若写成遍历 `all_operators()`
   去比 `all_operators()`，它测的是恒等式；也不拿 `backend_candidates` 的去重后的集合作语料。
   **并写明**：`backend_candidates` 的**次序**在本块的全部断言里都不是判据（它是候选集合；
-  §3.5 的判定与 §245 的 `is_candidate_backend` 都按集合读），故「换成另一个同样合法的串」
-  与「两项换序」都是等价变异体（纪律 1(b) 的 (i) 与 (ii)）。
+  §3.5 的判定与 §245 的 `is_candidate_backend` 都按集合读），故**「两项换序」是等价变异体**
+  （纪律 1(b) 的 (i)）；**「换成另一个同样合法的串」不是**——本用例的期望值手写、逐枚断言，
+  它**会红那一枚**（纪律 1(b) 里「先排除一处易误判的」那段与 `## 遗留` 第一节第 12 条）。
 - `the_ids_are_pairwise_distinct_and_all_versions_are_one`：
   **一行手写的五枚 id 清单**（`generate-image` / `detect-edit-region` / `local-generative-edit` /
   `hard-composite` / `verify-outside-mask`）与 `all_operators()` 的 id **逐枚**比对（按 id 取行，
@@ -880,8 +893,9 @@ git commit -m "feat(image): 五枚图像域算子的声明与 §343 的批次边
 `verify-outside-mask` → `{Image, Blob}`），**逐行断言两件事**：
 （A1）表里列出的**每个**型都在该下游的 `input_schema` 里；
 （A2）该下游的 `input_schema` 里**每个**型都在表里列出——**两个方向都判，合起来是集合相等**。
-**（A2）是本计划新增的一半**（设计 §11.2 第 (s) 条只写了「下游的每一型都能在该行列出的上游算子里找到」
-这一个方向），理由与依据见 `## 遗留` 第一节第 6 条与第五节。
+**（A1）是本计划新增的一半**（设计 §11.2 第 (s) 条写的「下游 `input_schema` 的每一型都能在该行列出的
+上游算子里找到」**正是**本计划的（A2）那一个方向；**表中列了而下游没有的型无人过问**，
+那一侧才是新补的（A1）），理由与依据见 `## 遗留` 第一节第 6 条与第五节。
 **（A2）承担的就是「下游的每一个型都能找到上游」这一半**：下游若多出一个语料外的型，（A2）红，
 而在（B）里那一型根本没有对应的行——两处一起把「下游有孤儿型」逼出来。
 
@@ -895,7 +909,16 @@ git commit -m "feat(image): 五枚图像域算子的声明与 §343 的批次边
 而 `generate-image` 自身即满足），**并写明这一条与其余各行的强度不同**：
 其余各行指认了一枚**具体**的上游，这一行只指认「**存在**一枚」。
 
-**（A）＋（B）就是设计 §3.4 的判据**：下游的每一型都在（A）的表里（A2 的后一个方向），
+**另有三行的来源是同形的「上游源图（`Image`）」**：设计 §3.4 表给 `local-generative-edit`、
+`hard-composite`、`verify-outside-mask` 各列了这一来源（与 `generate-image` 那一行的「上游任一枚出的
+`Image`」是**同一个命题**：存在一枚上游其 `output_schema` 含 `Image`）。
+**语料不为它们各写一行，理由在此写明**：那三行加上 `generate-image` 那一行是同一个断言的四次出现，
+逐行抄写会把「任一枚」读成「某四枚具体的上游」；**它们的承重与 `generate-image` 那一行相同**
+（都由 `generate-image ← generate-image : Image` 这一条钉住）。
+**射程据实**：这一条钉的是「本域**存在**一枚上游输出 `Image`」，**不钉**「那三行的源图就是
+`generate-image` 的产物」——后者的上游是哪一枚，规范与该表都写作「任一枚」。
+
+**（A）＋（B）就是设计 §3.4 的判据**：下游的每一型都在（A）的表里（即（A2）），
 表里的每一型在（B）里都有一枚上游的输出含它。**这不是把设计判据改写**——设计写的就是两半合起来的那一句。
 **交集中的型与「两侧相等」的分界写进注释**：第 1 行的上游是「任一枚」，故该行**不**要求
 上游的 `output_schema` 与下游的 `input_schema` 相等；断言的是**交集非空**这一半的可检查形式。
@@ -904,9 +927,11 @@ git commit -m "feat(image): 五枚图像域算子的声明与 §343 的批次边
 （A1）从 `local-generative-edit` 的 `input_schema` 里删掉 `Blob`（**取反档**）→（A1）红、（B）里
 那一行（`local-generative-edit ← detect-edit-region : Blob`）**仍绿**（它读的是上游的输出）；
 （A2）给 `verify-outside-mask` 的 `input_schema` 加一个 `ArtifactType::Text`（**取反档**）→（A2）红，
-（A）的两条（A1）仍绿；
-（B）把 `hard-composite` 的 `output_schema` 里的 `Image` 删掉（**取反档**）→（B）里那两行红
-（`hard-composite ← local-generative-edit : Image` 与 `verify-outside-mask ← hard-composite : Image`）。
+（A1）仍绿；
+（B）把 `hard-composite` 的 `output_schema` 里的 `Image` 删掉（**取反档**）→（B）里**只红一行**
+（`verify-outside-mask ← hard-composite : Image`）；`hard-composite ← local-generative-edit : Image`
+**仍绿**——它读的是**上游** `local-generative-edit` 的输出，删 `hard-composite` 的输出与它无关。
+（A1）与（A2）也不受影响（`hard-composite` 自己的 `input_schema` 一字未动）。
 
 - [ ] **Step 2: 运行**
 
@@ -1230,8 +1255,10 @@ git commit -m "feat(image): resolve_edit_region 与 RegionDetector——§325 �
   `pixels: Vec<u8>`；`PixelDiff` 的字段清单逐项：含一个可判 `== 0` 的差异量。
   红条件：给 `Raster` 加一个 `color_space` 字段（**移除档** → 穷尽解构先编译不过）。
   **明写两条**：（i）编译期照片，运行期无照片（纯数据声明）；
-  （ii）`PixelDiff` 的**形状是本计划自定**的——设计 §5.3 只约束「它必须含一个可以判 `== 0` 的差异量」
-  与「返回 mask 外**不相等**的像素数与总像素数」两句，没给字段名（见 `## 遗留` 第五节）。
+  （ii）`PixelDiff` 的**形状**：`differing` 这个**字段名是设计给的**——设计 §11.2 第 (l) 条的用例
+  逐字写 `PixelDiff { differing: 0, .. }`（实测在设计 `:520`）；**本计划自定的是它的整体形状
+  与总数那一枚的名字**，因为设计 §5.3 只约束「它必须含一个可以判 `== 0` 的差异量」与
+  「返回 mask 外**不相等**的像素数与总像素数」两句（见 `## 遗留` 第五节）。
   **`Raster` 的文档注释要写清设计 §5.2 的那一条**：本块**不定义像素格式**——
   §168 `:826` 只给了「Alpha / 色彩空间是否异常」这一条检查名，没有给通道语义、色彩空间或 Alpha 的表示；
   故本型只承载「宽、高、通道数、字节序列」，通道的语义由 backend 的约定决定。
@@ -1265,16 +1292,26 @@ git commit -m "feat(image): resolve_edit_region 与 RegionDetector——§325 �
   它自己声明的形状与它自己字节序列的长度；而 `ShapeMismatch` 的字段是 `(宽, 高, 通道数)`，
   **两个 `usize` 的长度值表达不进那个形状**。
 - `the_comparator_reports_the_difference_and_the_total`（§11.2 第 (l) 条，**两侧**）：
-  mask 外**全同** ⇒ 差异量为 `0`（**并判总数等于 mask 外的像素数**）；
-  把 mask 外**一个**像素改掉 ⇒ 差异量恰为 `1`。
+  mask 外**全同** ⇒ 差异量为 `0`（**并判总数**）；把 mask 外**一个**像素改掉 ⇒ 差异量恰为 `1`。
+  **「总数」是哪一种总数要写死，并写明它的来历**：设计 §5.3（实测在设计 `:510`）逐字只写
+  「返回 mask 外**不相等**的像素数与**总像素数**」，**没有指明后者是整图的像素数还是 mask 外的像素数**
+  （两种读法都通；`docs/spec/03-product-drive.md:832` 的 §168 只给了 `outside-mask pixel difference`
+  这个检查名，没有给这两个量的定义）。**本计划取「mask 外的像素数」**，理由是分子与分母同域：
+  分母若换成整图，则「mask 外全同」时读到的比例是 `0 / 整图像素数`，与「mask 外的改动占比」不是同一个量。
+  **这一读数属本计划自定，已入 `## 遗留` 第五节**；**若设计作者取的是另一种读法，本条的期望值与红条件
+  随之改、而动作不变**（收件人见 `## 遗留` 第一节第 11 条）。
+  **夹具要含一个掩码**（mask 外的像素数 ≠ 整图的像素数），否则两种读法在读数上不可分辨，
+  本条既钉不住本计划的读法、也钉不住另一种。
   红条件：把计数改成「mask 内」的（**取反档**）→ 第一条红（mask 外的改动被漏掉）；
   把总数写成「整图的像素数」（**取反档**）→ 第一条的总数断言红。
   **两侧都要**：只钉「全同 ⇒ 0」会让一个恒返回 `0` 的实现全绿（比较器什么都看不见）。
 - `the_comparator_declares_no_verdict`（§5.3 的第二半、§7.3）：
   返回类型是 `Result<PixelDiff, ImageError>`，**不是 `Result<bool, _>`**；
   `PixelDiff` 上**没有** `passed()` / `is_ok()` 一类判定方法。
-  **照片的落点分两处，写清**：类型层那一半是**编译期**（返回类型与穷尽解构，本 task）；
-  「`src/` 里没有一个返回 `bool` 的判定函数」那一半由 **Task 9 Step 3 的源码面复核**取（grep）。
+  **照片的落点分两处，写清**：（i）**返回类型**那一半是**编译期照片**——本用例把返回值绑到
+  `PixelDiff` 上并读它的字段，返回类型若是 `Result<bool, _>`，本用例**编不过**；
+  （ii）「`PixelDiff` 上**没有**判定方法」那一半**不是穷尽解构能证的**（解构只钉字段清单，
+  钉不到方法的有无），它由 **Task 9 Step 3 的源码面复核 (g)**（`grep -rn "Result<bool\|-> bool"`）取。
   **理由写进注释**（§5.3）：返回 `bool` 就把一条判据（阈值）塞进了本块，而 §326 给的是
   `= FORBIDDEN`（阈值为 0 的那一个特例）、§168 给的是「可以直接确定性检查」——
   **两者都不足以让本块替 P5a 定「多少算不过」**。故本块给**量**，判**在 P5a**。
@@ -1300,8 +1337,11 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-image --test pixels
 pub struct Raster { pub width: u32, pub height: u32, pub channels: u8, pub pixels: Vec<u8> }
 
 /// §168 `:832-835` 的 `outside-mask pixel difference` 的产物。
-/// 设计只约束「它必须含一个可以判 `== 0` 的差异量」与「mask 外不相等／总的像素数」两句；
-/// **字段名是本计划自定的**。
+/// 设计只约束「它必须含一个可以判 `== 0` 的差异量」与「mask 外不相等／总的像素数」两句。
+/// **`differing` 这个字段名是设计给的**（设计 §11.2 第 (l) 条的用例逐字写 `PixelDiff { differing: 0, .. }`）；
+/// **本计划自定的是整体形状与总数那一枚的名字**——设计未指明「总像素数」是整图还是 mask 外，
+/// 本计划取后者（理由与收件人见 Task 6 的 `the_comparator_reports_the_difference_and_the_total`
+/// 与 `## 遗留` 第五节）。
 pub struct PixelDiff { /* differing / total */ }
 
 /// §326 `:2378-2388` 的硬合成：mask 外的像素从 `source` 逐点复制，mask 内的取自 `generated`。
@@ -1653,7 +1693,7 @@ grep -rn "fn resolve_edit_region\|Result<EditMask" crates/continuum-image/src
 独立日志路径。**逐轮在报告里附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位
 （取反／放宽／收紧／移除；改被断言的声明取值的变异记取反并写明改的是哪一列）」**。
 
-**设计 §11.3 的预告表逐行照跑**，其中三行要按本计划的口径读：
+**设计 §11.3 的预告表逐行照跑**，其中数行要按本计划的口径读（逐行在下文标明）：
 
 - 「**取反**：`resolve_edit_region` 的 `Point` 支在 detector 空返回时合成一个单像素掩码」——
   该红 `g`，**不该红** `f`、`h`、`d`、`e`。
@@ -1665,18 +1705,26 @@ grep -rn "fn resolve_edit_region\|Result<EditMask" crates/continuum-image/src
   **不该红** `o`、`q`。
 - 「**取反**：`register_image_operators` 改成边查重边写」——该红 `c2`，**不该红** `b`、`c`；
   **夹具的重复项必须排在批的末尾**，否则该档全绿（Task 4 的注释）。
-- 「**等价变异**：把某个 backend 候选串改成另一个同样合法的串」——**全绿**，这是**等价变异体**；
-  要打红它必须换变异体：**把 `hard-composite` 的候选加一个**，那时 Task 2 的 (r) 红。
+- 「**等价变异**：把某个 backend 候选串改成另一个同样合法的串」——**设计记作「全绿」，本计划按
+  「取反」读**（设计这一行与它自己的 §11.2 第 (a) 条相抵：那一条对 `backend_candidates` **逐枚断言、
+  期望值手写**，故换串**会红那一枚的 (a) 行**）——该红 Task 2 的 (a) 的那一枚，**不该红** (r)。
+  **本块真正的等价变异体是「`backend_candidates` 的两项换序」**（候选读作集合），它红不了任何一条。
 - 「**放宽**：`all_operators()` 里少写一枚」——**编译失败**（返回类型是 `[Operator; 5]`），
   **这一档不是用例红，是编不过**（按纪律 1(c) 不上报为红）；
-  **若连返回类型也改成 `[Operator; 4]`**，则 Task 2 的 id 清单断言与 (q) 的补集断言红。
+  **若连返回类型也改成 `[Operator; 4]`**，则**红位在本计划里是 Task 2 的 (a) 的对应行、手写的 id 清单断言
+  与 (q) 的补集断言**——**这是对设计 §11.3 那一行的偏离**（设计预告的是 `b` 的对应枚与 `q`；
+  而设计的 (b) 自己就是「以 `&all_operators()` 调注册、逐枚 `resolve`」，按设计 §11.3 那句
+  「若改类型后仍不红，说明 b 是按 `all_operators()` 自己遍历的——即假照片」，**它本就不承重**）。
+  **本计划把承重者放到手写的五枚 id 清单与 (q)，理由与收件人见 `## 遗留` 第一节第 10 条。**
   **若改类型后仍不红，说明那些断言是按 `all_operators()` 自己遍历的**——即假照片。
 
 **本计划另加的两条必须跑的变异**（设计 §11.3 没有它们，而它们是本计划新增守卫的红来源）：
 - **取反**：把 `resolve_edit_region` 的两处 `RegionUnresolved` 都写成 `region: Point`
   ——该红 `a_semantic_object_with_no_match_is_rejected_with_its_own_kind`，**不该红** `g`。
 - **取反**：从 `verify-outside-mask` 的 `input_schema` 里删掉 `Blob`
-  ——该红 Task 3 的（A1）与（A2），**不该红**（B）。
+  ——该红 Task 3 的**（A1）**（表里列出的 `Blob` 不在 `input_schema` 里了）；
+  **不该红（A2）**（剩下的 `input_schema = {Image}` 仍**是**表的子集）、**也不该红**（B）
+  （（B）读的是上游的 `output_schema`，本变异不动它）。
 
 **三条跨 crate 的承重守卫必须跑全量**：
 （i）`ALLOWED` 与实际依赖一致（加/删一条边即红）；
@@ -1755,13 +1803,18 @@ git commit -m "docs(image): P5f 图像领域算子的收尾与复核"
    **翻转条件**：若协调者判「越界应当被拒」，则须给 `ImageError` 加第五臂（或把越界并入 `RegionUnresolved`
    的语义），两处都超出本块的范围。
    **收件人：设计作者 ＋ 规范维护者。**
-5. **§11.3 把「把 `generate-image` 的 `determinism` 改成 `Deterministic`」记为「收紧」，
-   与同一层的另一份设计的口径相反**：本层另一份设计的预告表把**同一形状**（把某枚算子的
-   `determinism` 改成 `Deterministic`）记为「**放宽**」，理由是 `Deterministic` **放宽** §305 的复用面。
-   **本计划按「放宽」记**（纪律 1 的宽紧口径），**并在此处留下设计那一行的来历**，
+5. **同一形状的变异在 P5c／P5d／P5e／P5f 四份同层设计里被记成了三个不同的档位名**（**口径不一**）：
+   同一个变异——**把某枚算子的 `determinism` 改成 `Deterministic`**——P5c 的预告表记「**放宽**」，
+   P5d 与 P5e 各记「**取反**」，P5f（**本块设计**）记「**收紧**」。
+   **本计划的判据是「放宽」**：`Deterministic` 让 `cache_key` 由 `None` 变 `Some`，
+   即**放宽** §305 的复用面（§305 要求 `operator_version` 未变等四条件，`Deterministic` 使其更常满足）。
+   故 **P5c 那一份对，P5d／P5e／P5f 三份错**——**那三份要改的是各自预告（变异预告）表里
+   `determinism` 那一行的档位名**（按内容指：P5d 的 §9.3、P5e 的 §12.3、P5f 的 §11.3；
+   那一侧的改动不属本计划，由协调者另行处置）。
+   **本计划按「放宽」统一记**（纪律 1 的宽紧口径），**并在此处留下设计那一行的来历**，
    免得复审按「收紧」去找一条不存在的症状。
    **动作不变**（该红的用例与不该红的用例，两处写的是同一组），**变的只是档位名**。
-   **收件人：设计作者 ＋ 复审者。**
+   **收件人：设计作者（P5d／P5e／P5f 三份）＋ 复审者 ＋ 协调者**（这一处口径跨四份设计）。
 6. **§11.2 第 (s) 条只给了一个方向**：它写「下游 `input_schema` 的每一型都能在该行列出的上游算子里找到，
    且那一枚的 `output_schema` 含该型（交集中的型，不是「两侧相等」）」——**下游那一侧只判了
    「下游 → 表」这一个方向**，**表中列了而下游没有的型无人过问**（那一个方向的取值是 fail-open 的）。
@@ -1769,7 +1822,8 @@ git commit -m "docs(image): P5f 图像领域算子的收尾与复核"
    合起来是集合相等。**这是一处计划侧的加强**，理由与同层另一份计划的同形处置一致。
    **收件人：设计作者。**
 7. **§165 的名字 `preserve_outside_mask = REQUIRED` 在设计的节点参数字段清单里没有落点**（**实测**）：
-   规范里同一条约束有**三个名字**——§165 `:711` 的 `preserve_outside_mask = REQUIRED`、
+   规范里同一条约束有**三个名字**——§165 `:714` 的 `preserve_outside_mask = REQUIRED`
+   （实测该名在 `docs/spec/03-product-drive.md:714`；`:711` 是那一节的首行「局部修改最重要的约束应该是：」，不是锚点）、
    §324 `:2343` 的 `preserve_outside_region = true`（算子的入参字段）、
    §326 `:2372` 的 `outside_mask_change = FORBIDDEN`（默认值）。
    而设计 §13 第 11 条那张「五个非制品字段」的清单是从 §323 / §324 **推出来的**
@@ -1790,6 +1844,34 @@ git commit -m "docs(image): P5f 图像领域算子的收尾与复核"
    而只有前者在本函数的返回类型里。**本计划不就地补前置**（补它就要一枚设计没有的臂，或改签名），
    只把这一条写进函数的文档注释（Task 5 的 `the_mask_arm_…` 与 Step 3）。
    **收件人：设计作者。**
+10. **§11.3 预告「`all_operators()` 少写一枚＋返回类型同步改小」时红的位是 (b)，而那一枚在本设计自己的
+    判据下不承重**（**这是一处本计划对设计预告的偏离**，不是设计缺口）：
+    §11.3 那一行写「若连返回类型也改成 `[Operator; 4]`，则 **b 的对应枚**与 q 的补集断言红」，
+    而 §11.2 第 (b) 条自己的写法是「以 `&all_operators()` 调 `register_image_operators`、逐枚 `resolve`」
+    —— 它**从 `all_operators()` 取语料**，正是 §11.3 那一行末句警告的假照片（「若改类型后仍不红，
+    说明 b 是按 `all_operators()` 自己遍历的」）。
+    **本计划的取舍**：承重者放到 Task 2 的**手写五枚 id 清单**（`the_ids_are_pairwise_distinct_…`）、
+    §11.2 第 (a) 的对应行与第 (q) 的补集断言（逐枚），**不把 (b) 当那一档的红位**。
+    **代价**：与设计的预告表有一处不一致，读者须读本节才知道为什么。
+    **翻转条件**：若设计作者坚持 (b) 承重，则须把 (b) 的语料改成手写的五枚 id（那会与 §11.2 的
+    「(b) 的期望清单必须手写」那条预防合流），本计划的 Task 4 与 Task 2 随之调整。
+    **收件人：设计作者 ＋ 复审者。**
+11. **§5.3 的「总像素数」没有指明是整图的还是 mask 外的**（**读数未定**）：
+    §5.3 逐字只写「返回 mask 外**不相等**的像素数与**总像素数**」（实测在设计 `:510`）——两种读法都通；
+    `docs/spec/03-product-drive.md:832` 的 §168 只给了 `outside-mask pixel difference` 这个检查名，
+    没有给这两个量的定义。**本计划取「mask 外的像素数」**（理由与夹具要求见 Task 6 的
+    `the_comparator_reports_the_difference_and_the_total`，并已入第五节）。
+    **代价**：若设计作者取的是另一种读法，照本计划写出的用例会把那一版实现判红。
+    **翻转条件**：若判「整图的像素数」，则 Task 6 那一条的总数期望值与「把总数写成整图的像素数」那条红条件
+    对调，动作不变。
+    **收件人：设计作者 ＋ 复审者。**
+12. **§11.3 的「等价变异」那一行（backend 候选串）与设计自己的 §11.2 第 (a) 条相抵**：
+    §11.3 把「把某个 backend 候选串改成另一个同样合法的串」预告为**全绿**，而 §11.2 第 (a) 条是
+    「端口两列、`determinism`、`side_effect_class`、backend 候选**逐枚**断言（期望值手写）」
+    —— 期望值既然手写，换串**必然红那一枚**，故那一行**不是等价变异体**。
+    **本计划按「取反」记**（纪律 1(b) 的「先排除一处易误判的」段与 Task 2 的用例注释）。
+    **动作不变**；**变的只是那一行的档位名**。
+    **收件人：设计作者 ＋ 复审者。**
 
 ### 二、设计里的「待对账 / 待裁」标记：**本计划不重述其内容**
 
@@ -1860,10 +1942,17 @@ P5a 设计 §4.4），本块的落点是 Task 9 Step 3 的 (c) 条与 Task 8 的
   （`Option<EditMask>`）都是本计划定的；**收益**：`resolve_edit_region` 的 `source` 实参有用途，
   且「零检出 ⇒ `None` ⇒ `Err`」这条链在类型上只有一处载体。
 - **`Box` 支的夹取**（Task 5）：见第一节第 4 条。
-- **`PixelDiff` 的字段名与 `Raster` 的四个字段名**（Task 6）：设计约束了「含一个可判 `== 0` 的差异量」
-  与「宽、高、通道数、字节序列」四件，**没给字段名**。
+- **`PixelDiff` 的整体形状与「总数」那一枚的名字**（Task 6）：设计约束了「含一个可判 `== 0` 的差异量」
+  与「返回 mask 外不相等的像素数与总像素数」两句，但也**已在 §11.2 第 (l) 条的用例里逐字给出
+  `differing` 这个字段名**（实测在设计 `:520`）——故**自定的不是 `differing`**，而是总数那一枚的名字
+  与整体形状（例如是否把总数与差异量放进同一枚结构体）。**`Raster` 的四个字段名**同样：设计约束了
+  「宽、高、通道数、字节序列」四件，**没给字段名**。
+- **`PixelDiff` 的「总像素数」取「mask 外的像素数」**（Task 6）：设计 §5.3 的那一句**没指明是整图还是
+  mask 外**（两种读法都通，见第一节第 11 条）。**代价**：与设计作者若取另一种读法相比，本条的期望值
+  与红条件会相反；**收益**：分子（mask 外不相等的像素数）与分母同域。**收件人见第一节第 11 条。**
 - **§3.4 边表的判据拆成两组断言（（A1）＋（A2）＋（B））**（Task 3）：见第一节第 6 条。
-  **代价**：多一份手写表；**收益**：**下游新增语料外的型**这一侧不再是 fail-open。
+  **代价**：多一份手写表；**收益**：**表中列了而下游的 `input_schema` 里没有的型**这一侧不再是 fail-open
+  （设计 §11.2 第 (s) 条只判了「下游 → 表」那一个方向，见表→下游一侧在（A1）里补上）。
 - **Task 8 排在最后、Task 2 紧跟 Task 1**：**不是风格偏好**，是「跨计划前置」第二节那两条硬前置的
   直接后果——Task 2 要 P5e 的变体，Task 8 要 P5a 的 crate。
 - **`all_operators()` 的返回类型是 `[Operator; 5]`**：**不是本计划自定**——设计 §3.1 已写死并给了两条理由。
@@ -1871,7 +1960,7 @@ P5a 设计 §4.4），本块的落点是 Task 9 Step 3 的 (c) 条与 Task 8 的
   **本块不写 `len() == 5`**（设计 §11.1 明写「不补」）——数目的运行期照片由
   Task 2 的**手写五枚 id 清单**承担，它与「逐枚断言」共用同一份清单，两处维护同一件事会更早漂。
 - **`four_kinds_of_dirty_input_…` 式的「枚举到的那几支之外是 fail-open」**：本计划在两处各补了一条
-  （`SemanticObject` 那一支、§3.4 的（A2）），两处都记在第一节（第 2、6 条）。
+  （`SemanticObject` 那一支、§3.4 的（A1）），两处都记在第一节（第 2、6 条）。
 
 ### 六、设计 §12 的逐条对账条目与 §13 的遗留：**本计划不重述其内容**
 
@@ -1901,9 +1990,11 @@ P5a 设计 §4.4），本块的落点是 Task 9 Step 3 的 (c) 条与 Task 8 的
   `Artifact.provenance` / `metadata` 的字段约定、掩码的编码格式、像素格式与色彩空间、
   §168 第一项检查的判据与持有方、§240 的 `version` 与 §327 的 `v1/v2/v3` 是否同一计数、
   §34 是否有图像生成的旗标，以及 §165／§324／§326 三个名字的统一。
-- **交给协调者**：§187 是否补 `image/` 目录、迁移档的合并、`continuum-persist` 那条 dev 边的取舍，
+- **交给协调者**：§187 是否补 `image/` 目录、迁移档的合并、`continuum-persist` 那条 dev 边的取舍、
+  `determinism` 档位在四份同层设计里口径不一这一处的跨块裁定（第一节第 5 条），
   以及上面第一节列出的设计问题（逐条已给翻转条件或具名收件人）。
-- **交给复审者**：本计划的**两处对设计的偏离**——第一节第 1 条（新增一条 dev 边）
-  与第 4 条（`Box` 支的夹取）——**两处都写明了「为什么不是那样」**；
-  以及第一节第 5 条的档位订正（设计与本计划的档位名相反，本计划按纪律 1 的口径记）。
+- **交给复审者**：本计划对设计的偏离（**逐条**）——第一节第 1 条（新增一条 dev 边）、
+  第 4 条（`Box` 支的夹取）、第 10 条（`all_operators()` 少写一枚＋改返回类型的红位由设计的 `b`
+  移到 Task 2 的 (a) 的对应行、手写 id 清单与 `q`）——**每条都写明了「为什么不是那样」**；
+  以及第一节第 5 条与第 12 条的档位订正（设计与本计划的档位名相反，本计划按纪律 1 的口径记）。
   复审时请对 Task 7 Step 1、Task 5 的 `a_box_reaching_outside_…` 与 Task 9 Step 5 逐行核。
