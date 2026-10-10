@@ -298,7 +298,10 @@ crates/continuum-semantics/
   Cargo.toml
   src/lib.rs          导出面与 crate 文档
   src/ids.rs          IntentId、PlanId、ContractId、RequirementId、DecisionId
-  src/intent.rs       Intent、IntentKind、IntentStatus、Priority、ContractRef、GraphIdRef、ProductIdRef、迁移表
+  src/intent.rs       Intent、IntentKind、IntentStatus、Priority、ContractRef、GraphIdRef、ProductIdRef
+  > **订正（2026-10-10，Task 8 实现期查出）**：本行原**末尾还写「迁移表」**，而下一节 `src/persist.rs` 那行写「七张表的迁移 110」——
+  > **同一个迁移在两行里各属一次，自相抵**。实现按 `continuum-canonical` 的 alias 表先例把迁移落在 `persist.rs`
+  > （**类型层不碰持久化**那条分界的同一条），理由写在该文件头。
   src/spec.rs         Specification、SpecDraft、Unknowns、Unknown、Conflict、UndefinedBehavior、六元组的成员类型
   src/contract.rs     TaskContract、Requirement、RequirementClass、VerificationRequirement
   src/diff.rs         DiffClass、DiffEntry、UnjudgedChange、UnjudgedReason、ContractDiff、diff
@@ -1092,7 +1095,11 @@ git commit -m "feat(canonical): alias 表（迁移 100）、四作用域与显�
 
 **Interfaces:**
 - Consumes: `continuum_canonical::EntityId`（§1.3 的类型边）；`continuum_persist::{Tx, Migration, Db, Value}`
-- Produces: `continuum_semantics::{IntentId, IntentKind, IntentStatus, Priority, ContractRef, GraphIdRef, ProductIdRef, Intent, IntentError, p4_semantics_migrations, save_intent, load_intent, list_children}`
+- Produces: `continuum_semantics::{IntentId, ContractId, PlanId, IntentKind, IntentStatus, Priority, ContractRef, GraphIdRef, ProductIdRef, Intent, IntentError, p4_semantics_migrations, save_intent, load_intent, list_children}`
+  > **订正（2026-10-10，Task 8 实现期查出）**：本行原**漏了 `ContractId` 与 `PlanId`**——而
+  > **`ContractRef` 与 `Intent.active_plan_id` 都要用它们**，且本计划 Task 11 逐字 `Consumes` `ContractId`。
+  > 实现把它们落进 `src/ids.rs`。**判据**：**产出行漏一枚类型，下游 task 的 `Consumes` 会指向一个没人产出的名字**——
+  > 而那条 `Consumes` 是**逐字给的**，读的人会以为它在上一节已经有了。
 
 - [ ] **Step 1: 建 crate 骨架、登记 members 与 `ALLOWED`**
 
@@ -1154,7 +1161,13 @@ pub struct ContractRef { pub id: ContractId, pub version: u32 }
 
 /// §222 的十五个字段。**语义内容的五个字段变化时 `version` +1，状态迁移不 +1**（§5.2 的设计决定）。
 pub struct Intent {
-    pub id: IntentId, pub version: u32, pub kind: IntentKind, pub goal: CanonicalRepresentation,
+    pub id: IntentId, pub version: u32, pub kind: IntentKind, pub goal: EntityId,
+    // **订正（2026-10-10，Task 8 实现期查出并交裁，裁定：取 `EntityId`）**：本行原速写为 `CanonicalRepresentation`，
+    // 与设计 §1.3 及本计划自己给 `continuum-semantics` 登记的那条 `ALLOWED` 注释（`EntityId`）相抵。
+    // **硬理由**：`CanonicalRepresentation` **在 crate 外造不出来**（字段私有、`new` 是 `pub(crate)`、唯一入口是 `finish`），
+    // 故它**不能是 `load_intent` 要从库里读回的字段**。
+    // **判据**：**一个要落库并读回的字段，其类型必须能从库里存的字节重构出来**——
+    // **不可构造的包装类型不能当持久字段**（否则「读回」这件事在类型上就写不出来）。
     pub status: IntentStatus, pub priority: Priority, pub created_at: i64, pub updated_at: i64,
     pub parent_intent: Option<IntentId>, pub contract_id: ContractRef, pub active_plan_id: Option<PlanId>,
     pub graph_id: Option<GraphIdRef>, pub product_id: Option<ProductIdRef>, pub completion_predicate: Opaque,
