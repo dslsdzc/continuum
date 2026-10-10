@@ -46,11 +46,11 @@ dev 依赖 `continuum-graph`（§6.1 的照片：`reuse::{cache_key, can_reuse}`
 |---|---|---|
 | P1 `continuum_operator::{Operator, OperatorId, OperatorVersion, BackendId, Determinism, SideEffectClass}`（`crates/continuum-operator/src/definition.rs:9`、`:17`、`:24`、`:45`、`:66`、`:79-88`） | **已交付** | 七枚算子的七个字段与 `all_operators()` 的全部类型 |
 | P1 `continuum_operator::{OperatorRegistry, OperatorError}`（`src/registry.rs:6-12`、`:14-48`） | **已交付** | Task 2 的登记面；`OperatorError::Duplicate`（`:11`）；**无迭代面**（`entries` 私有，`:16`） |
-| P1 `continuum_artifact::ArtifactType`（`crates/continuum-artifact/src/artifact.rs:14-21` 六臂、`:28` 的 `ALL`、`:47` 的 `as_str`、`:68` 的 `parse`） | **已交付（六臂）** | 七枚算子的端口类型；**`Report` 不在内**（见下） |
+| P1 `continuum_artifact::ArtifactType`（`crates/continuum-artifact/src/artifact.rs` 的**枚举本体**（今日六臂）、**`ALL`**、**`as_str`**、**`parse`** 四处；**按内容指，不写行号**——P5e 在本块之前改这个文件） | **已交付（六臂）** | 七枚算子的端口类型；**`Report` 不在内**（见下） |
 | P1 `continuum_graph::reuse::{CacheKey, cache_key, can_reuse}`（`crates/continuum-graph/src/reuse.rs:9-12`、`:16`、`:29`） | **已交付** | Task 5 的 (k) 条（**dev 边**） |
 | P5a `continuum-verify`（`Evidence`、`EvidenceType`、`VerificationPolicy`、`VerifyError`…） | **未交付**：`ls crates/` 无 `continuum-verify`；全仓 `grep -rn "struct Evidence\|enum EvidenceType" crates/` **零命中** | Task 6 的 `trybuild` 样例（**dev 边**）；§5.1 报出的两臂 |
 | P5b `continuum-method`（`MethodRegistry`、`MethodId`、`MethodDomain`、`MethodEntry`、`MethodError`、`seeded()`） | **未交付**：`ls crates/` 无 `continuum-method` | Task 3 的全部（**普通边**） |
-| P5e `ArtifactType::Report`（P5e 设计 §3.2 清单第 8 行定的新变体） | **未交付**：`artifact.rs:14-21` 六臂里无 `Report`，`:68-78` 的 `parse` 对 `"report"` 返回 `None` | **§4.2 第 6、7 行的端口**——故本块今天编不过 |
+| P5e `ArtifactType::Report`（P5e 设计 §3.2 清单第 8 行定的新变体） | **未交付**：`artifact.rs` 的**枚举本体**六臂里无 `Report`，其 **`parse`** 对 `"report"` 走通配臂返回 `None` | **§4.2 第 6、7 行的端口**——故本块今天编不过 |
 | P4 `continuum-semantics`（`RequirementId`） | **未交付**（`crates/` 下不存在） | **本块不用**：产出的证据一律 `Unattached`，故不登记那条边（设计 §2.1、§5.2） |
 | **本块的 crate `continuum-research`** | **不存在**（实读：`crates/` 下无该目录；`grep -rn "continuum-research" crates/ Cargo.toml` **零命中**） | 本计划的全部交付物 |
 | workspace `members` | **18 项**（`Cargo.toml:3` 起，`:22` 收） | Task 1 加一行 |
@@ -63,7 +63,8 @@ dev 依赖 `continuum-graph`（§6.1 的照片：`reuse::{cache_key, can_reuse}`
 1. **`Report` 不在枚举里 ⇒ 本 crate 的源码编不过**（§4.2 第 6、7 行的端口要用它）。这不是「测试缺一条」，
    是 `cargo build -p continuum-research` 就红。
 2. **把一个成员加进 `members` 而它的路径依赖不存在 ⇒ 整个工作区的 cargo 命令一起失败**：
-   路径依赖解析失败发生在 `cargo metadata` 之前，`cargo test -p <别的 crate>` 也一并失败。
+   路径依赖解析失败发生在**工作区清单装配**这一步——`cargo metadata` 与任何别的 cargo 命令
+   都要先经过它，故失败就发生在其**之中**，不在其之前；`cargo test -p <别的 crate>` 也一并失败。
    故本计划**不许**在 P5a/P5b 落地前把 `continuum-research` 加进 `members`，也不许先声明那两条路径依赖。
 3. **据此，本计划的全部 task 一律排在 P5a、P5b、P5e 三处落地之后**（三处的落地各有其自己的计划与合并），
    且 Task 1 的「加成员行」与「写 `Cargo.toml`」是**同一步**——
@@ -164,6 +165,12 @@ grep -n "Report" crates/continuum-artifact/src/artifact.rs
   - **不建执行路径、不迁节点状态、不调 `OperatorRegistry::resolve` 于生产代码**（切分 §四第 4 条）。
   - **不碰 `execution_policy` / `verification_policy`**（切分 §四第 5 条、P4）。
   - **不碰 `Checkpointable`**（切分 §二第 4 条判给 P5e）。
+  - **不碰 §88 的 capability token**（设计 §1.2 第 8 行：「检索类算子触网所需的授权」）：
+    归属是**能力面（P3a）**；本块只声明算子的 `backend_candidates` 与 `side_effect_class`，
+    **授权以何形态进入执行路径不在本块**。本块的搜索算子会经检索后端，但那是 `backend_candidates`
+    里的一枚名字，不是一条能力边（`ALLOWED` 里因此没有 `continuum-capability`）。
+  - **§34 的生成授权旗标在本块不适用**（设计 §1.2 第 9 行）：§34 的五个旗标逐枚点名的是**生成类**内容
+    （`allow_generated_broll` 等），而本块七枚里**一枚生成类算子都没有**（七步全是研究链上的读与写制品）。
   - **不定义四枚 `Json` 制品的 schema**（设计 §11 第 2 条：规范一处未给）。
   - **不声明两枚判定算子在 §262 五级序里的级别**（设计 §5.3）。
 
@@ -179,7 +186,8 @@ grep -n "Report" crates/continuum-artifact/src/artifact.rs
 - **`Operator` 的清单写不成 `const`**（设计 §4.1.1 的两条独立实测理由）：
   `OperatorId::new`（`:27`）与 `BackendId::new`（`:69`）**都不是 `const fn`**，
   且 `Operator` 的三个 `Vec` 里**没有一个是空的**（§4.2 逐格可核）⇒ `Vec::push` 不是 `const` 操作。
-  **本仓三处 `ALL`（`ArtifactType::ALL` `artifact.rs:28`、`EffectType::ALL`、`PrivacyClass::ALL` `artifact.rs:100`）
+  **本仓三处 `ALL`（`ArtifactType::ALL` 与 `PrivacyClass::ALL`，都在 `crates/continuum-artifact/src/artifact.rs`；
+  `EffectType::ALL` 在 `crates/continuum-effect/src/effect.rs`）
   都是无字段枚举**，元素是常量，故 `const` 成立——**形状能成立的前提在这里不存在**。
   交付面因此是 `pub fn all_operators() -> [Operator; 7]`；**「7」仍落在返回类型里**，
   「清单个数的改动编译期可见」这条性质不因它不是 `const` 而丢失。
@@ -195,8 +203,8 @@ grep -n "Report" crates/continuum-artifact/src/artifact.rs
   **`bind(&mut self, id: &MethodId, realized_by: &[&str]) -> Result<(), MethodError>`**（第二参是 `&[&str]`，不是 `Vec<String>`）；
   **`select(&self, domain: MethodDomain) -> Vec<&MethodEntry>`（返回该领域的全部条目，与 `realized_by` 是否为空无关）**；
   `MethodError::{NotFound { id }, Duplicate { id }}`；`seeded()` 建 18 条、`research/` **四条**。
-- `ArtifactType::ALL`（`artifact.rs:28`，带数目字面量 `[ArtifactType; 6]`）、`as_str`（`:47`）、
-  `parse`（`:68`，对表外串返回 `None`）。
+- `ArtifactType::ALL`（带数目字面量 `[ArtifactType; 6]`）、`as_str`、`parse`（对表外串走通配臂返回 `None`）——
+  **三处都在 `crates/continuum-artifact/src/artifact.rs`，按内容指**：P5e 在本块之前要改这个文件，行号按构造即过期。
 - `continuum_graph::reuse::{cache_key(&Operator, ContentHash) -> Option<CacheKey>, can_reuse(&Operator, Option<&CacheKey>, &ContentHash, bool) -> bool}`
   （`reuse.rs:16`、`:29`）；**`cache_key` 对 `NonDeterministic` 返回 `None`**（`:22`）。
 - `Evidence::from_tool_result` 是**八参数**（P5a 设计 §4.4）——**本块不调用它**，
@@ -210,6 +218,12 @@ grep -n "Report" crates/continuum-artifact/src/artifact.rs
   改名只改一侧即报「缺少期望输出」；（ii）**样例里的注释也是照片坐标**——
   注释写着「应编译失败：…」时，那句说明与样例实际钉的东西必须一致（本仓既有样例的注释里
   专门写了「这条样例钉住的是哪一件事，要说准」）。
+- **指进别的块会改的文件，一律按内容指，不写行号范围。** 本块的落点是
+  `crates/continuum-artifact/src/artifact.rs` 的**枚举本体**与 **`ALL`**/**`as_str`**/**`parse`** 三处（共四处）：
+  P5e 的落地要改这个文件，本块排在其后，**行号按构造即已过期**。**这里不是「行号更好定位」**：
+  定位的代价是复审与实现者都要重新实测一遍，而按内容指的名字（`parse` 里 `"report"` 那一臂）
+  在本块的射程内不会漂。本仓已有同形做法（Task 1 Step 1 的开工核对就是按内容 grep 的），
+  本节与它口径统一。
 
 ---
 
@@ -253,10 +267,16 @@ grep -n "Report" crates/continuum-artifact/src/artifact.rs
    其 backend **恰为** `builtin` 一枚（Task 1 的 (j)）、`register_research_operators` **只**报一件事（Task 2）。
 4. **枚举式判据的通病**：它钉的是**枚举到的那些**，不是**那个全称**。
    **本块有两处只能靠枚举承担，必须照实写明**：
-   - §4.5 的边表 **(l) 只钉住枚举到的七行**，且其中六行落在 `Json`↔`Json` 上、**无区分力**——
+   - §4.5 的边表 **(l) 只钉住枚举到的七行**，其中**第 2–6 行（五行）**落在 `Json`↔`Json` 上、**无区分力**——
      「§330 的七步之间的顺序」本块**表达不出**（`Operator` 无前驱字段，设计 §4.3 末）。
-   - **(m) 恒真**（端口类型的值必在 `ArtifactType::ALL` 里，而 `parse ∘ as_str == id` 由 P1 的
-     `every_artifact_type_round_trips_through_its_encoding` 把守）⇒ **不许写成「两枚型都由 P5e 收下」的全称**，
+     **「五行」不是「六行」**：设计 §4.5 正文里那个「六」数说的是**边**（不是行），
+     而本计划逐行逐来源实测该表的来源边共**八条、其中七条**落在 `Json`↔`Json` 上——
+     **设计正文的两个数（七条边、其中六条）与它自己的表都对不上**（见 `## 遗留` 第一节第 6 条）。
+     **边数与行数不是同一个数**——同一句话里两个计数要分别落回那张表数。
+   - **(m) 与 P1 的往返用例高度重叠、只在其遍历不到的变体上才独立**（端口类型的值必在 `ArtifactType::ALL` 里，
+     而 `parse ∘ as_str == id` 由 P1 的 `every_artifact_type_round_trips_through_its_encoding` 把守；
+     **但不是恒真**：`parse` 带通配臂、`ALL` 的完整性无守卫，故「新变体进了枚举与 `as_str`、未进 `parse`」
+     这一状态编得过，那时 (m) 红而 P1 的门绿）⇒ **不许写成「两枚型都由 P5e 收下」的全称**，
      见 `## 遗留` 第一节第 5 条。
 5. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 `Err`」。本块的错误面只有两族、共三臂：
    `OperatorError::{NotFound, Duplicate}`（Task 2 覆盖 `Duplicate` 两次）与
@@ -400,7 +420,9 @@ crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 加 continuum-
   逐格断言 `input_schema` / `output_schema` / `determinism` / `side_effect_class` / `backend_candidates`
   与 `version`。**七行逐行，不是抽样。**
   红条件（**取反档**）：改 `research-contradiction-check`（第 5 行）那一枚的 `side_effect_class`
-  由 `Pure` 改成 `Idempotent`（锚点：该枚的 `side_effect_class:` 字段值）⇒ 第 5 行红。
+  由 `Pure` 改成 `Idempotent`（锚点：**第 5 枚那个结构体字面量里**的 `side_effect_class:` 行——
+  `side_effect_class: SideEffectClass::Pure` 这个字段行在七枚里出现**七次**，故定位靠它的毗邻串
+  `OperatorId::new("research-contradiction-check")`，不靠这一行本身）⇒ 第 5 行红。
   红条件（**取反档**）：改第 3 行的 `determinism` 由 `Deterministic` 改成 `NonDeterministic` ⇒ 第 3 行红，
   同时 Task 5 的 (k) 也红（两条独立红点，见 §9.3 第 1 行）。
   **`backend_candidates` 那一格逐元素断言**：`["builtin"]` 与 `["Builtin"]` 在 `BackendId` 上是两个值（`definition.rs:66`），
@@ -408,16 +430,20 @@ crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 加 continuum-
 - `the_one_deterministic_operator_is_the_source_set`（§9.2 第 (j) 条与设计 §6.2 第 1 条）：
   `research-source-set` 的 `backend_candidates` **恰等于** `[BackendId::new("builtin")]`
   （**逐元素**，不是「非空」），且七枚里 `determinism == Deterministic` 的**恰一枚**、其 id 是 `research-source-set`。
-  红条件（**放宽档**）：把它改成 `["builtin", "primary-model"]`（锚点：该枚的 `backend_candidates` 字段值）
+  红条件（**放宽档**）：把它改成 `["builtin", "primary-model"]`（锚点：`research-source-set` 那一枚的
+  `backend_candidates` 字段值——`["builtin"]` 这个字面量在七枚里只出现**一次**，故唯一）
   ⇒ 长度与逐元素两半各红。
   **并写明本条的作用域**：它钉的是**本块的声明**，**不是一条被强制的注册期规则**——
   `register_research_operators` 只查重，将来第二枚 `Deterministic` 算子带外部后端候选出现时**今天没有任何东西会拦它**
   （设计 §6.2 第 2 条）。
 - `the_catalog_lists_seven_distinct_ids_despite_the_return_type`（§9.1）：`len() == 7` **且**两两 `id` 不同。
-  红条件（**取反档**）：把第 7 枚的 id 写成第 6 枚那个串（锚点：第 7 枚的 `id` 字面量）
+  红条件（**取反档**）：把第 7 枚的 id 写成第 6 枚那个串（锚点：`OperatorId::new("research-citation-verification")`
+  那一处的串——七枚的 id 字面量两两不同，故唯一）
   ⇒ 「两两不同」那一半红，而**返回类型 `[Operator; 7]` 的数目仍绿**——这一条正是为这个差而写。
 - `every_operator_declares_version_one`（§9.1）：逐枚 `assert_eq!(op.version, OperatorVersion::new(1))`。
-  红条件（**取反档**）：改第 4 枚的 `version` 为 `OperatorVersion::new(2)`（锚点：该枚的 `version` 字段值）
+  红条件（**取反档**）：改第 4 枚的 `version` 为 `OperatorVersion::new(2)`
+  （锚点：**第 4 枚那个结构体字面量里**的 `version:` 行——`OperatorVersion::new(1)` 这个取值在七枚里
+  出现**七次**，故定位靠它的毗邻串 `OperatorId::new("research-evidence-extraction")`）
   ⇒ 第 4 位红；**返回类型不变，故编译仍过**——这也说明它不是编译期照片。
 
 - [ ] **Step 3: 运行，确认失败**
@@ -459,7 +485,9 @@ pub fn all_operators() -> [Operator; 7];
 第 1、2、4、5、6、7 行 `NonDeterministic + Pure` 也自洽——**「经模型/检索」不等于「有外部副作用」**。
 **`side_effect_class` 判的是「算子自身的执行有没有改变本仓之外的状态」**，依据与边界测试在设计 §4.4 第 3 条
 （那段是这一口径的家，P5c/P5e/P5f 都指向它）；**本块的七枚一律取 `Pure`**，理由是七枚都只读、只产出本仓制品
-（`crates/continuum-effect/src/effect.rs:17-24` 的 `EffectType` 六臂与本块七枚无一对得上）。
+（`crates/continuum-effect/src/effect.rs:16-23` 的 `EffectType` 枚举本体、六臂在 `:17-22`——**实测**；
+初稿写的是 `:17-24`：首行是枚举的第一个臂而不是枚举本体，末行是 `}` 之后的空行，已订正）。
+本块的七枚无一与那六臂对得上。
 **注意 `NonDeterministic` 与 `Pure` 同现不是笔误**——写进 `operators.rs` 的文档注释。
 
 - [ ] **Step 5: 运行全部测试并提交**
@@ -505,7 +533,11 @@ git commit -m "feat(research): crate 骨架、七枚研究算子与 all_operator
   就地构造的 `Operator`，字段全 `pub`）⇒ `Err(Duplicate)`，
   **且 `probe` 用 `resolve` 查不到**（`Err(NotFound)`）。
   红条件（**移除档**）：删掉「先核后写」（改成逐枚 `register` 并在错处返回）⇒ `probe` 已写进表
-  ⇒ 本用例红。**这是本块唯一能区分「先核后写」与「边核边写」的夹具。**
+  ⇒ 本用例红。**这是本块能区分「先核后写」与「边核边写」的两条夹具里的第二条**（(e) 是第一条），
+  两条各覆盖「先核」漏掉的一半：**本条覆盖「漏核对既有表」**（撞车的那一枚在表里、新算子排在它之前），
+  **(e) 覆盖「漏核批内自撞」**（撞车发生在同一批的两枚之间）。**二者不可互换，故两条都要留。**
+  这里**不是**「本块唯一能区分的夹具」：按 (e) 自己的红条件，(e) 同样能让「边核边写」露出来
+  （见 `## 遗留` 第一节第 2 条）。
 - `a_batch_with_an_internal_collision_registers_nothing`（§9.2 第 (e) 条，**批内自撞**）：
   空表，批 = `[probe_a, probe_a₂]`，两枚的 `(id, version)` 相同（就地构造）⇒ `Err(Duplicate)`
   且 `probe_a` **查不到**。
@@ -591,15 +623,18 @@ git commit -m "feat(research): register_research_operators 的先核后写"
   （`OperatorVersion::new(1)`）。
   红条件（**移除档**）：删掉 `bind_research_methods` 里 `retrieval` 那一次 `bind`（锚点：那一次调用的 `MethodId` 字面量）
   ⇒ `retrieval` 的 `realized_by` 为空 ⇒ 逐位相等红。
-  红条件（**取反档**）：把 `"research-source-set"` 写成 `"research-source-set "`（多一个尾空格，锚点：那一枚字面量）
+  红条件（**取反档**）：把 `"research-source-set"` 写成 `"research-source-set "`（多一个尾空格，
+  锚点：`bind_research_methods` 里 `retrieval` 那一次 `bind` 的第二个实参列表中**那一枚**字面量——
+  该串在四处 `bind` 里只出现**一次**，故唯一）
   ⇒ 逐位相等的第 2 位红**且** `resolve` 得 `Err(NotFound)` ⇒ 本用例红。
   **并写明这条的补件性质**：`realized_by` 是 `Vec<String>`，**块间是文本弱引用、没有编译期照片**
   （P5b 设计 §3.2 末）——本用例是它的**运行期补件**，且它**在本 crate 内闭得上**，
   因为本块同时持有 `all_operators()` 与 `MethodRegistry`。
 - `the_research_domain_selects_exactly_four_entries`（§9.2 第 (g) 条）：
   `bind_research_methods` 之后 `select(MethodDomain::Research)` 返回**四条**，且四条 `id` 恰是手写的四个。
-  红条件（**移除档**，**跨 crate**）：删掉 P5b `seeded()` 里 `research/` 的一条（锚点：`crates/continuum-method`
-  的 `seeded()` 中那一条 `MethodId`）⇒ 本用例红。
+  红条件（**移除档**，**跨 crate**）：删掉 P5b `seeded()` 里 `research/` 的一条
+  （锚点：`crates/continuum-method` 的 `seeded()` 中 **`MethodId::new("contradiction-check")` 那一处**——
+  `research/` 有四条，故要指名是哪一条，不能写「那一条」）⇒ 本用例红。
   **并写明本条钉的是什么（设计此处自陈的方向与本例相反，见 `## 遗留` 第一节第 3 条）**：
   P5b 的 `select(MethodDomain)` **返回该领域的全部条目、与 `realized_by` 是否绑过无关**，
   故「四条都被 bind 过」**不是**本条钉的（那是上一条钉的）；
@@ -680,31 +715,47 @@ git commit -m "feat(research): bind_research_methods 与 research/ 四条 realiz
   | `research-citation-verification` | `research-synthesis`、`research-evidence-extraction` |
 
   红条件（**放宽档**）：把第 1 行 `research-question` 的 `input_schema` 由 `[]` 改成 `[Text]`
-  （锚点：该枚的 `input_schema` 字段值）⇒ 该行「无上游」而下游要一个型 ⇒ 本用例红。
+  （锚点：`research-question` 那一枚的 `input_schema` 字段值——空数组 `[]` 在七枚里只出现**一次**，故唯一）
+  ⇒ 该行「无上游」而下游要一个型 ⇒ 本用例红。
   红条件（**收紧档**）：把第 7 行 `research-citation-verification` 的 `input_schema` 里的 `Report` 删掉
-  （只留 `Json`）⇒ Task 1 的 (b) 红，而**本用例的第 7 行变绿**（`Json` 在上游找得到）
+  （只留 `Json`）（锚点：**`research-citation-verification` 那一枚的 `input_schema` 行**里那一枚 `Report`——
+  `Report` 在七枚里出现**两处**，另一处是第 6 行 `research-synthesis` 的 `output_schema`，故要靠算子 id 定位）
+  ⇒ Task 1 的 (b) 红，而**本用例的第 7 行变绿**（`Json` 在上游找得到）
   ⇒ **故 (l) 单独不足以钉住这一格，(b) 与 (l) 要一起看**（设计 §9.3 已列此条）。
   **并写明本条的作用域（照实，不许写成全称）**：
-  **它只钉住枚举到的这七行**；其中**六行落在 `Json`↔`Json` 上、无区分力**
+  **它只钉住枚举到的这七行**；其中**第 2–6 行（五行）落在 `Json`↔`Json` 上、无区分力**
   （§3.2 的代价：`SourceSet` 未收成一型），它只能拒掉「把 `Report` 接到只收 `Json` 的端口」这一类错。
   **「§330 的七步之间的顺序」本块表达不出**（`Operator` 无前驱字段，设计 §4.3 末）——
   本用例的断言**弱于顺序**：`Json → Json` 的三条边在类型上无法与「把链倒过来接」相区分。
 - `every_declared_port_type_is_a_known_artifact_type`（§9.2 第 (m) 条）：
   对七枚的每个 `input_schema` / `output_schema` 里的型 `t`，断言 `ArtifactType::parse(t.as_str()).is_some()`。
   红条件（**取反档**，**跨 crate**）：删掉 `crates/continuum-artifact/src/artifact.rs` 的 `parse` 里
-  `"report"` 那一臂（锚点：`artifact.rs:68-78` 的 `"report"` 臂）⇒ `Report` 的 `as_str` 取回 `"report"`、
-  `parse` 返回 `None` ⇒ 本用例红。
-  **并写明本条的实际强度（据实，见 `## 遗留` 第一节第 5 条）**：**它是恒真的**——
-  端口类型的取值必在 `ArtifactType::ALL` 里，而 `parse ∘ as_str == id` 已由 P1 的
-  `every_artifact_type_round_trips_through_its_encoding` 把守；本条的真正内容是
-  **「本 crate 能编译」这件事的推论**（`Report` 不在枚举里则本 crate 根本编不过），
+  `"report"` 那一臂（锚点：该文件 `parse` 本体里 `"report"` 那一臂——**是 `parse` 里那条，不是 `as_str` 里那条**；
+  **按内容指，不写行号范围**：P5e 在本块之前改这个文件）⇒ `Report` 的 `as_str` 取回 `"report"`、
+  `parse` 走通配臂返回 `None` ⇒ 本用例红。
+  **并写明本条的实际强度（据实，见 `## 遗留` 第一节第 5 条）**：**它不是恒真的，但与 P1 的往返用例高度重叠**——
+  端口类型的取值必在 `ArtifactType::ALL` 里，而 `parse ∘ as_str == id` 由 P1 的
+  `every_artifact_type_round_trips_through_its_encoding` 把守；**它独立的那一格**恰是 P1 遍历不到的：
+  `parse` 带通配臂、`ALL` 的完整性无守卫，故「新变体进了枚举与 `as_str`、未进 `parse`」这一状态
+  本 crate 编得过、P1 的门也绿，而本条红（这也说明它**不是**「本 crate 能编译」的推论）。
   故**不许**把它写成「本块声明了两枚正确的型」的全称。
+  **这一处的标签曾写作「恒真」，2026-10-10 复核订正为上述，原文与理由留在 `## 遗留` 第一节第 5 条。**
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认通过（本步不产生红，照实记读数）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-research --test edges
 ```
+
+**本步不是「先跑红再实现」那一步**：本 task 所测的实现体（`src/operators.rs` 的七行端口取值）
+**已在 Task 1 落地**，且 Step 3 自陈本 task 预期不改生产代码 ⇒ 这一轮**只会一次通过**。
+**照实写明，免得实现者去找一个不存在的红**：
+- 本轮**绿**是预期读数，把它记进报告（`Running` 与 `test result:` 的行数按纪律 11 的判据取）。
+- 本轮若**红**，红的是 **Task 1 的取值与设计 §4.5 的边表之间的差异**，不是「实现体还没写」——
+  按 Step 3 处置（以设计 §4.2／§4.5 为准改 `src/operators.rs`，并把这处差异记进 `## 遗留`）。
+- **本 task 两条红条件的兑现不在本轮，在 Task 7 Step 5 的变异轮**：放宽档（第 1 行 `input_schema`
+  由 `[]` 改成 `[Text]`）是那一轮的 (iv)，收紧档（第 7 行删掉 `Report`）是那一轮的 (v)；
+  (m) 的跨 crate 取反档（删 `parse` 里 `"report"` 那一臂）在那一轮按跨 crate 承重那一档另跑。
 
 - [ ] **Step 3: 实现**
 
@@ -743,23 +794,39 @@ git commit -m "test(research): §4.5 边表与端口类型的两条断言"
   `k.input_hash == h`；对**另外六枚逐枚**断言 `cache_key(&op, h).is_none()`（**逐枚六条，不抽代表**）。
   （ii）`can_reuse` 的四条件齐时（`cached = Some(&k)`、`current_input_hash = h`、`contract_affected = false`）为真。
   红条件（**取反档**）：把第 3 枚的 `determinism` 由 `Deterministic` 改成 `NonDeterministic`
+  （锚点：`research-source-set` 那一枚的 `determinism:` 字段值——`Deterministic` 在七枚里只出现**一次**，故唯一）
   ⇒ 那一枚由 `Some` 变 `None` ⇒ 本用例红（设计 §9.3 第 1 行）。
   红条件（**取反档，另一侧**）：把第 2 枚的 `determinism` 由 `NonDeterministic` 改成 `Deterministic`
+  （锚点：**`research-search` 那一枚那个结构体字面量里**的 `determinism:` 行——`NonDeterministic`
+  在七枚里出现**六次**，故定位靠它的毗邻串 `OperatorId::new("research-search")`，不靠这一行本身）
   ⇒ 该枚由 `None` 变 `Some` ⇒ 本用例红（设计 §9.3 第 2 行）。
   **并写明本条的作用域**：本块**不建第二份复用判据**（切分 §四第 7 条），
   本条的兑现**不是本块的一个函数**，而是**一枚算子的 `determinism` 声明**——
   `cache_key` 读的正是 `operator.determinism`（`reuse.rs:17`）而**不看 backend**
   （即 P5e 设计 §5.4 记的那处结构缺口；本块的处置见设计 §6.2 与 `## 遗留`）。
-- `the_cache_key_is_not_a_second_reuse_judgement`（**否定式照片**，切分 §四第 7 条）：
-  断言 `crates/continuum-research/src/` 里没有 `can_reuse` / `cache_key` 一类的第二份定义——
-  **照片机制是 Task 7 Step 3 的 grep（源码面复核）**，本用例内不写读源码的断言
-  （本仓已有一处人工复核点，不再造自指的断言；与 P4 的同一取舍）。
+- **`the_cache_key_is_not_a_second_reuse_judgement`：本计划不建这条用例**（切分 §四第 7 条的另一半）。
+  「本 crate 里没有第二份复用判据」这件事**在本块内没有可写的运行期断言**：本块不定义任何可与第二份判据
+  比对的函数面，而语料只能从被测清单里取（纪律 9「正控制不得自证」），故照这样写出来的用例只会是一条
+  **恒绿的空用例**——比没有更坏。**照片改由 Task 7 Step 3 的源码面复核（人工）承担**（`src/` 里
+  `can_reuse` / `cache_key` 等五枚名字一枚都不重写）。
+  **这一处照的是 P4 对同形情况的取法**：`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md` 的
+  `the_projection_is_value_preserving_dimension_by_dimension` 一条下判定「**不建**」那条读源码的自定义检查，
+  只把它加进人工复核清单——**P4 取的是「不建」，不是「建一条不写断言的用例」**。
+  **这一处只有人工照片的代价记在 `## 遗留` 第三节第 10 条。**
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行，确认通过（本步不产生红，照实记读数）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-research --test reuse
 ```
+
+**同 Task 4 Step 2**：本 task 所测的实现体（七枚的 `determinism` 声明）**已在 Task 1 落地**，
+Step 3 也自陈不改生产代码 ⇒ 这一轮**只会一次通过**。绿是预期读数，记进报告；
+若红，红的是 Task 1 的取值与 §6.1 的判据之间的差异，不是「实现体还没写」。
+**本 task 两条红条件的兑现同样在 Task 7 Step 5 的变异轮**：第 3 枚（`research-source-set`）的
+`determinism` 改成 `NonDeterministic` 是那一轮的 (iii-a)；第 2 枚（`research-search`）改成
+`Deterministic`（设计 §9.3 第 2 行，即 (k) 的另一侧）是同一轮的 (iii-b)——**两侧都要跑**，
+这一条两侧对钉的守卫只跑一侧等于没钉（纪律 6）。
 
 - [ ] **Step 3: 实现**
 
@@ -915,14 +982,18 @@ grep -rn "reqwest\|std::fs\|File::create" crates/continuum-research/src
 按纪律 1／2 跑**承重守卫**（两侧对钉的、fail-open 侧的、失败路径判别 `Err` 的、跨 crate 才可见的），
 每轮：`trap` 装还原 → 变异前 `sha256sum` → 跑全量 `--no-fail-fast` → 读红位 → 还原后 `sha256sum` → 独立日志路径。
 **逐轮在报告里附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位」**。
-**必跑的六轮**：
+**必跑的轮次**（(iii) 含两次变异，故实际跑的次数比这里的编号多一次）：
 （i）**移除档**：`register_research_operators` 的「先核后写」删掉 ⇒ 应红 `tests/register.rs` 的
 `a_duplicate_after_a_new_operator_leaves_no_half_registration` 与 `a_batch_with_an_internal_collision_registers_nothing`；
 **不应红** `a_full_batch_registers_and_every_id_resolves`（合法批次两侧都绿）。
 （ii）**移除档**：`bind_research_methods` 的 `retrieval` 那一条 ⇒ 应红 (f) 的两个串那一半；
-**不应红** (k)、(l)、(m)。
-（iii）**取反档**：`research-source-set` 的 `determinism` ⇒ 应红 (k) 的第一枚；
-**不应红** (j)、(l)、(m)（它们不看 determinism）。
+**不应红 (g)**——(g) 钉的是「P5b 的 `seeded()` 在 `research/` 域恰四条」，与 `realized_by` 绑没绑无关
+（`select` 返回该领域的全部条目，Task 3 Step 1 的 (g) 处已写明）；**设计 §9.3 在该行预告「g 也红」是错的预告，
+以本行为准**（据实记在 `## 遗留` 第一节第 3 条）。**不应红** (k)、(l)、(m)。
+（iii）**取反档，两侧各一次**：`research-source-set` 的 `determinism` 改成 `NonDeterministic` ⇒ 应红 (k) 的第一枚；
+`research-search` 的 `determinism` 改成 `Deterministic` ⇒ 应红 (k) 的第二组（该枚由 `None` 变 `Some`）。
+**两侧都要跑**——(k) 是两侧对钉的守卫（一枚 `Some` + 六枚 `None`），只跑一侧等于没钉（纪律 6）；
+**两次变异各用独立日志路径、各自附读数**。**两侧都**不应红 (j)、(l)、(m)（它们不看 determinism）。
 （iv）**放宽档**：第 1 行 `input_schema` 由 `[]` 改成 `[Text]` ⇒ 应红 (l) 第 1 行；
 **不应红** (b) 之外的行——**注意 (b) 也会红**（它逐格断言端口），故这两条一起看。
 （v）**收紧档**：第 7 行删掉 `Report` ⇒ (b) 红、(l) 第 7 行**变绿**（设计 §9.3 已列）。
@@ -965,16 +1036,19 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
 ### 一、本计划在设计里查出的**六条**问题（发现即报，本计划一处都不替设计补写）
 
 1. **⚠️ §9.3 最后一行把「改 backend 串`-`→`_`」标成「等价变异体、全绿」，与 §9.2 第 (b) 条相抵。**
-   该行逐字：「**等价变异**：把 `research-question` 的 `backend_candidates` 从 `["primary-model"]`
-   改成 `["primary_model"]`（大小写不同）｜**全绿**——这是一枚**等价变异体**（两个串在表里等价，
+   该行（`design:767`，表末行）**逐字**，按单元格引（表以 `|` 分格，此处只用「｜」标出格界）：
+   「**等价变异**：把 `research-question` 的 `backend_candidates` 从 `["primary-model"]`
+   改成 `["primary_model"]`」｜「**全绿**——这是一枚**等价变异体**（两个串在表里等价，
    都是本设计定的名字，无外部消费者）。要打红它必须换变异体：把它改成与另一枚算子共用的串以外的任意值，
    那时 b 红」。
    **两处对不上**：（i）§9.2 第 (b) 条要求**手写期望表**逐格断言 `backend_candidates`——
    源码里的串一改，那格就 `assert_eq!` 失败 ⇒ **本变异体打红 (b)**，不是全绿；
    （ii）该行自己给的那条规则（「改成不与另一枚算子共用的串 ⇒ b 红」）**也涵盖 `primary_model`**
    （别的算子用的是 `primary-model`），故该行**自相矛盾**。
-   另有一处笔误：括注「（大小写不同）」描述的是上一行的 `builtin` → `Builtin`，
-   `primary-model` → `primary_model` 是**分隔符**不同，不是大小写。
+   **（订正留痕，2026-10-10）** 本条初稿的引文把**上一行**（`design:766`，`builtin` → `Builtin` 那一行）
+   的括注「（大小写不同）」并入了本行，并据此报出一处「笔误」——**设计并无那处笔误**：
+   `design:766` 的括注与它自己那一行的变异体（`builtin` → `Builtin`）相符，`design:767` 没有这个括注。
+   引文已按 `design:767` 逐字订正，那处「笔误」的指摘已删。
    **本计划的取法**：按「能指出一个把两版分开的输入，它就是真变异体」办——
    **(b) 就是那个输入**，故本块的 `primary_model` 变异体按**取反档**记，预期 (b) 红。
    **收件人：设计作者 ＋ 复审者。**
@@ -986,8 +1060,9 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
    故 §9.3 对 d 的预告**不成立**——照它去查会去找一个不存在的红。
    **本计划的取法**：保留 (d)（它仍钉「`Err` 而不是静默覆盖」），在那条用例的注释里照实写明
    第二半在本夹具下不承重；**另补一条** `a_duplicate_after_a_new_operator_leaves_no_half_registration`
-   （批 = `[新算子, 已注册的那一枚]`）作**承重**夹具——这是本块的 (d)/(e) 里唯一能区分
-   「先核后写」与「边核边写」的形状。**收件人：设计作者 ＋ 复审者。**
+   （批 = `[新算子, 已注册的那一枚]`）作**承重**夹具——它与 (e) 合起来是 (d)/(e) 加本条里的
+   **两条**能区分「先核后写」与「边核边写」的形状：本条覆盖「漏核对既有表」，(e) 覆盖「漏核批内自撞」，
+   两条不可互换。**收件人：设计作者 ＋ 复审者。**
 3. **⚠️ §9.2 第 (g) 条的自陈与 `select` 的语义相反。**
    该条要求「`select(MethodDomain::Research)` 返回**四条**」，并自陈「**这一条钉的是「四条的 id 都被 bind 过」
    而不是「四条都存在」**」。**而 P5b 设计 §4.5 写死 `select` 「返回该领域的全部条目，按 id 升序」
@@ -1015,11 +1090,33 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
    而该条自己的括注（「这条用例要等 P5e 的枚举改动落地后才写得出」）说的正是这件事。
    **本计划的取法**：用例照写（它是一条便宜的跨 crate 交叉核对），但**照实标注强度**，
    **不许**写成「本块声明了两枚正确的型」的全称。**收件人：设计作者 ＋ 复审者。**
-6. **一处据实的边界，不是错**（记在此是为了让复审不必重新推一遍）：**§4.5 的边表七行里六行无区分力**
-   （§3.2 的代价：`SourceSet` 未收成一型 ⇒ 三条相邻边都是 `Json` 接 `Json`）。
+   **（2026-10-10 复核订正：上面这条自报的判定「恒真」经复核不成立，原文保留以此留痕。）**
+   **理由两条，都落在这个仓库的实测上**：
+   （i）`ArtifactType::parse` 的 `match` **带通配臂**（`crates/continuum-artifact/src/artifact.rs` 的
+   `parse` 末行 `_ => return None`），故一个新增变体**可以只在 `as_str` 有臂、在 `parse` 没有臂而全仓编译通过**
+   （`as_str` 是穷尽 `match`，加型即在定义处编译失败；`parse` 从 `&str` 出发，编译器点不出漏臂）；
+   （ii）`ALL` 的完整性**没有守卫**——`[ArtifactType; N]` 的数目字面量与 `assert_eq!(ALL.len(), N)`
+   都不强制新变体进 `ALL`，这一点由 P1 那条用例的文档注释自己写明（「它**发现不了**『加了类型却没加进 `ALL`』」）。
+   两条合起来：存在一个「本 crate 编得过、P1 的门也绿、而 (m) 红」的状态（`Report` 进了枚举与 `as_str`，
+   未进 `parse`）。**故 (m) 不是恒真，它的内容也不是「本 crate 能编译」**——本计划自己给的那个变异体
+   （Task 4 的 (m) 一条给出的那个变异体：删掉 `parse` 里 `"report"` 那一臂）**就能打红它**，这与「恒真」相抵。
+   **该条说对的那一半**是：(m) 钉的**不是**设计括注里那句「两枚型中 `Json` 既有、`Report` 由 P5e 的清单收下」。
+   **订正后的标签**：**(m) 与 P1 的往返用例高度重叠，只在其遍历不到的变体上独立**；
+   它作为一条独立的判据成立，只是强度弱于它自陈的「钉住 §3.2 的那句断言」。
+   （这一处订正同时落在纪律 4、Task 4 Step 1 的注释与第四节申报项上。）
+6. **§4.5 的边表：一处据实的边界 ＋ 一处设计正文的数与本表不符**（记在此是为了让复审不必重新推一遍）：
+   （i）**据实的边界**——**§4.5 的边表七行里第 2–6 行（五行）无区分力**
+   （§3.2 的代价：`SourceSet` 未收成一型 ⇒ 第 2、3、4 行的三条相邻边都是 `Json` 接 `Json`）。
    故 §9.2 第 (l) 条的实际判别力只落在**第 1 行**（`[]` 与 `[Text]` 之分）与**第 7 行**（`Report`）上；
    **「§330 的七步之间的顺序」本块表达不出**（`Operator` 无前驱字段，设计 §4.3 末、§11 第 3 条）。
-   Task 4 的注释已照此写。**收件人：复审者。**
+   Task 4 的注释已照此写。
+   （ii）**设计 §4.5 正文那句「七条边里有六条落在 `Json`↔`Json` 上」（design:411）与本计划逐行逐来源的实测不符**：
+   按「一张表里的**来源边**」数（第 2–5 行各一条、第 6 行两条、第 7 行两条），**共八条，其中七条落在
+   `Json`↔`Json` 上**，第 7 行那条 `Report` 是唯一不是的一条。**「六条边」记成「六行」是行数与边数的相混**
+   （本计划初稿的那三处即由此而来，已改）；而「七/六」这两个数**无论按来源边数还是按有上游的行数（六行、
+   其中五行 `Json`↔`Json`）都数不出来**，故这一处是设计正文的数与它自己的表不相符。
+   **本计划的处理**：正文只写可核的行级事实（第 2–6 行、五行），**不继承那两个数**。
+   **收件人：设计作者 ＋ 复审者。**
 
 ### 二、跨计划前置：本块的**硬门**（逐条见跨计划前置第二节）
 
@@ -1027,16 +1124,21 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
 - **P5b（`continuum-method`）未交付** ⇒ Task 3 整体写不出来（普通边）。
 - **P5e 的 `ArtifactType::Report` 未落地** ⇒ **本 crate 编不过**（§4.2 第 6、7 行的端口）。
 - **中间态的危险形状**：在 P5a/P5b 落地前把成员加进 `members`、或先声明那两条路径依赖，
-  会让**整个工作区**的 cargo 命令一起失败（路径依赖解析失败发生在 `cargo metadata` 之前）。
+  会让**整个工作区**的 cargo 命令一起失败（路径依赖解析失败发生在**工作区清单装配**之中，
+  `cargo metadata` 与任何 cargo 命令都要经过那一步）。
   故 Task 1 的「加成员行」与「写 `Cargo.toml`」是同一步，且整个计划排在三处落地之后。
 
-### 三、拍不到的照片（设计 §9.5 已列 **7** 条，**逐条照原文，本计划不发明**）；本计划补两条
+### 三、拍不到的照片（设计 §9.5 已列 **7** 条，**逐条照原文，本计划不发明**）；本计划补三条
 
 8. **本块对 `bind_research_methods` 的失败路径没有照片**（第一节第 4 条）：四个 id 全已 seed，
    该函数不可能返回 `Err`。**收件人：设计作者 ＋ 复审者。**
 9. **本块的 `ALLOWED` 五项里两条是 dev 边，而「生产代码零调用」这件事只有间接照片**：
    `tests/type_level.rs` 与 `tests/reuse.rs` 在，而 `src/` 里零 `use`（Task 7 Step 3 的 grep）。
    「零 `use`」是**源码文本层面**的观察，**不是**类型层的禁止。**收件人：复审者。**
+10. **「本 crate 里没有第二份复用判据」没有运行期照片**（Task 5 Step 1，切分 §四第 7 条）：
+   本块不定义任何可与第二份判据比对的函数面，语料又只能从被测清单里取（纪律 9），
+   故这条只能由 Task 7 Step 3 的**源码面复核**（人工）承担——「零命中」是**源码文本**层面的观察。
+   本块**不建**那条恒绿的空用例（P4 对同形的一处取的正是「不建」）。**收件人：复审者。**
 
 ### 四、本计划自定的形状与取值（**申报**，逐条说清代价）
 
@@ -1050,8 +1152,13 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
 - **Task 3 的 (f) 除「逐条非空 + `resolve` 成功」外，还断言 `realized_by` 的逐位内容**（手写表）：
   只断言「非空」会让「填错成别的算子、但那个算子恰好存在」静默通过。
   **代价**：多一份手写期望表；**收益**：§7 的四行有逐位照片。
-- **Task 3 的 (g) 照实改标作用域**（第一节第 3 条）、**Task 4 的 (m) 照实改标强度**（第 5 条）、
+- **Task 3 的 (g) 照实改标作用域**（第一节第 3 条）、**Task 4 的 (m) 照实改标强度**（第 5 条，
+  标签由「恒真」改标为「与 P1 的往返用例高度重叠、只在其遍历不到的变体上独立」）、
   **Task 4 的 (l) 写明只钉枚举到的七行**（第 6 条）：**三处都是标签订正，不改设计要求的断言本身**。
+- **Task 5 的否定式用例照 P4 办：不建**（切分 §四第 7 条的另一半）：
+  「本 crate 里没有第二份复用判据」在本块内没有可写的运行期断言（本块不定义可与之比对的函数面，
+  语料又只能从被测清单里取），故只留在 Task 7 Step 3 的人工复核清单里，**不造恒绿的空用例**。
+  **代价**：这一处只有源码文本层面的照片（见第三节第 10 条）；**收益**：不往 `tests/` 里放一条永不失败的用例。
 - **`research-probe` 这个就地构造的算子**：仅出现在 `tests/register.rs` 的夹具里，
   **不进 `all_operators()`**；它的 `(id, version)` 与七枚两两不同（否则夹具自身会先撞车）。
 - **测试文件按 §9.2 的分组切**（`catalog` / `register` / `methods` / `edges` / `reuse` / `type_level`）：
@@ -1113,5 +1220,5 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
   它们会让实现者去查不存在的红）；迁移号段（本块不占档，`160` 仍空）；设计 §11 第 1、4 条与 §10 第 2 条。
 - **交给规范维护者（本项目无此角色）**：设计 §11 第 2、5、7 条与设计 §12 第 2 条里那处规范侧未决
   （§330 的 SHOULD 与《总纲》§8.4 的「固定链条」）。**本计划一条都不发明。**
-- **交给复审者**：`## 遗留` 第一节的六条与第三节的两条补记；
-  以及本计划的**申报项**（第四节七条）——它们都是「本计划自定的形状」，判据是「代价写清了没有」。
+- **交给复审者**：`## 遗留` 第一节的六条与第三节的**三条**补记；
+  以及本计划的**申报项**（第四节逐条）——它们都是「本计划自定的形状」，判据是「代价写清了没有」。
