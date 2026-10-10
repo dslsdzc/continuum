@@ -277,8 +277,13 @@ crates/continuum-canonical/
   src/risk.rs         ResolutionRisk
   src/binding.rs      ExplicitBinding、BindingSource
   src/ambiguity.rs    Canonicalized、CanonicalRepresentation、UnresolvedMention、finish
-  src/alias.rs        AliasScope、Alias、promote_alias、children 式的读函数
-  src/persist.rs      alias 表（迁移 100）
+  src/alias.rs        AliasScope、Alias、children 式的读函数
+  src/persist.rs      alias 表（迁移 100）、save_alias / load_alias / list_aliases / promote_alias
+  > **订正（2026-10-10，Task 7 实现期查出并交裁，裁定：以代码那一侧为准、改本行）**：原把 `promote_alias` 列在 `src/alias.rs`。
+  > **四条 I/O（`save_alias` / `load_alias` / `list_aliases` / `promote_alias`）同址更合理**——它们都要 `Tx`，
+  > 而 `alias.rs` 是不碰持久化的类型与映射那一层。实现按后者落，偏离写在 `src/persist.rs` 的文件头。
+  > **判据**：**「某某落在哪个文件」这类行，若实现期出现了更一致的归属，改的是计划那一行**——
+  > 计划的文件结构表是**一张意图图**，不是判据；而**代码里的归属一旦落下，就有后续 task 按它写**。
   src/error.rs        CanonicalError、AliasError
   tests/surface.rs        规范化与 mention 切分
   tests/canonical.rs      和类型、Temporal、Ambiguity Manager
