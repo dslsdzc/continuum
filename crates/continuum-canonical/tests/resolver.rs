@@ -16,8 +16,8 @@
 //!
 //! # 这些用例钉的是**分支机制**，不是解析质量
 //!
-//! 真实候选来源今天**零个**（设计 §16 第 5 条），`ExplicitBinding` 的注入点还没建
-//! （Task 6），§4.2 的四条断言由 Task 5 钉。故下面的候选集是**夹具**给的，
+//! 真实候选来源今天**零个**（设计 §16 第 5 条），`ExplicitBinding` 的注入点已随 Task 6 落地
+//! （`binding::apply`；**本文件的用例一律不传它**），§4.2 的四条断言由 Task 5 钉。故下面的候选集是**夹具**给的，
 //! 本文件钉的是「四态各自在什么条件下产出」这件事本身
 //! （与设计 §15.2 第 3 条同一体：能拍的只有机制）。
 //!
@@ -498,10 +498,11 @@ fn the_two_numbers_are_not_on_the_same_axis() {
 /// 证据在设计自己的照片里：`Resolved.candidate_count` 比检索集多 1（§4.6 的照片 (a)）
 /// ⟹ 「检索集」与「工作集」是两个集合。
 ///
-/// # 今天 `injected` 一律传 `None`
+/// # 本文件的调用点一律传 `None`
 ///
-/// `ExplicitBinding` 的注入点是 Task 6（`binding::apply`），今天**没有第二个来源**。
-/// 参数留在签名里，是为了让注入落地之后这条判据**不必重写**且**仍不恒真**——
+/// `ExplicitBinding` 的注入点（`binding::apply`）**已随 Task 6 落地**，而本文件的调用点
+/// 一律传 `None`——**本次调用**没有注入，不是「本层没有注入点」。
+/// 参数留在签名里，是为了让**某条用例真传一枚注入**时这条判据**不必重写**且**仍不恒真**——
 /// 判据写在「来源」上而不是写在「工作集」上，`assertion_a_injection_guard` 钉的就是这个差别。
 fn a_holds(
     e: &EntityId,
@@ -555,7 +556,7 @@ fn assertion_a_a_resolved_entity_is_a_member_of_the_retrieved_set_or_the_injecte
         "夹具前提：e-c2 违反 K（它分数更高，故它不是被分数选中的那一枚）",
     );
 
-    // 今天没有第二个来源（注入点是 Task 6）。
+    // 本调用点不注入：`resolve` 的 `injection` 传 `None`（注入点 `binding::apply` 已随 Task 6 落地）。
     let injected: Option<EntityId> = None;
 
     let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
@@ -600,18 +601,19 @@ fn assertion_a_a_resolved_entity_is_a_member_of_the_retrieved_set_or_the_injecte
 ///
 /// `K = [Scope(Project), BoundTo(e-pointed)]`，检索集里那一枚**违反 `Scope`**。
 /// 「用户点名的实体就是"正确候选"」是一个很自然的错误实现——那时解析器会返回
-/// `Resolved(e-pointed)`，而 **`e-pointed` 既不在检索集里、今天也没有 binding 给它背书**：
+/// `Resolved(e-pointed)`，而 **`e-pointed` 既不在检索集里、本调用点也没有 binding 给它背书**：
 /// 它不在两个来源的并里。正确结果是 `Unknown { AllCandidatesRejected }`
-/// （`binding` 不豁免约束；那一侧的正式用例是 Task 6 的照片 (b)，这里钉的是
-/// 「**在今天这个没有注入点的实现里**，除检索集外没有第二个来源」）。
+/// （`binding` 不豁免约束；那一侧的正式用例是 §4.6 的照片 (b)，在 `tests/risk.rs`，这里钉的是
+/// 「**本调用点不传注入**，故除检索集外没有第二个来源」）。
 ///
 /// # 红条件（这条用例本身的红）
 ///
 /// 在 `resolve` 里加一条「没有合格候选时，把 `BoundTo` 点名的那个实体作为候选产出」
 /// （**取反档**：它正是「解析器自造实体」的形态）⟹ 结果落 `Resolved(e-pointed)`，
 /// 本用例 `Resolved` 那一支的**第一条**断言红（`a_holds` 为假）。
-/// 把 A 实现成「`e` ∈ 工作集」（**放宽档**）在**今天**与正确实现不可分
-/// ——注入点落地（Task 6）之后两者才分岔，而这条用例正是为那一刻准备的：
+/// 把 A 实现成「`e` ∈ 工作集」（**放宽档**）在**本用例上**与正确实现不可分
+/// （本用例的 `injection` 传 `None`，工作集 ≡ 检索集）——两者要等**某条用例真传一枚注入**
+/// 之后才分岔，而这条用例正是为那一刻准备的：
 /// 它读的是「两个声明的来源」，不是「解析器手里那一集」。
 /// 实测见报告 §变异轮。
 #[test]
@@ -630,7 +632,7 @@ fn assertion_a_injection_guard() {
         "夹具前提：这一枚违反 `Scope`，故合格集为空",
     );
 
-    // 今天没有第二个来源：`ExplicitBinding` 的注入点（`binding::apply`）是 Task 6。
+    // 本调用点不注入：`resolve` 的 `injection` 传 `None`（注入点 `binding::apply` 已随 Task 6 落地）。
     let injected: Option<EntityId> = None;
 
     let r = resolve(&retrieved, None, &k, &conf("high"), &req("high"));
@@ -640,7 +642,7 @@ fn assertion_a_injection_guard() {
             assert!(
                 a_holds(x.entity(), &retrieved, injected.as_ref()),
                 "断言 A 的注入守卫：解出的实体 {} 不在「检索集 ∪ 注入的那一枚」里 \
-                 ——自造实体只能来自 `ExplicitBinding` 这唯一一个注入点，今天是零个",
+                 ——自造实体只能来自 `ExplicitBinding` 这唯一一个注入点，而本次调用没有传注入",
                 x.entity().as_str(),
             );
             assert!(

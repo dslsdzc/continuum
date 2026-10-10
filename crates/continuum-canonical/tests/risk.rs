@@ -148,7 +148,7 @@ fn required_strength_is_a_required_argument_with_no_default() {
 /// 红条件（**移除档**，本仓口径：加一条「保守的」基线正是要防的那一格）：
 /// 在 `src/` 里写下 `impl From<ResolutionRisk> for RequiredStrength`（或一个
 /// `fn from_risk`）⟹ 第 2 条的扫描红，且 `required_strength_has_no_from_risk.rs`
-/// 那份反例的 `.stderr` 也变（那两行从 `E0599` / `E0277` 变成编得过）。
+/// 那份反例的 `.stderr` 也变（那两行从 `E0599` / `E0308` 变成编得过）。
 /// 实测见报告 §变异轮。
 #[test]
 fn the_layer_provides_no_baseline_mapping_from_risk_to_strength() {
