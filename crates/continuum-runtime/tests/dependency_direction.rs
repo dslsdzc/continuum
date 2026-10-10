@@ -153,7 +153,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 本层不登记任何指向执行层／资源层／边界层的边；允许集只含 continuum-persist
     // （alias 表经 Tx）与层内前驱。`continuum-semantics ← continuum-canonical` 是
     // 反向的读取方，不在这里。
-    ("continuum-canonical", &[]),
+    //
+    // P4 的 Task 7 起填入那条边：`alias` 表的迁移 100 与四条读写路径经 `Tx` 访问
+    // （设计 §4.6）。**上面几行的「只含 `continuum-persist`」在 Task 7 之前是「将来时」**
+    // ——那时数组是 `&[]`，本行注释写的是「允许集是空条目……今天还没有边」；
+    // Task 7 兑现了它。表是**允许集合**的转录（不是使用点派生），故这一格此前一直空着
+    // 不算错，只是当时还没有使用者。
+    ("continuum-canonical", &["continuum-persist"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

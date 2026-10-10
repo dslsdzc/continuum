@@ -22,6 +22,13 @@ thiserror = { workspace = true }
 # `ContractRef`」，与依赖边无关。**话对、号码错**，旧号码记此。
 # 它会改 `Cargo.lock`（本 crate 的依赖列表多一项），故提交时按显式路径带上。
 unicode-normalization = { workspace = true }
+# Task 7 的使用点：`persist.rs` 的 `alias` 表迁移与行级读写经 `Tx` / `Migration` /
+# `PersistError` / `Value` 访问（设计 §4.6）。数据库连接在 `continuum-persist` 内私有，
+# 本 crate 只经 `Tx` 访问。**这是本 crate 唯一的 workspace 内边**，故它同时要把
+# `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 里本 crate 的
+# 条目从 `&[]` 改成 `&["continuum-persist"]`——那一行今天写着「本 crate 的允许集是空条目」，
+# 那是 Task 1 时的实况，本 task 起不再成立。
+continuum-persist = { path = "../continuum-persist" }
 
 [dev-dependencies]
 # Task 3 的使用点：`tests/type_level.rs` 用编译失败样例钉住三件 crate 外**写不出**的东西
@@ -34,5 +41,9 @@ unicode-normalization = { workspace = true }
 # （`dependency_direction.rs` 的 `for other in &all_crates`）；`trybuild` 不在 members 里。
 # **但它会让 `Cargo.lock` 变化**（`continuum-canonical` 的依赖列表多一项），
 # 故提交时要按显式路径带上锁文件。
-# **只在测试目标里用**：`src/` 里没有一行读它（本 crate 对 workspace 内的引用仍是零）。
+# **只在测试目标里用**：`src/` 里没有一行读它。
 trybuild = { workspace = true }
+# Task 7 的使用点：`tests/alias.rs` 的落库用例各起一个临时库（与
+# `continuum-capability/tests/persist.rs` 的夹具同形）。它是**外部** crate，
+# 故同 `trybuild` 一样不进 `dependency_direction.rs` 的 `ALLOWED`。
+tempfile = { workspace = true }

@@ -68,6 +68,8 @@ dependencies = [
 name = "continuum-canonical"
 version = "0.1.0"
 dependencies = [
+ "continuum-persist",
+ "tempfile",
  "thiserror",
  "trybuild",
  "unicode-normalization",

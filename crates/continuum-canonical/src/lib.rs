@@ -58,6 +58,14 @@
 //! 「`RequiredStrength` 没有 `Default`」「少传门槛参数编不过」「没有 `from_risk` 一类的基线」
 //! 与它们的正控制。
 //!
+//! Task 7 落 §4.6 的 **Alias 存储**：迁移 100 的 `alias` 表（`p4_canonical_migrations`，
+//! `persist` 模块）与四条读写路径（[`save_alias`] / [`load_alias`] / [`list_aliases`] /
+//! [`promote_alias`]），加上 §278 四值的落库编码与记录体（[`AliasScope`] 的
+//! `as_str` / `parse` 与 [`Alias`]，`alias` 模块——**这个文件是 Task 4 提前起的头**）。
+//! [`AliasError`] 落在 `error.rs`。以 `tests/alias.rs` 的十条用例钉住四值逐枚往返与编码、
+//! 两条读路径各拒表外取值、「写侧不升级作用域」的两侧、提升路径的两侧、
+//! 列清单恰是三列且无过期列。**迁移 100 进驱动装配归 Task 20**（本 task 只交出它）。
+//!
 //! 本段是**逐 task 更新的进度注记**，不是对代码性质的可跑断言，故没有用例钉它
 //! ——与 `continuum-node` 的 `lib.rs` 同一体例：它的「走到哪为止」也由各 task 改写。
 //!
@@ -65,9 +73,11 @@
 //!
 //! 设计 §2.2 给本 crate 定的入边只有一条：`continuum-canonical ← continuum-persist`
 //! （`alias` 表经 `Tx` 读写，§4.6），**由用它的那个 task 登记**。
-//! 本 task 对 workspace 内其它 crate 的**引用为零**，故 `crates/continuum-runtime/tests/
-//! dependency_direction.rs` 的 `ALLOWED` 里本 crate 的允许集是**空条目**——
-//! 它不能省（那张表要求每个 workspace 成员都在里面），只是今天还没有边。
+//! **Task 7 就是那个 task**：故 `crates/continuum-runtime/tests/dependency_direction.rs`
+//! 的 `ALLOWED` 里本 crate 的允许集**已从空条目改成 `&["continuum-persist"]`**。
+//! （那一行原先的注释写着「本 crate 的允许集是**空条目**……只是今天还没有边」——
+//! 那是 Task 1 时的实况，那条注释随本 task 一并改了；旧说法记在
+//! `crates/continuum-canonical/Cargo.toml` 的 `continuum-persist` 那一行。）
 //! 反向的 `continuum-semantics ← continuum-canonical` 是**读取方**的边，登记在那一侧。
 
 mod alias;
@@ -76,6 +86,9 @@ mod canonical;
 mod candidate;
 mod error;
 mod explicit;
+// **`persist` 是私有模块**（同 `candidate` / `explicit` / `risk` 的体例）：
+// 它的五个公开项（`p4_canonical_migrations` 与四条读写函数）逐个在根上重导出。
+mod persist;
 mod risk;
 mod surface;
 mod temporal;
@@ -91,12 +104,15 @@ pub mod resolver;
 // **`risk` 是私有模块**：`ResolutionRisk` 就是它全部的公开面，同 `candidate` / `explicit` 的体例。
 pub mod binding;
 
-pub use alias::{AliasScope, alias_scope_to_resolution_scope, resolution_scope_to_alias_scope};
+pub use alias::{
+    Alias, AliasScope, alias_scope_to_resolution_scope, resolution_scope_to_alias_scope,
+};
 pub use ambiguity::finish;
 pub use binding::{BindingSource, ExplicitBinding, USER_EXPLICIT_EVIDENCE};
 pub use canonical::{CanonicalRepresentation, Canonicalized, UnresolvedMention};
 pub use candidate::{Candidate, CandidateSource, CandidateSources, EntityId};
-pub use error::CanonicalError;
+pub use error::{AliasError, CanonicalError};
+pub use persist::{list_aliases, load_alias, p4_canonical_migrations, promote_alias, save_alias};
 pub use explicit::{
     CandidateFacts, CandidateSet, EntityKind, ExplicitConstraint, ResolutionScope, qualifying,
     satisfies,

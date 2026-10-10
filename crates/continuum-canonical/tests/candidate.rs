@@ -16,7 +16,7 @@
 //! # 「没有指向 `ToolId` / `ModelId` / `ConnectorId` 的转换」那一半**不靠 `trybuild` 钉**
 //!
 //! 简报点名的这一句照录在此，免得后来者以为它漏了：本 crate 的 `ALLOWED` 条目
-//! （`crates/continuum-runtime/tests/dependency_direction.rs:156`，行号本 task 实测）
+//! （`crates/continuum-runtime/tests/dependency_direction.rs:162`，行号 **P4 Task 7** 实测）
 //! 里没有 `continuum-core`，**那三个类型在本 crate 里根本写不出来**——写了即 `E0432`
 //! 未解析导入，而**按本仓纪律「编译不过」不算变红**，那种样例证明不了任何东西。
 //! 故这一半的判据是 **`ALLOWED` 条目 ＋ Task 21 的 grep**（依赖边为零），

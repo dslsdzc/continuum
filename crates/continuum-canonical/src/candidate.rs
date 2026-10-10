@@ -28,8 +28,17 @@ use crate::Mention;
 /// `continuum-connector`），引用它们就要登记**指向那些 crate 的依赖边**，
 /// 而设计 §1.2.3 的规则 3（`design:99-138`）要求本层**不登记任何指向执行层／资源层／边界层的边**。
 /// 这条规则在仓里有既有的守卫：`crates/continuum-runtime/tests/dependency_direction.rs` 的
-/// `ALLOWED` 逐对断言，本 crate 的允许集是**空条目**
-/// （`dependency_direction.rs:156`，行号本 task 实测）。
+/// `ALLOWED` 逐对断言。**本 crate 的允许集今天只有 `continuum-persist`**
+/// （P4 Task 7 起，`alias` 表经 `Tx` 读写，§4.6）——**那三个 id 所属的 crate
+/// （`continuum-core` / `continuum-model-registry` / `continuum-capability` /
+/// `continuum-connector`）一个都不在里面**，故那三个类型在本 crate 里写不出来。
+///
+/// **〔订正（2026-10-10，P4 Task 7）〕**上面这句原先写的是「本 crate 的允许集是**空条目**
+/// （`dependency_direction.rs:156`）」。**那句被 Task 7 改假了**（它给本 crate 加了
+/// `continuum-persist` 那条边），行号也随之移到 `:162`。旧说法与旧行号（`156`）留在此处，
+/// 免得下一轮照它去那一行找一个空数组——**本条要说的判据没变**（指向那三个 crate 的边
+/// 仍然为零），变的只是「允许集空不空」这半句。
+/// 同族的一处在 `tests/candidate.rs` 的文件头（它也引了这一行）。
 ///
 /// 于是「mention 解析出的实体」与「注册表里的 `ToolId`」之间的对应由**装配方**维持。
 /// **代价照实写**：这份对应今天只活在装配方的代码里，它错了本层看不出来

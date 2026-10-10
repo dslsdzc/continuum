@@ -12,8 +12,18 @@
 //!
 //! **本 task 的处置**：把 `AliasScope` 的**词汇那一半**（四枚变体）提前落在这里——
 //! 落在计划给它定的那个文件里，**不另起名字、不换家**。Task 7 要往本文件里加的是
-//! `Alias` / `AliasError` / `promote_alias` / `save_alias` / `load_alias` / `list_aliases` /
-//! `p4_canonical_migrations`，以及 `as_str` / 解析那一对（§278 的四值落库走的那条路）。
+//! `as_str` / 解析那一对（§278 的四值落库走的那条路）与 `Alias` 记录体本身。
+//!
+//! **〔订正（2026-10-10，P4 Task 7）〕上一段原先还列了** `AliasError` /
+//! `promote_alias` / `save_alias` / `load_alias` / `list_aliases` / `p4_canonical_migrations`
+//! **说要加进本文件**——那是**关于另一个文件的形状的说法，而它错了**：
+//! Task 7 的 Files 逐字写着 `Create: crates/continuum-canonical/src/persist.rs`
+//! （`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:993`），
+//! 计划「文件结构」一节把 `src/persist.rs` 定成「alias 表（迁移 100）」的家、
+//! `src/error.rs` 定成 `AliasError` 的家（同文件 `:281`、`:282`）。
+//! 上面那半句是 Task 4 写下的**它对 Task 7 的猜测**，不是 Task 7 的实际布局；
+//! 旧说法留在此处，免得下一轮照它去本文件里找那几个函数。
+//! （同形的一处在 `crate::persist` 的文件头也记了一句，两处是同一笔。）
 //!
 //! **为什么不是「Task 4 在 `explicit.rs` 里自定一枚 `AliasScope`」**：那会让同一个名字有
 //! 两个可能的家，而计划已经把它写在 `alias.rs`；**为什么不是「Task 4 先不做这条映射」**：
@@ -46,6 +56,7 @@
 //! 末段已把这条方向与它的失效条件写死（`design:584-595`）。**本文件照录这张表，不重判它**：
 //! 「一旦 `TURN` 有了寿命，这一对须重判」的判据归设计，本层今天只实现映射本身。
 
+use crate::candidate::EntityId;
 use crate::explicit::ResolutionScope;
 
 /// §278 的四个 alias 作用域。**闭集四枚**——§278（`docs/spec/05-normative.md:1485-1499`）
@@ -64,9 +75,12 @@ use crate::explicit::ResolutionScope;
 /// 是**判据本身要的**——映射的断言形式是「`TURN` 映到 `conversation`」，
 /// 那需要「两个 `ResolutionScope` 相等」可判（见 [`crate::ResolutionScope`] 的派生说明）。
 ///
-/// **不带 `as_str` / `parse`**：§278 的四值**落库**时怎么编码（大小写、下划线）
+/// **Task 4 当时不带 `as_str` / `parse`**：§278 的四值**落库**时怎么编码（大小写、下划线）
 /// 是 Task 7 的地盘（计划 `:942` 的 `scope` 列纪律，`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:1000`），
-/// 本 task 只用它当词汇，不给它编码。
+/// Task 4 只用它当词汇，不给它编码。
+/// **〔订正（2026-10-10，P4 Task 7）〕那对函数已经加上了**——见下面 `impl AliasScope`
+/// 的 `as_str` / `parse`。旧说法留在此处是因为它记的正是「为什么上一轮没有它们」，
+/// 而那句话今天仍成立（只是不再描述现状）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AliasScope {
     /// §278 的 `TURN`。
@@ -77,6 +91,99 @@ pub enum AliasScope {
     Project,
     /// §278 的 `USER_PERSISTENT`。
     UserPersistent,
+}
+
+/// §278 四值的落库编码（Task 7）。
+///
+/// **编码纪律**（计划「全局约束」逐字）：小写、多词以 `_` 连接、不依赖 serde、
+/// 不用 `Debug`。故 `USER_PERSISTENT` 写成 `"user_persistent"`，而不是
+/// `"USER_PERSISTENT"`（`Debug` 的写法）也不是 `"userpersistent"`（不接 `_`）。
+///
+/// # 为什么是 `pub(crate)` 而不是 `pub`
+///
+/// 这两个函数今天只有**一个**外部可观察的用处：`alias` 表的那一列。
+/// crate 外没有第二个消费者要自己编码一枚 `AliasScope`
+/// （要落库就调 [`crate::save_alias`]，它自己会调 [`AliasScope::as_str`]；
+/// 要读就调 [`crate::load_alias`]，它自己会调 [`AliasScope::parse`]）。
+/// 故先按 `pub(crate)` 收着——**加宽是一字之改**，而一枚没有外部照片的公开表达力
+/// 正是本仓判为「先不加」的那一类（同 `src/canonical.rs` 的 `CanonicalRepresentation::new`）。
+///
+/// # 匹配不带通配臂
+///
+/// 给 `AliasScope` 加第五枚即**编译不过**——这是「四值落库编码**逐枚**有写」的编译期照片。
+/// （按本仓纪律，**编译不过不算变红**，故它是**类型保证**，不是运行期能取到的红；
+/// 运行期那一半——四枚各自的字面量——由 `tests/alias.rs` 的 `every_alias_scope_round_trips`
+/// 逐枚读库断言。）
+impl AliasScope {
+    /// §278 的那一枚 → 落库字面量。**全函数**（闭集四枚，没有第五种输入）。
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            AliasScope::Turn => "turn",
+            AliasScope::Session => "session",
+            AliasScope::Project => "project",
+            AliasScope::UserPersistent => "user_persistent",
+        }
+    }
+
+    /// [`AliasScope::as_str`] 的逆。**定义域是所有串**，认不出就是 `None`。
+    ///
+    /// 返回 `Option` 而不返回 `Result`，也不返回一枚「未知」变体：本函数没有失败原因可给
+    /// （它不读库、不写库），把「认不出」这件事说清楚的最小形态就是 `None`。
+    /// 把认不出的串**猜成某一枚**（例如默认 `SESSION`）会让库里一个被改坏的值
+    /// 静默变成一条有作用域的记录——那正是 §4.6 第 1 条与 P3D 的枚举列纪律要拦的。
+    /// **`None` 转成哪个错误由调用方的解码处决定**（[`crate::load_alias`] /
+    /// [`crate::list_aliases`] 转成 [`crate::AliasError::UnknownScope`]，带原始取值）——
+    /// 本函数不 `use` 错误类型，故它把这一步留给那一层。
+    ///
+    /// **带通配臂是刻意的**（与 [`alias_scope_to_resolution_scope`] 的无通配相反）：
+    /// 那一边的输入类型是**闭集**，多一枚变体就该停下来重判；这一边的输入是**开放集**
+    /// （任意串），逐枚列出永远列不完。
+    pub(crate) fn parse(s: &str) -> Option<AliasScope> {
+        match s {
+            "turn" => Some(AliasScope::Turn),
+            "session" => Some(AliasScope::Session),
+            "project" => Some(AliasScope::Project),
+            "user_persistent" => Some(AliasScope::UserPersistent),
+            _ => None,
+        }
+    }
+}
+
+/// 一条 alias 记录：一个名字在某个作用域下指到一枚实体（§197 的 alias registry
+/// 作为候选来源之一，设计 §4.6）。
+///
+/// # 字段逐枚
+///
+/// - `alias`：**被书写的那个名字**（§197 的「高召回候选生成」里，它是**输入的写法**那
+///   一侧）。它是表的主键——见 `crate::persist` 的迁移注释。
+/// - `target`：它指到的实体，取 [`EntityId`]——与 §272 的候选、`ResolutionResult` 的
+///   `Resolved` 用**同一个**类型。取 `String` 会让「alias 指到的东西」与「候选集里的
+///   实体」成为两个可以静默失配的类型（装配方各写一个串，长得一样不代表是同一个），
+///   而那正是本层唯一能替装配方挡住的一类错。
+/// - `scope`：§278 的四值。**提升改的就是这一个字段**（[`crate::promote_alias`]），
+///   其余两个不动——那正是「提升」与「换一条 alias」的区别。
+///
+/// # 字段是 `pub` 的（同 [`crate::Candidate`]，而 [`crate::CanonicalRepresentation`] 的不是）
+///
+/// 区别仍在于**有没有不变量可挂**：本类型是「一行记录」，构造它不需要满足任何本层
+/// 能判的条件（作用域是不是「够久」是调用方的意图，`target` 是不是真有那枚实体本层
+/// 无从知道）。锁起来只会让每个调用方多写一个构造函数，而不变量一条也不会多。
+///
+/// # 不派生 `PartialEq`
+///
+/// 里子含 [`EntityId`]，而它没有 `PartialEq`（理由见 `src/candidate.rs`）——
+/// 故本类型也拿不到。要比较就逐字段比：`alias` / `target.as_str()` / `scope`
+/// （`tests/alias.rs` 的用例正是这么比的）。
+/// **`Debug` 与 `Clone` 不是语义能力**：前者是断言失败时打得出来，后者是它要能装进
+/// `Vec` 随值传递（`list_aliases` 的返回、`save_alias` 的入参）。
+#[derive(Debug, Clone)]
+pub struct Alias {
+    /// 被书写的那个名字（表的主键）。
+    pub alias: String,
+    /// 它指到的实体。与 §272 的候选、`Resolved` 共用 [`EntityId`]。
+    pub target: EntityId,
+    /// §278 的作用域；提升只改这一个字段。
+    pub scope: AliasScope,
 }
 
 /// §278 的四枚 → §274 的一枚。**定义域恰是那四枚**：`AliasScope` 是封闭枚举，
