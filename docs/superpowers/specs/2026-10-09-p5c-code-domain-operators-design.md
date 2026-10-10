@@ -228,7 +228,9 @@ Milestone → 规划 → 拆任务 → 全新 subagent 实现 → 规格审查 �
 | §186 多出来的 | 处置 |
 |---|---|
 | `Requirement / Design Review`（`:60`） | **不入本块**：它是 §229 的 Plan Review 状态机的一部分，属 P4（P4 设计 §9）。本块不为它注册算子 |
-| `Fresh Subagent`（`:66`） | **不是一步**：它是 `Implement` 这一步的**隔离属性**（§186 `:83` 逐字「任务上下文隔离」），与 §263 的 Verifier 隔离同源但不同物。故它不落成算子，落成 §3.3 第 3 行对 `code-implement` 的 `backend_candidates` 的一项要求 |
+| `Fresh Subagent`（`:66`） | **不是一步**：它是 `Implement` 这一步的**隔离属性**（§186 `:83` 逐字「任务上下文隔离」），与 §263 的 Verifier 隔离同源但不同物。故它不落成算子，落成 **§3.2 表第 4 行**（`code-implement`）的 `backend_candidates` 的一项要求
+（**订正 2026-10-10，P5c 的设计订正者查出**：原引「§3.3 第 3 行」——那一处讲的是**第 1 行**（`code-workspace`）是 `NonDeterministic`，
+与 `code-implement` 的候选名无关） |
 | `Next Task`（`:76`） | **不是一步**：它是链的回边（下一轮任务），而回边是 ADFIR 的图结构（P1），不是算子 |
 
 **「默认形态」这四个字要读出**：`:1445` 逐字是「执行方法的**默认**形态」。故上面这六个步骤是**默认**的链，
