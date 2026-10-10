@@ -182,7 +182,7 @@ pub enum MethodDomain {
 impl MethodDomain {
     pub const ALL: [MethodDomain; 4];
     pub fn as_str(&self) -> &'static str;        // "software" | "video" | "research" | "3d"
-    pub fn parse(s: &str) -> Option<MethodDomain>; // 穷尽 match，无通配臂
+    pub fn parse(s: &str) -> Option<MethodDomain>; // **必须有通配臂**（`_ => None`），见下
 
     /// 本轮**是否有算子块作它的对家**（第 7 节、第 8 节 R2）。
     /// Software/Video/Research → true；ThreeD → false。
@@ -193,11 +193,19 @@ impl MethodDomain {
 }
 ```
 
-- `as_str` / `parse` 是**两个穷尽 `match`**，与 `ArtifactType` 的用法同形
-  （`crates/continuum-artifact/src/artifact.rs` 的 `as_str`/`parse`，切分文档 §四第 2 条 (c) 提到的那一对）。
-  加目录时编译失败，不会静默。
+- **「加一个目录即编译失败」这张照片的承担者不是 `parse`**（**订正 2026-10-10，P5b 的计划评审查出**）：
+  - **`as_str`**：`match self`，**无通配臂** ⇒ 加一臂即编译不过。**它是照片之一。**
+  - **`parse`**：签名是 `parse(s: &str) -> Option<MethodDomain>`——**`match` 在 `&str` 上，必须有通配臂**
+    （`_ => None`），故**加目录不会让它编译失败**。仓库里的同形函数正是这样
+    （`crates/continuum-artifact/src/artifact.rs` 的 `parse`：`Some(match s { … _ => return None })`）。
+  - **`has_counterpart`**：`match self` ⇒ **加一臂即编译不过。它是这张照片的另一位承担者。**
+  > **原稿写「`as_str` / `parse` 是**两个穷尽 `match`**……加目录时编译失败」——对 `parse` 那半是假的**：
+  > 一个返回 `Option<Self>`、入参是 `&str` 的解析函数**不可能没有通配臂**。
+  > **判据**：**「某函数是穷尽 `match`」这句话要连它的入参类型一起核**——
+  > **`match` 的是枚举自身、还是别的东西（`&str` / `&Value`）**，决定了加臂会不会编译失败。
+  > （同一句错话曾被抄进 P5b 的实现计划，那一份仍须各自改——来历见本节。）
 - **封闭**是设计决定，不是规范断言：§187 在列目录前写了「例如：」（`docs/spec/04-method.md:114`），
-  《总纲》§8.1 又以四行界定（`docs/01-总纲.md:1331-1336`）。**没有规范说这四个是穷尽的**；
+  《总纲》§8.1 又以四行界定（`docs/01-总纲.md:1332-1335`）。**没有规范说这四个是穷尽的**；
   取封闭是为了给四个算子块一个共同的词汇表（开放目录会让「未知域」到运行期才失败，
   与 P2 的 `EffectType` 取封闭同一理由）。此caveat 与它引出的缺口见第 8 节 R3。
 
@@ -209,7 +217,12 @@ impl MethodId {
     pub fn new(id: impl Into<String>) -> Self;
     pub fn as_str(&self) -> &str;
     // Display：MethodError 的格式串以 {id} 引用该字段（同 OperatorId 的理由，
-    // crates/continuum-operator/src/definition.rs:36-38 的那段注释；该文件 :38-42 是 Display 本体）。
+    // crates/continuum-operator/src/definition.rs:36-37 的那段注释；该文件 :38-42 是 Display 本体）。
+    // **订正（2026-10-10，P5b 的计划评审查出）**：原引 `:36-38`——实测那段注释是 `:36-37`
+    // （两行 `//`），`:38` 起已是 `impl std::fmt::Display for OperatorId`。
+    // 同批订正：本设计三处引《总纲》§8.1 的「四行」原写 `:1331-1336`，**实测四行是 `:1332-1335`**
+    // （`:1331`／`:1336` 是代码围栏）。判据：**引「某几行」时要把围栏算在内核一遍**——
+    // 把围栏算进去会让范围看着正好、其实多两行。
 }
 ```
 
@@ -349,7 +362,7 @@ pub const UNREALIZED_BY_DESIGN: [(&str, &str); 2] =
 
 `seeded()` 以 §187 的四目录逐名建立 18 条 `MethodEntry`，`domain` 与 `id` 照录，
 `realized_by` 为空。四条目录与例名（`docs/spec/04-method.md:116-142`，与
-`docs/01-总纲.md:1331-1336` 一致）。
+`docs/01-总纲.md:1332-1335` 一致）。
 
 **逐条计数（实测自上面两处）**：`software/` 7 条、`video/` 4 条、`research/` 4 条、
 `3d/` 3 条，**合计 18 条**。
@@ -458,7 +471,7 @@ R2 被重新裁决（例如 `3d/` 分给了某一块）时，`has_counterpart` �
   这一事实，它未因 §八 记账而消失**，只是缺口已两侧具名。）
   切分文档 §五 P5f 行**原先**逐字含「本领域的 Operator 集**与它在 P5b 目录里的条目**」
   （该行已订正，现写作「本行原先还写…——那句没有对应物」），
-  而 §187（`docs/spec/04-method.md:116-142`）与《总纲》§8.1（`docs/01-总纲.md:1331-1336`）
+  而 §187（`docs/spec/04-method.md:116-142`）与《总纲》§8.1（`docs/01-总纲.md:1332-1335`）
   **都没有 `image/` 目录**（实测：`grep -n "image/\|images/" docs/spec/ docs/01-总纲.md docs/02-工程.md`
   无命中）。**故 P5f 被要求有条目，却没有可落入的目录名。** 这是与 `3d/` **对偶**的缺口——
   §八只记了 `3d/` 一侧。**处置同 R2：不发明 `image/` 目录，理由是「无规范判据，据实记缺口，
