@@ -762,7 +762,7 @@ P5a 的占用是**声明**，其迁移随 P5a 的实现落地）。测试夹具�
 
 | 变异 | 该红 | 不该红 |
 |---|---|---|
-| **取反**：`research-source-set` 的 `determinism` 改成 `NonDeterministic` | k 的第一枚（`Some` → `None`） | j（候选列表与 determinism 无关）、其余各条 |
+| **收紧**：`research-source-set` 的 `determinism` 改成 `NonDeterministic`（**订正 2026-10-10**：原记「取反」） | k 的第一枚（`Some` → `None`） | j（候选列表与 determinism 无关）、其余各条 |
 | **放宽**：`research-search` 的 `determinism` 改成 `Deterministic`（**订正 2026-10-10**：原记「取反」） | k 的第二组（该枚由 `None` 变 `Some`） | j、l、m（它们不看 determinism） |
 | **移除**：`register_research_operators` 的「先核后写」删掉（边核边写） | e 的第二个子例（表内容与调用前不同）——**原写「d 的第二个子例、e 的第二个子例」，订正 2026-10-10**：d 用「同一批注册两次」这一夹具，该夹具下「表未变」那一半**恒真**（第二批首枚即撞车，边核边写也一字不写，见 §9.2 (d)）⇒ d 不红 | c（合法批次两侧都绿） |
 | **移除**：`bind` 的 `retrieval` 那一条 | f 对 `research-search` / `research-source-set` 两个串的解析（它们从 `realized_by` 里消失） | g、其余三条 `bind`、a–e、j–m（i 已撤销）。**原写把 g 列在该红栏（「`select` 那一条的 `realized_by` 变空」），订正 2026-10-10**：`select` 返回该领域的全部条目、与 `realized_by` 是否绑过无关，故删一条 `bind` 不改 `select` 的返回数目，g 不红 |
