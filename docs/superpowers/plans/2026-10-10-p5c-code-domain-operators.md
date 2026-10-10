@@ -38,7 +38,7 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
 
 | 依赖 | 状态 | 本块用在哪 |
 |---|---|---|
-| P1 `continuum-operator`：`Operator { id, version, input_schema, output_schema, determinism, side_effect_class, backend_candidates }`（`crates/continuum-operator/src/definition.rs:79-88`）、`OperatorId`（`:24`，字段私有、`new` 非 `const fn`）、`OperatorVersion`（`:45`）、`BackendId`（`:66`）、`OperatorRegistry::{register, resolve}`（`crates/continuum-operator/src/registry.rs:24`、`:34`）、`OperatorError`（`:7-12`） | **已交付** | 九枚算子的类型、注册入口、注册期规则的错误臂 |
+| P1 `continuum-operator`：`Operator { id, version, input_schema, output_schema, determinism, side_effect_class, backend_candidates }`（`crates/continuum-operator/src/definition.rs:79-88`）、`OperatorId`（`:24`，字段私有、`new` 非 `const fn`）、`OperatorVersion`（`:45`）、`BackendId`（`:66`）、`OperatorRegistry::{register, resolve}`（`crates/continuum-operator/src/registry.rs:24`、`:36`）、`OperatorError`（`:7-12`） | **已交付** | 九枚算子的类型、注册入口、注册期规则的错误臂 |
 | P1 `continuum-artifact`：`ArtifactType` 六型（`crates/continuum-artifact/src/artifact.rs:14-21`）、`ALL`（`:28`，带数目字面量 `[ArtifactType; 6]`）、`as_str`（`:47`）/ `parse`（`:68`）两个穷尽 `match`、`ContentHash::of`（`src/content.rs:11`） | **已交付** | 九枚算子的端口类型；Task 4 的复用照片 |
 | P1 `continuum-graph`：`cache_key`（`crates/continuum-graph/src/reuse.rs:16`）、`can_reuse`（`:29`）、`CacheKey`（`:9`）；另 `is_candidate_backend`（`src/execution.rs:87`） | **已交付** | Task 4 的 §3.6 照片（**dev 边**） |
 | P2 `continuum-workspace`：`WorkspaceBackend` 两臂（`crates/continuum-workspace/src/backend.rs:22`、`:26`、`:31`）、`backend_str`（`src/persist.rs:177`，**`pub(crate)`**） | **已交付** | Task 5 的 §4.2 照片（**dev 边**） |
@@ -63,6 +63,12 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
   的 `ALLOWED`），两处都在切分 §一 的共写文件表里。**它们今天就可以开工**。
 - **Task 1 与 Task 2 之间、Task 3 与 Task 4 与 Task 5 之间没有硬序**：Task 6 与 Task 7 排在最后，
   只是为了让「前六个 task 可立即开工」这件事在计划里是**可执行的**，不是一条风格偏好。
+  **但 Task 4 与 Task 5 要改 `crates/continuum-runtime/tests/dependency_direction.rs` 的
+  同一个内层数组**（`("continuum-code", &[…])` 那一项：Task 4 加 `continuum-graph`、
+  Task 5 加 `continuum-workspace`）——**并行执行这两者会在该文件上互相覆盖**。
+  Task 3 不碰该文件（它不登记任何新边，只新建一条测试）。
+  「没有硬序」说的是依赖关系，不是文件所有权：两者并行时须**串行化对那一行的改动**
+  （或由最后合入的一方核对两条边都在），这不是风格偏好。
 
 ### 三、本块对既有之物的请求（**本计划只作消费方写，一处都不实施**）
 
@@ -73,9 +79,9 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
 |---|---|---|---|
 | `backend_str` 是 `pub(crate)`（`crates/continuum-workspace/src/persist.rs:177`） | 设计 §10.2 第 (p) 条把照片坐标指到它，而 **`pub(crate)` 的函数在 `continuum-code` 里调不到**——故本块**没有**「两个候选名等于 `workspace` 列的编码」这张照片（详见 Task 5 与 `## 遗留`） | **消费方**（只 `use` `WorkspaceBackend` 那两臂） | P2 ＋ 协调者 |
 | Base 不在端口上（设计 §4.3）、`NodeContext` 没有工作区句柄（设计 §4.4） | 这两条是同一处改动的两半：算子的输入端口的**取值域**与执行上下文；两者都在 P1 / 第 3 层的改动范围里 | **消费方**（本块只声明 `input_schema` 为空、不补通道） | P1 ＋ 第 3 层的执行器 |
-| `code-workspace` 的「每 Intent 一枚」（设计 §4.2 末） | §16 `:796` 要求一个 Intent 一份工作区，而算子是**每节点**的执行单元（§244）。本块**无法在类型层钉住「图上只有一个该节点的实例」** | **消费方**（只登记声明） | 协调者（Planner 的归属未定） |
+| `code-workspace` 的「每 Intent 一枚」（设计 §4.2 末） | §16（`docs/spec/01-concepts.md` 的「Git L2 Sandbox」：每个 Intent 创建独立 `ai/task-id`）要求一个 Intent 一份工作区，而算子是**每节点**的执行单元（§244）。本块**无法在类型层钉住「图上只有一个该节点的实例」** | **消费方**（只登记声明） | 协调者（Planner 的归属未定） |
 | 迁移档号 `150`（设计 §9.3） | 本块**零表**，故 `150` 是一条**登记**不是一条死迁移；须与其余各块与 P6 的档合并成一张表 | **登记方** | 协调者 |
-| 两个「Plan」同名（设计 §8 末、§11 第 5 条） | §228 的 `Plan` 是 P4 的对象（`docs/spec/05-normative.md:334` 起），`code-plan` 产出的是 `Json` 制品（§186 `:62` 的 `Implementation Plan`）——同名不同物 | **消费方**（不改名、不合并） | P4 的持有方 ＋ 协调者 |
+| 两个「Plan」同名（设计 §8 末、§11 第 5 条） | §228 的 `Plan` 是 P4 的对象（`docs/spec/05-normative.md` 的「Plan 数据模型」一节），`code-plan` 产出的是 `Json` 制品（§186 的 `Implementation Plan` 一步）——同名不同物 | **消费方**（不改名、不合并） | P4 的持有方 ＋ 协调者 |
 | 「逐位可复现的 backend」封闭名单（设计 §3.5） | **规范没有一处给过 backend 的确定性**——缺的是「该 backend 的什么属性使输出逐位可复现」这一步 | **定义方**（名单是本块定的） | 规范维护者 |
 | `TestResult` 的载荷 schema（设计 §5.4 第 4 条） | 承载处与写入方已定（`TestResult` 制品、`code-test-run` / `code-fuzz-run`），**载荷 schema 未给**——缺的是「一份 `TestResult` 里哪些字段是判『通过/不通过』所必需的」这一步 | **报出方**（不发明） | 规范维护者 ＋ P5a |
 
@@ -162,12 +168,25 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
   - **不建第二份复用判据**（§305 已由 `crates/continuum-graph/src/reuse.rs:29` 落地）、
     **不建第二份端口兼容判定**（§239 由 `crates/continuum-port/src/port.rs:94` 落地）、
     **不建第二份后端候选判定**（§245 由 `crates/continuum-graph/src/execution.rs:87` 落地）——切分 §四第 7 条。
-  - **不建 `MethodEntry`、不 `register` 方法条目**（P5b 设计第六节禁止四块自造）；只调 `bind`。
+  - **不建 `MethodEntry`、不 `register` 方法条目**（P5b 设计第六节禁止四块自造；设计 §7.3 的答复
+    也是这一条——§186 的流程名不入 `software/` 目录，它们落成的是**算子的 id**，不是方法条目）；只调 `bind`。
   - **不建 `code-debug`**（设计 §7.2 第 2 条：链上没有调试这一步，且规范没给过调试的端口类型）。
   - **不定义 `TestResult` 的载荷 schema**（设计 §5.4 第 4 条）。
   - **不把 Integration Gate 算子化**（设计 §4.2：批准值没有位置装）。
   - **不建表、不写迁移、不写事件**（设计 §9.1）。
   - **不改 `docs/02-工程.md`、不改六份设计、不改切分文档**（设计 §13 的「只记，不改」）。
+
+  **设计 §13 的三条（在切分文档里发现的错或缺口）在本块的落点逐条如下**——它们不改切分文档，
+  但**要看得出本块按哪一条做**：
+  - **第 1 条**（切分 §五 P5c 行「并让每步产出 P5a 的 `Evidence`」的外延过宽）：落点是
+    Task 6 Step 3 与「交付给谁」里的**逐枚产出面**——`code-spec-review` / `code-quality-review` 是
+    `ModelReview`、`code-test-run` 是 `Test`、`code-fuzz-run` 是 `Fuzz` / `Property`，
+    其余五枚不产；以及 `## 遗留` 第四节第 (i) 条（产出面在本块的 crate 里无照片，它是声明）。
+  - **第 2 条**（切分 §四第 3 条与 §五都没指出「`software/` 七条里有两条不是算子」）：**就是设计 §7.2**，
+    已由 2026-10-10 的裁定关闭，落点见「跨计划前置」第二节与 Task 7 的 `k`。
+  - **第 3 条**（切分 §四第 7 条只举了复用判据一例）：落点是本节的三条「不建第二份判据」
+    （复用判据 / 端口兼容 / 后端候选判定）。**设计 §13 第 3 条 2026-10-10 的订正记：切分 §四第 7 条
+    现已按实测扩到四处**——第四处是 §327 的「制品不得被默认覆盖」，它不邻本块，**本块不引它**。
 
 ### 本计划特有的「签名即判据」，照抄前须对源
 
@@ -178,7 +197,7 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
   **要连它的成立条件一起搬**：那两处是无字段枚举。
 - `OperatorRegistry::register(&mut self, operator: Operator) -> Result<(), OperatorError>` 与
   `resolve(&self, id: &OperatorId, version: &OperatorVersion) -> Result<&Operator, OperatorError>`
-  （`crates/continuum-operator/src/registry.rs:24`、`:34`）；`OperatorError::Duplicate { id, version }`
+  （`crates/continuum-operator/src/registry.rs:24`、`:36`）；`OperatorError::Duplicate { id, version }`
   （`:11`）与 `NotFound { id, version }`（`:9`）。
 - `ArtifactType` 的 `ALL: [ArtifactType; 6]`（`crates/continuum-artifact/src/artifact.rs:28`）、
   `as_str`（`:47`）/ `parse`（`:68`）。**`parse` 收 `&str`、一定有通配臂**，故它**不是**「加一臂即编译不过」那张照片
@@ -200,22 +219,32 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
 ## 已付过代价的纪律
 
 1. **变异必须在全量 `cargo test --workspace --no-fail-fast` 下得出否定结论**（「不变红」）；
-   正向的「变红」跑全量是加分。**变异分四档，每一处「预期谁红」都要标档位**：
-   **取反**（把判定反过来）／**放宽**（少判一半条件）／**收紧**（多判一半条件）／**移除**（删掉整条守卫）。
+   正向的「变红」跑全量是加分。**每一处「预期谁红」都要标档位。四档是对「守卫的变异」的分档**：
+   **取反**（把守卫的判定反过来）／**放宽**（把守卫少判一半条件）／**收紧**（把守卫多判一半条件）／
+   **移除**（删掉整条守卫或它的一半动作）。
+   **凡变异改的是被守卫断言的声明取值**（`operators.rs` 的某一列、名单里的某一项、语料里的某一个串），
+   守卫本身一字未动——那一类按**把被断言的取值改成与期望不是同一枚**读，档位记**取反**，
+   并写清它改的是哪一列；**同一形状的变异在全篇用同一个档位**。「把某一行的 `input_schema` 去掉一个型」
+   与「给某一行加一个端口型」都属这一类，前者在 Task 1 与 Task 3 一律记取反（设计 §10.3 给前者这一
+   形状的档位就是取反），后者记取反。**唯一的例外是设计 §10.3 明标了档位的两处 `determinism` 取值变异**
+   （该列有宽紧方向：`Deterministic` 放宽 §305 的复用面、`NonDeterministic` 收紧它），那两处照录设计的
+   **放宽**／**收紧**，本计划不把它们的档位改写成取反。
    **三条失效形态都要防**：
    (a) **锚点不唯一** → 变异没落到实现体却报 GREEN。**本计划每条红条件都指明唯一锚点**
    （哪一枚算子的哪一列、哪个函数的哪一行）；凡变异点的字面量在 `all_operators()` 里出现多次的，
    红条件写清是**第几行**。
    (b) **等价变异体**——判据是「**这两版在哪个入参上会给出不同结果**」，举不出即是等价，处理是**换真变异体而非补用例**。
-   **本块已预先识别的等价变异体有三处**：
+   **本块已预先识别的等价变异体逐处列出**：
    （i）**把某枚算子的 `backend_candidates` 里两项换序**——候选列表在本块全部断言里都是**集合**，
    `code-workspace` 的候选与 §3.5 的名单判定都不读次序（设计 §10.3 末行已写明），故**换序是全绿的等价变异体**；
    要打红它必须换变异体：**删掉一项**（届时 Task 5 与 Task 2 的名单逐项断言红）；
-   （ii）**`all_operators()` 的返回类型里的数目 `9`**——`[Operator; 9]` 使「清单里有九个元素」成为**类型事实**，
-   故运行期的 `len() == 9` 单独看是**恒真**的；它真正钉的是「返回类型的数目正好是 9」，
-   执行者**不要把 `len() == 9` 当成「清单里没少东西」的守卫**（见 Task 1 的用例注释）；
-   （iii）**`Assertion` 里手抄的期望语料与被测清单同源**——§10.2 第 (m) 条与 Task 3 的边表语料
+   （ii）**`Assertion` 里手抄的期望语料与被测清单同源**——§10.2 第 (m) 条与 Task 3 的边表语料
    **必须手写**，若从 `all_operators()` 派生即是**恒真的假照片**（设计 §10.2 的两条「预防」）。
+   **`all_operators()` 的返回类型里的数目 `9` 不在此列，不要把它读成等价变异体**：
+   `len() == 9` 是设计 §10.1 列的**守卫**，它钉的是「返回类型的数目正好是 9」——
+   删掉一枚算子**必须同步**把返回类型写成 `[Operator; 8]`，那一处改动**会让它红**
+   （设计 §10.3 的「移除」那一行预告的正是这一枚，见 Task 1 的用例注释）。它**不钉**的是
+   「九枚的 id 与 §3.2 表逐行对得上」——那由 Task 1 的 `f`／`g`／`i` 与 Task 4／Task 5 的逐枚断言承担。
    (c) **变异导致编译失败**——那不是「变红」（判据用 `could not compile` 或 `error[E….`；
    cargo 在**用例失败**时也打印 `error: test failed, to rerun pass …`，不能拿它当判据）。
    **本计划里有三条照片本身是编译期照片**（Task 5 的 `WorkspaceBackend` 穷尽 `match`、
@@ -250,7 +279,9 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
    不抽代表（手写分支能各自漂移）。
    **本块的绝对措辞逐处落点**：`operators.rs` 里「九枚无一为 `NonIdempotent`」→ Task 1 的 `f`；
    「第 7、9 行是 `Deterministic`，其余七枚不是」→ Task 1 的 `g`；
-   「§3.5 的名单恰为五项」→ Task 2 的逐项断言；「候选列表无序」→ 写成**等价变异体的说明**而不是断言。
+   「§3.5 的名单恰为五项」→ Task 2 的逐项断言；「候选列表无序」→ 写成**等价变异体的说明**而不是断言；
+   「档位记取反的唯一例外是设计 §10.3 那两处 `determinism` 取值变异」→ **设计 §10.3 的表本身**
+   （逐行可读：该表里带**放宽**／**收紧**档的只有改 `determinism` 的那两行）。
 5. **「自指计数不写数值」**：「下面这 N 条」这类话会被自己推翻。本计划凡引用设计或切分文档的编号，
    照原文的编号写（那是可实测的）；凡指本计划自己的清单，一律用「逐条」而不写数目。
 6. **失败路径的测试要断言是哪一种 `Err`**，不只「返回了 `Err`」。本块的失败面是 `CodeError` 的
@@ -259,10 +290,17 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`）、`continuum
    （注册表内容与调用前逐枚相同）。
 7. **「守卫」要两侧都钉；缺的那侧往往是 fail-open 的那侧。** 本计划逐处标出「另一侧」是哪一个用例：
    §3.5 的注册期规则（`d` 拒的那侧 ＋ `c` 与 `e` 放行的那侧）、§3.4 的边表（下游输入侧 ＋ 上游输出侧，
-   见 Task 3 的三列语料）、§4.2 的两个候选名（运行期字面量侧 ＋ 编译期穷尽 `match` 侧）。
+   见 Task 3 的两组断言——**下游侧由「下游算子的 `input_schema` 与该行的语料型集合
+   两个方向都相等」钉，上游侧由三列来源语料钉**，两组各是一条独立的断言）、
+   §4.2 的两个候选名（运行期字面量侧 ＋ 编译期穷尽 `match` 侧）。
+   **把两侧塞进同一条枚举式语料不算两侧都钉**：语料只覆盖它写到的那些取值，语料外的取值两侧都是 fail-open。
 8. **编译期性质照实写成编译期照片，不冒充运行期红。** 本块的编译期照片逐处标出：
    `all_operators()` 的返回类型数目（Task 1）、`WorkspaceBackend` 的穷尽 `match`（Task 5）、
    `Evidence` 的不可构造性（Task 6）、`bind_code_methods` 的返回类型（Task 7）。
+9. **各 task 的「运行，确认失败」一步要写清量到的是哪一种失败。** 只有**该用例引用的符号已经存在**时，
+   那一步才可能量到运行期的红；否则量到的是 `error[E0432]`／`error[E0433]` 一类的**编译失败**，
+   按本纪律第 1(c) 条**不算红**，那一步是空转的——凡属此类的步骤，本计划**照实标注为编译期照片**，
+   并写明「要取到运行期的红需要先有什么」。
 
 **另两条运行纪律**：跑测试加 `timeout`（本机 `TMPDIR` 在 FUSE 类挂载上，I/O 曾挂起），
 **命令的管道结尾不要接 `tail`**（退出码会被 `tail` 吃掉）；若报「在等后台任务」，先核进程与日志。
@@ -350,6 +388,29 @@ crates/continuum-runtime/tests/dependency_direction.rs   ALLOWED 加 continuum-c
 
 ---
 
+## 各 task 的「运行，确认失败」一步量到的是哪一种失败（逐 task 扫过）
+
+**这一步的名字只在「本 task 有新生产代码」时才成立。** 逐 task 实测的形态如下——
+凡量到**编译失败**的，按纪律 1(c) **不算红**，那一步是空转的，本计划在那里**照实标注为编译期照片**；
+凡本 task **不交付生产代码**（只新建测试）的，测试对的是 Task 1 已交付的声明，**首次即绿**，
+那一类的步名不叫「确认失败」：
+
+| task 的那一步 | 量到的是 | 为什么 |
+|---|---|---|
+| Task 1 Step 3 | **编译失败**（`E0432` / `E0433`） | `all_operators` 的声明面由 Step 4 才建出 |
+| Task 2 Step 2 | **编译失败**（`E0432`） | `register_code_operators` / `REPRODUCIBLE_BACKENDS` 由 Step 3 才建出 |
+| Task 3 Step 2 | **首次即绿** | 本 task 只新建测试（Step 3 明写「无生产代码」），断言的是 Task 1 已交付的声明 |
+| Task 4 Step 2 | **首次即绿** | 同上（`cache_key` / `can_reuse` 是 P1 已交付的） |
+| Task 5 Step 2 | **首次即绿** | 同上（`WorkspaceBackend` 是 P2 已交付的） |
+| Task 6 Step 2 | **运行期红**（trybuild 报样例与 `.stderr` 不符） | 样例与 `.stderr` 都在本 task 内，`.stderr` 尚未取值 |
+| Task 7 Step 2 | **编译失败**（`E0432` / `E0433`） | `bind_code_methods` 由 Step 3 才建出 |
+| Task 8 | 无「确认失败」步 | 它是收尾与复核 |
+
+**「首次即绿」不是缺陷，也不许改写成「先红后绿」**：那三个 task 的交付物就是断言本身，
+它们的红由 Task 8 Step 5 的变异复核取（改 `operators.rs` 的某一列 → 对应断言红）。
+
+---
+
 ### Task 1: `continuum-code` 骨架、`CodeError` 与九枚算子的声明
 
 **Files:**
@@ -395,9 +456,13 @@ crates/continuum-runtime/tests/dependency_direction.rs   ALLOWED 加 continuum-c
 
 - `the_return_type_pins_the_count_and_the_ids_are_pairwise_distinct`：
   **两个断言，性质不同，注释里要分清**。
-  （i）`all_operators().len() == 9`——**它钉的是「返回类型的数目正好是 9」**，
-  因为 `[Operator; 9]` 已使「清单里有九个元素」成为**类型事实**；故单看它是**恒真的**，
-  **不许把它写成「清单里没少东西」的守卫**（这正是纪律 1(b) 的第二处等价变异体）。
+  （i）`all_operators().len() == 9`——**它是一条守卫，钉的是「返回类型的数目正好是 9」**
+  （设计 §10.1 的第一条）。**它不是恒真的**：清单少一枚在 Rust 里编不过
+  （数组字面量的元素个数与返回类型不符），故删一枚**必须同步**把返回类型写成 `[Operator; 8]`，
+  而那一处改动**会让本条红**——这正是设计 §10.3 的「移除」那一行预告的 `len() == 9`（纪律 1(b)）。
+  **它不钉的是什么**要一并写明：它**不**钉「九枚的 id 与 §3.2 表逐行对得上」，
+  也**不**该被写成「清单里没少东西」这一层意思的唯一载体——逐行对应由本节其余各条与
+  Task 4／Task 5 的逐枚断言承担。
   （ii）**九个 id 两两比较**（不是只查总数）全不相同，且每枚 `version == 1`。
   红条件：把第 5 行与第 6 行的 id 改成同一个（**取反档**）→（ii）红而（i）绿。
   **锚点唯一**：`operators.rs` 里第 5 行那个 `OperatorId::new("code-spec-review")`。
@@ -416,13 +481,18 @@ crates/continuum-runtime/tests/dependency_direction.rs   ALLOWED 加 continuum-c
   Task 2 的注册期规则变红——**§3.5 的规则与这一条是两条独立的守卫**（设计 §3.5 末）。
 - `code_workspace_takes_no_artifact_input_and_yields_a_source_tree`（§10.2 第 (h) 条）：
   第 1 行的 `input_schema` 是空 `Vec`（`Vec::is_empty()`），`output_schema == [ArtifactType::SourceTree]`。
-  红条件：给它加一个 `[ArtifactType::Json]` 输入（**收紧档**）。
+  红条件：给它加一个 `[ArtifactType::Json]` 输入（**取反档**；按纪律 1：改的是被断言的声明取值，
+  把「空输入」改成「与期望不是同一枚」）。
   注释里写明出处（设计 §3.3 第 2 条）：**Base 不是制品**，给它一个制品身份等于让下游把 Base 当输入制品消费，
-  而 §256 `:1046` 的 `AI_WRITE(BaseWorkspace) = DENY` 正是要拦住这件事。代价是 Base 的形态不进端口。
+  而 §256 的 `AI_WRITE(BaseWorkspace) = DENY` 正是要拦住这件事。代价是 Base 的形态不进端口。
 - `the_two_review_operators_differ_only_in_id`（§10.2 第 (i) 条）：
   第 5 行与第 6 行的 `input_schema` / `output_schema` / `determinism` / `side_effect_class` / `backend_candidates`
-  **逐字段相同**，而 `id` 不同。红条件：把第 6 行的 `input_schema` 改成 `[Patch]`（**收紧档**）。
-  注释里写明：§186 `:85` 逐字「规格审查与代码质量审查**分离**」，而**分离这一条只有两枚同形的东西才说得上**
+  **逐字段相同**，而 `id` 不同。红条件：把第 6 行的 `input_schema` 改成 `[Patch]`（**取反档**；
+  同形的改取值变异在 Task 3 也记取反，设计 §10.3 给这一形状的档位即取反）。
+  **比较的写法要写死：用不带 `..` 的穷尽解构**（把 `Operator` 的七个字段逐个绑定再逐字段比较），
+  **不许用 `..`**——留了 `..` 的话，`Operator` 将来多出一个字段时本条**静默照过**（纪律 1(c) 末段）；
+  不带 `..` 时多一个字段即**编译不过**，那张照片才是「逐字段相同」而不是「我列出的那几列相同」。
+  注释里写明：§186 逐字「规格审查与代码质量审查**分离**」（该节列的四条优势之一），而**分离这一条只有两枚同形的东西才说得上**
   （设计 §3.3 第 10 条）。
 - `the_port_types_in_use_are_exactly_the_four_types_of_this_chain`：§8「本链零请求」的**可观察形态**。
   遍历九枚算子的 `input_schema ∪ output_schema`，断言出现的型**恰是**手写的四枚
@@ -436,6 +506,15 @@ crates/continuum-runtime/tests/dependency_direction.rs   ALLOWED 加 continuum-c
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-code --test operators
 ```
+
+**这一步量到的是编译失败，按纪律 1(c) 不算红**——照实写成**编译期照片**：
+`src/operators.rs` 的声明面由 Step 4 才建出，故本步的失败形态是
+`error[E0432] unresolved import`／`error[E0433] failed to resolve` 一类（`all_operators` 尚不存在），
+不是断言失败。**这是本 task 的刻意顺序**：九枚的逐列取值与它的断言写在同一节里，
+声明面一写出，取值也就定了，再把取值在下一节改一遍就是二次转录（这正是本计划要避免的）。
+**若要取到运行期的红**，须在 Step 1 就给出 `all_operators` 的**签名**（函数体先写作 `todo!()`），
+届时本步的红是**用例 panic**（运行期，纪律 1(c) 认它）。**本计划的判据按前者记**（不强制走这条）；
+**若实现者走后者，那一行 `todo!()` 不许活到 Step 5 的提交里**。
 
 - [ ] **Step 4: 实现**
 
@@ -462,6 +541,26 @@ pub enum CodeError {
 
 九枚算子的逐列取值**照设计 §3.2 的表**，本计划不重抄一遍（重抄就是第二份转录，正是本项目出错最多之处）；
 **实现时对着该表的九行逐行填**，并逐行在 `operators.rs` 里留下出处注释（§3.2 表末「出处」列的原话）。
+
+**设计 §3.3 的十一条逐枚理由，逐条给出落点**（此前只落了其中一部分——第 2、8、10 条与第 3 条，
+其余各条没有落点要求，此处补齐；纪律 4：没有照片的明写为什么没有）：
+
+| §3.3 | 理由 | 落点 |
+|---|---|---|
+| 第 1 条 | 第 1 行不在《总纲》§8.3 的六步上，来源两处 | 无断言：它是「为什么有这一枚」的理由。**`operators.rs` 第 1 行的出处注释**要写它；登记面是 Task 5 的 `p` |
+| 第 2 条 | 第 1 行的 `input_schema` 为空 | Task 1 的 `h`（用例注释已引） |
+| 第 3 条 | 第 1 行是 `NonDeterministic`（fail-closed 的一侧） | Task 4 的 `o` 的第 1 行那一枚（`cache_key` 为 `None`）；**注释要引 §3.3 第 3 条** |
+| 第 4 条 | 第 1 行是 `Idempotent` 而非 `NonIdempotent` | Task 1 的 `f` 第 1 行；**注释要引 §3.3 第 4 条**（与第 8 条并列） |
+| 第 5 条 | 第 7、8 行分作两枚，不合成一枚 | 无独立断言：可观察面是 Task 1 的 `g`（第 8 行为 `NonDeterministic`）与 Task 4 的 `o`（第 8 行 `cache_key` 为 `None`，故 fuzz 不进复用）；**注释要写「若合成一枚，那一枚的 `Deterministic` 声明当场为假」** |
+| 第 6 条 | 第 7 行是 `Deterministic`，因此进复用 | Task 4 的 `o` 的第 7 行；**注释要引 §3.3 第 6 条**（它是收益，不是缺口） |
+| 第 7 条 | 第 2、3、4、5、6 行是 `NonDeterministic` | Task 1 的 `g` 的第 2–6 行；注释写明「规范没有一处给过 operator 的 determinism」这一条代价 |
+| 第 8 条 | 九枚都不是 `NonIdempotent` | Task 1 的 `f` 的第三条断言（用例注释已引） |
+| 第 9 条 | 第 7、8 行是 `Idempotent` 而非 `Pure` | Task 1 的 `f` 第 7、8 行；**注释要引 §3.3 第 9 条**（执行体自己落盘） |
+| 第 10 条 | 第 5、6 行是两枚算子，不是一枚 | Task 1 的 `i`（用例注释已引） |
+| 第 11 条 | 第 9 行是「§262 第 1 级的判定器」，不是 P5a 的判定 | 无断言：比较器的实现不在本块（本块只声明算子）。**`operators.rs` 第 9 行的出处注释**要写它，并写明「级别序与候选过滤属 P5a」 |
+
+**上表里标「无断言」的三条（第 1、5、11 条）是理由而非守卫**——它们没有可拍的照片，
+据实写成注释而不是用例；**不许为了凑覆盖把它们写成恒真的断言**（纪律 1(b)(ii)）。
 
 - [ ] **Step 5: 运行全部测试并提交**
 
@@ -503,9 +602,13 @@ git commit -m "feat(code): crate 骨架、CodeError 与九枚代码域算子的�
 - `the_list_is_exactly_these_five_names`（§10.1 的逐项断言）：
   **手写**五项 `{"worktree", "overlay", "builtin", "cargo-test", "local-test-runner"}`，
   断言 `REPRODUCIBLE_BACKENDS` 与之**逐项相等**（集合相等且个数相等）。
-  **期望值必须手写、不从常量自身取**——否则是自证（纪律 1(b)(iii)）。
-  红条件：从常量里删掉 `"builtin"`（**移除档**）→ 本条红；**而 (c) 与 (a) 不红**
-  （九枚算子里只有 `code-verify` 的候选是 `builtin`，删掉它后 (c) 仍绿而 (a) 不涉及名单）。
+  **期望值必须手写、不从常量自身取**——否则是自证（纪律 1(b)(ii)）。
+  红条件：从常量里删掉 `"builtin"`，**并把类型字面量同步改成 `[&str; 4]`**（**移除档**）
+  → 本条红、**(c) 也红**（(c) 遍历九枚里 `determinism == Deterministic` 的两枚——第 7、9 行——
+  逐枚判候选是否在名单内，而第 9 行 `code-verify` 的候选就是 `builtin`（设计 §3.2 表的 backend 候选列），
+  删掉该项后第 9 行立刻不成），**而 (a) 不红**（它不涉及名单）。
+  **类型字面量那一半要写进红条件**：`REPRODUCIBLE_BACKENDS` 是 `[&str; 5]`（本 task Step 3），
+  只删一项而不改类型即**编译不过**，按纪律 1(c) **不算红**。
   **这一句要写进注释**：它说明为什么本条与 (c) 都要留。
 - `an_operator_with_an_unlisted_backend_is_rejected_before_any_write`（§10.2 第 (d) 条，**两个子例，两条都要**）：
   （i）造一枚 `determinism == Deterministic` 而候选含名单外 backend（如 `BackendId::new("remote-cluster")`）的算子，
@@ -513,7 +616,10 @@ git commit -m "feat(code): crate 骨架、CodeError 与九枚代码域算子的�
   **且判准 `operator` 与 `backend` 两个字段的值**；
   （ii）**同一调用之后，注册表内容与调用前逐枚相同**（先核后写，不留半注册）。
   红条件一：把名单判定改成恒真（**取反档**）→（i）红。
-  红条件二：把函数改成边核边写（先注册前几枚、遇到违规才返回）（**取反档**）→（ii）红而（i）仍红。
+  红条件二：把函数改成边核边写（先注册前几枚、遇到违规才返回）（**取反档**）→（ii）红而（i）**仍绿**。
+  **（i）为什么仍绿**：「边核边写」不改返回的 `Err` 值（仍是 `UnverifiableDeterminism { operator, backend }`），
+  故 (i) 的两个字段判据照过；设计 §10.3 那一行也只预告 (ii) 那一个子例红、并明写「不该红 c、a」。
+  **若 (i) 在这一档下也红了，说明两件不相干的事被混进了一条断言。**
   **（ii）是 fail-open 的那一侧**（纪律 7）：只钉（i）会让「注册表被写坏了一半」漂过去。
 - `an_operator_with_an_id_outside_the_table_is_accepted`（§10.2 第 (e) 条）：
   用表外的 `OperatorId`（如 `"codew"`）造一枚候选全在名单内的 `Deterministic` 算子，
@@ -529,11 +635,19 @@ git commit -m "feat(code): crate 骨架、CodeError 与九枚代码域算子的�
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-code --test register
 ```
 
+**这一步量到的是编译失败，按纪律 1(c) 不算红**——照实写成**编译期照片**：
+`tests/register.rs` 要 `use continuum_code::{register_code_operators, REPRODUCIBLE_BACKENDS}`，
+而这两个符号由 Step 3 才建出（`src/register.rs`），故本步的失败形态是
+`error[E0432] unresolved import`，不是断言失败，**这一步是空转的**。
+**要取到运行期的红**，须先有能编译、能跑出断言的 `register.rs`——而那一写就与 Step 3 重合，
+故本 task 不做（本计划的判据以 Step 4 的全量跑与 Task 8 Step 5 的变异为准）。
+
 - [ ] **Step 3: 实现**
 
 ```rust
 /// §3.5 的「逐位可复现的 backend」封闭名单。**内容是设计 §3.5 定的，规范没有一处给 backend 的确定性。**
-/// 名单里为什么有 `overlay`：§255 `:1029-1037` 列了非 Git 项目的五种形态，而 P2 已落地的
+/// 名单里为什么有 `overlay`：§255 给非 Git 项目列的五种形态（`OverlayFS` / `Btrfs snapshot` /
+/// `ZFS clone` / `CoW workspace` / `container layer`），而 P2 已落地的
 /// `WorkspaceBackend`（`crates/continuum-workspace/src/backend.rs:22`）只有两臂；本块取那两臂，
 /// 不按 §255 的五种各造一个名字——那会让候选里出现三个没有实现的取值。
 pub const REPRODUCIBLE_BACKENDS: [&str; 5];
@@ -578,39 +692,68 @@ git commit -m "feat(code): register_code_operators 的先核后写与逐位可�
 
 `every_declared_edge_has_the_type_on_both_sides`（§10.2 第 (j) 条）：
 
-**语料形态写死为三列**——`(下游算子 id, 上游算子 id, 型)`，**手写在测试里**，逐条对应设计 §3.4 的边表。
-断言**两个方向**：`下游.input_schema` 含该型 **且** `上游.output_schema` 含该型。
+**形态：两组断言，各钉设计 §3.4 判据的一侧**——**这里不是「一份三列语料同时钉两侧」**：
+三列语料只覆盖它写到的那些型，**语料之外的取值两侧都是 fail-open**（给某枚下游算子加一个
+语料里没列过的型，三列语料全绿）。故把两半各自交给一条**独立**的断言：
 
-**这里不是设计 §3.4 判据的单向读法：因为单向读法会把一处该红的变异放过。**
-设计写的是「逐行断言下游 `input_schema` 的**每一个型**都能在该行列出的上游里找到」——
-那是**单侧**的：**从下游删掉一个型**（把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`）
-会让单侧断言**更容易满足**，于是**该变异全绿**，而设计 §10.3 的预告表却写着它会红
-（那一行是设计的一处相抵，见 `## 遗留`）。**三列语料把它变成两侧都钉**：
-下游删一个型 ⇒ 「下游含该型」这一半红；上游删一个型 ⇒ 「上游含该型」那一半红。
+**（A）下游覆盖**——手写一份「有上游算子的下游 → 该下游在设计 §3.4 表里列出的型集合」的表
+（`code-decompose` → `{Json}`；`code-implement` → `{Json}`；`code-spec-review` → `{Json, Patch}`；
+`code-quality-review` → `{Json, Patch}`；`code-test-run` → `{SourceTree, Patch}`；
+`code-fuzz-run` → `{SourceTree, Patch}`；`code-verify` → `{TestResult, Patch}`），**逐行断言两件事**：
+（A1）表里列出的**每个**型都在该下游的 `input_schema` 里；
+（A2）该下游的 `input_schema` 里**每个**型都在表里列出——**两个方向都判，合起来是集合相等**。
+**（A2）承担的就是「下游的每一个型都能找到上游」这一半**：下游若多出一个语料外的型，
+（A2）红，而在 (B) 里那一型根本没有对应的行——两处一起把「下游有孤儿型」逼出来。
 
-- 红条件（下游侧）：把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`（去掉 `Json`）（**取反档**）
-  → `(code-spec-review, code-decompose, Json)` 那条红。
+**（B）上游来源**——手写三列语料 `(下游算子 id, 上游算子 id, 型)`，逐行对应设计 §3.4 的边表，
+逐行断言该上游的 `output_schema` 含该型。
+
+**（A）＋（B）就是设计 §3.4 的判据**：下游的每一型都在 (A) 的表里（A2 的后一个方向），
+表里的每一型在 (B) 里都有一枚上游的输出含它。**这不是把设计判据改写**——设计写的就是
+两半合起来的那一句，本计划只是**把两半各自交给一条独立的断言**：三列语料是 (B) 那一半，
+它**不能**同时充当 (A)，否则下游侧只剩「语料枚举到的那几个型」，正是 fail-open 的那一侧。
+
+- 红条件（下游侧·删型）：把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`（去掉 `Json`）（**取反档**）
+  →（A1）红（表里列了 `Json` 而下游没有）。
+  **这一条正是设计 §10.3 预告的那一行**（它的判据是「下游的每一型都要能找到上游」）。
+- 红条件（下游侧·增型）：给 `code-test-run` 的 `input_schema` 加一个 `ArtifactType::Json`（**取反档**）
+  →（A2）红。**这一条是三列语料单独用时会漏掉的那一侧**——把它写进红条件，才说明 (A) 不是摆设。
 - 红条件（上游侧）：把 `code-decompose` 的 `output_schema` 改成 `[Patch]`（**取反档**）
-  → 同一条的「上游含该型」那一半红。**两条红条件各指一个唯一锚点**（分别是第 5 行与第 3 行的端口字段）。
+  →（B）里 `(code-implement, code-decompose, Json)` 那一行红。
+  **三条红条件各指一个唯一锚点**（分别是第 5、7、3 行的端口字段）。
+- **串 → 算子的查找方式要写死**：本用例与 Task 7 的 `l`／`m` 都按**串**指认算子，故测试里要有一个
+  辅助函数，形态是「在 `all_operators()` 里按 `id` 线性查找，**找不到即 `panic!` 并打印那个串**」，
+  两处**同形**。**不许写成「找不到就跳过」**：那样 Task 1 的 id 变异（把第 5、6 行的 id 改成同一个）
+  会让本用例**静默通过**；写成 panic 之后，那一处变异在本用例的红是「找不到 `code-quality-review`」
+  这一条 panic——**红的位置可解释**。
 - **`code-plan` 那一行不入本用例**：它的输入由装配方以 `Json` 值投射、**不由任何算子的 `output_schema` 提供**，
   故它**没有上游算子可指**（设计 §3.4 的「一处例外」）。**若不写明这一点，本用例会被读成判据的反例。**
   它的上游是 §234 的 `Milestone` 与 §228 的 `Plan`（都是 P4 的对象），**以值**由装配方投射。
 - **`code-workspace` 那一行的三元组数为零**（它的输入是空的，Base 不在端口上）——
-  **明写为零，而不是「不在表里」**：两者在代码里长得一样，但前者是一条断言（它的输入确实是空的），
-  后者是漏写。
+  **明写为零，而不是「不在表里」**：两者在代码里长得一样，但前者是一条断言
+  （它在 (A) 的表里，型集合为空集，且它的输入确实是空的——Task 1 的 `h` 钉后者），后者是漏写。
 
-**依据栏的读法照设计 §3.4 写进注释**：语料里写「§186 `:62`→`:64`」这一类的是规范正文的步骤序；
+**依据栏的读法照设计 §3.4 写进注释**：语料里写「§186 的 `Implementation Plan`→`Engineering Tasks` 两步」这一类的是规范正文的步骤序；
 写「§3.2 第 N 行」的是**该行的 `input_schema` 与全表 `output_schema` 的对应**（本设计的判定，规范未给边）。
 
-**这条用例钉不住什么（写进注释）**：它只判**相邻两枚的 schema 相交**，
-**不判**「图上的边该不该存在」（那是 Planner 的构造）；也**不替代** P1 的
+**（A2）比的是「下游的 `input_schema`」与「设计 §3.4 表为该行列出的型」，不是「下游的输入与上游的输出
+两侧相等」**——后者是设计 §3.4 末与 P5e 设计 §5.3 已否掉的那条读法（例如 `code-spec-review` 的
+输入是 `{Json, Patch}`，而它的两枚上游的输出分别是 `{Json}` 与 `{Patch}`，两侧并不相等）。
+本用例断言的始终是「交集中的型」，即 (B) 的逐行含型判定。
+
+**这条用例钉不住什么（写进注释）**：它只判**下游的每一型都有一枚上游的输出含它**，
+**不判**「图上的边该不该存在」（那是 Planner 的构造），也**不判**「两侧的 schema 相等」；**不替代** P1 的
 `compatible`（`crates/continuum-port/src/port.rs:94`）——本块不写第二份那类判定（切分 §四第 7 条）。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行（本 task 无生产代码，预期首次即绿）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-code --test schema_edges
 ```
+
+**预期是绿**：本 task 只新建测试，断言的是 Task 1 已交付的声明，故这里没有「先红后绿」。
+**若这一步红了，说明 Task 1 的声明与设计 §3.4 的边表不符**——那是要回 Task 1 查的，
+不是本 task 的用例写错。这一条本 task 的红由 Task 8 Step 5 的变异复核取。
 
 - [ ] **Step 3: 实现（无生产代码）**
 
@@ -665,6 +808,9 @@ git commit -m "test(code): §3.4 边表的两侧断言——注册期可查的�
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-code --test reuse
 ```
 
+**预期是绿**（同 Task 3 Step 2）：本 task 无生产代码可写，断言的是 Task 1 的 `determinism` 声明
+与 P1 已交付的 `cache_key` / `can_reuse`。红了先查那两处，不是查本用例。
+
 - [ ] **Step 3: 实现（无生产代码）**
 
 本 task **只交付用例与一条 dev 边**。**不建** `can_reuse` 的包装、**不建** `CacheKey` 的存储
@@ -707,11 +853,17 @@ git commit -m "test(code): §3.6 的复用照片——determinism 声明是 §30
   **不判次序**：候选列表在本块没有任何断言读它的次序，**「两项换序」是一枚等价变异体**
   （设计 §10.3 末行已写明）；**要打红它必须换变异体：删掉一项**——那时本条与 Task 2 的
   `the_list_is_exactly_these_five_names` 都红。**这一句要写进注释**，否则后来者会拿换序去验守卫。
-  红条件：把 `overlay` 写成 §255 的散文名 `overlayfs`（**取反档**）→ 两半都红。
+  红条件：把第 1 行的 `overlay` 写成 §255 的散文名 `overlayfs`（**取反档**）→**（p1）红而（p2）仍绿**。
+  **（p2）为什么仍绿**：它读的是 `WorkspaceBackend` 与**测试里手写的**期望串，
+  **不读算子的 `backend_candidates`**，故改算子的那一列不动它。
+  **若本意是让（p2）也红**，那要把它写成「`match` 的结果等于**算子的候选集合**」——那时它变成
+  运行期断言，与它自陈的「编译期照片」混在一处，本计划**不取**那条写法（（p2）的用途只有一个：
+  「P2 给枚举加一臂即编译不过」）。
   **锚点唯一**：`operators.rs` 里第 1 行的 `backend_candidates`。
 - **（p2）编译期侧**：对 `WorkspaceBackend` 做**穷尽 `match`、不带 `..`**，每臂返回期望的候选串，
-  断言该集合等于（p1）的期望集合。
-  **这是一张编译期照片，照实写成编译期照片**：P2 若按 §255 `:1029-1037` 给 `WorkspaceBackend`
+  断言 `match` 出来的集合等于**测试里同一份手写期望**——**（p1）与（p2）都只读 `WorkspaceBackend`
+  与手写期望，两者都不读算子的 `backend_candidates`**（故（p1）的红条件改算子那一列时（p2）不动）。
+  **这是一张编译期照片，照实写成编译期照片**：P2 若按 §255 的非 Git 项目那五种形态给 `WorkspaceBackend`
   加第三臂，`crates/continuum-code/tests/workspace_backends.rs` **编译不过**
   （具体错误码取自实跑，不许凭记忆写）。它**不是**「用例变红」。
   **它成立的前提是 `match` 的入参是枚举自身**——故这里的 `match` 收 `WorkspaceBackend`，
@@ -722,11 +874,14 @@ git commit -m "test(code): §3.6 的复用照片——determinism 声明是 §30
   不由 serde 表示或 `Debug` 推出**），故本块**不拿 serde 表示替代它**：
   两者今天恰好同串，而它们是两件事（设计 §3.5 末）。
 
-- [ ] **Step 2: 运行，确认失败**
+- [ ] **Step 2: 运行（本 task 无生产代码，预期首次即绿）**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-code --test workspace_backends
 ```
+
+**预期是绿**（同 Task 3 Step 2）：本 task 无生产代码可写，断言的是 Task 1 第 1 行的
+`backend_candidates` 与 P2 已交付的两臂。红了先查那两处。
 
 - [ ] **Step 3: 实现（无生产代码）**
 
@@ -845,6 +1000,12 @@ git commit -m "test(code): Evidence 唯一产生点的使用侧照片（trybuild
   （P5b 设计 §3.2 末已把这条弱引用的无照片写清）。
   红条件：把 `fuzz` 一行的 `code-fuzz-run` 改成 `code-fuzz-runs`（**取反档**）→ 本条红、而 (k) 红
   （(k) 的期望里写的是正确的串）。**两条同时红是预期**，注释里要写明。
+  **串→算子怎么找要写死**：这一条与上面的 `m` 都按「串」指认算子，故测试里要有一个辅助函数，
+  形态是「在 `all_operators()` 里按 `id` 线性查找，**找不到即 `panic!` 并打印那个串**」。
+  **不许写成「找不到就跳过」**：那样 Task 1 的 id 变异（把第 5、6 行的 id 改成同一个）会让本块
+  以**静默通过**而非红收场。写成 panic 之后，那一处变异在本块的红是
+  「找不到 `code-quality-review`」这一条 panic——**红的位置可解释**。
+  查找方式要在 `tests/methods.rs` 与 `tests/schema_edges.rs` 两处**同形**（Task 3 的语料同样按串指认算子）。
 - `exactly_the_eight_declared_operators_are_referenced_by_the_directory`（§10.2 第 (m) 条）：
   **手写**那八个 id 的名单（`code-workspace` `code-plan` `code-decompose` `code-spec-review`
   `code-quality-review` `code-test-run` `code-fuzz-run` `code-verify`），断言这八个**都**出现在
@@ -855,7 +1016,7 @@ git commit -m "test(code): Evidence 唯一产生点的使用侧照片（trybuild
   红条件：把 `planning` 一行填成 `["code-implement"]`（**取反档**）→ 本条红而 (k) 仍绿
   （那一行仍是非空的）。**这一对红绿是本条存在的理由。**
   注释里写明：`code-implement` 不被任何 `realized_by` 引用**不构成缺陷**——
-  §186 `:68` 的 `Implement` 是链上的一步，而 §187 `:118-124` 的七条是**方法名**（「怎样做得可靠」），
+  §186 的 `Implement` 是链上的一步，而 §187 的 `software/` 七条是**方法名**（「怎样做得可靠」），
   两者不是同一张表。
 - `bind_returns_the_method_error_type`（§10.2 第 (n) 条）：
   编译期照片——`let _: Result<(), MethodError> = bind_code_methods(&mut registry);` 编译通过。
@@ -871,6 +1032,10 @@ git commit -m "test(code): Evidence 唯一产生点的使用侧照片（trybuild
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-code --test methods
 ```
 
+**这一步量到的是编译失败，按纪律 1(c) 不算红**——照实写成**编译期照片**：
+`bind_code_methods` 由 Step 3 才建出，故本步的失败形态是 `error[E0432]`／`error[E0433]`
+（`continuum_code::bind_code_methods` 尚不存在），不是断言失败，**这一步是空转的**。
+
 - [ ] **Step 3: 实现**
 
 ```rust
@@ -885,10 +1050,17 @@ pub fn bind_code_methods(registry: &mut MethodRegistry) -> Result<(), MethodErro
 **七条 `realized_by` 的取值照设计 §7.1 的表**（本计划不重抄；实现时对表逐行填，
 并在 `methods.rs` 里留下每一行的理由注释）。
 
+**设计 §7.3（§186 的流程名不入 `software/` 目录，答复 P5b 设计 R6）的落点就是本函数**：
+它的交付物是**没有任何一行 `register`**——`bind_code_methods` 只对 P5b `seeded()` 给出的七条 id
+调 `MethodRegistry::bind`，**§186 的步骤名（`spec-review` / `quality-review` 一类串）一个字都不出现**
+（P5b 设计第六节禁止四块自造 `MethodEntry`）。这一条**没有可拍的照片**（它是「代码里没有那一行」），
+据实写成函数文档注释里的一句；它的**可观察近邻**是 Task 7 的 `m`（§186 的 `Implement` 那一步落成的
+算子 id `code-implement` 不被任何 `realized_by` 引用）。
+
 `TDD` 与 `debugging` 为空 `Vec` 的**理由要写在函数文档里**（不是「还没填」）：
 `TDD` 的全部内容是**次序**（先写测试、后写实现），而 `realized_by` 的类型是算子 id 的一个**集合**，
 **表达不了次序**——填两枚 id 会让 `TDD` 与「先实现后补测试」在登记面上不可区分；
-`debugging` 在链上没有对应的步骤（《总纲》`:1448` 的六步与 §186 `:57-77` 的十行都没有调试），
+`debugging` 在链上没有对应的步骤（《总纲》§8.3 的六步与 §186 那十行流程块都没有调试），
 且规范没有一处给过「调试的输入与产物是什么」。
 
 - [ ] **Step 4: 运行全部测试并提交**
@@ -984,18 +1156,20 @@ grep -rn "EvidenceType::" crates/continuum-code/src
 
 按纪律 1／2 跑**承重守卫**（两侧对钉的、fail-open 侧的、失败路径判别 `Err` 的、跨 crate 才可见的），
 每轮：`trap` 装还原 → 变异前 `sha256sum` → 跑全量 `--no-fail-fast` → 读红位 → 还原后 `sha256sum` →
-独立日志路径。**逐轮在报告里附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位（取反／放宽／收紧／移除）」**。
+独立日志路径。**逐轮在报告里附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位（取反／放宽／收紧／移除；改被断言的声明取值的变异记取反并写明改的是哪一列）」**。
 
-**设计 §10.3 的预告表逐行照跑，但其中一行已按实测订正**（见 `## 遗留`）：
-「把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`（去掉 `Json`）」在**设计给的单侧判据**下
-**不会红**（那是等价变异体），本计划的 Task 3 用的是**三列语料**，故它**会红**。
+**设计 §10.3 的预告表逐行照跑**：其中「把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`（去掉 `Json`）」
+那一行，在**设计给的单侧判据**下不会红（单侧读法下它更容易满足），本计划的 Task 3 把那一半交给
+**（A1）这条独立断言**（表里列了 `Json` 而下游没有 ⇒ 红），故它**会红**；该行的其余预告（谁该红、
+谁不该红）照设计读。
 
 **三条跨 crate 的承重守卫必须跑全量**：
 （i）`ALLOWED` 与实际依赖一致（加/删一条边即红）；
 （ii）新 crate 进 workspace 后**迁移集合与计数不受影响**（本块零迁移）；
 （iii）Task 5 的 `WorkspaceBackend` 穷尽 `match`——**它的变异是「给 P2 的枚举加一臂」，
 红的时点应在编译期；若它跑成了「编译失败」而不是「用例失败」，按纪律 1(c) 记为「编译不过」，
-并另换一个真变异体**（把第 1 行的 `overlay` 改成 `overlayfs`，运行期红）。
+并另换一个真变异体**（把第 1 行的 `overlay` 改成 `overlayfs`，**取反档**，
+红的是（p1）——（p2）不读算子，见 Task 5 Step 1）。
 **注意（iii）的变异要改的是 `continuum-workspace` 的文件——不属于本块的交付物**，
 故它只能在**本地工作树**上做、且**必须还原**；**报告里要写明这一点**，
 **不许把那个改动提交**。
@@ -1036,10 +1210,12 @@ git commit -m "docs(code): P5c 代码领域算子的收尾与复核"
    **收件人：P2 ＋ 协调者。**
 2. **§10.3 的预告表有一行在它自己给的判据下不会红**（**实测相抵**）：
    该行写「**取反**：把 `code-spec-review` 的 `input_schema` 改成 `[Patch]`（去掉 `Json`）→
-   j 的第 5 行」，而 §3.4 的判据是**单侧**的（「下游的每一型都要能找到上游」）——
-   **从下游删一个型会让该判据更容易满足**，故那一行变异在单侧读法下**全绿**（等价变异体）。
-   **本计划的处置**：Task 3 把语料写成**三列**（下游、上游、型）并对**两侧**各断言一次，
-   该变异随之真红。**收件人：设计作者 ＋ 复审者。**
+   j 的第 5 行」，而 §3.4 的判据里「下游的每一型都要能找到上游」那一半，若**只**由一份
+   枚举式三列语料承担，则**从下游删一个型会让它更容易满足**，那一行变异就会**全绿**（等价变异体）。
+   **本计划的处置**：Task 3 把设计判据的两半各自交给一条**独立的**断言——
+   （A）「下游的 `input_schema` 与该行的语料型集合**两个方向都相等**」承担下游侧
+   （删型 ⇒（A1）红；**增型 ⇒（A2）红**），（B）三列来源语料承担上游侧（上游删型 ⇒ 红）。
+   该变异随之真红，且不再有「语料外的型」这个 fail-open 的口子。**收件人：设计作者 ＋ 复审者。**
 3. **§3.5 的封闭名单没有规范来源**（**设计已自陈并已给收件人**）：§245 只给「一个 Operator 多 backend」，
    不给 backend 的确定性。缺的是「该 backend 的什么属性使输出逐位可复现」这一步。
    **本计划照 §3.5 落地**（名单五项写在 `REPRODUCIBLE_BACKENDS`，逐项有 Task 2 的用例）。
@@ -1048,7 +1224,7 @@ git commit -m "docs(code): P5c 代码领域算子的收尾与复核"
    判『通过/不通过』所必需的」这一步。**本块不发明它**（设计 §5.4 第 4 条）。
    **收件人：规范维护者 ＋ P5a。**
 5. **两个「Plan」同名**（**设计已自陈**）：§228 的 `Plan`（P4 的对象）与 `code-plan` 产出的
-   `Json` 制品（§186 `:62` 的 `Implementation Plan`）。**本块不改名、不合并。**
+   `Json` 制品（§186 的 `Implementation Plan` 一步）。**本块不改名、不合并。**
    **收件人：P4 的持有方 ＋ 协调者。**
 6. **`code-workspace` 的「每 Intent 一枚」在类型层不可钉**（**设计已自陈**）：
    算子是每节点的执行单元，而「图上有几个该节点的实例」是 Planner 的构造。
@@ -1094,13 +1270,22 @@ git commit -m "docs(code): P5c 代码领域算子的收尾与复核"
 
 - **`REPRODUCIBLE_BACKENDS` 的取名**（Task 2）：设计 §3.5 只写「一份封闭表」，**没给名字**。
   **代价**：名字是本计划定的；**收益**：那张表有一个可被用例指认的落点。
-- **§3.4 边表的语料形态取三列**（Task 3）：设计 §3.4 的判据是**单侧**的，本计划取三列并对两侧断言。
-  **代价**：语料比设计多一列；**收益**：设计 §10.3 预告的那一行变异真红（第一节第 2 条）。
+- **§3.4 边表的判据拆成两组断言**（Task 3）：设计 §3.4 把判据写成一句（下游的每一型能在
+  该行的上游里找到，且那一枚的输出含该型），本计划把它拆成
+  **（A）下游覆盖**（手写的「下游 → 型集合」表，两个方向都断言）与 **（B）上游来源**（三列语料）。
+  **代价**：多一份手写表；**收益**：设计 §10.3 预告的那一行变异真红，且**下游新增语料外的型**
+  这一侧不再是 fail-open（第一节第 2 条）。
 - **§4.2 的照片取「两臂穷尽 `match` ＋ 手写期望串」**（Task 5）：见第一节第 1 条。
   **代价**：落库编码那一半无照片；**收益**：不为此加一条设计边表之外的 dev 边。
 - **`all_operators()` 的返回类型是 `[Operator; 9]`**（Task 1）：**不是本计划自定**——设计 §3.2 已写死
   并给了两条理由。留这一条是为了让「数目写在返回类型里」这件事可查，
-  并附上它的**副作用**：`len() == 9` 单看是恒真的（纪律 1(b) 第二处等价变异体）。
+  并附上它的**副作用**：`len() == 9` 钉的是**返回类型的数目**（设计 §10.1 的守卫），
+  它不钉「九枚的 id 与 §3.2 表逐行对得上」——后者由 Task 1 的 `f`／`g`／`i` 与 Task 4／Task 5 的逐枚断言承担。
+- **Task 1 的 `the_port_types_in_use_are_exactly_the_four_types_of_this_chain` 是本计划新增的一条守卫**
+  （§8「本链零请求」的可观察形态：九枚的 `input_schema ∪ output_schema` 恰为手写的四枚型）：
+  它**不在设计 §10.2 的 (a)–(p) 之内**，内容与 §8 一致但设计没给它编号。
+  **代价**：比设计多一条用例；**收益**：§8 的「零请求」有可跑的形态，而不是只写在设计的正文里。
+  **（这一条先前漏申报，此处补入。）**
 - **Task 6 与 Task 7 排在最后**：**不是风格偏好**，是跨计划前置第二节那条硬前置的直接后果。
 
 ### 六、设计 §11 的逐条对账条目与 §12 的遗留：**本计划不重述其内容**
