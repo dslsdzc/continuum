@@ -79,7 +79,7 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
 | `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-media", &[…])`，**五项不出现在同一次改动里**（Task 3／7／8／9 各追加） | 切分 §四第 6 条 |
 | `crates/continuum-artifact/src/artifact.rs` | 枚举本体、`:24` 的注记、`ALL`、`as_str`、`parse` 五处 | 切分 §四第 2 条 (a)(b)(c) |
 | `crates/continuum-artifact/tests/artifact_type.rs` | `:23` 的数目断言 | 切分 §四第 2 条 (d) |
-| `crates/continuum-port/tests/compatibility.rs` | `:47` 的用例改为遍历 `ALL` | 切分 §四第 2 条 (e)——**清单里唯一不会自己变红的一处** |
+| `crates/continuum-port/tests/compatibility.rs` | `:47` 的用例改为遍历 `ALL`，并逐型断言 **serde 串与 `as_str()` 相同** | 切分 §四第 2 条 (e)——**清单里唯一不会自己变红的一处**；加的那条断言是本计划自定，申报见 `## 遗留` 第三节 |
 | `crates/continuum-operator/src/definition.rs` | `:95` / `:96` 两行签名、`:76` 之后加 `BackendId` 的 `Display`、`:90-91` 的注记、末尾加两枚新类型 | 设计 §4.4；切分 §一 的共写表 |
 | `crates/continuum-operator/src/lib.rs` | `:7-9` 的 `pub use` 补两枚 | 设计 §4.4（一并清掉 P1 计划 `:5565` 记的「未 re-export」遗留） |
 
@@ -95,6 +95,7 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
   本块不自建（切分 §四第 4 条），**本计划不为它们建任何接线 task**。
 - **交给 P5a（`continuum-verify`）**：设计 §9.1 的答复「`VisualCheck` 够用、不请求新臂」；
   两枚验证算子的 §262 级别声明（第 1 级与第 3 级，设计 §5.5）。**本计划只交付那两条声明，不交付 `AvailableVerifier` 的构造。**
+  那两条声明的载体是 `src/operators.rs` 里 `verify-deterministic` / `verify-multimodal` 两枚算子值上的文档注释（Task 3 Step 3）。
 - **交给 P5b（`continuum-method`）**：四条 `video/` 方法的 `realized_by`（Task 8）。
   **本块不 `register` 方法条目**（P5b 设计第六节：四块不得自造 `MethodEntry`）。
 - **交给装配方**：`Evidence` 的构造调用点（`subject` 取 `Unattached`、`producer` 取 `EvidenceProducer::Node{..}`），
@@ -165,8 +166,10 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
   `can_reuse(&Operator, Option<&CacheKey>, &ContentHash, bool) -> bool`（`:29`）、
   `CacheKey { input_hash, operator_version }`（`:9-12`）；`ContentHash::of(&[u8])`（`crates/continuum-artifact/src/content.rs:11`）。
 - P5b 的 `MethodRegistry::bind(&mut self, id: &MethodId, realized_by: &[&str]) -> Result<(), MethodError>`、
-  `MethodRegistry::seeded()`、`MethodId::new(impl Into<String>)`、`MethodError::{NotFound, Duplicate}`
-  （`docs/superpowers/specs/2026-10-08-p5b-execution-method-library-design.md` §4.2／§4.4／§4.5 的形状块）。
+  `MethodRegistry::seeded()`、`MethodRegistry::new()`、`MethodRegistry::select(&self, domain: MethodDomain) -> Vec<&MethodEntry>`、
+  `MethodId::new(impl Into<String>)`、`MethodEntry::realized_by: Vec<String>`、`MethodDomain::Video`、
+  `MethodError::{NotFound, Duplicate}`
+  （`docs/superpowers/specs/2026-10-08-p5b-execution-method-library-design.md` §4.1／§4.2／§4.3／§4.4／§4.5 的形状块）。
   **落地前须读 `continuum-method` 的源码确认**——本计划引用的是**设计**，该 crate 今天不存在。
 - P5a 的 `Evidence::from_tool_result` 八参数（`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md` §4.4）、
   `EvidenceSubject::{Requirement, Unattached}`（其 §4.3.1）。**同样只有设计，落地前须对源。**
@@ -183,13 +186,17 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
    (c) **变异导致编译失败**——那不是「变红」（判据用 `could not compile` 或 `error[E….`；
    cargo 在**用例失败**时也打印 `error: test failed, to rerun pass …`，**不能拿它当判据**）。
    **本块已预先识别的三处等价变异体**（换变异体，不补用例）：
-   - **把某个新变体的串换成另一个同样合法的小写串**（`shot_set` → `shotset`）：往返仍成立、全绿
-     ——要打红它必须换成与 `crates/continuum-artifact/tests/artifact_type.rs:40` 的表外取值相撞的串，
-     或直接断言**串的字面值**（Task 1 的 (a) 取后者，见该 task 与 `## 遗留` 第三节）；
+   - **把某个新变体的串换成另一个同样合法的小写串**（`shot_set` → `shotset`）：**只看 serde 往返时**它全绿
+     ——要打红它，或换成与 `crates/continuum-artifact/tests/artifact_type.rs:40` 的表外取值相撞的串，
+     或直接断言**串的字面值**（Task 1 的 (a) 取后者）、或断言 **serde 串与 `as_str()` 相同**
+     （Task 1 的 (d) 取后者；两处都已落，见该 task 与 `## 遗留` 第二、三节）；
    - **把 `[Operator; 17]` 的数目字面量改成 16**：那是**编译期**的红（返回类型不一致），**不算变红**；
      运行期可观察的那一半是 `len()` 断言与 (f) 的逐枚 `resolve`（Task 3）；
-   - **`Version` / `Permission` 的 `parse` 里把两枚不同臂映射到同一个串**：若用例只断「往返」则等价
-     ——Task 5 的 (l) 逐枚断言**具体是哪一枚**，故两臂互换即红。
+   - **把某一枚旗标的串改成另一个未被占用的合法串**（`as_str` 与 `parse` **两处一起**改）：往返仍成立、全绿
+     ——打红它要靠**串的字面值断言**，即 Task 5 的第 1 条用例（`the_five_flags_are_exactly_the_five_from_section_34`
+     逐臂断言 `parse(as_str(p)) == Some(p)` 与串的字面值）；**(l) 与它无关**（(l) 断言的是「算子 → 旗标」的映射）。
+     **别把它写成「把两枚的串互换」**：互换也要在 `as_str` 与 `parse` 两处**一致地**做才是等价变异体；
+     **只在一处改，`parse(as_str(p)) == Some(p)` 当场为假、往返即红**——那是真变异体，报成「等价」会白跑一轮。
 2. **变异脚本必须带还原护栏**（本仓出过一次「变异留在源码里」的事故）：
    每次变异**用 `trap` 装还原**、**变异前与还原后各核一次 `sha256sum`**、**每轮用独立日志路径**，
    报告里逐轮附「变异前的 sha256 / 还原后的 sha256 / 红的位置 / 日志路径 / 档位」。模板（`MUT` 是改的文件、`BAK` 是备份）：
@@ -227,7 +234,7 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
    「编译器强制穷尽的解构／结构体字面量」且不得带 `..`。**
    **Rust 没有反射**——若「把字段名各列一遍」被理解成手写两份名单，那条断言恒真。**本块适用这条的类型**：
    17 枚 `Operator` 值（结构体字面量，七字段全写，`crates/continuum-operator/src/definition.rs:79-88`）、
-   `PermittedGenerativeContent`、两枚检查点结构。
+   `PermittedGenerativeContent`、两枚检查点类型与它们的 `Progress`。
 9. **凡注释写绝对措辞，必须有对应用例；且要带时点**——「唯一／一律／只有／全部／没有任何」这类词，
    要么有可写出的照片，要么**明写为什么没有**。**断言的作用域要与事实同宽**：
    「本 crate 的源码文本里零命中」≠「全仓零命中」；「在本 task 结束时」≠「永远」。
@@ -272,11 +279,13 @@ crates/continuum-media/                 （新建）
   Cargo.toml
   src/lib.rs              导出面与 crate 文档；P5e 的四处判定各一行指向实现处
   src/error.rs            MediaError（三臂）
-  src/operators.rs        all_operators() -> [Operator; 17]、register_media_operators、
+  src/operators.rs        all_operators() -> [Operator; 17]（§5.5 的两条级别声明在两枚验证算子值的
+                          文档注释上）、register_media_operators、
                           逐位可复现 backend 的名单常量与注册期规则（§5.4）
   src/permission.rs       GenerativePermission（五臂 ＋ ALL ＋ as_str / parse）、
                           PermittedGenerativeContent、required_permission、authorize_generative（§34）
-  src/checkpoint.rs       GenerateBroll / Render 两枚类型与它们的 Checkpointable 实现（§4.5）
+  src/checkpoint.rs       GenerateBroll / Render 两枚类型、Progress，与它们的 Checkpointable 实现
+                          及那组读法／写法（§4.5）
   src/methods.rs          bind_media_methods（§10；唯一入口，只调 MethodRegistry::bind）
   tests/operators.rs      (f)(g)(n)：清单、注册的两侧、五枚 side_effect_class 逐枚
   tests/ports.rs          (t)：§5.3 的 17 行边表逐行
@@ -296,8 +305,8 @@ crates/continuum-media/                 （新建）
 Cargo.toml（workspace）                                   members 加 crates/continuum-media（Task 3）
 crates/continuum-artifact/src/artifact.rs                 五处（Task 1）
 crates/continuum-artifact/tests/artifact_type.rs          :23 的数目断言（Task 1）
-crates/continuum-artifact/tests/artifact_types_p5.rs      新建：(a)(c)(e) 的用例（Task 1）
-crates/continuum-port/tests/compatibility.rs              :47 的用例改为遍历 ALL（Task 1）
+crates/continuum-artifact/tests/artifact_types_p5.rs      新建：(a)(c)(e) 的用例（Task 1；字母取设计 §12.2）
+crates/continuum-port/tests/compatibility.rs              :47 的用例改为遍历 ALL，并逐型断言 serde 串与 as_str() 相同（Task 1）
 crates/continuum-operator/src/definition.rs               两行签名、BackendId 的 Display、:90-91 注记、末尾两枚新类型（Task 2）
 crates/continuum-operator/src/lib.rs                      pub use 补两枚（Task 2）
 crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 的 continuum-media 条目（Task 3／7／8／9 各追加）
@@ -312,8 +321,8 @@ crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 的 continuum-
 **Files:**
 - Modify: `crates/continuum-artifact/src/artifact.rs`（枚举本体 `:14-21`、注记 `:24`、`ALL` `:28-35`、`as_str` `:47-56`、`parse` `:68-78`）
 - Modify: `crates/continuum-artifact/tests/artifact_type.rs`（**只改** `:23` 的数目断言 `6` → `17`）
-- Modify: `crates/continuum-port/tests/compatibility.rs`（`:47` 的用例改为遍历 `ALL`）
-- Create: `crates/continuum-artifact/tests/artifact_types_p5.rs`（(a)(c)(e) 的用例：手写的 11 对 ＋ 落库往返；
+- Modify: `crates/continuum-port/tests/compatibility.rs`（`:47` 的用例改为遍历 `ALL`，并逐型断言 serde 串与 `as_str()` 相同）
+- Create: `crates/continuum-artifact/tests/artifact_types_p5.rs`（(a)(c)(e) 的用例，字母取设计 §12.2：手写的 11 对 ＋ 落库往返；
   **新文件而不是改 `artifact_store.rs`**，理由见 Step 1）
 
 **Interfaces:**
@@ -336,11 +345,18 @@ crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 的 continuum-
 
 `crates/continuum-artifact/tests/artifact_types_p5.rs`（新建）：
 
-- `every_p5_artifact_type_has_exactly_its_declared_encoding`（**第 (a) 与 (e) 条**）：
+> **字母用哪一套（本节与 Step 3 的表不是同一套，读时别看串）**：**本 step 里用例的字母取设计 §12.2 的一套**
+> ——(a) 11 枚新串的往返、(c) 落库往返、(d) `compatibility.rs`、(e) 两个多词串；
+> **Step 3 那张表的字母取设计 §3.5 的一套**——(a) 枚举本体、(b) `ALL`（含 `:24` 的注记）、
+> (c) `as_str` / `parse`、(d) 数目断言、(e) `compatibility.rs`。**同一个 `(e)` 在两套里是两件事**
+> （§12.2 的 (e) 是多词串，§3.5 的 (e) 是那个用例）。本计划不合并两套字母（合并就要重述设计的表）。
+
+- `every_p5_artifact_type_has_exactly_its_declared_encoding`（**第 (a) 与 (e) 条**，设计 §12.2 的字母）：
   语料是**手写的 11 对**（`变体`, `串`），**不从 `ALL` 取**——逐对断言两件事：
   （i）`ty.as_str() == 期望的串`；（ii）`ArtifactType::parse(该串) == Some(ty)`。
   **（i）是承重的那一半**，理由是设计 §12.3 已把「只断往返」标成**等价变异体**：
-  把 `shot_set` 改成 `shotset` 仍往返成立、全绿；**能把两版分开的输入就是那个期望串本身**。
+  把 `shot_set` 改成 `shotset`，**在只看 serde 往返的语料里**仍成立、仍绿；
+  **能把两版分开的输入就是那个期望串本身**。
   **红条件（取反档）**：把 `SubtitleTrack` 的 `as_str` 写成 `"subtitletrack"` ⇒（i）红。
   **红条件（收紧档）**：把 `ShotSet` 的串写成 `"shot_set "`（尾空格）⇒（i）红，且 `artifact_type.rs` 里
   「小写 + `_`」那条断言也红（`:32-35`，它对 `ALL` 逐型跑）。
@@ -357,16 +373,25 @@ crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 的 continuum-
   **它的红条件（取反档）**：把 `parse` 的某一臂写成 `_ => Some(..)`（兜底为默认型）⇒ 那条既有断言红。
 
 `crates/continuum-port/tests/compatibility.rs:47` 的 `six_types_round_trip_through_serde`（**第 (d) 条**）：
-- **改为遍历 `ArtifactType::ALL`**，并**把函数名里的数目字面量去掉**（改名，使下一次加型不必再改名字）。
+- **改为遍历 `ArtifactType::ALL`**，**逐型加一条断言：serde 串与 `as_str()` 相同**
+  （`serde_json::to_string(&t)` 去掉两侧引号后与 `t.as_str()` 逐字相同），
+  并**把函数名里的数目字面量去掉**（改名，使下一次加型不必再改名字）。
   ```
   fn every_artifact_type_round_trips_through_serde()
   ```
+  **为什么要加那条断言（本计划自定，申报见 `## 遗留` 第三节）**：只做 serde 往返时，
+  「删掉 `artifact.rs:13` 的 `#[serde(rename_all = "snake_case")]`」这一档**不红**——
+  `SubtitleTrack` 序列化成 `"SubtitleTrack"`、反序列化仍解回 `SubtitleTrack`，往返照旧成立，
+  **那是一枚等价变异体**（举不出会给出不同结果的入参）。**能把两版分开的入参就是那两个串本身**，
+  故把「serde 表示 == `as_str()`」写成断言；它同时是 `artifact.rs:41-46` 那条既有注记
+  （「`rename_all = "snake_case"` 给出的字符串与本函数逐型相同」）的照片。
   **这是本 task 唯一一处「不改也会照旧编译、照旧通过」的地方**（设计 §3.5 的 (e)）：它手工列了六型
   （`:49-54`），加 11 型之后它仍绿，而**它的名字与它的清单都成了假话**。
   **红条件（移除档）**：把循环改回手工六型 ⇒ **本用例不变红**——这一处的守卫是**清单本身**
-  （改了它之后，遍历 `ALL` 就能发现新串的 serde 往返问题），故**红条件写在另一处**：
+  （它与 `ALL` 是两个各自维护的清单，而 `ALL` 有守卫、它没有），故**红条件写在另一处**：
   把 `ArtifactType` 的 `#[serde(rename_all = "snake_case")]`（`artifact.rs:13`）删掉 ⇒ 遍历 `ALL` 时
-  `SubtitleTrack` 的 serde 表示与 `as_str` 不一致 ⇒ 红。
+  `SubtitleTrack` 的 serde 串是 `"SubtitleTrack"`、`as_str()` 是 `"subtitle_track"` ⇒ 那条新加的断言红。
+  **照实记**：「删 `rename_all` 会红」这句话只在**加了这条断言之后**成立；只断往返时该变异是等价变异体。
   **并写明**：既有用例 `different_type_is_rejected_with_both_sides_named` 等三条**不动**。
 
 - [ ] **Step 2: 运行，确认失败**
@@ -388,6 +413,8 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-port --test compatibility
 
 - [ ] **Step 3: 实现（一次改动，五处同时）**
 
+**本表的字母取设计 §3.5 的一套**（与 Step 1 的 §12.2 字母不同，见 Step 1 开头的注记）：
+
 | 处 | 落点（实测） | 改法 |
 |---|---|---|
 | (a) 枚举本体 | `crates/continuum-artifact/src/artifact.rs:14-21` | 追加 11 枚变体，**顺序照设计 §3.2 的表**（`Image` `Audio` `Video` `Timeline` `Mesh` `Scene` `Transcript` `Report` `ShotSet` `SubtitleTrack` `Render`） |
@@ -395,7 +422,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-port --test compatibility
 | (b) `ALL` | 同文件 `:28-35` | `[ArtifactType; 6]` → `[ArtifactType; 17]` 并补齐 11 项。**`[ArtifactType; 6]` 与 17 项不符即编译失败**——这是 (b) 的报警机制 |
 | (c) `as_str` / `parse` | 同文件 `:47-56` / `:68-78` | 两个穷尽 `match` 各补 11 臂。**`as_str` 无通配臂，加型即编译失败**；**`parse` 从 `&str` 出发，一定要有 `_ => return None`——它不是那张「加型即编译不过」的照片**（这一句要写进用例注释） |
 | (d) 数目断言 | `tests/artifact_type.rs:23` | `6` → `17` |
-| (e) 手工清单 | `crates/continuum-port/tests/compatibility.rs:47`（六型列举在 `:49-54`） | 循环改为 `for t in ArtifactType::ALL`，函数去掉数目字面量 |
+| (e) 手工清单 | `crates/continuum-port/tests/compatibility.rs:47`（六型列举在 `:49-54`） | 循环改为 `for t in ArtifactType::ALL`，函数去掉数目字面量，**并逐型加「serde 串 == `as_str()`」断言** |
 
 **串名沿用本文件既有的约定**（`:37` 的注记：小写、多词以 `_` 连接）：`shot_set` / `subtitle_track`。
 
@@ -539,6 +566,8 @@ git commit -m "feat(operator): Checkpointable 的错误类型（CheckpointError 
   **本 task 的 `MediaError` 只有 `Registry` 那一臂**（撞车由 P1 的 `OperatorError::Duplicate` 判）。
   **另两臂的落点写死，不许落空臂、也不许提前落**：`UnverifiableDeterminism` 由 Task 4 加（它的判定是 §5.4 的名单规则），
   `NotPermitted` 由 Task 5 加（它的判定是 §34 的授权）。**「一个没有判定者的臂」在本块等于一条永不触发的死分支。**
+  **另交付设计 §5.5 的两条声明**（载体是 `src/operators.rs` 里第 16、17 行两枚算子值上的
+  文档注释，见 Step 3 末；**纯声明、无运行期照片**）。
 
 - [ ] **Step 1: 写用例——17 行清单与注册的两侧**
 
@@ -568,6 +597,10 @@ verify-deterministic  verify-multimodal
   ⇒ 该 id 的 `resolve` 返回 `NotFound`，红。
 - `all_operators_has_seventeen_distinct_ids_and_every_version_is_one`：断言 `len() == 17`、
   且 17 个 id **两两不同**（两两比较，不是只查总数）、且每枚 `version == 1`（设计 §5.1 的不变量）。
+  **照实记：`len() == 17` 这一半不承重**——`all_operators()` 的返回类型是 `[Operator; 17]`，
+  在没有编译错误的前提下它**恒真**（纪律 5 已就「数目由返回类型承载」作过说明；设计 §12.1 也把这条写成
+  `len() == 17`）。它是一个**读数**，本条真正承重的是那两两比较与 `version == 1` 两条；
+  「清单少了一枚」这一档的红由**返回类型**（编译期）与 (f) 的逐枚 `resolve` 承担，不由这一行承担。
   **红条件（取反档）**：把两枚算子的 id 写成同一个 ⇒ 两两比较红（**注意**：那时 `register` 也会返回 `Duplicate`，
   两条用例会一起红——**这是刻意的**，它说明两处守卫抓手不同）。
 - `a_second_identical_registration_returns_the_registry_error`（**第 (g) 条**）：
@@ -636,6 +669,18 @@ pub enum MediaError {
 ```
 **「先核后写」在 Task 4 才落地**（那时才有可核的规则）；本 task 的 `register_media_operators`
 只做「逐枚 `register`、任一失败即返回」。
+
+**设计 §5.5 的两条声明的落点（本小节交付它们；`src/operators.rs` 里那两枚算子值各带一段文档注释）**：
+第 16 行 `verify-deterministic` 与第 17 行 `verify-multimodal` 的 `Operator` 值上，
+各逐字抄设计 §5.5 的那两句——「`verify-deterministic` 在 §262 的序里是第 1 级（`DeterministicChecker`）、
+`verify-multimodal` 是第 3 级（`IndependentModelVerifier`）」——并写明两件事：
+（i）**这是本设计的声明**（§32 只说这两步在链尾，没说级别）；
+（ii）**「这一对应由谁持有」未定**（设计 §13 第 5 条 (ii)：装配方以值构造 `AvailableVerifier`，
+`level` 取本设计声明的那一级）。
+**据实记**：`Operator` 的七字段里没有级别，故这两条**只有文档注释这一个载体、没有运行期照片**
+（同纪律 8 的「纯数据声明」；列进 `## 遗留` 第五节）。**它仍是交付物**：设计 §9.3 逐字
+「本块的消费止于「两枚验证算子的级别声明」（§5.5）」，`## 跨计划前置` 第四节「交给 P5a」那一笔即指此处。
+**不建 `AvailableVerifier`、不给 `Operator` 加字段**（设计 §5.5 的归属表：级别序与候选过滤属 P5a）。
 
 - [ ] **Step 4: 运行全部测试并提交**
 
@@ -760,8 +805,11 @@ git commit -m "feat(media): §5.4 的逐位可复现 backend 注册期规则与 
   `GenerativePermission::ALL.len() == 5`，**逐臂** `parse(as_str(p)) == Some(p)`，并**逐臂断言串的字面值**
   （`broll` / `voice` / `music` / `frame_interpolation` / `three_d_generation`——**串的取值是本计划定的**
   （设计只给了类型名与五个旗标的规范名 `allow_generated_broll` 一类，没给 `as_str` 的串），见 `## 遗留` 第三节）。
-  **红条件（取反档）**：把 `Music` 与 `Voice` 的串互换 ⇒ 逐臂的字面值断言红（只断往返不会红——**这是本块预先识别的等价变异体之一**）。
-  **三枚 `ThreeDGeneration` 的地位要写进注释**：§34 的旗标与算子不是一一对应；**本块不给它编算子**
+  **红条件（取反档）**：把 `Music` 与 `Voice` 的串**在 `as_str` 与 `parse` 两处一致地**互换 ⇒ 逐臂的字面值断言红。
+  **据实记**：这一档**只断往返时不会红**（两处一致地互换是自洽的重编码），故承重的是字面值那一条；
+  **只在 `as_str` 一处改则 `parse(as_str(p)) == Some(p)` 当场为假、往返即红**——两档不是同一枚变异体
+  （口径见纪律 1 的第三枚）。
+  **`ThreeDGeneration` 这一枚旗标的地位要写进注释**：§34 的旗标与算子不是一一对应；**本块不给它编算子**
   （那会落进切分 §八「`3d/` 无对家」那条无解）；**这不是死臂**——一个 Contract 声明 `allow_3d_generation`
   而系统里没有 3D 生成算子，是**系统不提供该能力**。
 - `each_of_the_four_generative_operators_requires_its_own_flag`（**第 (l) 条，四臂各一条**）：
@@ -796,7 +844,12 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-media --test permission
 ```
 /// §34 的五个旗标（`docs/spec/01-concepts.md:1424-1428`），逐条照录。
 /// Debug：`MediaError` 自身 derive(Debug)，且其 `NotPermitted` 臂以 `{required:?}` 引用本型。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// **比设计 §7.1 多三项派生**（设计只给 `#[derive(Debug)]`）：`PartialEq` 是 §12.1 的逐臂往返断言
+/// （`parse(as_str(p)) == Some(p)`）所需的值比较；`Clone` / `Eq` 照本仓枚举措辞的既有做法
+/// （`crates/continuum-operator/src/definition.rs:7`、`:15` 的两枚枚举同形）。
+/// **不取 `Copy`**：设计未把本型定成可复制值，而 `contains` 按值收一枚即可。
+/// **这是本计划自定的外部面，不是照抄设计**（申报见 `## 遗留` 第三节）。
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerativePermission { Broll, Voice, Music, FrameInterpolation, ThreeDGeneration }
 
 /// 臂数与编码的守卫：`ALL` 与两个穷尽 `match`，形状照 `ArtifactType` 的既有做法。
@@ -858,11 +911,43 @@ git commit -m "feat(media): §34 的生成内容单独授权（五旗标、四�
 **Interfaces:**
 - Consumes: Task 2 的 `continuum_operator::{Checkpointable, CheckpointError, CheckpointOwner}`、
   `OperatorId` / `OperatorVersion` / `BackendId`；Task 3 的 `all_operators()`
-- Produces: `continuum_media::{GenerateBroll, Render}` 两枚类型与它们的 `Checkpointable` 实现
+- Produces: `continuum_media::{GenerateBroll, Render}` 两枚类型与它们的 `Checkpointable` 实现，
+  **以及三条判据的用例必须能用到的读法／写法**（本计划自定，申报见 `## 遗留` 第三节）：
 
-> **本计划自定的形状（设计只给了「哪两枚算子」与三条判据，没给类型名与它们与 `all_operators()` 的关系）**：
-> 两枚类型各持自己的**进度状态**，各有一个 `operator() -> Operator` 或 `operator_id() -> OperatorId`
-> 的读法使它与 Task 3 的清单对得上；**本计划取 `operator_id()`**（一个 `OperatorId`，比对成本最低）。
+  ```
+  /// 尚无进度、尚未选定 backend 的初值。
+  pub fn new() -> Self;
+  /// 与该类型对应的那一枚算子的 id（见下「与 all_operators() 的关系」）。
+  pub fn operator_id(&self) -> OperatorId;
+  /// 推进进度：记下第 index 个片段已完成（判据 1 的「有进度」由它造出）。
+  pub fn record_completed_segment(&mut self, index: u32);
+  /// 指定本次要用的 backend（判据 3 的两侧由它造出）。
+  pub fn select_backend(&mut self, backend: BackendId);
+  /// 读回当前进度（判据 1／2 的「逐字段相同」以它取存前的值）。
+  pub fn progress(&self) -> &Progress;
+  ```
+
+  **`type Checkpoint` 取 `Progress`**（本计划取这一枚：快照就是进度值本身）。`Progress` 是一枚
+  **具名结构体、字段全 `pub`**——判据 1／2 要求「逐字段相同」写成**穷尽解构、不带 `..`**，
+  而这只有在字段可见、且是具名结构体（不是元组、不是 `u32`）时才写得出（纪律 8）。
+  它**自带身份**（身份字段取 Task 2 的 `CheckpointOwner`，即 `OperatorId` ＋ `OperatorVersion`
+  两字段，设计 §4.6：`RestoreRejected` 的判据要求检查点携带身份），故「用另一版本的检查点去 `restore`」
+  这条用例可以**直接构造**一枚身份不同的 `Progress`，不必依赖任何绕过路径。
+
+  **「选中的 backend 支不支持检查点」的判据（判据 3 两侧的落点，本计划自定）**：
+  **选中的 backend 在该算子 `all_operators()` 那枚 `Operator` 值的 `backend_candidates` 内 ⇒ 支持；
+  否则不支持。** 不另立第二份支持名单——§5.4 的九枚名单判的是 `determinism`，不是 checkpoint 能力，
+  混用就是「同一件事两套词汇表」。照此写用例时（候选取值见设计 §5.2 第 11、12 行）：
+  `render` 的候选是 `ffmpeg` ⇒ `select_backend(ffmpeg)` 后 `checkpoint()` 为 `Ok`；
+  `generate-broll` 的候选是 `video-gen-backend` ⇒ 同；`select_backend(BackendId::new("nvenc"))`
+  （17 枚的候选里没有它）⇒ `Err(CheckpointError::UnsupportedByBackend { backend })`，
+  **且断言 `backend` 正是选中的那一枚**。
+
+> **本计划自定的形状（设计只给了「哪两枚算子」与三条判据，没给类型名、没给这组读写面、
+> 也没给它们与 `all_operators()` 的关系）**：
+> 两枚类型各持自己的**进度状态**，各有一个 `operator_id() -> OperatorId` 使它与 Task 3 的清单对得上
+> （一个 `OperatorId`，比对成本最低）；三条判据要用的读写面即上面那五个方法，
+> 缺了它们「推进进度」「指定 backend」两处**在用例里写不出来**。
 > 落点与代价见 `## 遗留` 第三节；**收件人：设计作者**。
 
 - [ ] **Step 1: 写用例**
@@ -870,22 +955,25 @@ git commit -m "feat(media): §34 的生成内容单独授权（五旗标、四�
 `tests/checkpoint.rs`（**判据三组，逐组两边，照设计 §4.5**）：
 
 - `a_checkpoint_restores_the_progress_it_recorded`（**判据 1 的正例**）：
-  推进进度到「非空」之后 `checkpoint()` 返回 `Ok`，再 `restore` 该检查点，
-  断言**算子的进度与存前逐字段相同**（穷尽解构，不带 `..`）。
+  以 `record_completed_segment` 推进进度到「非空」（读法／写法见 `Interfaces`）之后 `checkpoint()` 返回 `Ok`，
+  再 `restore` 该检查点，断言**算子的进度与存前逐字段相同**（以 `progress()` 取存前的值，穷尽解构，不带 `..`）。
   **红条件（移除档）**：把 `restore` 写成 no-op ⇒ 恢复后进度与存前不同，红。
 - `checkpointing_without_progress_is_rejected`（**判据 1 的反例**）：
   尚无进度时 `checkpoint()` ⇒ `Err(CheckpointError::NothingToCheckpoint { owner })`，
   **并断言 `owner` 的 id 与 version 是这一枚算子**。
   **红条件（取反档）**：返一个「空进度」的检查点并给 `Ok` ⇒ 红。
 - `restoring_another_operators_checkpoint_is_rejected_and_leaves_state_unchanged`（**判据 2，两侧**）：
+  **本用例用 `Render` 那一枚实现**（Step 3 有两枚 `impl Checkpointable`，此处写死是哪一枚；
+  Task 10 Step 5 第 4 轮的变异也据此落到同一枚上）。
   用**另一版本**（`OperatorVersion` 不同）的同一算子的检查点去 `restore` ⇒ `Err(CheckpointError::RestoreRejected { .. })`，
   **且恢复失败后算子状态与调用前逐字段相同**（半恢复比不恢复更坏）。
   **红条件（移除档）**：删掉身份比对（一律 `Ok`）⇒ 第一个子例红（返回 `Ok`）。
   **两侧的另一半**：同一版本、同一算子的检查点 `restore` ⇒ `Ok`（**否则「一律 `Err`」也能满足前一半**）。
 - `an_unsupported_backend_is_rejected_and_a_supported_one_succeeds`（**判据 3，两侧**）：
-  选中的 backend 不支持检查点时（§308 是 **SHOULD**，§245 允同一个 Operator 有多个 backend，
-  故「不支持」是一个合法答案，且它的主语是**选中的那个 backend**）⇒ `Err(CheckpointError::UnsupportedByBackend { backend })`；
-  支持时 ⇒ `Ok`。**两侧各一条。**
+  以 `select_backend` 指定 backend 之后，选中的那一个不支持检查点时（§308 是 **SHOULD**，§245 允同一个
+  Operator 有多个 backend，故「不支持」是一个合法答案，且它的主语是**选中的那个 backend**）
+  ⇒ `Err(CheckpointError::UnsupportedByBackend { backend })`，**并断言 `backend` 正是选中的那一枚**；
+  支持时 ⇒ `Ok`。**两侧各一条**；照 `Interfaces` 里那条判据取值（候选在 `backend_candidates` 内 ⇒ 支持）。
   **红条件（取反档）**：把不支持的后端也放行为 `Ok` ⇒ 红（这正是「假装检查点成功」的形态）。
 - `the_two_implementations_are_the_two_named_operators`：两枚类型的 `operator_id()` 与
   `all_operators()` 里 `generate-broll` / `render` 的 `id` 相同（**逐枚**），
@@ -909,13 +997,20 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-media --test checkpoint
 
 ```
 /// §308 点名的第一项长任务（video generation）的检查点实现。
-pub struct GenerateBroll { /* 进度状态 */ }
-impl Checkpointable for GenerateBroll { type Checkpoint = /* 本算子的进度快照 */; … }
+pub struct GenerateBroll { /* 进度状态 ＋ 选中的 backend */ }
+impl Checkpointable for GenerateBroll { type Checkpoint = Progress; … }
 
 /// 同一条 SHOULD 下的另一枚长算子（设计 §4.5：§308 的「尤其」清单是举例，不是穷尽清单）。
-pub struct Render { /* 进度状态 */ }
-impl Checkpointable for Render { type Checkpoint = /* 同上 */; … }
+pub struct Render { /* 进度状态 ＋ 选中的 backend */ }
+impl Checkpointable for Render { type Checkpoint = Progress; … }
+
+/// 检查点的负载：已完成的片段区间 ＋ 选中的 backend ＋ 身份（`CheckpointOwner`）。
+/// 字段全 `pub`：判据 1／2 的「逐字段相同」要能写成穷尽解构（不带 `..`）。
+pub struct Progress { /* … */ }
 ```
+
+**上面那五个方法与 `Progress` 的字段清单是本任务必须落出来的读写面**（`Interfaces` 一块），
+三条判据的用例全靠它们写；其余实现细节（`checkpoint()` 内部怎样快照、片段区间用什么类型表示）随实现走。
 
 **调用点不在本块（写进注释）**：谁在什么时候调 `checkpoint()` / `restore()` 规范未给，属第 3 层的恢复路径
 （§311 / §312 那一组）。故「无调用点」这件事在 P5e 落地之后**仍然成立**，
@@ -1008,8 +1103,10 @@ git commit -m "test(media): §305 复用的六行照片（dev 边上核对 deter
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 追加 `"continuum-method"`）
 
 **Interfaces:**
-- Consumes: `continuum_method::{MethodRegistry, MethodId, MethodError}`、
+- Consumes: `continuum_method::{MethodRegistry, MethodId, MethodError, MethodDomain, MethodEntry}`、
   Task 3 的 `all_operators()` 与 `continuum_operator::OperatorRegistry`
+  （`MethodDomain` 与 `MethodEntry` 是本 task 的用例要用的：`registry.select(MethodDomain::Video)`
+  与逐条读 `MethodEntry::realized_by`；`MethodRegistry::new()` 是失败路径那条用例的夹具）
 - Produces: `continuum_media::bind_media_methods(registry: &mut MethodRegistry) -> Result<(), MethodError>`
 
 - [ ] **Step 1: 写用例**
@@ -1208,12 +1305,14 @@ grep -rn "propagate_invalidation\|apply_transition\|OperatorRegistry::resolve" c
 
 - [ ] **Step 4: 逐条核对设计 §12.2 的 20 条用例是否都有落点**
 
+**本表的字母取设计 §12.2 的一套**（与 Task 1 Step 3 那张表的 §3.5 字母不同：同一个 `(e)` 在两套里是两件事）。
+
 | 条 | 落在哪个 task／用例 | 备注 |
 |---|---|---|
 | (a) | Task 1 `every_p5_artifact_type_has_exactly_its_declared_encoding` | 手写 11 对，含串字面值 |
 | (b) | Task 1：**既有**的 `artifact_type.rs:40` 那六个表外取值（本 task 不改它，重跑时核对） | 语料不在新用例里，它是既有守卫 |
 | (c) | Task 1 `a_new_type_survives_a_commit_and_read_back` | 11 枚逐枚 |
-| (d) | Task 1 `every_artifact_type_round_trips_through_serde`（改后） | 遍历 `ALL` |
+| (d) | Task 1 `every_artifact_type_round_trips_through_serde`（改后） | 遍历 `ALL`，并逐型断言 serde 串与 `as_str()` 相同 |
 | (e) | 同 (a) 的 `shot_set` / `subtitle_track` 两对 | 多词型只有两条 |
 | (f) | Task 3 `the_seventeen_ids_are_hand_listed_and_each_resolves` | 语料手写 |
 | (g) | Task 3 `a_second_identical_registration_returns_the_registry_error` | 断言是哪一臂、哪一枚 |
@@ -1237,6 +1336,10 @@ grep -rn "propagate_invalidation\|apply_transition\|OperatorRegistry::resolve" c
 **逐条在 `## 遗留` 第三节申报**。
 **若某条找不到对应落点，不得标注为覆盖**，据实报告缺口。
 
+**§12.2 的表不含设计 §5.5 的两条声明**（它不是 §12.2 的用例，是 §5.5 的交付物）：它的落点是
+`src/operators.rs` 里 `verify-deterministic` / `verify-multimodal` 两枚算子值上的文档注释（Task 3 Step 3），
+**纯声明、无运行期照片**（列在 `## 遗留` 第五节）。
+
 - [ ] **Step 5: 变异复核**
 
 按纪律 1／2 跑**承重守卫**（两侧对钉的、fail-open 侧的、失败路径判别 `Err` 的、跨 crate 才可见的），
@@ -1248,10 +1351,16 @@ grep -rn "propagate_invalidation\|apply_transition\|OperatorRegistry::resolve" c
 | 1 | `authorize_generative` 改成「未声明 ⇒ 放行」（取反） | Task 5 的 (j) 与空集那条 | (k)、(l)、(m) |
 | 2 | §5.4 的名单判定改成恒真（取反） | Task 4 的 (i) 第一半 | (h)（名单内的候选仍通过） |
 | 3 | `register_media_operators` 改成边核边写（取反） | Task 4 的 (i) 第二半 | (h)、(f) |
-| 4 | `RestoreRejected` 的身份比对删掉（移除） | Task 6 的 (q) 第一半 | (o)、(p)、后端两侧 |
+| 4 | `RestoreRejected` 的身份比对删掉（移除）——**落在 `Render` 那一枚上**（即 (q) 实际用到的那一枚；两枚都改亦可） | Task 6 的 (q) 第一半 | (o)、(p)、后端两侧 |
 | 5 | `required_permission` 对四枚都返回 `Broll`（收紧） | Task 5 的 (l) 后三条 | (j)、(k)、(m) |
-| 6 | 把某一枚新变体的 `as_str` 串改成另一个**同样合法**的小写串 | **全绿——这是等价变异体**；**换成「改成与 `tests/artifact_type.rs:40` 的表外取值相撞的串」再跑一轮**，那时 (b) 红 | —— |
+| 6 | 把某一枚新变体的 `as_str` 串改成另一个**同样合法**的小写串（`shot_set` → `shotset`） | **Task 1 的 (a)**（手写语料里那一枚的期望串对不上）**与改后的 (d)**（serde 串与 `as_str()` 不再逐型相同，两条腿各红一次） | (b)（六个表外取值不含 `shotset`，仍绿）、(c)（读写走同一对函数，仍绿） |
 | 7 | 某一条 `realized_by` 写成空 `Vec`（放宽） | Task 8 的 (s) 第一腿 | Task 8 的第二腿、其余 |
+
+**第 4 轮的锚点是 `Render` 那一枚，不许落在 `GenerateBroll` 上**：Task 6 有两枚 `impl Checkpointable`，
+两处都含身份比对；若变异只落在未被 (q) 用到的那一枚上，会报 GREEN 而判据其实未被改动（纪律 1(a) 的失效形态）。
+**第 6 轮的档位是设计 §12.3 原判的「等价变异体」，本计划把它变成真变异体**（口径与来历见 `## 遗留` 第二节）：
+设计 §12.3 那一行预告「全绿」是按「只断往返」的语料写的，而本计划的 (a) 直接断言串的字面值、(d) 断言
+serde 串与 `as_str()` 相同，故这一档**红在 (a) 与 (d)**。**按设计的旧预告执行会白跑一轮。**
 
 **一条跨 crate 的承重守卫必须跑全量**：`ALLOWED` 与实际依赖一致（Task 3／7／8／9 每加一条边都要核一次）。
 **若某轮跑成了「编译失败」而不是「用例失败」，按纪律 1(c) 记为「编译不过」，并另换一个真变异体。**
@@ -1297,21 +1406,31 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
    **翻转条件**：若协调者判 §12.1 那句适用于 `CheckpointError`，则须先给它一个**无载荷**的臂集
    （那会改掉 §4.3 的形状与「三臂各自判据」三条理由中的两条）。
    **收件人：设计作者 ＋ 协调者。**
-3. **两枚检查点实现的类型名与它们跟 `all_operators()` 的关系未给**（**没写清**）：
+3. **两枚检查点实现的类型名与它们跟 `all_operators()` 的关系未给，三条判据要用的读写面也没给**（**没写清**）：
    设计 §4.5 定了「实现的算子是 `generate-broll` 与 `render`」与三条判据，也写了「`type Checkpoint`
    的字段清单不在本设计的约束范围内」；但**没有给承载 `impl Checkpointable` 的类型名**，
-   也没有说这两枚类型与 §5.2 那 17 个 `Operator` 值（纯数据）之间的关系由谁维持。
-   **本计划的处置**：`continuum_media::{GenerateBroll, Render}` 两枚类型，各带一个 `operator_id() -> OperatorId`，
-   并加一条用例逐枚核它与 `all_operators()` 里对应那一枚的 `id` 相同（Task 6）。
-   **代价**：「类型名是本计划定的」；**收益**：`Checkpointable` 的第一枚实现有一个可指认的落点，
-   而不是「定义了一个没人实现它的类型」（切分 §八 明写本块要写明落点与判据）。
+   也没有说这两枚类型与 §5.2 那 17 个 `Operator` 值（纯数据）之间的关系由谁维持；
+   **更没有给测试侧的写入面**——三条判据里有两条要求用例能**推进进度**与**指定选中的 backend**
+   （判据 1 的「有进度」、判据 3 的「选中的 backend」），而哪两个方法做这两件事一处未给，
+   **按 §4.5 的文本写不出那两条用例**。
+   **本计划的处置**：`continuum_media::{GenerateBroll, Render}` 两枚类型，各带 `operator_id() -> OperatorId`
+   与 `new` / `record_completed_segment` / `select_backend` / `progress` 五个读法／写法
+   （`type Checkpoint` 取一枚字段全 `pub` 的 `Progress`），
+   并加一条用例逐枚核 `operator_id()` 与 `all_operators()` 里对应那一枚的 `id` 相同（Task 6）。
+   **代价**：「类型名与这组读写面都是本计划定的」；**收益**：`Checkpointable` 的第一枚实现有一个可指认的
+   落点，三条判据的用例也真的写得出来（而不是「定义了一个没人实现它的类型」——
+   切分 §八 明写本块要写明落点与判据）。
    **收件人：设计作者。**
-4. **`all_operators()` 的 12 枚算子的 `side_effect_class` 与 12 枚算子的 `determinism` 没有对应用例的承担者**（**判据缺口**）：
+4. **`all_operators()` 的 `side_effect_class` 与 `determinism` 各有一批没有对应用例的承担者**（**判据缺口**）：
    设计 §12.2 只点名了五枚（(n)）与「`Deterministic` 的每一枚的 backend」（(h)）。
-   **`Deterministic` 与 `NonDeterministic` 的**划分**由 (h) ＋ (r) 部分承担**（(h) 遍历 `Deterministic` 的域、
-   (r) 逐行核六枚），**而 `Pure` / `Idempotent` / `NonIdempotent` 的划分只有五枚有照片**。
+   **未被任何用例钉住的 `determinism` 是十一枚**（(r) 的六行经 `cache_key` 的 `Some` / `None` 钉住六枚，
+   17 − 6 = 11）；**(h) 按 `determinism` 的取值挑要遍历的算子，但它不断言那个取值**
+   （把一枚 `Deterministic` 改成 `NonDeterministic` 只让 (h) 少遍历一枚，仍绿），
+   故 `determinism` 一侧的承担者只有 (r) 的六枚；**`side_effect_class` 一侧未钉住的是十二枚**（17 − 5），
+   因为 `Pure` / `Idempotent` / `NonIdempotent` 的划分只有五枚有照片。
    **本计划不发明那条全称**（给 17 枚各写一条断言会让「枚举式断言」变成第二份转录），
-   **照实写明**：**「17 枚的 `side_effect_class` 都对」这句话在本计划里没有照片**，钉住的只是那五枚。
+   **照实写明**：**「17 枚的 `side_effect_class` / `determinism` 都对」这句话在本计划里没有照片**，
+   钉住的只是被点名的那几枚。
    **收件人：复审者**（若判必须全量，缺的是「把设计的 §5.2 表落成一条表驱动用例并逐行给人读的对照」这一步）。
 
 ### 二、设计 §12.3 的变异预告：本计划照抄，并补**两处预测的修正**
@@ -1320,9 +1439,11 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
 
 - 表里「**放宽**：`all_operators()` 少注册一枚（16）」那一行自陈「**这一档若不红，说明 f 是按
   `all_operators()` 自己遍历的**——即假照片」。**本计划的 (f) 语料手写**（Task 3），故这一档会红。
-- 表里「**等价变异**」那一行的处置是「换成与表外取值相撞的串」——**本计划另加了一半**：
-  Task 1 的 (a) **直接断言串的字面值**，故「把串换成另一个合法小写串」这一档**也会红**，
-  不必再换变异体。**这是本计划的一处加强**（申报见第三节）。
+- 表里「**等价变异**」那一行的处置是「换成与表外取值相撞的串」——**本计划另加了两半**：
+  Task 1 的 (a) **直接断言串的字面值**，**改后的 (d) 又逐型断言 serde 串与 `as_str()` 相同**，
+  故「把串换成另一个合法小写串」这一档**红在 (a) 与 (d) 两处，不必再换变异体**
+  （只断 serde 往返时它确实全绿——那条旧预告按当时的语料是对的，Task 10 Step 5 第 6 轮据此订正）。
+  **这是本计划的一处加强**（申报见第三节）。
 
 ### 三、本计划自定的形状与取值（**申报**，逐条说清代价）
 
@@ -1332,12 +1453,22 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
   **代价**：这是本块定的外部编码，将来若要改是破坏性变更。
 - **`PermittedGenerativeContent` 的两个构造函数与 `contains`**（见第一节第 1 条）。**代价**：多两个公开入口；
   **收益**：§34 的 fail-closed 有一个可被用例指认的产生点。
-- **`GenerateBroll` / `Render` 两枚类型名与 `operator_id()` 读法**（见第一节第 3 条）。
+- **`GenerateBroll` / `Render` 两枚类型名、`operator_id()` 与那四个读法／写法**
+  （`new` / `record_completed_segment` / `select_backend` / `progress`，与 `type Checkpoint = Progress`
+  一枚字段全 `pub` 的结构体）（见第一节第 3 条）。
+  **代价**：本计划定的外部面有六项（两枚类型名 ＋ 一组读写面）；**收益**：§4.5 的三条判据在用例里真的写得出来，
+  且「选中的 backend 支不支持」由 `Operator::backend_candidates` 承载，不另立第二份名单。
+- **`GenerativePermission` 比设计 §7.1 多三项派生**（设计只给 `#[derive(Debug)]`，Task 5 取
+  `#[derive(Debug, Clone, PartialEq, Eq)]`）：`PartialEq` 是 §12.1 的逐臂往返断言所需，
+  `Clone` / `Eq` 照本仓枚举措辞的既有做法，**不取 `Copy`**（设计未把本型定成可复制值）。
+  **代价**：本型的外部面比设计宽三项派生。
 - **`verify_deterministic_backends` 作为独立的私有函数**（Task 4）：把「先核后写」拆成两步。
   **代价**：多一次遍历；**收益**：那条性质的唯一可观察后果（违规时注册表没被动过）成立。
-- **(a) 直接断言 11 枚新串的字面值**（Task 1）：设计 §12.2 的 (a) 只说「往返」，
-  本计划把「串的字面值」也断言了。**代价**：将来改串要改两处（`as_str` 与那条手写清单）；
-  **收益**：把设计 §12.3 自己标出的等价变异体变成真变异体。
+- **(a) 直接断言 11 枚新串的字面值 ＋ (d) 逐型断言 serde 串与 `as_str()` 相同**（Task 1）：
+  设计 §12.2 的 (a) 只说「往返」、(d) 只说「遍历 `ALL` 逐型断言 serde 往返」，
+  本计划把「串的字面值」与「serde 表示 == `as_str()`」两条也断言了。
+  **代价**：将来改串要改两处（`as_str` 与那条手写清单）；**收益**：把设计 §12.3 自己标出的等价变异体
+  变成真变异体——「删 `rename_all`」这一档在只断往返时不红，加了 (d) 的那条断言才红。
 - **`a_new_type_survives_a_commit_and_read_back` 落在新文件**（`tests/artifact_types_p5.rs`）
   而不是改 `crates/continuum-artifact/tests/artifact_store.rs`：**代价**：多一个文件；
   **收益**：`artifact_store.rs` 的既有夹具（`fn artifact(...)` 固定 `ArtifactType::Text`，`:8-21`）不动。
@@ -1382,15 +1513,20 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
 ### 五、拍不到的照片
 
 设计 §12.5 的**五条**（端到端、§34 授权在真实执行路径上的效果、`checkpoint()` / `restore()` 的崩溃恢复效果、
-§131 的复用真的省下一次重算、Timeline 六字段）**逐条照原文，本计划不发明**。**本计划另补两条**：
+§131 的复用真的省下一次重算、Timeline 六字段）**逐条照原文，本计划不发明**。**本计划另补三条**
+（编号是本节的补件序号，与设计 §12.5 的五条无关）：
 
-11. **「17 枚的 `side_effect_class` / `determinism` 都对」是拍不到的**：见第一节第 4 条——
-    钉住的是被点名的那些，不是那个全称。
-12. **`bind_media_methods` 的四条 `realized_by` 与算子的对应关系只有运行期照片**：
-    `realized_by: Vec<String>`（P5b 设计 §4.3）在编译期核不了，
-    故「绑的是不是**对的**算子」这一半只有「串能 `resolve`」那一条腿——
-    **「`render-review` 该绑 `verify-deterministic` 与 `verify-multimodal`」这个判断本身没有照片**
-    （它是设计 §10 的判定，规范只给了 §32 的步骤名）。
+- **设计 §5.5 的两条 §262 级别声明只有文档注释这一个载体**：`verify-deterministic` 是第 1 级、
+  `verify-multimodal` 是第 3 级（Task 3 Step 3），而 `Operator` 的七字段里没有级别，
+  故**它没有运行期照片**（同纪律 8 的「纯数据声明」）。**这不是漏拍**：级别序、候选过滤与独立性判定
+  都属 P5a（设计 §5.5 的归属表），本块交付的就是那两条声明本身。
+- **「17 枚的 `side_effect_class` / `determinism` 都对」是拍不到的**：见第一节第 4 条——
+  钉住的是被点名的那些，不是那个全称。
+- **`bind_media_methods` 的四条 `realized_by` 与算子的对应关系只有运行期照片**：
+  `realized_by: Vec<String>`（P5b 设计 §4.3）在编译期核不了，
+  故「绑的是不是**对的**算子」这一半只有「串能 `resolve`」那一条腿——
+  **「`render-review` 该绑 `verify-deterministic` 与 `verify-multimodal`」这个判断本身没有照片**
+  （它是设计 §10 的判定，规范只给了 §32 的步骤名）。
 
 ---
 
@@ -1403,7 +1539,7 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
 - **给 P5b 的实现方**：四条 `video/` 的 `realized_by`（Task 8）＋「本块不 `register` 方法条目」这条边界。
 - **给 P5c／P5d／P5f 的实现方**：`ArtifactType` 的 11 枚新变体由 Task 1 一次落地（**三份设计的报出都是「无」**）；
   P5f 需要的 `Image`、P5d 需要的 `Report` 都在其中；**Task 1 之后不得再改这个枚举**。
-- **给协调者**：本计划第一节查出的**四处设计问题**、第二节对设计 §12.3 的两处修正、第三节的**八处本计划自定形状**；
+- **给协调者**：本计划第一节查出的**四处设计问题**、第二节对设计 §12.3 的两处修正、**第三节逐条申报的本计划自定形状**；
   以及「Task 8／9 在 P5a／P5b 的实现落地前动不了」这一条排期事实。
 - **给复审者**：**变异那一轮的七轮记录**（纪律 2 要求的 sha256 与日志路径）、Task 10 Step 1 的**两条门读数**、
-  以及 `## 遗留` 第五节第 11、12 条那两处**拍不到的照片**。
+  以及 `## 遗留` 第五节另补的那几条**拍不到的照片**。
