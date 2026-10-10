@@ -20,6 +20,7 @@ members = [
     "crates/continuum-model-registry",
     "crates/continuum-node",
     "crates/continuum-canonical",
+    "crates/continuum-semantics",
 ]
 
 [workspace.package]

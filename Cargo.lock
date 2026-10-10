@@ -284,6 +284,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-semantics"
+version = "0.1.0"
+dependencies = [
+ "continuum-canonical",
+ "continuum-persist",
+ "tempfile",
+ "thiserror",
+]
+
+[[package]]
 name = "continuum-workspace"
 version = "0.1.0"
 dependencies = [

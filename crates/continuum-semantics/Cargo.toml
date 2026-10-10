@@ -1,0 +1,25 @@
+[package]
+name = "continuum-semantics"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`error.rs` 的 `IntentError` 派生 `Error`。
+thiserror = { workspace = true }
+# 本 crate 的使用点（两条 workspace 内的边之一，设计 §1.3 的读法甲）：
+# `intent.rs` 的 `Intent.goal` 取 `EntityId`（§1.3 的类型边）、
+# `priority` / `completion_predicate` 取 `Opaque`（占位类型的定义收在 canonical，
+# 见 `continuum-canonical/src/lib.rs` 的 `Opaque` 文档）。
+continuum-canonical = { path = "../continuum-canonical" }
+# 本 crate 的使用点（另一条 workspace 内的边）：`persist.rs` 的 `intent` 表（迁移 110）
+# 与三条 I/O 经 `Tx` / `Migration` / `PersistError` / `Value` 访问。数据库连接在
+# `continuum-persist` 内私有，本 crate 只经 `Tx` 访问。
+continuum-persist = { path = "../continuum-persist" }
+
+[dev-dependencies]
+# 本 crate 的使用点：`tests/intent.rs` 的落库用例各起一个临时库
+# （与 `continuum-canonical/tests/alias.rs` 的夹具同形）。它是**外部** crate，
+# 故不进 `dependency_direction.rs` 的 `ALLOWED`——那张表逐对断言的是 workspace 成员
+# 之间的边。**但会让 `Cargo.lock` 变化**，提交时按显式路径带上锁文件。
+tempfile = { workspace = true }

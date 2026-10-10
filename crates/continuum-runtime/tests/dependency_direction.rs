@@ -160,6 +160,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 7 兑现了它。表是**允许集合**的转录（不是使用点派生），故这一格此前一直空着
     // 不算错，只是当时还没有使用者。
     ("continuum-canonical", &["continuum-persist"]),
+    // P4 语义层（设计 §2.1）：Intent / Specification / Contract / ContractDiff / Plan / Decision /
+    // Constraint Validator。`← continuum-canonical` 是 §1.3 的类型边（Intent.goal 取 EntityId）；
+    // `← continuum-persist` 由本 task 登记（intent 表）。
+    // **允许集里没有 continuum-budget**——§11.5 的第 1 条守卫（两道门分离）。
+    ("continuum-semantics", &["continuum-canonical", "continuum-persist"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
