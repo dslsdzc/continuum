@@ -79,9 +79,9 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
 | `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:25`） | 加 `("continuum-media", &[…])`，**五项不出现在同一次改动里**（Task 3／7／8／9 各追加） | 切分 §四第 6 条 |
 | `crates/continuum-artifact/src/artifact.rs` | 枚举本体、`:24` 的注记、`ALL`、`as_str`、`parse` 五处 | 切分 §四第 2 条 (a)(b)(c) |
 | `crates/continuum-artifact/tests/artifact_type.rs` | `:23` 的数目断言 | 切分 §四第 2 条 (d) |
-| `crates/continuum-port/tests/compatibility.rs` | `:47` 的用例改为遍历 `ALL`，并逐型断言 **serde 串与 `as_str()` 相同** | 切分 §四第 2 条 (e)——**清单里唯一不会自己变红的一处**；加的那条断言是本计划自定，申报见 `## 遗留` 第三节 |
+| `crates/continuum-port/tests/compatibility.rs` | `:47` 的用例改为遍历 `ALL`，并逐型断言 **serde 串与 `as_str()` 相同** | 切分 §四第 2 条 (e)——**清单里唯一不会自己变红的一处**；加的那条断言本是本计划先写出（设计 §12.2 的 (d) 现文已收进同一句，见 `## 遗留` 一节） |
 | `crates/continuum-operator/src/definition.rs` | `:95` / `:96` 两行签名、`:76` 之后加 `BackendId` 的 `Display`、`:90-91` 的注记、末尾加两枚新类型 | 设计 §4.4；切分 §一 的共写表 |
-| `crates/continuum-operator/src/lib.rs` | `:7-9` 的 `pub use` 补两枚 | 设计 §4.4（一并清掉 P1 计划 `:5565` 记的「未 re-export」遗留） |
+| `crates/continuum-operator/src/lib.rs` | `:7-9` 的 `pub use` 补两枚 | 设计 §4.4（一并清掉 P1 计划里记的「未 re-export」遗留；**按内容指**，不写行号） |
 
 **本块不碰**：`crates/continuum-graph/**`（只 `use` 它的 `cache_key` / `can_reuse`，一个字不改）、
 `crates/continuum-persist/**`、`crates/continuum-runtime/src/**`（零迁移、零钩子）、
@@ -95,13 +95,14 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
   本块不自建（切分 §四第 4 条），**本计划不为它们建任何接线 task**。
 - **交给 P5a（`continuum-verify`）**：设计 §9.1 的答复「`VisualCheck` 够用、不请求新臂」；
   两枚验证算子的 §262 级别声明（第 1 级与第 3 级，设计 §5.5）。**本计划只交付那两条声明，不交付 `AvailableVerifier` 的构造。**
-  那两条声明的载体是 `src/operators.rs` 里 `verify-deterministic` / `verify-multimodal` 两枚算子值上的文档注释（Task 3 Step 3）。
+  那两条声明的载体是 `src/operators.rs` 里两枚**具名私有 helper fn**（`verify_deterministic_operator` /
+  `verify_multimodal_operator`）上的文档注释（Task 3 Step 3；**不是挂在算子值上**——数组元素不是 item，见该 step）。
 - **交给 P5b（`continuum-method`）**：四条 `video/` 方法的 `realized_by`（Task 8）。
   **本块不 `register` 方法条目**（P5b 设计第六节：四块不得自造 `MethodEntry`）。
 - **交给装配方**：`Evidence` 的构造调用点（`subject` 取 `Unattached`、`producer` 取 `EvidenceProducer::Node{..}`），
   与 §34 授权判定在真实执行路径上的调用（设计 §7.3、§9.2）。
 - **交给规范维护者**：设计 §14 第 3、4、6、7 条与 §13 第 3、4、7 条——**本计划一条都不发明**，逐条抄在 `## 遗留` 第四节。
-- **交给协调者**：本计划查出的**四处设计问题**（逐条见 `## 遗留` 第一节：`GenerativePermission` 的容器形状未给、
+- **交给协调者**：本计划查出的设计缺口（逐条见 `## 遗留` 第一节：`GenerativePermission` 的容器形状未给、
   `CheckpointError` 的编码与设计 §12.1 相抵、两枚检查点实现的类型名与它们和 `all_operators()` 的关系未给、
   `PermittedGenerativeContent` 的「缺省」问题）——**Task 5／6 的开工不挂在它们上**（本计划各取一个最小形状并申报）。
 
@@ -186,10 +187,12 @@ dev：`continuum-graph`（`cache_key` / `can_reuse` / `CacheKey`，设计 §12.2
    (c) **变异导致编译失败**——那不是「变红」（判据用 `could not compile` 或 `error[E….`；
    cargo 在**用例失败**时也打印 `error: test failed, to rerun pass …`，**不能拿它当判据**）。
    **本块已预先识别的三处等价变异体**（换变异体，不补用例）：
-   - **把某个新变体的串换成另一个同样合法的小写串**（`shot_set` → `shotset`）：**只看 serde 往返时**它全绿
-     ——要打红它，或换成与 `crates/continuum-artifact/tests/artifact_type.rs:40` 的表外取值相撞的串，
+   - **把某个新变体的串改成另一个未被占用的合法小写串**（`shot_set` → `shotset`；`as_str` 与 `parse`
+     **两处一起**改）：**只看 serde 往返时**它全绿——要打红它，或换成与
+     `crates/continuum-artifact/tests/artifact_type.rs:40` 的表外取值相撞的串，
      或直接断言**串的字面值**（Task 1 的 (a) 取后者）、或断言 **serde 串与 `as_str()` 相同**
-     （Task 1 的 (d) 取后者；两处都已落，见该 task 与 `## 遗留` 第二、三节）；
+     （Task 1 的 (d) 取后者；两处都已落，见该 task 与 `## 遗留` 第二、三节）。
+     **只在一处改（`as_str` 改了、`parse` 没改）则往返当场红**——两档不是同一枚变异体；
    - **把 `[Operator; 17]` 的数目字面量改成 16**：那是**编译期**的红（返回类型不一致），**不算变红**；
      运行期可观察的那一半是 `len()` 断言与 (f) 的逐枚 `resolve`（Task 3）；
    - **把某一枚旗标的串改成另一个未被占用的合法串**（`as_str` 与 `parse` **两处一起**改）：往返仍成立、全绿
@@ -279,8 +282,8 @@ crates/continuum-media/                 （新建）
   Cargo.toml
   src/lib.rs              导出面与 crate 文档；P5e 的四处判定各一行指向实现处
   src/error.rs            MediaError（三臂）
-  src/operators.rs        all_operators() -> [Operator; 17]（§5.5 的两条级别声明在两枚验证算子值的
-                          文档注释上）、register_media_operators、
+  src/operators.rs        all_operators() -> [Operator; 17]（§5.5 的两条级别声明挂在两枚验证算子的
+                          具名 helper fn 的文档注释上）、register_media_operators、
                           逐位可复现 backend 的名单常量与注册期规则（§5.4）
   src/permission.rs       GenerativePermission（五臂 ＋ ALL ＋ as_str / parse）、
                           PermittedGenerativeContent、required_permission、authorize_generative（§34）
@@ -379,7 +382,7 @@ crates/continuum-runtime/tests/dependency_direction.rs    ALLOWED 的 continuum-
   ```
   fn every_artifact_type_round_trips_through_serde()
   ```
-  **为什么要加那条断言（本计划自定，申报见 `## 遗留` 第三节）**：只做 serde 往返时，
+  **为什么要加那条断言（本计划先写出；设计 §12.2 的 (d) 现文已收进同一句，见 `## 遗留` 第一节）**：只做 serde 往返时，
   「删掉 `artifact.rs:13` 的 `#[serde(rename_all = "snake_case")]`」这一档**不红**——
   `SubtitleTrack` 序列化成 `"SubtitleTrack"`、反序列化仍解回 `SubtitleTrack`，往返照旧成立，
   **那是一枚等价变异体**（举不出会给出不同结果的入参）。**能把两版分开的入参就是那两个串本身**，
@@ -461,7 +464,7 @@ git commit -m "feat(artifact): ArtifactType 的 P5 扩展清单（11 枚新变�
 
 > **落点为什么在别人的 crate（本节的第一个裁定，理由是依赖方向不是命名偏好）**：
 > 错误类型若定义在 `continuum-media`（第 8 层），则 `continuum-operator`（第 3 层）要 `use` 它 ⇒
-> **第 3 层与第 8 层之间的 2-环**，与 §9.1 `:588` 逐字写的「依赖方向单向，无环」相抵，
+> **第 3 层与第 8 层之间的 2-环**，与 `docs/02-工程.md` §9.1 逐字写的「依赖方向单向，无环」相抵，
 > 且会让 `dependency_direction` 门在两个方向都红。**落点不新增任何一条依赖边**（三个身份类型都在同文件内）。
 > **「这里不是 `continuum-media`：因为那会让第 3 层依赖第 8 层，即 2-环。」**——这一句要写进类型的文档注释。
 > **同一处境有先例、而先例不是硬理由**：切分 §二第 2 条订正段对 `verification_policy` 的处置形状
@@ -481,7 +484,8 @@ git commit -m "feat(artifact): ArtifactType 的 P5 扩展清单（11 枚新变�
   故它就是那个「两个字段都要有人读」的地方。
   **并写明**：`CheckpointError` **没有** `as_str` / `parse` / `ALL`——它的编码就是 thiserror 的 `Display`
   （本仓 `OperatorError`（`src/registry.rs:6-12`）同形：一个带载荷的错误枚举没有字符串往返这一说）。
-  **设计 §12.1 要求它有 as_str/parse 与数目断言，与本设计 §4.3 的类型相抵**——见 `## 遗留` 第一节第 2 条。
+  **设计 §12.1 订正前要求它有 as_str/parse 与数目断言，与本设计 §4.3 的类型相抵**；
+  **该处已按本计划的结论订正**（§12.1 现文与本节同）——见 `## 遗留` 第一节第 2 条。
 - `backend_id_display_names_the_backend`：`BackendId::new("ffmpeg").to_string() == "ffmpeg"`。
   **红条件（取反档）**：把它实现成 Debug 形态（`BackendId("ffmpeg")`）⇒ 红；且 `UnsupportedByBackend`
   那条文案里会带引号与括号——**两条用例会一起红**（这是刻意：同一个 `Display` 被两处消费）。
@@ -505,7 +509,8 @@ git commit -m "feat(artifact): ArtifactType 的 P5 扩展清单（11 枚新变�
   测试文件顶部 `use continuum_operator::{Checkpointable, CheckpointError};`（**不用全路径**）。
   **红条件（移除档）**：删掉 `lib.rs` 的那两枚 re-export ⇒ **`E0432` 未解析导入**，
   即**编译不过、不算变红**；**故本条的运行期照片只有一条**：这个文件能跑起来（`cargo test` 收得住它）。
-  **并写明**：P1 计划 `:5565` 记的「`Checkpointable` 未 re-export」是遗留项，**本 task 一并清掉**。
+  **并写明**：P1 计划里记的「`Checkpointable` 未 re-export」是遗留项（**按内容指**，不写行号），
+  **本 task 一并清掉**。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -566,8 +571,8 @@ git commit -m "feat(operator): Checkpointable 的错误类型（CheckpointError 
   **本 task 的 `MediaError` 只有 `Registry` 那一臂**（撞车由 P1 的 `OperatorError::Duplicate` 判）。
   **另两臂的落点写死，不许落空臂、也不许提前落**：`UnverifiableDeterminism` 由 Task 4 加（它的判定是 §5.4 的名单规则），
   `NotPermitted` 由 Task 5 加（它的判定是 §34 的授权）。**「一个没有判定者的臂」在本块等于一条永不触发的死分支。**
-  **另交付设计 §5.5 的两条声明**（载体是 `src/operators.rs` 里第 16、17 行两枚算子值上的
-  文档注释，见 Step 3 末；**纯声明、无运行期照片**）。
+  **另交付设计 §5.5 的两条声明**（载体是 `src/operators.rs` 里两枚具名私有 helper fn 的文档注释，
+  见 Step 3 末；**纯声明、无运行期照片**）。
 
 - [ ] **Step 1: 写用例——17 行清单与注册的两侧**
 
@@ -670,14 +675,27 @@ pub enum MediaError {
 **「先核后写」在 Task 4 才落地**（那时才有可核的规则）；本 task 的 `register_media_operators`
 只做「逐枚 `register`、任一失败即返回」。
 
-**设计 §5.5 的两条声明的落点（本小节交付它们；`src/operators.rs` 里那两枚算子值各带一段文档注释）**：
-第 16 行 `verify-deterministic` 与第 17 行 `verify-multimodal` 的 `Operator` 值上，
-各逐字抄设计 §5.5 的那两句——「`verify-deterministic` 在 §262 的序里是第 1 级（`DeterministicChecker`）、
-`verify-multimodal` 是第 3 级（`IndependentModelVerifier`）」——并写明两件事：
-（i）**这是本设计的声明**（§32 只说这两步在链尾，没说级别）；
-（ii）**「这一对应由谁持有」未定**（设计 §13 第 5 条 (ii)：装配方以值构造 `AvailableVerifier`，
-`level` 取本设计声明的那一级）。
-**据实记**：`Operator` 的七字段里没有级别，故这两条**只有文档注释这一个载体、没有运行期照片**
+**设计 §5.5 的两条声明的落点（本小节交付它们）：两枚具名私有 helper fn**——
+`verify_deterministic_operator()` 与 `verify_multimodal_operator()`，各返回 §5.2 第 16、17 行那一枚 `Operator` 值；
+声明挂在**函数**的 `///` 上（`all_operators()` 的数组第 16、17 项取这两个函数的返回值）：
+
+```
+/// §5.5 的声明：`verify-deterministic` 在 §262 的序里是第 1 级（`DeterministicChecker`）。
+/// **这是本设计的声明**（§32 只说这两步在链尾，没说级别）；
+/// **「这一对应由谁持有」未定**（设计 §13 第 5 条 (ii)：装配方以值构造 `AvailableVerifier`，
+/// `level` 取本设计声明的那一级）。
+fn verify_deterministic_operator() -> Operator { /* 七字段字面量，id 取 verify-deterministic */ }
+
+/// §5.5 的声明：`verify-multimodal` 在 §262 的序里是第 3 级（`IndependentModelVerifier`）。其余同上。
+fn verify_multimodal_operator() -> Operator { /* 同上 */ }
+```
+
+**这里不是「把这两段挂在 `all_operators()` 里的那两枚算子值上」：因为数组元素与块内语句都是表达式而非 item**——
+`///`（或 `#[doc]`）挂上去不生成文档，rustc 1.95.0 实测为 `unused_doc_comments`（warn-by-default），
+**与本计划的 0 warning 门相抵**（设计 §5.5 的现文把载体写成「两枚算子值上的文档注释」，那一处落不下去——
+见 `## 遗留` 第一节与报告）。**具名 helper 是 item，声明挂得住、可编译、无 warning**；
+代价是多两个私有函数，收益是这两条声明真的有一处可读的落点。
+**据实记**：`Operator` 的七字段里没有级别，故这两条**没有运行期照片**
 （同纪律 8 的「纯数据声明」；列进 `## 遗留` 第五节）。**它仍是交付物**：设计 §9.3 逐字
 「本块的消费止于「两枚验证算子的级别声明」（§5.5）」，`## 跨计划前置` 第四节「交给 P5a」那一笔即指此处。
 **不建 `AvailableVerifier`、不给 `Operator` 加字段**（设计 §5.5 的归属表：级别序与候选过滤属 P5a）。
@@ -844,11 +862,12 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-media --test permission
 ```
 /// §34 的五个旗标（`docs/spec/01-concepts.md:1424-1428`），逐条照录。
 /// Debug：`MediaError` 自身 derive(Debug)，且其 `NotPermitted` 臂以 `{required:?}` 引用本型。
-/// **比设计 §7.1 多三项派生**（设计只给 `#[derive(Debug)]`）：`PartialEq` 是 §12.1 的逐臂往返断言
-/// （`parse(as_str(p)) == Some(p)`）所需的值比较；`Clone` / `Eq` 照本仓枚举措辞的既有做法
+/// `PartialEq`：§12.1 的逐臂往返断言要与 `parse` 的结果比——`parse(as_str(p)) == Some(p)`，
+/// 没有值比较就写不出来。`Clone` / `Eq` 照本仓枚举措辞的既有做法
 /// （`crates/continuum-operator/src/definition.rs:7`、`:15` 的两枚枚举同形）。
-/// **不取 `Copy`**：设计未把本型定成可复制值，而 `contains` 按值收一枚即可。
-/// **这是本计划自定的外部面，不是照抄设计**（申报见 `## 遗留` 第三节）。
+/// **不取 `Copy`**：本型不是可复制值，`PermittedGenerativeContent::contains` 按**引用**收一枚即可。
+/// **这一行与设计 §7.1 的现文相同**（订正前那版只给 `#[derive(Debug)]`，与 §12.1 的断言不齐；
+/// 设计 2026-10-10 的订正已给出这一行，见 `## 遗留` 第一节）。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GenerativePermission { Broll, Voice, Music, FrameInterpolation, ThreeDGeneration }
 
@@ -862,6 +881,8 @@ impl GenerativePermission {
 /// Contract 里**已声明为真**的旗标集合。以**值**从 Contract 传入（P4 的规则：凡跨层输入以值传入）。
 /// **没有 `Default`**：本型的「空集」由一个具名构造函数给出，理由是 §34 的 fail-closed——
 /// 一个默认构造是全放行的类型，会让「没写旗标的 Contract」自动获得全部生成权限。
+/// **这一组的三个方法与设计 §7.1 的现文相同**（订正前那版只有 `{ /* ... */ }`；设计 2026-10-10
+/// 的订正已补齐，且 `contains` 按**引用**收——见 `## 遗留` 第一节）。
 pub struct PermittedGenerativeContent { /* 一份已授权旗标的集合 */ }
 
 impl PermittedGenerativeContent {
@@ -869,7 +890,7 @@ impl PermittedGenerativeContent {
     pub fn none() -> Self;
     /// 逐枚给定已授权的旗标。
     pub fn from_permissions(permissions: &[GenerativePermission]) -> Self;
-    pub fn contains(&self, permission: GenerativePermission) -> bool;
+    pub fn contains(&self, permission: &GenerativePermission) -> bool;
 }
 
 /// 本领域的生成类算子各自需要哪一枚旗标。`None` 表示该算子不是生成类（不触 §34 的约束）。
@@ -912,7 +933,7 @@ git commit -m "feat(media): §34 的生成内容单独授权（五旗标、四�
 - Consumes: Task 2 的 `continuum_operator::{Checkpointable, CheckpointError, CheckpointOwner}`、
   `OperatorId` / `OperatorVersion` / `BackendId`；Task 3 的 `all_operators()`
 - Produces: `continuum_media::{GenerateBroll, Render}` 两枚类型与它们的 `Checkpointable` 实现，
-  **以及三条判据的用例必须能用到的读法／写法**（本计划自定，申报见 `## 遗留` 第三节）：
+  **以及三条判据的用例必须能用到的读法／写法**（本计划先写出；设计 §4.5 现文已给出同一组，见 `## 遗留` 第一节）：
 
   ```
   /// 尚无进度、尚未选定 backend 的初值。
@@ -934,7 +955,7 @@ git commit -m "feat(media): §34 的生成内容单独授权（五旗标、四�
   两字段，设计 §4.6：`RestoreRejected` 的判据要求检查点携带身份），故「用另一版本的检查点去 `restore`」
   这条用例可以**直接构造**一枚身份不同的 `Progress`，不必依赖任何绕过路径。
 
-  **「选中的 backend 支不支持检查点」的判据（判据 3 两侧的落点，本计划自定）**：
+  **「选中的 backend 支不支持检查点」的判据（判据 3 两侧的落点；设计 §4.5 现文已给出同一条）**：
   **选中的 backend 在该算子 `all_operators()` 那枚 `Operator` 值的 `backend_candidates` 内 ⇒ 支持；
   否则不支持。** 不另立第二份支持名单——§5.4 的九枚名单判的是 `determinism`，不是 checkpoint 能力，
   混用就是「同一件事两套词汇表」。照此写用例时（候选取值见设计 §5.2 第 11、12 行）：
@@ -943,8 +964,8 @@ git commit -m "feat(media): §34 的生成内容单独授权（五旗标、四�
   （17 枚的候选里没有它）⇒ `Err(CheckpointError::UnsupportedByBackend { backend })`，
   **且断言 `backend` 正是选中的那一枚**。
 
-> **本计划自定的形状（设计只给了「哪两枚算子」与三条判据，没给类型名、没给这组读写面、
-> 也没给它们与 `all_operators()` 的关系）**：
+> **本节这一组形状由本计划先写出（设计订正前只给了「哪两枚算子」与三条判据，没给类型名、
+> 没给这组读写面、也没给它们与 `all_operators()` 的关系；设计 §4.5 现文已给出同一组）**：
 > 两枚类型各持自己的**进度状态**，各有一个 `operator_id() -> OperatorId` 使它与 Task 3 的清单对得上
 > （一个 `OperatorId`，比对成本最低）；三条判据要用的读写面即上面那五个方法，
 > 缺了它们「推进进度」「指定 backend」两处**在用例里写不出来**。
@@ -1203,8 +1224,9 @@ fn the_type_level_guarantees_hold() {
 
 1. `evidence_fields_are_private.rs`：在本 crate 里写 `Evidence { .. }`（字段私有）与 `Evidence::default()`（无实现）。
    **这一条是 P5a 设计 §4.4「唯一产生点」那条结构事实在本块的**使用侧**照片**
-   （实测该段在 `docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md:324`；
-   **本块的设计把它引成 `:319`**——本计划按实测的 `:324` 引，两处差 5 行）。
+   （**按内容指**：`docs/superpowers/specs/2026-10-08-p5a-verification-and-evidence-design.md` §4.4 里
+   「**「唯一」在这里是结构事实**」那一段；**这一处不写行号**——该文件其后被改过，行号漂过两次：
+   本块的设计原引 `:319`，实测那时在 `:324`，本轮再量又在另一行。**指进别人会改的文件一律按内容指**）。
    **它证不到「产出只能经本块的某枚函数」**：`Evidence::from_tool_result` 是 `pub`，
    构造由**宿主**直接调它完成（设计 §9.2），**调用点不在本 crate 里**。
 2. `evidence_subject_requires_a_named_requirement.rs`：在本 crate 里构造 `EvidenceSubject::Requirement(..)`。
@@ -1337,8 +1359,8 @@ grep -rn "propagate_invalidation\|apply_transition\|OperatorRegistry::resolve" c
 **若某条找不到对应落点，不得标注为覆盖**，据实报告缺口。
 
 **§12.2 的表不含设计 §5.5 的两条声明**（它不是 §12.2 的用例，是 §5.5 的交付物）：它的落点是
-`src/operators.rs` 里 `verify-deterministic` / `verify-multimodal` 两枚算子值上的文档注释（Task 3 Step 3），
-**纯声明、无运行期照片**（列在 `## 遗留` 第五节）。
+`src/operators.rs` 里两枚具名私有 helper fn（`verify_deterministic_operator` / `verify_multimodal_operator`）
+上的文档注释（Task 3 Step 3），**纯声明、无运行期照片**（列在 `## 遗留` 第五节）。
 
 - [ ] **Step 5: 变异复核**
 
@@ -1353,14 +1375,15 @@ grep -rn "propagate_invalidation\|apply_transition\|OperatorRegistry::resolve" c
 | 3 | `register_media_operators` 改成边核边写（取反） | Task 4 的 (i) 第二半 | (h)、(f) |
 | 4 | `RestoreRejected` 的身份比对删掉（移除）——**落在 `Render` 那一枚上**（即 (q) 实际用到的那一枚；两枚都改亦可） | Task 6 的 (q) 第一半 | (o)、(p)、后端两侧 |
 | 5 | `required_permission` 对四枚都返回 `Broll`（收紧） | Task 5 的 (l) 后三条 | (j)、(k)、(m) |
-| 6 | 把某一枚新变体的 `as_str` 串改成另一个**同样合法**的小写串（`shot_set` → `shotset`） | **Task 1 的 (a)**（手写语料里那一枚的期望串对不上）**与改后的 (d)**（serde 串与 `as_str()` 不再逐型相同，两条腿各红一次） | (b)（六个表外取值不含 `shotset`，仍绿）、(c)（读写走同一对函数，仍绿） |
+| 6 | 把某一枚新变体的串改成另一个**未被占用**的合法小写串（`shot_set` → `shotset`），**`as_str` 与 `parse` 两处一起改** | **Task 1 的 (a)**（手写语料里那一枚的期望串对不上）**与 (d)**（serde 串与 `as_str()` 不再逐型相同，两条腿各红一次）；**变的是 `shot_set` 那一枚则 (e) 同红**（它的语料也手写了 `shot_set`） | (b)（六个表外取值不含 `shotset`，仍绿）、(c)（落库写走 `as_str`、读走 `parse`，**两处一起改则两端一致**，仍绿） |
 | 7 | 某一条 `realized_by` 写成空 `Vec`（放宽） | Task 8 的 (s) 第一腿 | Task 8 的第二腿、其余 |
 
 **第 4 轮的锚点是 `Render` 那一枚，不许落在 `GenerateBroll` 上**：Task 6 有两枚 `impl Checkpointable`，
 两处都含身份比对；若变异只落在未被 (q) 用到的那一枚上，会报 GREEN 而判据其实未被改动（纪律 1(a) 的失效形态）。
-**第 6 轮的档位是设计 §12.3 原判的「等价变异体」，本计划把它变成真变异体**（口径与来历见 `## 遗留` 第二节）：
-设计 §12.3 那一行预告「全绿」是按「只断往返」的语料写的，而本计划的 (a) 直接断言串的字面值、(d) 断言
-serde 串与 `as_str()` 相同，故这一档**红在 (a) 与 (d)**。**按设计的旧预告执行会白跑一轮。**
+**第 6 轮的两点写死**：**串在 `as_str` 与 `parse` 两处一起改**（只改一处则往返当场红，那是另一枚变异体；
+口径见 `## 遗留` 第二节）；**变的是 `shot_set` 那一枚则 (e) 同红**。
+**这一档不是等价变异体**（设计 §12.3 的现文已按同一结论写成「该红 (a) 与 (d)」，见 `## 遗留` 第二节）：
+订正前那一版设计按「只断 serde 往返」的旧语料预告「全绿」，**按那份旧预告执行会白跑一轮**。
 
 **一条跨 crate 的承重守卫必须跑全量**：`ALLOWED` 与实际依赖一致（Task 3／7／8／9 每加一条边都要核一次）。
 **若某轮跑成了「编译失败」而不是「用例失败」，按纪律 1(c) 记为「编译不过」，并另换一个真变异体。**
@@ -1384,18 +1407,25 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
 **凡设计未给判据的，下标「规范未给判据」；凡本计划自己定了的，下标「本计划自定」。**
 设计 §13 的 **9 条**对账条目与 §14 的 **9 条**遗留**本计划一条都不发明**——收件人照原文，逐条落在下节第四节。
 
-### 一、设计问题：本计划查出的**四处**（发现即报，本计划一处都不替设计补写）
+### 一、本计划查出的设计缺口（发现即报；**2026-10-10 设计已逐条订正**）
 
-1. **`PermittedGenerativeContent` 的形状未给，而它的「缺省」正是 §34 的判据所在**（**没写清**）：
+**本节记的是来历**：下列各处是本计划在**订正前那一版设计**里查出的缺口，**设计现文已按同一结论订正**
+（订正记录散在设计各节的「订正 2026-10-10」句里），故本计划与设计**不再相抵**。每条保留当时的原文与
+本计划的处置，末尾注明设计现文落在哪一处；**本计划不重述设计的现文**。
+
+1. **`PermittedGenerativeContent` 的形状未给，而它的「缺省」正是 §34 的判据所在**（当时：**没写清**）：
    设计 §7.1 给的是 `pub struct PermittedGenerativeContent { /* ... */ }`——**成员类型、构造函数、查询方法一处都没有**；
    而 §7.2 的反例判据（「未声明 ⇒ `Err`」）与 §12.2 的 (j)(k) 两条都要**先有一个「未授权/已授权」的值**。
    更关键的是 §7.2 那句「**这里不是「用 `unwrap_or(true)` 让缺省放行」**」：它要求「空集」这个状态
    **有一处具名的、可被用例指认的产生点**——若本块的实现顺手给一个 `Default`，那条判据就当场为假。
    **本计划的处置**：**不给 `Default`**，给两个具名构造函数（`none()` / `from_permissions(&[..])`）与 `contains`，
    并加一条用例把「空集什么都不放行」四枚逐枚钉住（Task 5）。
-   **这是本计划自定的一处 API 形状**（申报见第三节）。**收件人：设计作者 ＋ 复审者。**
-2. **`CheckpointError` 的编码与设计 §12.1 相抵**（**两处相抵**）：
-   §12.1 逐字要求「`CheckpointError`（3 臂）、`GenerativePermission`（5 臂）：各一条**臂数与往返**用例
+   **设计现文（2026-10-10 订正）**：§7.1 的 `PermittedGenerativeContent` 块已给出同一组
+   （`none` / `from_permissions` / `contains`，并明写「不给 `Default`」；**`contains` 按引用收一枚**）。
+   ⇒ **这一处缺口已闭合**：本计划的这三个方法不再是自定外部面，`contains` 的形参按设计现文取引用。
+   **收件人：设计作者（已办，2026-10-10）。**
+2. **`CheckpointError` 的编码与设计 §12.1 相抵**（当时：**两处相抵**）：
+   §12.1 **当时**逐字要求「`CheckpointError`（3 臂）、`GenerativePermission`（5 臂）：各一条**臂数与往返**用例
    （`as_str` / `parse` 两枚穷尽 `match` + 一条数目断言，形状照 `ArtifactType` 的既有做法）」；
    而 §4.3 给的 `CheckpointError` **三臂都带载荷**（`BackendId` / `CheckpointOwner` / 两个 `CheckpointOwner`），
    §4.3 与 §7.1 的类型定义里**都没有 `as_str` / `parse` / `ALL`**。
@@ -1405,8 +1435,11 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
    `CheckpointError` **只落三臂各自的 `Display` 断言**（Task 2 第一条用例），**不落 `as_str` / `parse`**。
    **翻转条件**：若协调者判 §12.1 那句适用于 `CheckpointError`，则须先给它一个**无载荷**的臂集
    （那会改掉 §4.3 的形状与「三臂各自判据」三条理由中的两条）。
-   **收件人：设计作者 ＋ 协调者。**
-3. **两枚检查点实现的类型名与它们跟 `all_operators()` 的关系未给，三条判据要用的读写面也没给**（**没写清**）：
+   **设计现文（2026-10-10 订正）**：§12.1 的 `CheckpointError` 那一条已改写成「**只有三臂各自的 `Display`
+   断言，没有 `as_str` / `parse` / `ALL`**」，并写明它与 `GenerativePermission` 不是同一形状的守卫、
+   连翻转条件也照录。⇒ **这一处相抵已闭合，两处现同结论**。
+   **收件人：设计作者 ＋ 协调者（已办，2026-10-10）。**
+3. **两枚检查点实现的类型名与它们跟 `all_operators()` 的关系未给，三条判据要用的读写面也没给**（当时：**没写清**）：
    设计 §4.5 定了「实现的算子是 `generate-broll` 与 `render`」与三条判据，也写了「`type Checkpoint`
    的字段清单不在本设计的约束范围内」；但**没有给承载 `impl Checkpointable` 的类型名**，
    也没有说这两枚类型与 §5.2 那 17 个 `Operator` 值（纯数据）之间的关系由谁维持；
@@ -1420,7 +1453,12 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
    **代价**：「类型名与这组读写面都是本计划定的」；**收益**：`Checkpointable` 的第一枚实现有一个可指认的
    落点，三条判据的用例也真的写得出来（而不是「定义了一个没人实现它的类型」——
    切分 §八 明写本块要写明落点与判据）。
-   **收件人：设计作者。**
+   **设计现文（2026-10-10 订正）**：§4.5 已补类型名（`continuum_media::GenerateBroll` / `Render`）、
+   `operator_id()` 与那条纯数据关系、「测试侧的读写面」一条（`new` / `record_completed_segment` /
+   `select_backend` / `progress`），以及判据 3 的「选中的 backend 在 `backend_candidates` 内 ⇒ 支持」。
+   ⇒ **这几处缺口已闭合**。**仍与设计现文不同的是检查点结构本身**：设计写「两枚各自定义一个检查点结构」，
+   本计划取两枚**共用**一枚 `Progress`——这一处保留为本计划的申报偏差（见第三节）。
+   **收件人：设计作者（已办，2026-10-10）。**
 4. **`all_operators()` 的 `side_effect_class` 与 `determinism` 各有一批没有对应用例的承担者**（**判据缺口**）：
    设计 §12.2 只点名了五枚（(n)）与「`Deterministic` 的每一枚的 backend」（(h)）。
    **未被任何用例钉住的 `determinism` 是十一枚**（(r) 的六行经 `cache_key` 的 `Some` / `None` 钉住六枚，
@@ -1431,37 +1469,47 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
    **本计划不发明那条全称**（给 17 枚各写一条断言会让「枚举式断言」变成第二份转录），
    **照实写明**：**「17 枚的 `side_effect_class` / `determinism` 都对」这句话在本计划里没有照片**，
    钉住的只是被点名的那几枚。
-   **收件人：复审者**（若判必须全量，缺的是「把设计的 §5.2 表落成一条表驱动用例并逐行给人读的对照」这一步）。
+   **设计现文（2026-10-10 订正）**：§12.5 已补第 6 条记同一结论（`determinism` 只有 (r) 的六枚有承担者、
+   其余十一枚无照片；`side_effect_class` 只有 (n) 点名的五枚有承担者），§12.2 的 (h) 也写明「本条按取值
+   挑选要遍历的算子，但不断言那个取值」。⇒ **这一处判据缺口已闭合**。
+   **收件人：复审者（已办，2026-10-10）。**
 
-### 二、设计 §12.3 的变异预告：本计划照抄，并补**两处预测的修正**
+### 二、设计 §12.3 的变异预告（现文**八行**；三处档位与等价变异行已 2026-10-10 订正）
 
-设计 §12.3 的七行预告**本计划一处不改**（它是本块变异那一轮的输入）。**两处要单独读出**：
+设计 §12.3 现文的八行预告是本块变异那一轮的输入，**本计划一处不改**。**两处要单独读出**：
 
-- 表里「**放宽**：`all_operators()` 少注册一枚（16）」那一行自陈「**这一档若不红，说明 f 是按
+- 「**放宽**：`all_operators()` 少注册一枚（16）」那一行自陈「**这一档若不红，说明 f 是按
   `all_operators()` 自己遍历的**——即假照片」。**本计划的 (f) 语料手写**（Task 3），故这一档会红。
-- 表里「**等价变异**」那一行的处置是「换成与表外取值相撞的串」——**本计划另加了两半**：
-  Task 1 的 (a) **直接断言串的字面值**，**改后的 (d) 又逐型断言 serde 串与 `as_str()` 相同**，
-  故「把串换成另一个合法小写串」这一档**红在 (a) 与 (d) 两处，不必再换变异体**
-  （只断 serde 往返时它确实全绿——那条旧预告按当时的语料是对的，Task 10 Step 5 第 6 轮据此订正）。
-  **这是本计划的一处加强**（申报见第三节）。
+- 「**等价变异**：把某个新型的串改成另一个**同样合法**的小写串（`as_str` 与 `parse` **两处一起改**）」
+  那一行**现文写「该红 (a) 与 (d)」**，并注明「若变的是 `shot_set` 那一枚，(e) 同红」
+  「只在一处改则往返也红」。**订正前那一版该行写的是「全绿——这是一枚等价变异体」**，
+  按当时「只断 serde 往返」的语料成立；**设计 2026-10-10 的订正已改**，两处现同结论。
+  **本计划另加的两半**（Task 1 的 (a) 直接断言串的字面值、(d) 逐型断言 serde 串与 `as_str()` 相同）
+  **已被设计收进 §12.2 的 (d)（并在 §12.3 里按「(a) 逐条手写串」引用）**。
+  **一处措辞不齐（据实记）**：§12.2 的 (a) 那一行的正文只写「逐条 `parse` 回自身」，
+  而 §12.3 是按「(a) 逐条手写串」预告的——**本计划取严的那一半**（断言手写串的字面值，Task 1），
+  否则 (a) 打不红那枚变异体。见报告的设计需改处清单。
 
-### 三、本计划自定的形状与取值（**申报**，逐条说清代价）
+### 三、本计划自定、且设计现文未给的东西（**申报**，逐条说清代价）
+
+**经 2026-10-10 的订正，原先「本计划自定」的几处已与设计现文一致**：`PermittedGenerativeContent` 的
+三个方法与其「不给 `Default`」、`GenerativePermission` 的四个派生（设计 §7.1 现文给出同一行）、
+两枚检查点类型名与那组读写面、「选中的 backend 在 `backend_candidates` 内 ⇒ 支持」的判据、
+以及 (a) 与 (d) 的两条断言（见第一节）。**下面这些仍是本计划自定的**：
 
 - **`GenerativePermission::as_str` 的五个串**（`broll` / `voice` / `music` / `frame_interpolation` /
   `three_d_generation`）：设计只给了类型名与规范侧五个旗标名（`allow_generated_broll` 一类），**没给编码串**。
   取值沿用本仓既有约定（小写、多词以 `_` 连接，`crates/continuum-artifact/src/artifact.rs:37` 的注记）。
   **代价**：这是本块定的外部编码，将来若要改是破坏性变更。
-- **`PermittedGenerativeContent` 的两个构造函数与 `contains`**（见第一节第 1 条）。**代价**：多两个公开入口；
-  **收益**：§34 的 fail-closed 有一个可被用例指认的产生点。
-- **`GenerateBroll` / `Render` 两枚类型名、`operator_id()` 与那四个读法／写法**
-  （`new` / `record_completed_segment` / `select_backend` / `progress`，与 `type Checkpoint = Progress`
-  一枚字段全 `pub` 的结构体）（见第一节第 3 条）。
-  **代价**：本计划定的外部面有六项（两枚类型名 ＋ 一组读写面）；**收益**：§4.5 的三条判据在用例里真的写得出来，
-  且「选中的 backend 支不支持」由 `Operator::backend_candidates` 承载，不另立第二份名单。
-- **`GenerativePermission` 比设计 §7.1 多三项派生**（设计只给 `#[derive(Debug)]`，Task 5 取
-  `#[derive(Debug, Clone, PartialEq, Eq)]`）：`PartialEq` 是 §12.1 的逐臂往返断言所需，
-  `Clone` / `Eq` 照本仓枚举措辞的既有做法，**不取 `Copy`**（设计未把本型定成可复制值）。
-  **代价**：本型的外部面比设计宽三项派生。
+- **两枚检查点类型共用一枚 `Progress`**（`type Checkpoint = Progress`）：设计 §4.5 现文写「两枚各自定义一个
+  检查点结构」，本计划取两枚共用一枚字段全 `pub` 的结构体（见第一节第 3 条）。
+  **代价**：与设计现文的一处措辞不同；**收益**：两枚的进度状态同形，共用一枚使判据 1／2 的
+  「逐字段相同」只有一处写法。**收件人：设计作者。**
+- **§5.5 两条声明的载体取两枚具名私有 helper fn**（`verify_deterministic_operator` /
+  `verify_multimodal_operator`）：设计 §5.5 现文把载体写成「两枚算子值上的文档注释」，
+  **那一处落不下去**（数组元素是表达式而非 item，`///` 挂上去只触发 `unused_doc_comments`，
+  与 0 warning 门相抵；rustc 1.95.0 实测，见 Task 3 Step 3）。**代价**：多两个私有函数；
+  **收益**：那两条声明真的有一处挂得住、可编译的落点。**收件人：设计作者。**
 - **`verify_deterministic_backends` 作为独立的私有函数**（Task 4）：把「先核后写」拆成两步。
   **代价**：多一次遍历；**收益**：那条性质的唯一可观察后果（违规时注册表没被动过）成立。
 - **(a) 直接断言 11 枚新串的字面值 ＋ (d) 逐型断言 serde 串与 `as_str()` 相同**（Task 1）：
@@ -1505,23 +1553,24 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
 - **收件人：协调者**——§14 第 1 条（本块的兑现口径是「让算子满足 §305 的前提」）、
   §14 第 2 条（`Checkpointable` 的类型只能落在 `continuum-operator`）、
   §14 第 5 条（`ThreeDGeneration` 这一臂今天没有算子映射它）、§13 第 9 条
-  （P1 设计 `:573` 那句会随加型而变旧的文本，`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md:573`）。
+  （P1 设计里那句会随加型而变旧的文本——`docs/superpowers/specs/2026-10-01-p1-execution-layer-design.md`
+  对 `ArtifactType` 集合写「本子项目取六种」的那一句；**按内容指**，不写行号）。
   **本计划不改别人的文件**（设计 §3.5 的 (g)）。
 - **收件人：规范维护者 ＋ 第 3 层**——§14 第 6 条（检查点的存储形态未定义）。
 - **§14 第 9 条**——收件人是**第 3 层**（见上）。
 
 ### 五、拍不到的照片
 
-设计 §12.5 的**五条**（端到端、§34 授权在真实执行路径上的效果、`checkpoint()` / `restore()` 的崩溃恢复效果、
-§131 的复用真的省下一次重算、Timeline 六字段）**逐条照原文，本计划不发明**。**本计划另补三条**
-（编号是本节的补件序号，与设计 §12.5 的五条无关）：
+设计 §12.5 现为**六条**（端到端、§34 授权在真实执行路径上的效果、`checkpoint()` / `restore()` 的崩溃恢复效果、
+§131 的复用真的省下一次重算、Timeline 六字段，以及 2026-10-10 补的「17 枚的 `determinism` /
+`side_effect_class` 都对」那一条）**逐条照原文，本计划不发明**。**本计划另补两条**
+（编号是本节的补件序号，与设计 §12.5 的六条无关）：
 
 - **设计 §5.5 的两条 §262 级别声明只有文档注释这一个载体**：`verify-deterministic` 是第 1 级、
-  `verify-multimodal` 是第 3 级（Task 3 Step 3），而 `Operator` 的七字段里没有级别，
-  故**它没有运行期照片**（同纪律 8 的「纯数据声明」）。**这不是漏拍**：级别序、候选过滤与独立性判定
-  都属 P5a（设计 §5.5 的归属表），本块交付的就是那两条声明本身。
-- **「17 枚的 `side_effect_class` / `determinism` 都对」是拍不到的**：见第一节第 4 条——
-  钉住的是被点名的那些，不是那个全称。
+  `verify-multimodal` 是第 3 级，载体是两枚具名私有 helper fn 上的文档注释（Task 3 Step 3）；
+  而 `Operator` 的七字段里没有级别，故**它没有运行期照片**（同纪律 8 的「纯数据声明」）。
+  **这不是漏拍**：级别序、候选过滤与独立性判定都属 P5a（设计 §5.5 的归属表），
+  本块交付的就是那两条声明本身。
 - **`bind_media_methods` 的四条 `realized_by` 与算子的对应关系只有运行期照片**：
   `realized_by: Vec<String>`（P5b 设计 §4.3）在编译期核不了，
   故「绑的是不是**对的**算子」这一半只有「串能 `resolve`」那一条腿——
@@ -1539,7 +1588,8 @@ git commit -m "docs(media): P5e 媒体领域算子的收尾与复核"
 - **给 P5b 的实现方**：四条 `video/` 的 `realized_by`（Task 8）＋「本块不 `register` 方法条目」这条边界。
 - **给 P5c／P5d／P5f 的实现方**：`ArtifactType` 的 11 枚新变体由 Task 1 一次落地（**三份设计的报出都是「无」**）；
   P5f 需要的 `Image`、P5d 需要的 `Report` 都在其中；**Task 1 之后不得再改这个枚举**。
-- **给协调者**：本计划第一节查出的**四处设计问题**、第二节对设计 §12.3 的两处修正、**第三节逐条申报的本计划自定形状**；
+- **给协调者**：本计划第一节记的设计缺口（**2026-10-10 设计已逐条订正**）、第二节记的设计 §12.3 现文与其来历、
+  **第三节逐条申报的本计划自定形状**；
   以及「Task 8／9 在 P5a／P5b 的实现落地前动不了」这一条排期事实。
 - **给复审者**：**变异那一轮的七轮记录**（纪律 2 要求的 sha256 与日志路径）、Task 10 Step 1 的**两条门读数**、
   以及 `## 遗留` 第五节另补的那几条**拍不到的照片**。
