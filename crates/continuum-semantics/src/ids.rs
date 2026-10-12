@@ -24,6 +24,12 @@
 //!
 //! **`Debug` 与 `Clone` 不是语义能力**：前者是断言失败时必须打得出来，后者是它们要能
 //! 装进 `Intent` 并随值传递（设计 §1.2 的「以值进入」）。
+//!
+//! # 「不改写、不裁剪」「无校验」的照片
+//!
+//! 三个类型都写了这两句绝对措辞。**各自直接**的照片在 `tests/intent.rs` 的
+//! `opaque_strings_are_not_rewritten_trimmed_or_rejected`：带空白／特殊字符／非 ASCII 的串
+//! 逐字节往返、空串也被接受（此前只有 `PlanId` 有一条直接照片，另两个靠普通串间接经过）。
 
 /// §222 的 `Intent.id`。落库是 `intent` 表的主键。
 #[derive(Debug, Clone)]

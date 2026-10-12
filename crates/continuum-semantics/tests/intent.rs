@@ -20,6 +20,8 @@
 //! | `enum_columns_use_lowercase_underscore_and_reject_out_of_table_values` | `kind` 六枚、`status` 十三枚的落库字面量**逐枚**；表外取值读回得**具体** `Err` | 编码改成大写／去掉 `_`／表外取值取默认值即红 |
 //! | `list_children_rejects_an_out_of_table_enum_too` | 第二条读路径的表外取值处置 | 同上（两条读路径**各有一条照片**） |
 //! | `the_migration_registers_exactly_the_intent_table` | 迁移 110 只建 `intent` 一张表 | 多建／少建一张表即红 |
+//! | `contract_id_id_half_is_also_semantic` | `ContractRef` 的 `id` 那一半也是语义内容：只改 `id`（`version` 不动）⇒ `version` +1 | 把 `contract_id.id` 从语义比较里去掉（**移除档**） |
+//! | `opaque_strings_are_not_rewritten_trimmed_or_rejected` | `IntentId` / `PlanId` / `ContractId` / `Priority` 的「不改写、不裁剪、无校验」：带空白／特殊字符／非 ASCII 的串**各自直接**逐字节往返 | 任一 `from_str` 裁剪／改写输入即红 |
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -329,6 +331,39 @@ fn version_increments_for_each_of_the_five_semantic_fields() {
         );
         tx.commit().unwrap();
     }
+}
+
+/// `contract_id` 的 **`id` 那一半**也是语义内容：保持 `version` 不变、只改 `id` ⇒ `version` +1。
+///
+/// 与 [`version_increments_for_each_of_the_five_semantic_fields`] 里 `contract_id` 那一格
+/// （只改 `version` 那一半）**各是一条、各起一个库**：`ContractRef` 是 `{ id, version }`
+/// 两个字段，而 [`crate::save_intent`] 的语义比较把 `contract_id` 拆成
+/// `contract_id` 与 `contract_version` 两列（见其 `semantic_columns`）——只钉其中一半
+/// 会让另一半的漏判漂过去。
+///
+/// **红条件**：把 `contract_id.id` 从语义比较里去掉（**移除档**）——本用例红（版本停在 1）。
+#[test]
+fn contract_id_id_half_is_also_semantic() {
+    let (_d, db) = db();
+    let tx = db.begin().unwrap();
+
+    save_intent(&tx, &sample("i-1")).unwrap();
+    let mut changed = sample("i-1");
+    // `version` 那一半**不动**（`sample` 给的是 1），只改 `id`。
+    changed.contract_id.id = ContractId::from_str("c-2");
+    changed.updated_at = 2_000;
+    save_intent(&tx, &changed).unwrap();
+
+    let back = load_intent(&tx, &IntentId::from_str("i-1")).unwrap().unwrap();
+    assert_eq!(
+        back.version, 2,
+        "只改 contract_id.id（version 那一半不动）时版本应 +1（停在 {} 说明 id 那一半没被算进语义字段）",
+        back.version
+    );
+    assert_eq!(back.contract_id.id.as_str(), "c-2", "改动本身要真的落库");
+    assert_eq!(back.contract_id.version, 1, "version 那一半应原样保留");
+
+    tx.commit().unwrap();
 }
 
 /// §5.2 的**非**语义字段**逐项各一条**：改了它们，`version` **不** +1。
@@ -720,4 +755,51 @@ fn collect_rs(dir: &Path, out: &mut Vec<PathBuf>) {
 fn plan_id_round_trips() {
     let p = PlanId::from_str("plan-1");
     assert_eq!(p.as_str(), "plan-1");
+}
+
+/// `IntentId` / `PlanId` / `ContractId` / [`Priority`] 的**不透明串**承诺：
+/// **不改写、不裁剪、无校验**，四种类型**各自直接**有一张照片。
+///
+/// `ids.rs` 给三个 id 类型、`intent.rs` 给 [`Priority`] 都写了「不改写、不裁剪」「无校验」，
+/// 而此前**只有 `PlanId` 有一条直接往返照片**（`IntentId` / `ContractId` / `Priority`
+/// 只经普通串间接经过）。这一条让四种类型各自过一个「什么字符都可能有」的串，
+/// 逐字节断言进什么出什么：不 trim、不折叠空白、不转义、不按任何词表拒绝。
+///
+/// **「无校验」**那一句由「空串／带任何字符的串都构造得出来且原样取出」承接——
+/// 本类型的 `from_str` 签名不返回 `Result`（没有可失败的输入），照片能钉的是
+/// 「没有哪个串被拦下或替换」。**「不排序」不在本用例射程**（见 [`Priority`] 的类型文档：
+/// 那是「没有比较 API」这件事，没有会红的运行期用例可写，按纪律 3 明写在那里）。
+///
+/// **红条件**：把任一个 `from_str` 写成 `s.trim().to_owned()`（或任何改写输入的写法）即红。
+#[test]
+fn opaque_strings_are_not_rewritten_trimmed_or_rejected() {
+    // 前后空白、制表符、换行、引号、反斜杠、斜杠、emoji、汉字——凡是「会诱使实现
+    // trim / 转义 / 按词表校验」的形状都摆进来。
+    let raw = "  \t\n Intent id/\"引号\"\\反斜杠 😀 末尾  ";
+
+    assert_eq!(
+        IntentId::from_str(raw).as_str(),
+        raw,
+        "IntentId 不该改写、裁剪、转义输入"
+    );
+    assert_eq!(
+        PlanId::from_str(raw).as_str(),
+        raw,
+        "PlanId 不该改写、裁剪、转义输入"
+    );
+    assert_eq!(
+        ContractId::from_str(raw).as_str(),
+        raw,
+        "ContractId 不该改写、裁剪、转义输入"
+    );
+    assert_eq!(
+        Priority::from_str(raw).as_str(),
+        raw,
+        "Priority 不该改写、裁剪、转义输入"
+    );
+
+    // 「无校验」：空串也是合法输入——本类型没有「合法取值」这个概念，也就没有可拒绝的串。
+    assert_eq!(IntentId::from_str("").as_str(), "");
+    assert_eq!(ContractId::from_str("").as_str(), "");
+    assert_eq!(Priority::from_str("").as_str(), "");
 }
