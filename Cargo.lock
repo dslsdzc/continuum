@@ -292,6 +292,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "trybuild",
 ]
 
 [[package]]

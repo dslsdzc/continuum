@@ -1,0 +1,31 @@
+error[E0061]: this method takes 1 argument but 0 arguments were supplied
+  --> tests/compile_fail/a_draft_without_unknowns_cannot_be_finalized.rs:24:19
+   |
+24 |     let _ = draft.finalize();
+   |                   ^^^^^^^^-- argument #1 of type `Unknowns` is missing
+   |
+note: method defined here
+  --> src/spec.rs
+   |
+   |     pub fn finalize(self, unknowns: Unknowns) -> Specification {
+   |            ^^^^^^^^
+help: provide the argument
+   |
+24 |     let _ = draft.finalize(/* Unknowns */);
+   |                            ++++++++++++++
+
+error[E0308]: mismatched types
+  --> tests/compile_fail/a_draft_without_unknowns_cannot_be_finalized.rs:34:29
+   |
+34 |     let _ = draft2.finalize(None::<Unknowns>);
+   |                    -------- ^^^^^^^^^^^^^^^^ expected `Unknowns`, found `Option<Unknowns>`
+   |                    |
+   |                    arguments to this method are incorrect
+   |
+   = note: expected enum `Unknowns`
+              found enum `Option<Unknowns>`
+note: method defined here
+  --> src/spec.rs
+   |
+   |     pub fn finalize(self, unknowns: Unknowns) -> Specification {
+   |            ^^^^^^^^

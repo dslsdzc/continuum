@@ -52,6 +52,26 @@
 //! 的 kind 两侧、首次落库恰一条 `intent.created`、收口恰一条 `intent.completed`、
 //! 失败路径回滚后不留半写的行、可跳过事件之后的 `intent.completed` 被拒（及其反例）。
 //!
+//! Task 10 落 §227 的六元组与 §214 的 Specification 编译（设计 §6.1／§6.2）：
+//!
+//! - **§227 两句 MUST 的类型落点**：[`Unknowns`] 恰两枚（`Enumerated` / `NoneFound`）、
+//!   [`SpecDraft`] 里没有 `unknowns` 字段、[`SpecDraft::finalize`] 要求**显式给出**
+//!   `Unknowns`（不是 `Option`）、[`Specification`] 字段私有且唯一构造入口是 `finalize`
+//!   （`spec` 模块）；
+//! - **§214 只建类型、不建检测器**：[`Conflict`] / [`UndefinedBehavior`] 作为
+//!   [`Unknowns::Enumerated`] 的成员**保存**（「什么算冲突」规范没给判据，§16 第 10 条）；
+//! - **`specification` 表**（迁移 110 的第二张表，§6.2）：主键 `(intent_id, version)`，
+//!   Specification 的版本与 Intent 的版本**同号**；`unknowns_kind` ＋ `unknowns` 两列
+//!   让「已查过、没有」与「枚举为空」分得开；
+//! - **同事务写** [`save_intent_with_specification`]（一个函数写两件事，同 P1 的
+//!   `apply_transition` 形状，**不自己 `commit`**）与读回 [`load_specification`]。
+//!
+//! 以 `tests/spec.rs` 的六条用例钉住：`Unknowns` 恰两枚（**编译期**）、
+//! `NoneFound` 与 `Enumerated(vec![])` 的往返**可区分**、六元组字段**逐项**、
+//! 同事务写的正常／失败两侧、两枚「只保存」的成员、`unknowns` 编码的字面量与
+//! 表外取值处置；以 `tests/type_level.rs` 驱动的三份 `tests/compile_fail/` 样例钉住
+//! 「crate 外拼不出 `Specification`」「少给 `unknowns` 编不过」「两个检测器名字取不到」。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
 //! - **§5.4 的其余四个写入点**：`PlanReviewRequired` / `DecisionRequired`
@@ -61,19 +81,29 @@
 //!   （[`GraphIdRef`]，设计 §1.2.3 的规则 3），故本 crate 对执行层的依赖边为零
 //!   （照片：`tests/intent.rs` 的 `graph_id_and_product_id_are_opaque_strings`——
 //!   它扫本 crate 的 `src/`，断言执行层 crate 的**下划线标识符拼法**零命中）。
-//! - 迁移 110 的其余六张表（`specification` / `contract` / `contract_requirement` /
-//!   `plan` / `decision` / `decision_result`）由 Task 10／11／13／15 追加。
+//! - 迁移 110 的其余五张表（`contract` / `contract_requirement` / `plan` /
+//!   `decision` / `decision_result`）由 Task 11／13／15 追加进**同一个迁移项的 SQL**
+//!   （不是第二个 110 号项——那会被 `migrate()` 静默跳过，见
+//!   [`p4_semantics_migrations`] 的文档）。
 
 mod error;
 mod ids;
 mod intent;
 mod intent_tx;
 mod persist;
+mod spec;
 
-pub use error::{IntentError, IntentStatusError};
+pub use error::{IntentError, IntentStatusError, SpecError};
 pub use ids::{ContractId, IntentId, PlanId};
 pub use intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
 pub use intent_tx::apply_intent_transition;
-pub use persist::{list_children, load_intent, p4_semantics_migrations, save_intent};
+pub use persist::{
+    list_children, load_intent, load_specification, p4_semantics_migrations, save_intent,
+    save_intent_with_specification,
+};
+pub use spec::{
+    AcceptancePredicate, Conflict, ForbiddenState, Goal, Invariant, Preference, SpecDraft,
+    Specification, UndefinedBehavior, Unknown, Unknowns,
+};

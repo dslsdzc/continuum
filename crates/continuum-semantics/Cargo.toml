@@ -24,8 +24,17 @@ continuum-persist = { path = "../continuum-persist" }
 serde_json = { workspace = true }
 
 [dev-dependencies]
-# 本 crate 的使用点：`tests/intent.rs` 的落库用例各起一个临时库
+# 本 crate 的使用点：`tests/intent.rs` / `tests/spec.rs` 的落库用例各起一个临时库
 # （与 `continuum-canonical/tests/alias.rs` 的夹具同形）。它是**外部** crate，
 # 故不进 `dependency_direction.rs` 的 `ALLOWED`——那张表逐对断言的是 workspace 成员
 # 之间的边。**但会让 `Cargo.lock` 变化**，提交时按显式路径带上锁文件。
 tempfile = { workspace = true }
+# Task 10 的使用点：`tests/type_level.rs` 用编译失败样例钉住三件 crate 外**写不出**的东西
+# （`Specification` 的结构体字面量、`finalize` 少参数／传 `None`、两个检测器名字），
+# `trybuild` 的用法与 `continuum-canonical` / `continuum-model-registry` 同形
+# （本 crate **不建** `compile_pass/` 的理由写在 `tests/type_level.rs` 文件头）。
+# **它是外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表逐对断言的是
+# **workspace 成员之间**的边（设计 §1.2.3 推论 1），比对的内层循环只遍历 workspace 成员；
+# `trybuild` 不在 members 里。**但它会让 `Cargo.lock` 变化**（本 crate 的依赖列表多一项），
+# 故提交时要按显式路径带上锁文件。**只在测试目标里用**：`src/` 里没有一行读它。
+trybuild = { workspace = true }

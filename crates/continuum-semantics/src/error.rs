@@ -1,6 +1,6 @@
 //! 本 crate 的错误类型。计划「文件结构」一节把 `IntentError、SpecError、ContractError、
 //! PlanError、DecisionError、ConstraintError` 都列在 `src/error.rs`；本 crate 至今落
-//! 前两枚（`IntentError` 与 Task 9 的 `IntentStatusError`）。
+//! 前三枚（`IntentError`、Task 9 的 `IntentStatusError` 与 Task 10 的 `SpecError`）。
 
 use continuum_persist::PersistError;
 
@@ -95,6 +95,46 @@ pub enum IntentError {
     UnknownIntent { id: String },
 
     /// `Tx` 的往返失败。
+    #[error(transparent)]
+    Persist(#[from] PersistError),
+}
+
+/// Specification 落库与读回的错误（Task 10）。
+///
+/// # 四枚各有真实产生方，一条不漏
+///
+/// - [`SpecError::UnknownsKind`]：`specification.unknowns_kind` 列是**闭集两枚**
+///   （`none_found` / `enumerated`，编码挂在 [`crate::Unknowns::kind_str`] 上），
+///   库里读到表外取值（历史行、被外部改过的行）时由 [`crate::load_specification`]
+///   的解码处产出，**带库里那一个原始串**。
+/// - [`SpecError::UnknownItemKind`]：`specification.unknowns` 列里元素的 `kind`
+///   是**闭集两枚**（`conflict` / `undefined_behavior`，编码挂在
+///   [`crate::Unknown::kind_str`] 上），表外取值在同一解码处产出，带原始串。
+/// - [`SpecError::Intent`]：组合写路径 [`crate::save_intent_with_specification`]
+///   里 Intent 侧的失败（含 `save_intent` 自己的 `Persist` 一枚），`#[from]` 转出。
+/// - [`SpecError::Persist`]：`Tx` 的往返失败，`#[from]` 转出。**容器坏**（列表列不是
+///   JSON 数组、`unknowns` 元素不是 `{kind, value}` 对象等）也走这一枚的
+///   `Database` 形状——与 `continuum-model-registry` 的列表列同一条分工
+///   （「容器坏」与「表外取值」是两类失败，别处有各自先例）。
+///
+/// **两枚表外取值是分开的，不合并成一枚**：合并之后「`unknowns_kind` 列坏了」与
+/// 「列表里某一项坏了」在类型上不再可分辨，而两者的处置方向可能不同（一个要修那一行、
+/// 一个要修列表里那一项）——与 [`IntentError`] 的两枚同一条理由。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SpecError {
+    /// `unknowns_kind` 列是表外取值。`value` 是**库里那一个**原始取值。
+    #[error("表外的 specification unknowns_kind 取值: {value}")]
+    UnknownsKind { value: String },
+
+    /// `unknowns` 列表里元素的 `kind` 是表外取值。`value` 同上。
+    #[error("表外的 unknown 元素 kind 取值: {value}")]
+    UnknownItemKind { value: String },
+
+    /// 组合写路径里 Intent 侧的失败。
+    #[error(transparent)]
+    Intent(#[from] IntentError),
+
+    /// `Tx` 的往返失败（含容器坏）。
     #[error(transparent)]
     Persist(#[from] PersistError),
 }

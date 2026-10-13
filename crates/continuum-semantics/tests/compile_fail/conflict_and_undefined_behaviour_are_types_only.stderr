@@ -1,0 +1,11 @@
+error[E0599]: no method named `detect_conflicts` found for struct `Specification` in the current scope
+  --> tests/compile_fail/conflict_and_undefined_behaviour_are_types_only.rs:32:18
+   |
+32 |     let _ = spec.detect_conflicts();
+   |                  ^^^^^^^^^^^^^^^^ method not found in `Specification`
+
+error[E0599]: no method named `find_undefined_behaviour` found for struct `Specification` in the current scope
+  --> tests/compile_fail/conflict_and_undefined_behaviour_are_types_only.rs:35:18
+   |
+35 |     let _ = spec.find_undefined_behaviour();
+   |                  ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `Specification`
