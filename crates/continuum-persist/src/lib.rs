@@ -16,3 +16,17 @@ pub use recovery::{
 };
 pub use tx::{EventLogScan, Tx};
 pub use value::Value;
+
+// 事件面经本 crate 转出，供 P4 语义层使用。
+//
+// 依据：设计 §2.2（`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md:259-261`）
+// ——「`EventType` 与 `AuditKind` 是 `continuum-events` 的类型，本层经 `continuum-persist`
+// 的 `Tx::append_event` / `Tx::append_audit` 写它们，**故不新增边**」。`Tx::append_event`
+// 的参数类型与 `Tx::scan_event_log` 的参数类型都来自 `continuum-events`，调用方（语义层）
+// 要构造事件、装配链就必须能命名它们，故在此转出——**这是转出，不是新依赖边**：
+// `continuum-persist → continuum-events` 早已存在（`tx.rs` / `recovery.rs` 在用）。
+//
+// `default_chain` 与 `EventCodecChain` 是 `scan_event_log` 的配套：链的装配点只有
+// `continuum-events::codec::default_chain`（它自己的文档写着「运行期唯一的链装配点」），
+// `scan_event_log` 的调用方（语义层写 `intent.completed` 后的收口自检）经这里取。
+pub use continuum_events::{default_chain, Event, EventCodecChain, EventType};

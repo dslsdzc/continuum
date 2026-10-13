@@ -1,4 +1,4 @@
-//! `intent` 表（迁移 **110**）与它的行级读写（设计 §5.1／§5.2）。
+//! `intent` 表（迁移 **110**）与它的行级读写（设计 §5.1／§5.2／§5.4）。
 //!
 //! # 本文件与 `intent.rs` 的分工（一处与计划正文不同的落点，理由在此）
 //!
@@ -42,7 +42,7 @@
 //! `kind` / `status` 的字面量取自 [`crate::IntentKind::as_str`] / [`crate::IntentStatus::parse`]
 //! （与类型同址）。**本文件不自建第二份编码。**
 
-use continuum_persist::{Migration, PersistError, Tx, Value, value::kind_name};
+use continuum_persist::{Event, EventType, Migration, PersistError, Tx, Value, value::kind_name};
 
 use crate::error::IntentError;
 use crate::ids::{ContractId, IntentId, PlanId};
@@ -97,6 +97,28 @@ pub fn p4_semantics_migrations() -> Vec<Migration> {
 
 /// 写一条 Intent。**不 `commit`**——事务由调用方持有并提交（同 P1 的 `apply_transition`
 /// 形状；§318 要求状态更新与对应事件在同一事务内提交，故写函数不自己收口）。
+///
+/// # 首次落库写出 `IntentCreated`（§5.4）
+///
+/// **仅首次**（`INSERT` 分支）写出恰一条 `EventType::IntentCreated`——§5.4 的六项写入点
+/// 之一，本层是它的第一个生产方。后续 save 走 `UPDATE` 分支，不写事件（「Intent 首次落库」
+/// 这件事只发生一次）。
+///
+/// 事件的两个入参由本函数给（`save_intent` 的签名没有它们，也不该有）：
+///
+/// - `event_id` 派生为 `intent/{id}/created`：这是 P1 给 `ArtifactCreated` 的豁免形状
+///   （`artifact/{id}`，见 `docs/superpowers/p1-followups.md` §一.2）的同一判据——
+///   **一个 Intent 的首次落库恰一次**，`intent.id` 是主键，故派生 id 不可复用。
+///   **限度照实写**：行被外部删掉（本层没有删除路径）后重新保存会再走一次首次落库路径、
+///   撞上主键——那时 `append_event` 失败、本次 save 返回 `Err`（不静默留下第二条）。
+/// - `occurred_at` 取 `intent.created_at`：首次落库的时刻，由调用方在记录里给出
+///   （本层不取时钟，同 [`crate::Intent`] 的字段文档）。
+///
+/// 事件写在行之后：行写失败时（如表不存在）直接返回错误，不产生指向不存在 Intent 的事件
+/// （同 P1 的 `save_artifact`）。事件写失败时行**已经留在事务里**——调用方必须回滚，
+/// 不得提交（P1 的纪律，见 `save_intent` 上面那句与 [`crate::apply_intent_transition`]）。
+/// 照片：`tests/intent_state.rs` 的 `the_intent_created_event_is_written_on_the_first_save`
+/// （首次恰一条、第二次不重复）。
 ///
 /// # 一次写入 = 插入或原地更新（与 `alias` 表**刻意不同**）
 ///
@@ -179,6 +201,18 @@ pub fn save_intent(tx: &Tx<'_>, intent: &Intent) -> Result<(), IntentError> {
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             &columns,
         )?;
+
+        // 首次落库写出 IntentCreated（§5.4）——**写在行之后**：行写失败时（如表不存在）
+        // 不产生指向不存在 Intent 的事件。事件与行同在这个事务里，由调用方一起提交
+        // 或一起回滚。
+        let event = Event::new(
+            EventType::IntentCreated,
+            format!("intent/{}/created", intent.id.as_str()),
+            intent.created_at,
+            serde_json::json!({ "intent_id": intent.id.as_str() }),
+        )
+        .with_intent(intent.id.as_str());
+        tx.append_event(&event)?;
     } else {
         tx.execute(
             "UPDATE intent SET version = ?2, kind = ?3, goal = ?4, status = ?5, priority = ?6, \

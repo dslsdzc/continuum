@@ -32,11 +32,31 @@
 //! 历史不堆在 `intent` 表里、`ContractRef` 带版本、`graph_id` / `product_id` 是不透明串、
 //! `intent` 表列清单逐列、枚举列的编码纪律与表外取值处置。
 //!
-//! # 本 task 明确不做
+//! Task 9 落 §223 的状态机与「状态迁移与事件同事务」（§5.4）：
 //!
-//! - **不建状态机**：`IntentStatus` 只是词汇与落库编码，合法迁移的判定（§223）归 Task 9
-//!   （`IntentStatusError` / `apply_intent_transition`）。
-//! - **不写事件与审计**：§5.4 的六个写入点由用它们的 task 落；本 task 的写路径不写 `events`。
+//! - **迁移判定**在 [`IntentStatus::transition`]（`intent` 模块，`pub(crate)`）：
+//!   §5.3 的迁移表（**本设计的决定，不是规范转录**）、两条 `Ok` 自环
+//!   （`RUNNING` / `WAITING`，与其余自环一律 `Illegal` 两条独立判定）以及
+//!   `COMPLETED → EVOLVING` 的 `kind = PRODUCT` 条件；
+//! - **落库版** [`apply_intent_transition`]（`intent_tx` 模块）：读当前态 → 判定 →
+//!   写回 `status` / `updated_at` → 写事件，全在调用方的事务里，**不自己 `commit`**；
+//! - **§5.4 的两个写入点**：[`save_intent`] 首次落库写 `EventType::IntentCreated`；
+//!   [`apply_intent_transition`] 迁移到 `COMPLETED` 写 `EventType::IntentCompleted`，
+//!   写完复扫事件日志做收口自检（可跳过记录之后不得存在 `intent.completed`，
+//!   那是既有消费者的 MUST，见 `continuum-persist/src/tx.rs`）；
+//! - 判定错误 [`IntentStatusError`] 与「没有这个 Intent」的 [`IntentError::UnknownIntent`]
+//!   一并落在 `error` 模块。
+//!
+//! 以 `tests/intent_state.rs` 的用例钉住：§5.3 的迁移表**逐条**（31 条，不抽代表）、
+//! 未列出的对得 `Illegal { from, to }` 且带出那一对、自环两侧、`COMPLETED → EVOLVING`
+//! 的 kind 两侧、首次落库恰一条 `intent.created`、收口恰一条 `intent.completed`、
+//! 失败路径回滚后不留半写的行、可跳过事件之后的 `intent.completed` 被拒（及其反例）。
+//!
+//! # 尚未做的（后续 task 的，不是本 crate 的终态）
+//!
+//! - **§5.4 的其余四个写入点**：`PlanReviewRequired` / `DecisionRequired`
+//!   （`EventType`）与 `ContractChanges` / `UserApprovals`（`AuditKind`）由用它们的
+//!   task 落（Task 11 / 13 / 15）。本 crate 今日写 `events` 的只有上面那两个写入点。
 //! - **不建 ADFIR 图、不引用 `continuum-graph`**：`graph_id` 取不透明串
 //!   （[`GraphIdRef`]，设计 §1.2.3 的规则 3），故本 crate 对执行层的依赖边为零
 //!   （照片：`tests/intent.rs` 的 `graph_id_and_product_id_are_opaque_strings`——
@@ -47,11 +67,13 @@
 mod error;
 mod ids;
 mod intent;
+mod intent_tx;
 mod persist;
 
-pub use error::IntentError;
+pub use error::{IntentError, IntentStatusError};
 pub use ids::{ContractId, IntentId, PlanId};
 pub use intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
+pub use intent_tx::apply_intent_transition;
 pub use persist::{list_children, load_intent, p4_semantics_migrations, save_intent};

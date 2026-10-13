@@ -10,6 +10,7 @@
 
 use continuum_canonical::{EntityId, Opaque};
 
+use crate::error::IntentStatusError;
 use crate::ids::{ContractId, IntentId, PlanId};
 
 /// §222 的六个 `kind`，**封闭六值**。
@@ -49,8 +50,8 @@ pub enum IntentKind {
 
 /// §223 的十三个状态。
 ///
-/// **本 task 只定义词汇与落库编码**；合法迁移表与「哪些迁移合法」的判定归 Task 9
-/// （`IntentStatusError` / `apply_intent_transition`）。这里**没有任何迁移判定**。
+/// **本类型含词汇、落库编码与 §5.3 的迁移判定**（[`IntentStatus::transition`]）；
+/// 判定的落库版是 [`crate::apply_intent_transition`]（§5.4）。
 ///
 /// §223 给了两组（`docs/spec/05-normative.md:174-206`）：进入运行的五步链
 /// `PROPOSED → SPECIFYING → PLANNING → REVIEW → READY → RUNNING`，
@@ -170,6 +171,108 @@ impl IntentStatus {
             "cancelled" => Some(IntentStatus::Cancelled),
             "evolving" => Some(IntentStatus::Evolving),
             _ => None,
+        }
+    }
+
+    /// §5.3 的迁移表：判定一次迁移是否合法。
+    ///
+    /// # 判定的是三件事，各有各的出处
+    ///
+    /// 1. **`(from, to)` 在不在表里**——表是**本设计的决定**，不是规范转录（§223 只给
+    ///    态与顺序箭头，没给完整的合法对；设计 §5.3 自陈「收件人：复审者」）。
+    /// 2. **自环单列**（照 P3D 的纪律）：`RUNNING → RUNNING`、`WAITING → WAITING`
+    ///    两条在表里、判 `Ok`；其余自环（如 `PROPOSED → PROPOSED`、`COMPLETED → COMPLETED`）
+    ///    是未列出的对，一律 [`IntentStatusError::Illegal`]。**自环不靠矩阵顺带**——
+    ///    放行那两条与拒绝其余是两条独立的判定，照片两侧都钉（`tests/intent_state.rs`
+    ///    的 `self_loops_are_decided_on_both_sides`）。
+    /// 3. **`COMPLETED → EVOLVING` 另看 `kind`**（§223 原文「Product Intent MAY 在达到
+    ///    首次 Shippable 后进入 EVOLVING」）：`PRODUCT` 才 `Ok`，其余 kind 得
+    ///    [`IntentStatusError::NotProduct`]。表里其余的对**不看 `kind`**。
+    ///
+    /// # 表（逐条，与 `tests/intent_state.rs` 的 31 条合法对同源）
+    ///
+    /// | 从 | 到 |
+    /// |---|---|
+    /// | `Proposed` | `Specifying`、`Cancelled` |
+    /// | `Specifying` | `Planning`、`Proposed`（回退）、`Cancelled` |
+    /// | `Planning` | `Review`、`Suspended`、`Cancelled` |
+    /// | `Review` | `Ready`、`Planning`（驳回）、`Cancelled` |
+    /// | `Ready` | `Running`、`Cancelled` |
+    /// | `Running` | `Waiting`、`Suspended`、`Verifying`、`Failed`、`Cancelled`、`Running`（自环） |
+    /// | `Waiting` | `Running`、`Suspended`、`Cancelled`、`Waiting`（自环） |
+    /// | `Suspended` | `Running`、`Cancelled` |
+    /// | `Verifying` | `Completed`、`Failed`、`Running`（返工） |
+    /// | `Completed` | `Evolving`（**仅 `kind = Product`**） |
+    /// | `Evolving` | `Running`、`Cancelled` |
+    /// | `Failed` / `Cancelled` | 终态，没有出边 |
+    ///
+    /// # 产生方与照片
+    ///
+    /// 本函数是 `pub(crate)`：判定在本层之外的唯一落点是
+    /// [`crate::apply_intent_transition`]（先判、后写）。故判定的照片全部经落库版落在
+    /// `tests/intent_state.rs`：`every_listed_pair_is_accepted` 逐条（31 条，不抽代表）、
+    /// `unlisted_pairs_are_illegal_and_the_error_names_the_pair`（8＋1 条未列出的对，
+    /// 断言 `from` / `to` 原样带出）、`self_loops_are_decided_on_both_sides`（4 条）、
+    /// `completed_to_evolving_depends_on_the_kind`（`kind` 两侧）。
+    pub(crate) fn transition(from: Self, to: Self, kind: IntentKind) -> Result<(), IntentStatusError> {
+        use IntentStatus::*;
+
+        // `COMPLETED → EVOLVING` 单列：它是表里唯一带条件的对。先于查表返回，
+        // 故它永远不会落到 `Illegal`。
+        if from == Completed && to == Evolving {
+            return match kind {
+                IntentKind::Product => Ok(()),
+                // 逐枚列出（不带通配臂）：加第七枚 kind 即**编译不过**——那时实现者必须
+                // 显式决定它在哪一侧，而不是被一个 `_` 静默收编（同 `IntentKind::as_str`
+                // 的无通配纪律）。`not_product` 是 match 绑定，不是参数改名。
+                not_product @ (IntentKind::Task
+                | IntentKind::Maintenance
+                | IntentKind::Research
+                | IntentKind::Background
+                | IntentKind::RuntimeImprovement) => {
+                    Err(IntentStatusError::NotProduct { kind: not_product })
+                }
+            };
+        }
+
+        // 其余各边逐对列出（含两条自环；不含 `COMPLETED → EVOLVING`，它已在上面返回）。
+        let listed = matches!(
+            (from, to),
+            (Proposed, Specifying)
+                | (Proposed, Cancelled)
+                | (Specifying, Planning)
+                | (Specifying, Proposed)
+                | (Specifying, Cancelled)
+                | (Planning, Review)
+                | (Planning, Suspended)
+                | (Planning, Cancelled)
+                | (Review, Ready)
+                | (Review, Planning)
+                | (Review, Cancelled)
+                | (Ready, Running)
+                | (Ready, Cancelled)
+                | (Running, Waiting)
+                | (Running, Suspended)
+                | (Running, Verifying)
+                | (Running, Failed)
+                | (Running, Cancelled)
+                | (Running, Running)
+                | (Waiting, Running)
+                | (Waiting, Suspended)
+                | (Waiting, Cancelled)
+                | (Waiting, Waiting)
+                | (Suspended, Running)
+                | (Suspended, Cancelled)
+                | (Verifying, Completed)
+                | (Verifying, Failed)
+                | (Verifying, Running)
+                | (Evolving, Running)
+                | (Evolving, Cancelled)
+        );
+        if listed {
+            Ok(())
+        } else {
+            Err(IntentStatusError::Illegal { from, to })
         }
     }
 }
@@ -337,7 +440,8 @@ pub struct Intent {
     pub kind: IntentKind,
     /// §222 的 `goal`（见类型文档：本层取 `EntityId`）。
     pub goal: EntityId,
-    /// §222 的 `status`。合法迁移的判定归 Task 9。
+    /// §222 的 `status`。合法迁移的判定在 [`IntentStatus::transition`]（§5.3），
+    /// 落库版是 [`crate::apply_intent_transition`]（§5.4）。
     pub status: IntentStatus,
     /// §222 的 `priority`（不透明）。
     pub priority: Priority,

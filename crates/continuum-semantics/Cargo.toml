@@ -15,7 +15,13 @@ continuum-canonical = { path = "../continuum-canonical" }
 # 本 crate 的使用点（另一条 workspace 内的边）：`persist.rs` 的 `intent` 表（迁移 110）
 # 与三条 I/O 经 `Tx` / `Migration` / `PersistError` / `Value` 访问。数据库连接在
 # `continuum-persist` 内私有，本 crate 只经 `Tx` 访问。
+# Task 9 起还经它的转出取 `Event` / `EventType` / `default_chain` 写事件
+# （设计 §2.2：本层不登记指向 `continuum-events` 的边）。
 continuum-persist = { path = "../continuum-persist" }
+# 本 crate 的使用点：`persist.rs` 与 `intent_tx.rs` 写事件 payload（`Event::new` 的
+# 第四个参数是 `serde_json::Value`）。**外部 crate，按需加**（计划 Global Constraints
+# 的「外部 crate 按需加，不进 `ALLOWED`」）——那张表只逐对断言 workspace 成员之间的边。
+serde_json = { workspace = true }
 
 [dev-dependencies]
 # 本 crate 的使用点：`tests/intent.rs` 的落库用例各起一个临时库
