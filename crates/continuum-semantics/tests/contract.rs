@@ -12,6 +12,8 @@
 //! | `the_contract_requirement_table_has_exactly_the_expected_columns` | `PRAGMA table_info(contract_requirement)` 实际列 vs 手写期望**逐列**（Requirement 的五个字段名照 §224） | 加／少／改一列（含改类型／`NOT NULL`／主键位次）即红 |
 //! | `the_contract_table_has_exactly_the_expected_columns` | 同上，`contract` 表（TaskContract 的九个落库列） | 同上 |
 //! | `a_second_write_of_the_same_id_and_version_hits_the_primary_key` | §226 的 MUST NOT 原地修改：同 `(id, version)` 二次写得**撞主键的 `Err`**，**且原行逐列不变** | `INSERT OR REPLACE`／先删后插（**移除档**）——第二次写变 `Ok` 或行被覆写 |
+//! | `a_duplicate_requirement_id_in_one_version_hits_the_key` | 同一个 save 里的重复 requirement id 撞 `contract_requirement` 的复合主键、得 `Err`，且回滚后两表无半写行 | 改成 `INSERT OR IGNORE`／`OR REPLACE`（**放宽档**）——save 变 `Ok` 或只剩一行 |
+//! | `a_missing_contract_reads_back_as_none` | `load_contract` 的「不存在」处置：从没写过的 id、写过 v1 但没写过的 v2，都读回 `Ok(None)`（不是 `Err`、不是空记录） | 变成一枚 `Err`（**收紧档**）或 `Ok(Some(空记录))` 即红 |
 //! | `a_new_version_writes_exactly_one_contract_changes_audit_row` | §5.4：断言 `AuditKind` **是 `ContractChanges`**、每个新版本**恰一条**、且与 INSERT **同一事务**（失败路径：审计写失败 ⇒ `contract` 表**无半写行**） | kind 写错（**取反档**）／写两条或不写／审计与 INSERT 拆成两个事务（**移除档**，(c) 红） |
 //! | `the_other_fields_of_224_are_opaque` | `TaskContract` 的其余字段（六个名单）字段清单**逐项**（穷尽解构，**不带 `..`**——加／少／改名即编译不过）＋每个字段的表外取值逐字节往返 | 任一字段被裁剪／改写／与邻字段写串即红；字段加／少即**编译不过** |
 //! | `requirement_ids_are_not_rewritten_trimmed_or_rejected` | `RequirementId` 的「不改写、不裁剪、无校验」：带空白／特殊字符／非 ASCII 的 id（含空串）经 `contract_requirement` 表**逐字节**往返 | 任一 `from_str` 裁剪／改写输入即红 |
@@ -555,6 +557,86 @@ fn a_second_write_of_the_same_id_and_version_hits_the_primary_key() {
         raw_requirement_rows(&tx, "c-1", 1),
         before_requirements,
         "撞键之后原 contract_requirement 行集应逐列不变"
+    );
+    tx.commit().unwrap();
+}
+
+/// 同一个 `save_contract` 里的**重复 requirement id** 撞 `contract_requirement` 的
+/// 复合主键、得 `Err`——不会静默产生两行。
+///
+/// # 为什么这也是一条「裸 INSERT 不 REPLACE」的照片
+///
+/// 写入次序上它与上一条同族：`insert_requirement` 是裸 `INSERT`。§224 的
+/// `requirements[]` 里 `id` 是键——**两条同 id 是坏数据，不是「两个元素」**
+/// （同一条契约的同一版本上两条 same-id 的 requirement 没有可分辨的语义）。
+/// 拒绝在**第二个 requirement 的 INSERT** 上发生：`contract` 行与第一条 requirement 行
+/// 已在事务里，调用方回滚后两表都没有半写行。
+///
+/// **红条件**：改成 `INSERT OR IGNORE`（**放宽档**——第二行被静默丢掉、`save` 得 `Ok`）
+/// 或 `OR REPLACE`（第一行被第二行覆盖、`save` 得 `Ok` 且库里只剩一行）即红。
+#[test]
+fn a_duplicate_requirement_id_in_one_version_hits_the_key() {
+    let (_d, db) = new_db();
+
+    let tx = db.begin().unwrap();
+    let mut doubled = sample_contract("c-dup", 1);
+    doubled.requirements = vec![
+        sample_requirement("r-x", RequirementClass::Required),
+        sample_requirement("r-x", RequirementClass::Preferred),
+    ];
+    let err = save_contract(&tx, &doubled, 1_000).unwrap_err();
+    assert!(
+        matches!(&err, ContractError::Persist(PersistError::Database(m))
+            if m.contains("UNIQUE constraint failed") && m.contains("contract_requirement")),
+        "同一版本里两条同 id 应撞 contract_requirement 的复合主键，实得 {err:?}"
+    );
+    // 调用方在 `Err` 后回滚（丢弃 Tx）。
+    drop(tx);
+
+    let tx = db.begin().unwrap();
+    assert_eq!(contract_row_count(&tx), 0, "回滚后 contract 表应无半写行");
+    assert_eq!(
+        requirement_row_count(&tx),
+        0,
+        "回滚后 contract_requirement 表应无半写行"
+    );
+    tx.commit().unwrap();
+}
+
+/// `load_contract` 对「不存在」的处置：**`Ok(None)`，不是错误**——同 [`load_intent`] /
+/// [`load_specification`]（读一个不存在的记录是「没有」，不是「出错」；后者——枚举列坏、
+/// 容器坏——才得 `Err`，见 `every_requirement_class_has_a_photo`）。
+///
+/// 两个面都钉：**从没写过**的 id 得 `None`；**写过 v1 但没写过 v2** 也按版本得 `None`
+/// ——版本化是「哪个版本读哪个版本」，「最近一版」由调用方自己先算（写在 `load_contract`
+/// 的文档里，不做回退）。
+///
+/// **红条件**：把「不存在」变成一枚 `Err`（**收紧档**）即红；把它换成
+/// `Ok(Some(空记录))`（静默造一条没写过的契约）也红。
+#[test]
+fn a_missing_contract_reads_back_as_none() {
+    let (_d, db) = new_db();
+
+    let tx = db.begin().unwrap();
+    assert!(
+        load_contract(&tx, &ContractId::from_str("c-none"), 1)
+            .unwrap()
+            .is_none(),
+        "从没写过的 id 应读回 None（不是 Err、不是空记录）"
+    );
+
+    save_contract(&tx, &sample_contract("c-none", 1), 1_000).unwrap();
+    assert!(
+        load_contract(&tx, &ContractId::from_str("c-none"), 1)
+            .unwrap()
+            .is_some(),
+        "写过的 v1 应读得到"
+    );
+    assert!(
+        load_contract(&tx, &ContractId::from_str("c-none"), 2)
+            .unwrap()
+            .is_none(),
+        "没写过的 v2 应读回 None——版本化不做「最近一版」回退"
     );
     tx.commit().unwrap();
 }
