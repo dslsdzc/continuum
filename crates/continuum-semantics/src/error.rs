@@ -1,6 +1,7 @@
 //! 本 crate 的错误类型。计划「文件结构」一节把 `IntentError、SpecError、ContractError、
 //! PlanError、DecisionError、ConstraintError` 都列在 `src/error.rs`；本 crate 至今落
-//! 前三枚（`IntentError`、Task 9 的 `IntentStatusError` 与 Task 10 的 `SpecError`）。
+//! 前四枚（`IntentError`、Task 9 的 `IntentStatusError`、Task 10 的 `SpecError` 与
+//! Task 11 的 `ContractError`）。
 
 use continuum_persist::PersistError;
 
@@ -137,6 +138,32 @@ pub enum SpecError {
     Intent(#[from] IntentError),
 
     /// `Tx` 的往返失败（含容器坏）。
+    #[error(transparent)]
+    Persist(#[from] PersistError),
+}
+
+/// Contract 落库与读回的错误（Task 11）。
+///
+/// # 两枚各有真实产生方，一条不漏
+///
+/// - [`ContractError::UnknownClass`]：`contract_requirement.class` 列是**闭集四枚**
+///   （编码 / 解码挂在 [`crate::RequirementClass::as_str`] / `parse` 上，
+///   与类型同址），库里读到表外取值（历史行、被外部改过的行）时由
+///   [`crate::load_contract`] 的解码处产出，**带库里那一个原始串**。
+/// - [`ContractError::Persist`]：`Tx` 的往返失败，`#[from]` 转出。**`(id, version)` 的
+///   二次写**（§226 的 MUST NOT 原地修改）也走这一枚的 `Database` 形状——
+///   `PersistError` 没有独立的冲突变体，且 `Tx::execute` 把 rusqlite 的错误码抹成了
+///   字符串，故调用方只能在 `Database` 内按消息识别冲突（同 `continuum-effect` 的
+///   既有处置与 `continuum-workspace` 的 gate 审计失败）。**不吞成 `UnknownClass`**：
+///   数据库层的失败若被降级，调用方会以为「数据就是这样」，而真相是这次压根没读到
+///   （同 [`IntentError::Persist`] 与 [`SpecError::Persist`] 的理由）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ContractError {
+    /// `class` 列是表外取值。`value` 是**库里那一个**原始取值，不是被映射过的任何东西。
+    #[error("表外的 requirement class 取值: {value}")]
+    UnknownClass { value: String },
+
+    /// `Tx` 的往返失败（含 `(id, version)` 撞主键）。
     #[error(transparent)]
     Persist(#[from] PersistError),
 }

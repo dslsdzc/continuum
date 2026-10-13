@@ -2,7 +2,7 @@
 //!
 //! 本 crate 是 P4 的**语义层**成员，落《工程》§2.1 组件表里 Intent 存储与状态机
 //! 那一格（§222 / §223）以及它之后的 Specification / Contract / Plan / Decision /
-//! Constraint Validator（后五者由后续 task 追加进本 crate）。
+//! Constraint Validator（后三者由后续 task 追加进本 crate）。
 //!
 //! # 本层不依赖任何下层（设计 §1.2／§1.2.3）
 //!
@@ -72,20 +72,45 @@
 //! 表外取值处置；以 `tests/type_level.rs` 驱动的三份 `tests/compile_fail/` 样例钉住
 //! 「crate 外拼不出 `Specification`」「少给 `unknowns` 编不过」「两个检测器名字取不到」。
 //!
+//! Task 11 落 §224 的 Contract 与 §226 的版本化（设计 §7.1／§7.2／§7.3）：
+//!
+//! - **Requirement 的五个字段逐字照 §224**（[`Requirement`]：`id` / `class` /
+//!   `expression` / `source` / `verification_requirement`）；[`RequirementClass`]
+//!   四值封闭（`REQUIRED` / `PREFERRED` / `FLEXIBLE` / `UNSPECIFIED`，编码 / 解码
+//!   与类型同址，表外取值读回具体 `Err`）；
+//! - **§7.2 的禁读**：[`VerificationRequirement`] 公开方法集只有 `as_str` /
+//!   `from_str`——OPEN-001 未决期间只存不判。照片：`tests/type_level.rs` 驱动的
+//!   三份 trybuild 反例（`is_satisfied` / `check` / `evaluate` 各编不过）＋ 一份
+//!   正控制（`as_str` 编得过）＋ `tests/contract.rs` 的「`src/` 出现点逐条登记」；
+//! - **§226 的版本化**：`contract` 表主键 `(id, version)`、[`save_contract`] 只
+//!   INSERT（同号二次写撞键得 `Err`、原行逐列不变）；每个新版本在同一事务内写一条
+//!   `AuditKind::ContractChanges`（§5.4 的写入点之一，`AuditKind` 经
+//!   `continuum-persist` 转出）；
+//! - **`TaskContract` 的其余字段一律不透明值**（六个名单；`budget` 与 §12 的预算
+//!   不是同一个东西），两个设计未处置的规范列表字段（`preferences[]` /
+//!   `prohibitions[]`）未建——申报写在 `src/contract.rs` 的 `TaskContract` 文档里。
+//!
+//! 以 `tests/contract.rs` 的用例钉住：四 class 逐枚、禁读的三反例一正控、
+//! `src/` 出现点清单、两张表的列清单逐列、同 `(id, version)` 二次写撞键且原行不变、
+//! `ContractChanges` 恰一条且与 INSERT 同事务、六个 Opaque 字段逐项往返、
+//! `RequirementId` 的不改写照片。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
-//! - **§5.4 的其余四个写入点**：`PlanReviewRequired` / `DecisionRequired`
-//!   （`EventType`）与 `ContractChanges` / `UserApprovals`（`AuditKind`）由用它们的
-//!   task 落（Task 11 / 13 / 15）。本 crate 今日写 `events` 的只有上面那两个写入点。
+//! - **§5.4 的其余三个写入点**：`PlanReviewRequired` / `DecisionRequired`
+//!   （`EventType`）与 `UserApprovals`（`AuditKind`）由用它们的 task 落（Task 13 / 15）。
+//!   本 crate 今日的写入点：`events` 两条（`IntentCreated` / `IntentCompleted`，
+//!   Task 8 / 9）＋ `audit_log` 一条（`ContractChanges`，Task 11，
+//!   见 [`save_contract`]）。
 //! - **不建 ADFIR 图、不引用 `continuum-graph`**：`graph_id` 取不透明串
 //!   （[`GraphIdRef`]，设计 §1.2.3 的规则 3），故本 crate 对执行层的依赖边为零
 //!   （照片：`tests/intent.rs` 的 `graph_id_and_product_id_are_opaque_strings`——
 //!   它扫本 crate 的 `src/`，断言执行层 crate 的**下划线标识符拼法**零命中）。
-//! - 迁移 110 的其余五张表（`contract` / `contract_requirement` / `plan` /
-//!   `decision` / `decision_result`）由 Task 11／13／15 追加进**同一个迁移项的 SQL**
-//!   （不是第二个 110 号项——那会被 `migrate()` 静默跳过，见
-//!   [`p4_semantics_migrations`] 的文档）。
+//! - 迁移 110 的其余三张表（`plan` / `decision` / `decision_result`）由 Task 13／15
+//!   追加进**同一个迁移项的 SQL**（不是第二个 110 号项——那会被 `migrate()` 静默跳过，
+//!   见 [`p4_semantics_migrations`] 的文档）。
 
+mod contract;
 mod error;
 mod ids;
 mod intent;
@@ -93,15 +118,16 @@ mod intent_tx;
 mod persist;
 mod spec;
 
-pub use error::{IntentError, IntentStatusError, SpecError};
-pub use ids::{ContractId, IntentId, PlanId};
+pub use contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
+pub use error::{ContractError, IntentError, IntentStatusError, SpecError};
+pub use ids::{ContractId, IntentId, PlanId, RequirementId};
 pub use intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
 pub use intent_tx::apply_intent_transition;
 pub use persist::{
-    list_children, load_intent, load_specification, p4_semantics_migrations, save_intent,
-    save_intent_with_specification,
+    list_children, load_contract, load_intent, load_specification, p4_semantics_migrations,
+    save_contract, save_intent, save_intent_with_specification,
 };
 pub use spec::{
     AcceptancePredicate, Conflict, ForbiddenState, Goal, Invariant, Preference, SpecDraft,

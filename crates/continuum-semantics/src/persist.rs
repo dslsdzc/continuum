@@ -1,5 +1,6 @@
-//! `intent` 与 `specification` 两张表（迁移 **110**）与它们的行级读写
-//! （设计 §5.1／§5.2／§5.4／§6.1／§6.2）。
+//! `intent` / `specification` / `contract` / `contract_requirement` 四张表
+//! （迁移 **110**）与它们的行级读写
+//! （设计 §5.1／§5.2／§5.4／§6.1／§6.2／§7.1／§7.3）。
 //!
 //! # 本文件与 `intent.rs` 的分工（一处与计划正文不同的落点，理由在此）
 //!
@@ -12,14 +13,15 @@
 //! `alias` 表处置办（迁移与四条 I/O 同址于 `src/persist.rs`，理由写在那个文件头），
 //! 并依计划自己的判据「实现期出现了更一致的归属，改的是计划那一行」（同文件 `:285-287`）。
 //!
-//! # 迁移 110：`intent` 与 `specification` 两张表（逐表追加）
+//! # 迁移 110：本层的表（逐表追加）
 //!
 //! 设计 §2.4 规定 110 含**七张表**（`intent` / `specification` / `contract` /
-//! `contract_requirement` / `plan` / `decision` / `decision_result`）；**其余五张由用它们的
+//! `contract_requirement` / `plan` / `decision` / `decision_result`）；**其余表由用它们的
 //! task 逐表追加**（计划「全局约束」：`110` 的 SQL 在 Task 8–15 之间逐表追加，
 //! Task 20 之后不得再改）。**「追加」的落点是同一个迁移项的 SQL 字符串**——
 //! 见 [`p4_semantics_migrations`] 的文档（第二个 110 号迁移项会被 `migrate()`
-//! 静默跳过）。Task 8 加 `intent`；**Task 10 加 `specification`**。
+//! 静默跳过）。Task 8 加 `intent`；**Task 10 加 `specification`**；
+//! **Task 11 加 `contract` 与 `contract_requirement`**。
 //!
 //! 编号 **110**：1、2 是 `continuum-persist` 的内建（events、audit_log），10 是 P1 的
 //! artifact，20 是 P1 的 graph，30 是 P2 的 workspace，40 是 P2 的 effect，41 是 P2 的
@@ -56,10 +58,14 @@
 //! 里），且与上上段「解码走 `…::parse`」自相矛盾。现已把白名单移进 `spec.rs` 的
 //! `parse_kind`（照 `IntentKind::parse` 形状），旧说法记此。
 
-use continuum_persist::{Event, EventType, Migration, PersistError, Tx, Value, value::kind_name};
+use continuum_canonical::Opaque;
+use continuum_persist::{
+    AuditKind, Event, EventType, Migration, PersistError, Tx, Value, value::kind_name,
+};
 
-use crate::error::{IntentError, SpecError};
-use crate::ids::{ContractId, IntentId, PlanId};
+use crate::contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
+use crate::error::{ContractError, IntentError, SpecError};
+use crate::ids::{ContractId, IntentId, PlanId, RequirementId};
 use crate::intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
@@ -78,7 +84,8 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
                        parent_intent, contract_id, contract_version, active_plan_id, graph_id, \
                        product_id, completion_predicate";
 
-/// 本 crate 在 `intent` 与 `specification` 两张表上注册的迁移（设计 §2.4 的 110 段）。
+/// 本 crate 的四张表（`intent` / `specification` / `contract` / `contract_requirement`）
+/// 上注册的迁移（设计 §2.4 的 110 段）。
 ///
 /// # 110 是**一个迁移项**，表**逐表追加进它的 SQL**
 ///
@@ -86,8 +93,9 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 /// 的项**——`Db::migrate()` 以 `schema_migrations.version`（**主键**）判「已应用」
 /// （`crates/continuum-persist/src/db.rs:103-112`），同号的第二个迁移项会被**静默跳过**
 /// （第二个表永不建）。照片是 `tests/intent.rs` 的
-/// `the_migration_registers_the_intent_and_specification_tables`：它断言
-/// **`len() == 1`**，那条断言正是这件事的守卫。
+/// `the_migration_registers_every_table_of_the_110_item`：它断言
+/// **`len() == 1`**、并逐表断言 SQL 里每张表都在（Task 8–11 共四张），
+/// 那条 `len() == 1` 正是这件事的守卫。
 ///
 /// 〔订正（2026-10-14，Task 10）〕本注释初版写「其余六张……追加进**同一个**
 /// `p4_semantics_migrations()` 的返回向量（各自的迁移号也是 110，表不同）」——
@@ -111,6 +119,30 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 ///   （元素 `{kind, value}`）。**两列缺一不可**：只留一个列表列的话，
 ///   `NoneFound` 与 `Enumerated(vec![])` 会编成同一个表示（`vec![]` 同时表示
 ///   「已查过、没有」与「没查」），那正是 §227 禁的「把未知项自动转换成假设」。
+///
+/// # `contract` 与 `contract_requirement` 两张表的形状（Task 11 追加）
+///
+/// - `contract` 表：主键 `(id, version)`——**§226 的 MUST NOT 原地修改**的落库形态。
+///   无 UPDATE 路径（[`save_contract`] 只 INSERT），同 `(id, version)` 的二次写被
+///   复合主键拒绝（照片：`tests/contract.rs` 的
+///   `a_second_write_of_the_same_id_and_version_hits_the_primary_key`）。
+///   九列 = `TaskContract` 的字段减 `requirements[]`（它落另一张表）。
+///   **`budget` / `authority_limit` / `data_policy` / `model_policy` / `node_policy` /
+///   `acceptance_predicate` 六列都存不透明串**——§224 只给名字（§7.1）；
+///   读回逐字节往返的照片在同文件的 `the_other_fields_of_224_are_opaque`。
+/// - `contract_requirement` 表：主键 `(contract_id, contract_version, id)`——
+///   **归属键两列**把 requirement 钉在一条 contract 的具体版本上（同 `specification`
+///   表的 `intent_id` ＋ `version` 处置），`id` 是 Requirement 自己的记录键。
+///   Requirement 的五个字段名照 §224（`id` / `class` / `expression` / `source` /
+///   `verification_requirement`），列清单**逐列**的照片在
+///   `tests/contract.rs` 的 `the_contract_requirement_table_has_exactly_the_expected_columns`。
+///   `class` 是闭集四枚（`required` / `preferred` / `flexible` / `unspecified`，
+///   编码 / 解码挂在 [`crate::RequirementClass::as_str`] / `parse` 上，与类型同址），
+///   表外取值读回 [`crate::ContractError::UnknownClass`]（带原始串、不取默认值）。
+/// - **`verification_requirement` 列照常存、照常读**（只是没有判定方法）——
+///   §7.2 的「只存不判」：禁读的是**方法**，不是列。
+/// - **两张表都不建外键**（同 `intent.contract_id` 的处置）：跨记录对应关系由写路径的
+///   调用方保证，本层不在库里登记引用约束。
 pub fn p4_semantics_migrations() -> Vec<Migration> {
     vec![Migration::new(
         110,
@@ -144,6 +176,28 @@ pub fn p4_semantics_migrations() -> Vec<Migration> {
             unknowns_kind         TEXT NOT NULL,
             unknowns              TEXT NOT NULL,
             PRIMARY KEY (intent_id, version)
+        );
+        CREATE TABLE contract (
+            id                   TEXT NOT NULL,
+            version              INTEGER NOT NULL,
+            intent_id            TEXT NOT NULL,
+            budget               TEXT NOT NULL,
+            authority_limit      TEXT NOT NULL,
+            data_policy          TEXT NOT NULL,
+            model_policy         TEXT NOT NULL,
+            node_policy          TEXT NOT NULL,
+            acceptance_predicate TEXT NOT NULL,
+            PRIMARY KEY (id, version)
+        );
+        CREATE TABLE contract_requirement (
+            contract_id              TEXT NOT NULL,
+            contract_version         INTEGER NOT NULL,
+            id                       TEXT NOT NULL,
+            class                    TEXT NOT NULL,
+            expression               TEXT NOT NULL,
+            source                   TEXT NOT NULL,
+            verification_requirement TEXT NOT NULL,
+            PRIMARY KEY (contract_id, contract_version, id)
         );",
     )]
 }
@@ -707,4 +761,187 @@ fn decode_unknowns(kind: &str, raw: &str) -> Result<Unknowns, SpecError> {
             value: kind.to_owned(),
         }),
     }
+}
+
+// ===== `contract` / `contract_requirement` 表的行级读写（设计 §7.1／§7.3；Task 11） =====
+
+/// `contract` 表的内容列清单（读路径用；写路径的列名是 `INSERT` 语句文本的一部分，
+/// 不引用本常量）。
+///
+/// 七列 = `TaskContract` 字段减主键两列（`id` / `version`）与 `requirements[]`
+/// （后者落 `contract_requirement` 表）。
+const CONTRACT_COLUMNS: &str = "intent_id, budget, authority_limit, data_policy, model_policy, \
+                                node_policy, acceptance_predicate";
+
+/// 写一条 TaskContract（**只 INSERT，无 UPDATE 路径**，§226），并在同一事务内写一条
+/// `AuditKind::ContractChanges`（§5.4）。**本函数不自己 `commit`**（同 [`save_intent`]
+/// 的纪律：事务由调用方持有并提交；任一写入失败后调用方必须回滚，不得提交）。
+///
+/// # `occurred_at`：签名比任务简报的速写多一个参数（**申报**）
+///
+/// 简报 Step 3 的速写是 `(tx, c) -> Result<(), ContractError>`。落地时补上它，
+/// 理由两条：
+///
+/// 1. **审计的 `occurred_at` 没有第二个来源**：`Tx::append_audit` 必填它，而本层
+///    **不取系统时钟**（Task 21 的源码面复核 `SystemTime::now` 零命中），故只能由
+///    调用方给。先例：本 crate Task 9 的 `apply_intent_transition(…, occurred_at, …)`、
+///    P1 的 `apply_transition(…, occurred_at, …)`、P3 的 `authorize(…, now)` 与
+///    P2 的 gate（`Gate::audit` 的 `occurred_at` 由调用方给出）。
+/// 2. **签名形状照 Task 9**（`to` 后接 `occurred_at`）：本条没有事件 id 可给
+///    （审计没有 id 字段，链的 `seq` 由 `append_audit` 自己推）。
+///
+/// # `version` 由调用方给，不存在「自动 +1」
+///
+/// §226 说「用户修改要求时 MUST 创建 `Contract vN+1`」——「新版本」是一个**显式动作**。
+/// 本函数不读旧版本、不替调用方算 N+1：若那样，同 `(id, version)` 的二次写会被
+/// 静默升版写下去，而 §226 的 MUST NOT 原地修改就没有落点了。入参给哪个版本，
+/// 写下去的就是哪个版本；已存在的 `(id, version)` 撞主键得 `Err`（**绝不覆盖**）。
+///
+/// # 写入次序与失败路径
+///
+/// 先写 `contract` 行，再逐条写 `contract_requirement` 行，最后写审计——审计**写在行之后**
+/// （同 [`save_intent`] 的事件次序）：任一步失败都返回 `Err`，而此时前一步的写入
+/// **已经留在事务里**——调用方必须回滚（丢弃 `Tx`），不得提交。照片：
+/// `tests/contract.rs` 的 `a_new_version_writes_exactly_one_contract_changes_audit_row`
+/// 的 (c)（`audit_log` 表缺失 ⇒ `Err`；**回滚后两张表都没有半写的行**）。
+///
+/// # 审计面
+///
+/// 恰一条 `AuditKind::ContractChanges`（§5.4 的六项写入点之一；`EventType` /
+/// `AuditKind` 的变体一个不改、一张表不加）。payload 是 JSON 对象
+/// （`contract_id` / `version` / `intent_id`），供后续对账取用。
+pub fn save_contract(
+    tx: &Tx<'_>,
+    contract: &TaskContract,
+    occurred_at: i64,
+) -> Result<(), ContractError> {
+    tx.execute(
+        "INSERT INTO contract (id, version, intent_id, budget, authority_limit, data_policy, \
+                                model_policy, node_policy, acceptance_predicate) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        &[
+            Value::text(contract.id.as_str()),
+            Value::Int(i64::from(contract.version)),
+            Value::text(contract.intent_id.as_str()),
+            Value::text(contract.budget.as_str()),
+            Value::text(contract.authority_limit.as_str()),
+            Value::text(contract.data_policy.as_str()),
+            Value::text(contract.model_policy.as_str()),
+            Value::text(contract.node_policy.as_str()),
+            Value::text(contract.acceptance_predicate.as_str()),
+        ],
+    )?;
+
+    for requirement in &contract.requirements {
+        insert_requirement(tx, contract, requirement)?;
+    }
+
+    tx.append_audit(
+        AuditKind::ContractChanges,
+        occurred_at,
+        Value::text(
+            serde_json::to_string(&serde_json::json!({
+                "contract_id": contract.id.as_str(),
+                "version": contract.version,
+                "intent_id": contract.intent_id.as_str(),
+            }))
+            .expect("payload 由 json! 构造，必可序列化"),
+        ),
+    )?;
+    Ok(())
+}
+
+/// 写一行 `contract_requirement`。**裸 `INSERT`**：同
+/// `(contract_id, contract_version, id)` 的第二次写入由复合主键拒绝（同一版本里
+/// 重复的 requirement id 因此不会静默产生两行——它撞键得 `Err`）。
+fn insert_requirement(
+    tx: &Tx<'_>,
+    contract: &TaskContract,
+    requirement: &Requirement,
+) -> Result<(), ContractError> {
+    tx.execute(
+        "INSERT INTO contract_requirement (contract_id, contract_version, id, class, \
+                                            expression, source, verification_requirement) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        &[
+            Value::text(contract.id.as_str()),
+            Value::Int(i64::from(contract.version)),
+            Value::text(requirement.id.as_str()),
+            Value::text(requirement.class.as_str()),
+            Value::text(requirement.expression.as_str()),
+            Value::text(requirement.source.as_str()),
+            Value::text(requirement.verification_requirement.as_str()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 按 `(id, version)` 读一条 TaskContract。**不存在返回 `Ok(None)`**
+/// （那不是错误，同 [`load_intent`] / [`load_specification`]）。
+///
+/// 版本必须**显式给出**（同 [`load_specification`]）：§226 的版本化是「哪个版本读哪个
+/// 版本」，「最近一版」由调用方自己先算（本函数不替它挑）。
+///
+/// `requirements` 按**写入顺序**（行写入顺序，`ORDER BY rowid`——同 P0 的
+/// `scan_event_log` 表达事件写序的处置）读回。**§224 未给 requirements 的顺序语义**，
+/// 这里保存事实：调用方写入的顺序就是读回的顺序；本函数不做 id 排序。
+///
+/// `class` 是表外取值时返回 [`ContractError::UnknownClass`]，**不取默认值**
+/// （见文件头）；其余列是不透明串，逐字节进出。
+pub fn load_contract(
+    tx: &Tx<'_>,
+    id: &ContractId,
+    version: u32,
+) -> Result<Option<TaskContract>, ContractError> {
+    let rows = tx.query(
+        &format!("SELECT {CONTRACT_COLUMNS} FROM contract WHERE id = ?1 AND version = ?2"),
+        &[Value::text(id.as_str()), Value::Int(i64::from(version))],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let requirements = load_requirements(tx, id, version)?;
+    Ok(Some(TaskContract {
+        id: id.clone(),
+        version,
+        intent_id: IntentId::from_str(&text_at(&row, 0)?),
+        requirements,
+        budget: Opaque::from_str(&text_at(&row, 1)?),
+        authority_limit: Opaque::from_str(&text_at(&row, 2)?),
+        data_policy: Opaque::from_str(&text_at(&row, 3)?),
+        model_policy: Opaque::from_str(&text_at(&row, 4)?),
+        node_policy: Opaque::from_str(&text_at(&row, 5)?),
+        acceptance_predicate: Opaque::from_str(&text_at(&row, 6)?),
+    }))
+}
+
+/// 一条 contract 版本的全部 requirement 行，按写入顺序。
+///
+/// 列序与 [`insert_requirement`] 的 `INSERT` 列清单一一对应：
+/// `id` / `class` / `expression` / `source` / `verification_requirement`。
+fn load_requirements(
+    tx: &Tx<'_>,
+    id: &ContractId,
+    version: u32,
+) -> Result<Vec<Requirement>, ContractError> {
+    tx.query(
+        "SELECT id, class, expression, source, verification_requirement \
+         FROM contract_requirement WHERE contract_id = ?1 AND contract_version = ?2 \
+         ORDER BY rowid",
+        &[Value::text(id.as_str()), Value::Int(i64::from(version))],
+    )?
+    .iter()
+    .map(|row| {
+        let raw_class = text_at(row, 1)?;
+        let class = RequirementClass::parse(&raw_class)
+            .ok_or(ContractError::UnknownClass { value: raw_class })?;
+        Ok(Requirement {
+            id: RequirementId::from_str(&text_at(row, 0)?),
+            class,
+            expression: Opaque::from_str(&text_at(row, 2)?),
+            source: Opaque::from_str(&text_at(row, 3)?),
+            verification_requirement: VerificationRequirement::from_str(&text_at(row, 4)?),
+        })
+    })
+    .collect()
 }

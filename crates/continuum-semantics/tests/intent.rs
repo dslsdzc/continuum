@@ -19,7 +19,7 @@
 //! | `the_intent_table_has_exactly_the_expected_columns` | `PRAGMA table_info(intent)` 实际列 vs 手写期望，**逐列** | 加／少／改一列即红 |
 //! | `enum_columns_use_lowercase_underscore_and_reject_out_of_table_values` | `kind` 六枚、`status` 十三枚的落库字面量**逐枚**；表外取值读回得**具体** `Err` | 编码改成大写／去掉 `_`／表外取值取默认值即红 |
 //! | `list_children_rejects_an_out_of_table_enum_too` | 第二条读路径的表外取值处置 | 同上（两条读路径**各有一条照片**） |
-//! | `the_migration_registers_the_intent_and_specification_tables` | 迁移 110 是**一个项**（`len() == 1`——同号的第二个项会被 `migrate()` 静默跳过），SQL 里 `intent` 与 `specification` 两张表都在 | 往返回向量里加第二个 110 号项（**移除档**——它会静默丢表）／多建少建一张表即红 |
+//! | `the_migration_registers_every_table_of_the_110_item` | 迁移 110 是**一个项**（`len() == 1`——同号的第二个项会被 `migrate()` 静默跳过），SQL 里的**每张表逐表**都在（Task 8–11：`intent` / `specification` / `contract` / `contract_requirement`） | 往返回向量里加第二个 110 号项（**移除档**——它会静默丢表）／多建少建一张表即红 |
 //! | `contract_id_id_half_is_also_semantic` | `ContractRef` 的 `id` 那一半也是语义内容：只改 `id`（`version` 不动）⇒ `version` +1 | 把 `contract_id.id` 从语义比较里去掉（**移除档**） |
 //! | `opaque_strings_are_not_rewritten_trimmed_or_rejected` | `IntentId` / `PlanId` / `ContractId` / `Priority` 的「不改写、不裁剪、无校验」：带空白／特殊字符／非 ASCII 的串**各自直接**逐字节往返 | 任一 `from_str` 裁剪／改写输入即红 |
 
@@ -685,7 +685,7 @@ fn list_children_rejects_an_out_of_table_enum_too() {
     tx.commit().unwrap();
 }
 
-/// 迁移 110 是**一个迁移项**：SQL 里此刻含 `intent` 与 `specification` 两张表。
+/// 迁移 110 是**一个迁移项**：SQL 里的**每张表逐表**都在（此刻四张：Task 8–11）。
 ///
 /// # 「一个项」有判别力，不是计数癖
 ///
@@ -694,14 +694,22 @@ fn list_children_rejects_an_out_of_table_enum_too() {
 /// 它建的表永不出现（设计 §13.2 第 2 条点名的那处静默失效的形状）。故其余表只能追加进
 /// **同一个迁移项的 SQL**；`len() == 1` 正是这件事的守卫。
 ///
-/// **本断言会随 Task 11／13／15 追加表而递增**（每加一张表，`CREATE TABLE` 的计数 +1）
+/// # 名字为什么不再逐表枚数
+///
+/// Task 8 时本用例叫 `…_exactly_the_intent_table`、Task 10 改叫
+/// `…_the_intent_and_specification_tables`（`3e47545`）——名字随表数变长。
+/// **Task 11 起名字不再枚举**（四张表、还有 Task 13／15 的三张），改为
+/// 「110 项的每张表」这件事本身；枚举的对象移进下面的**逐表清单**。
+///
+/// **本断言会随 Task 13／15 追加表而递增**（每加一张表，往下面清单加一行、计数 +1）
 /// ——它是「逐表追加」的实况照片，不是一条永久约束；`len() == 1` 那一半则是永久的。
-/// Task 8 加 `intent`；**Task 10 加 `specification`**。
+/// Task 8 加 `intent`；Task 10 加 `specification`；**Task 11 加 `contract` 与
+/// `contract_requirement`**。
 ///
 /// **红条件**：往返回向量里加第二个 version = 110 的项（**移除档**——`len()` 变 2，
 /// 且那样写的实现会静默丢表）；本 task 顺手多建一张表（同断言）。
 #[test]
-fn the_migration_registers_the_intent_and_specification_tables() {
+fn the_migration_registers_every_table_of_the_110_item() {
     let migrations = p4_semantics_migrations();
     assert_eq!(
         migrations.len(),
@@ -712,19 +720,23 @@ fn the_migration_registers_the_intent_and_specification_tables() {
     // 名字是 Task 8 的历史命名（当时 110 只建 `intent` 一张表）——不改：
     // 已应用的库在 `schema_migrations` 里记着它（见 `p4_semantics_migrations` 的文档）。
     assert_eq!(migrations[0].name, "p4_intent");
-    assert!(
-        migrations[0].sql.contains("CREATE TABLE intent"),
-        "迁移 110 应建 `intent` 表"
-    );
-    assert!(
-        migrations[0].sql.contains("CREATE TABLE specification"),
-        "迁移 110 此刻也应建 `specification` 表（Task 10 追加）"
-    );
-    // 此刻恰两张表（Task 8 的 `intent` ＋ Task 10 的 `specification`）。
+    // 逐表（含各自是哪个 task 追加的）——四张表四行，不抽代表。
+    for (table, since) in [
+        ("intent", "Task 8"),
+        ("specification", "Task 10"),
+        ("contract", "Task 11"),
+        ("contract_requirement", "Task 11"),
+    ] {
+        assert!(
+            migrations[0].sql.contains(&format!("CREATE TABLE {table}")),
+            "迁移 110 应建 `{table}` 表（{since} 追加）"
+        );
+    }
+    // 此刻恰四张表（Task 8 的 `intent`、Task 10 的 `specification`、Task 11 的两张）。
     assert_eq!(
         migrations[0].sql.matches("CREATE TABLE").count(),
-        2,
-        "迁移 110 的 SQL 里此刻应恰有两条 `CREATE TABLE`（本断言随 Task 11／13／15 追加表而递增）"
+        4,
+        "迁移 110 的 SQL 里此刻应恰有四条 `CREATE TABLE`（本断言随 Task 13／15 追加表而递增）"
     );
 }
 

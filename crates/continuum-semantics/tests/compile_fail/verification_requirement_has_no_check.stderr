@@ -1,0 +1,5 @@
+error[E0599]: no method named `check` found for struct `VerificationRequirement` in the current scope
+  --> tests/compile_fail/verification_requirement_has_no_check.rs:14:16
+   |
+14 |     let _ = vr.check(&vr);
+   |                ^^^^^ method not found in `VerificationRequirement`
