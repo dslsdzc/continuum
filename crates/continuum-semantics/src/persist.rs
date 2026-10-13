@@ -43,12 +43,18 @@
 //! # 编码本体不在本文件
 //!
 //! `kind` / `status` 的字面量取自 [`crate::IntentKind::as_str`] / [`crate::IntentStatus::as_str`]
-//! （与类型同址）；解码侧的白名单字面量照 `parse` 先例（输入是开放集，逐枚匹配带通配臂）。
-//! `unknowns_kind` / `unknown` 的 kind 两处同理（[`crate::Unknowns::kind_str`] /
-//! [`crate::Unknown::kind_str`] 与 `decode_unknowns` 的匹配）。
-//! **两列的白名单各写一遍是刻意的**（同 [`crate::IntentKind::parse`] 的理由）：
-//! 两条路径各自有照片，`tests/spec.rs` 的
+//! 与 [`crate::IntentKind::parse`] / [`crate::IntentStatus::parse`]（两对都与类型同址——`as_str`
+//! 无通配臂、`parse` 带通配臂，理由见各自类型）。`unknowns_kind` / `unknown` 的 kind 同理：
+//! 编码取 [`crate::Unknowns::kind_str`] / [`crate::Unknown::kind_str`]，解码走
+//! [`crate::Unknowns::parse_kind`] / [`crate::Unknown::parse_kind`]（`decode_unknowns` 调用后者）。
+//! **白名单一个字面量都不内联在本文件**：`parse` 给 `None` 之后，转成哪一枚错误
+//! （带库里那一个原始串）才是本文件的事。照片：`tests/spec.rs` 的
 //! `the_unknowns_columns_use_lowercase_underscore_and_reject_out_of_table_values` 逐枚读库钉。
+//!
+//! 〔订正（2026-10-14，fix 轮 1）〕本段初版写「两列的白名单各写一遍是刻意的」，
+//! 把「`parse` 白名单与类型同址」这条纪律**读反**了（当时白名单内联在 `decode_unknowns`
+//! 里），且与上上段「解码走 `…::parse`」自相矛盾。现已把白名单移进 `spec.rs` 的
+//! `parse_kind`（照 `IntentKind::parse` 形状），旧说法记此。
 
 use continuum_persist::{Event, EventType, Migration, PersistError, Tx, Value, value::kind_name};
 
@@ -58,8 +64,8 @@ use crate::intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
 use crate::spec::{
-    AcceptancePredicate, Conflict, ForbiddenState, Goal, Invariant, Preference, SpecDraft,
-    Specification, UndefinedBehavior, Unknown, Unknowns,
+    AcceptancePredicate, ForbiddenState, Goal, Invariant, Preference, SpecDraft, Specification,
+    Unknown, Unknowns, UnknownsKind,
 };
 
 /// `intent` 表的列清单，只写一份：三条读路径共用同一列序，`row_to_intent` 按它取列。
@@ -660,17 +666,17 @@ fn encode_unknowns(unknowns: &Unknowns) -> (String, String) {
 ///
 /// # 两条失败面（与 [`decode_members`] 的分工）
 ///
-/// - **表外取值**（闭集的白名单不认）：`unknowns_kind` 不是两枚之一 →
-///   [`SpecError::UnknownsKind`]；元素 `kind` 不是两枚之一 → [`SpecError::UnknownItemKind`]。
-///   两处都**带库里那一个原始串、不取默认值**（枚举列纪律）。
+/// - **表外取值**（[`Unknowns::parse_kind`] / [`Unknown::parse_kind`] 给 `None`）：
+///   `unknowns_kind` 不是两枚之一 → [`SpecError::UnknownsKind`]；元素 `kind` 不是两枚之一
+///   → [`SpecError::UnknownItemKind`]。两处都**带库里那一个原始串、不取默认值**（枚举列纪律）。
 /// - **容器坏**：`unknowns` 不是 JSON 数组、或元素不是 `{kind, value}` 对象 →
 ///   [`SpecError::Persist`] 的 `Database` 形状（同 [`decode_members`]：「容器坏」
 ///   与「表外取值」是两类失败）。
 fn decode_unknowns(kind: &str, raw: &str) -> Result<Unknowns, SpecError> {
-    match kind {
+    match Unknowns::parse_kind(kind) {
         // `NoneFound` 时 `raw` 不参与解码：`unknowns_kind` 列是权威，内容列按约定是 `[]`。
-        "none_found" => Ok(Unknowns::NoneFound),
-        "enumerated" => {
+        Some(UnknownsKind::NoneFound) => Ok(Unknowns::NoneFound),
+        Some(UnknownsKind::Enumerated) => {
             let items: Vec<serde_json::Value> = serde_json::from_str(raw).map_err(|e| {
                 PersistError::Database(format!(
                     "specification.unknowns 不是 JSON 数组（{raw}）: {e}"
@@ -690,18 +696,15 @@ fn decode_unknowns(kind: &str, raw: &str) -> Result<Unknowns, SpecError> {
                         .into());
                     }
                 };
-                out.push(match item_kind {
-                    "conflict" => Unknown::Conflict(Conflict::from_str(value)),
-                    "undefined_behavior" => {
-                        Unknown::UndefinedBehavior(UndefinedBehavior::from_str(value))
-                    }
-                    other => return Err(SpecError::UnknownItemKind { value: other.to_owned() }),
-                });
+                // 白名单在 [`Unknown::parse_kind`]（与类型同址）；错误构造留在这里。
+                let unknown = Unknown::parse_kind(item_kind, value)
+                    .ok_or_else(|| SpecError::UnknownItemKind { value: item_kind.to_owned() })?;
+                out.push(unknown);
             }
             Ok(Unknowns::Enumerated(out))
         }
-        other => Err(SpecError::UnknownsKind {
-            value: other.to_owned(),
+        None => Err(SpecError::UnknownsKind {
+            value: kind.to_owned(),
         }),
     }
 }

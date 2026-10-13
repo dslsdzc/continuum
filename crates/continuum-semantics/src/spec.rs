@@ -207,13 +207,51 @@ impl Unknowns {
     /// **`pub(crate)`**：外部可观察的用处只有 `specification` 表那一列（要落库就调
     /// [`crate::save_intent_with_specification`]；要读就调
     /// [`crate::load_specification`]），同 [`crate::IntentKind::as_str`] 的收法。
-    /// **无通配臂**：加第三枚即编译不过。
+    /// **无通配臂**：加第三枚即编译不过。解码走 [`Unknowns::parse_kind`]。
     pub(crate) fn kind_str(&self) -> &'static str {
         match self {
             Unknowns::Enumerated(_) => "enumerated",
             Unknowns::NoneFound => "none_found",
         }
     }
+
+    /// [`Unknowns::kind_str`] 的逆——只回答「这个串是两枚中哪一枚的落库字面量」。
+    ///
+    /// # 为什么是 `Option<UnknownsKind>` 而不是 `Option<Unknowns>`
+    ///
+    /// `Enumerated` 带载荷（列表要经容器解码才拿得到），**装不进 `Option<Self>`**——
+    /// 故判别式单列一个小枚举 [`UnknownsKind`]；列表的容器解码留在 `persist.rs` 的
+    /// `decode_unknowns`（那是容器层的活，本文件不碰 JSON）。
+    ///
+    /// # 形状照 [`crate::IntentKind::parse`]
+    ///
+    /// **定义域是所有串**，认不出就是 `None`；返回 `Option` 而不返回一枚「未知」变体——
+    /// 本函数没有失败原因可给（它不读库、不写库）。`None` 转成哪个错误由调用方的解码处
+    /// 决定（`continuum-semantics` 的 `persist.rs` 转成 [`crate::SpecError::UnknownsKind`]，
+    /// 带原始取值）。
+    ///
+    /// **带通配臂是刻意的**（与 [`Unknowns::kind_str`] 的无通配相反）：这一边的输入是
+    /// **开放集**（任意串），逐枚列出永远列不完。
+    pub(crate) fn parse_kind(kind: &str) -> Option<UnknownsKind> {
+        match kind {
+            "none_found" => Some(UnknownsKind::NoneFound),
+            "enumerated" => Some(UnknownsKind::Enumerated),
+            _ => None,
+        }
+    }
+}
+
+/// [`Unknowns::parse_kind`] 的返回值：「这个 `unknowns_kind` 串是哪一枚」。
+///
+/// **`pub(crate)`、不外泄**：它不是第二份数据模型——[`Unknowns`] 带载荷的那一支
+/// （`Enumerated`）装不进 `Option<Unknowns>`，故白名单判定单列一个判别式，
+/// 列表的容器解码留在 `persist.rs`。**不落库、不被 crate 外看见。**
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum UnknownsKind {
+    /// 对应 [`Unknowns::Enumerated`]。
+    Enumerated,
+    /// 对应 [`Unknowns::NoneFound`]。
+    NoneFound,
 }
 
 /// §214 的 `Unknown`：一个未知项。今天的成员恰两类——[`Conflict`] 与
@@ -221,7 +259,8 @@ impl Unknowns {
 ///
 /// 两枚变体**逐项**有照片（`tests/spec.rs` 的
 /// `conflict_and_undefined_behaviour_are_types_only`：两枚各写一次、读回、逐项断言）。
-/// **无通配臂**的 `kind_str` 是它的编码（加第三类即编译不过）。
+/// **无通配臂**的 [`Unknown::kind_str`] 是它的编码（加第三类即编译不过）；
+/// 解码走带通配臂的 [`Unknown::parse_kind`]（输入是开放集）。
 #[derive(Debug, Clone)]
 pub enum Unknown {
     /// 检测冲突的产物——**只有类型，没有检测器**（§6.1；理由见 [`Conflict`]）。
@@ -233,11 +272,33 @@ pub enum Unknown {
 impl Unknown {
     /// `unknowns` 列 JSON 里元素的 `kind` 落库字面量（小写、多词接 `_`）。
     ///
-    /// 同 [`Unknowns::kind_str`]：`pub(crate)`、无通配臂。
+    /// 同 [`Unknowns::kind_str`]：`pub(crate)`、无通配臂。解码走 [`Unknown::parse_kind`]。
     pub(crate) fn kind_str(&self) -> &'static str {
         match self {
             Unknown::Conflict(_) => "conflict",
             Unknown::UndefinedBehavior(_) => "undefined_behavior",
+        }
+    }
+
+    /// [`Unknown::kind_str`] 的逆（连同载荷）：`unknowns` 列 JSON 元素的两半 →
+    /// 一枚 `Unknown`。
+    ///
+    /// # 形状照 [`crate::IntentKind::parse`]
+    ///
+    /// **定义域是所有 `(串, 串)` 对**，认不出就是 `None`；返回 `Option` 而不返回一枚
+    /// 「未知」变体——本函数没有失败原因可给（它不读库、不写库）。`None` 转成哪个错误由
+    /// 调用方的解码处决定（`continuum-semantics` 的 `persist.rs` 转成
+    /// [`crate::SpecError::UnknownItemKind`]，带原始取值）。
+    ///
+    /// **带通配臂是刻意的**（与 [`Unknown::kind_str`] 的无通配相反）：这一边的输入是
+    /// **开放集**（任意串），逐枚列出永远列不完。
+    pub(crate) fn parse_kind(kind: &str, value: &str) -> Option<Unknown> {
+        match kind {
+            "conflict" => Some(Unknown::Conflict(Conflict::from_str(value))),
+            "undefined_behavior" => {
+                Some(Unknown::UndefinedBehavior(UndefinedBehavior::from_str(value)))
+            }
+            _ => None,
         }
     }
 

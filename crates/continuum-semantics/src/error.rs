@@ -104,12 +104,14 @@ pub enum IntentError {
 /// # 四枚各有真实产生方，一条不漏
 ///
 /// - [`SpecError::UnknownsKind`]：`specification.unknowns_kind` 列是**闭集两枚**
-///   （`none_found` / `enumerated`，编码挂在 [`crate::Unknowns::kind_str`] 上），
+///   （`none_found` / `enumerated`，编码 / 解码挂在 [`crate::Unknowns::kind_str`] /
+///   [`crate::Unknowns::parse_kind`] 上），
 ///   库里读到表外取值（历史行、被外部改过的行）时由 [`crate::load_specification`]
 ///   的解码处产出，**带库里那一个原始串**。
 /// - [`SpecError::UnknownItemKind`]：`specification.unknowns` 列里元素的 `kind`
-///   是**闭集两枚**（`conflict` / `undefined_behavior`，编码挂在
-///   [`crate::Unknown::kind_str`] 上），表外取值在同一解码处产出，带原始串。
+///   是**闭集两枚**（`conflict` / `undefined_behavior`，编码 / 解码挂在
+///   [`crate::Unknown::kind_str`] / [`crate::Unknown::parse_kind`] 上），
+///   表外取值在同一解码处产出，带原始串。
 /// - [`SpecError::Intent`]：组合写路径 [`crate::save_intent_with_specification`]
 ///   里 Intent 侧的失败（含 `save_intent` 自己的 `Persist` 一枚），`#[from]` 转出。
 /// - [`SpecError::Persist`]：`Tx` 的往返失败，`#[from]` 转出。**容器坏**（列表列不是
