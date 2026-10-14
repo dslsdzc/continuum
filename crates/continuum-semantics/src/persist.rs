@@ -1,9 +1,11 @@
-//! `intent` / `specification` / `contract` / `contract_requirement` / `plan` 五张表
-//! （迁移 **110**）与它们的行级读写
-//! （设计 §5.1／§5.2／§5.4／§6.1／§6.2／§7.1／§7.3／§9.1）。
-//! **`plan` 表由 Task 13 建表、行级 I/O 随后续 task**（本 task 的用例清单没有
-//! I/O 用例；§10.2 的恢复链要写 `plan` 行——它的写读函数随第一个有 I/O 用例的
-//! task 落地，见 [`p4_semantics_migrations`] 的文档）。
+//! 设计 §2.4 的七张表
+//! （`intent` / `specification` / `contract` / `contract_requirement` / `plan` /
+//! `decision` / `decision_result`，迁移 **110**）与它们的行级读写
+//! （设计 §5.1／§5.2／§5.4／§6.1／§6.2／§7.1／§7.3／§9.1／§10.1／§10.2）。
+//! **110 段的七张表由此齐**：Task 8 加 `intent`、Task 10 加 `specification`、
+//! Task 11 加 `contract` 与 `contract_requirement`、Task 13 加 `plan`、
+//! **Task 15 加 `decision` 与 `decision_result`**（本 task——两张表连同 §332
+//! 恢复链的行级 I/O 一起落地）。
 //!
 //! # 本文件与 `intent.rs` 的分工（一处与计划正文不同的落点，理由在此）
 //!
@@ -24,7 +26,8 @@
 //! Task 20 之后不得再改）。**「追加」的落点是同一个迁移项的 SQL 字符串**——
 //! 见 [`p4_semantics_migrations`] 的文档（第二个 110 号迁移项会被 `migrate()`
 //! 静默跳过）。Task 8 加 `intent`；**Task 10 加 `specification`**；
-//! **Task 11 加 `contract` 与 `contract_requirement`**；**Task 13 加 `plan`**。
+//! **Task 11 加 `contract` 与 `contract_requirement`**；**Task 13 加 `plan`**；
+//! **Task 15 加 `decision` 与 `decision_result`**。
 //!
 //! 编号 **110**：1、2 是 `continuum-persist` 的内建（events、audit_log），10 是 P1 的
 //! artifact，20 是 P1 的 graph，30 是 P2 的 workspace，40 是 P2 的 effect，41 是 P2 的
@@ -67,11 +70,14 @@ use continuum_persist::{
 };
 
 use crate::contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
-use crate::error::{ContractError, IntentError, SpecError};
-use crate::ids::{ContractId, IntentId, PlanId, RequirementId};
+use crate::decision::{ContractUpdate, Decision, DecisionOption, DecisionResult, PlanUpdate};
+use crate::error::{ContractError, DecisionError, IntentError, PlanError, SpecError};
+use crate::ids::{ContractId, DecisionId, IntentId, PlanId, RequirementId};
 use crate::intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
+use crate::intent_tx::apply_intent_transition;
+use crate::plan::{Plan, PlanType, PlanVersion, ReviewState};
 use crate::spec::{
     AcceptancePredicate, ForbiddenState, Goal, Invariant, Preference, SpecDraft, Specification,
     Unknown, Unknowns, UnknownsKind,
@@ -87,8 +93,8 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
                        parent_intent, contract_id, contract_version, active_plan_id, graph_id, \
                        product_id, completion_predicate";
 
-/// 本 crate 的五张表（`intent` / `specification` / `contract` / `contract_requirement` /
-/// `plan`）上注册的迁移（设计 §2.4 的 110 段）。
+/// 本 crate 的七张表（`intent` / `specification` / `contract` / `contract_requirement` /
+/// `plan` / `decision` / `decision_result`）上注册的迁移（设计 §2.4 的 110 段）。
 ///
 /// # 110 是**一个迁移项**，表**逐表追加进它的 SQL**
 ///
@@ -97,7 +103,7 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 /// （`crates/continuum-persist/src/db.rs:103-112`），同号的第二个迁移项会被**静默跳过**
 /// （第二个表永不建）。照片是 `tests/intent.rs` 的
 /// `the_migration_registers_every_table_of_the_110_item`：它断言
-/// **`len() == 1`**、并逐表断言 SQL 里每张表都在（Task 8–13 共五张），
+/// **`len() == 1`**、并逐表断言 SQL 里每张表都在（Task 8–15 共七张），
 /// 那条 `len() == 1` 正是这件事的守卫。
 ///
 /// 〔订正（2026-10-14，Task 10）〕本注释初版写「其余六张……追加进**同一个**
@@ -152,7 +158,8 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 /// - 主键 `(id, major, minor)`——§228 的 `version` 是**两段式**（§9.1：`major` 在
 ///   MATERIAL 时 +1、`minor` 在 MINOR 时 +1），故版本拆成两列、连同 `id` 构成复合
 ///   主键：多版本并存（§213 的版本化）、同 `(id, major, minor)` 的二次写由主键拒绝
-///   （与 `contract` 的 `(id, version)` 同一条处置；`INSERT`／读函数随行级 I/O 落地）。
+///   （与 `contract` 的 `(id, version)` 同一条处置；[`save_plan`] 的裸 `INSERT`
+///   由 Task 15 落地，同键二次写随它撞键得 `Err`）。
 /// - 十一个列：[`crate::Plan`] 的十个字段里**九个直接成列**（`id` / `intent_id` /
 ///   `type` / `objectives` / `milestones` / `assumptions` / `risks` /
 ///   `acceptance_conditions` / `review_state`），`version` **拆成两列**（`major` ＋
@@ -161,16 +168,41 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 ///   `the_plan_table_has_exactly_the_expected_columns`。
 /// - `type` / `review_state` 是两个**枚举列**（编码 / 解码挂在
 ///   `PlanType::as_str`／`parse` 与 `ReviewState::as_str`／`parse` 上，与类型同址），
-///   表外取值读回具体 `Err` 的处置随行级 I/O 落地（PlanError 的相应变体也在那时加——
-///   本 task 不为零产生方的错误变体留位）。
+///   表外取值读回 [`PlanError::UnknownType`] / [`PlanError::UnknownReview`]
+///   （Task 15 的行级 I/O 落地时兑现——Task 13 的批注说的就是这两个变体）。
 /// - 五个列表列（`objectives` / `milestones` / `assumptions` / `risks` /
 ///   `acceptance_conditions`）按 JSON 字符串数组存（同 `specification` 的五个列表列
 ///   的容器处置）。
 /// - **不建外键**（同其余四张表的处置）。
 ///
-/// **本 task 只建表、不落行级 I/O**：`plan` 的行级读写（`save_plan` 一类）随第一个
-/// 有 I/O 用例的 task 落地（§10.2 的恢复链要写 `plan` 行）；本 task 的 `tests/plan.rs`
-/// 只钉表列清单与迁移守卫（`tests/intent.rs` 同步为逐表清单加 `plan` 一行）。
+/// # `plan` 表的行级读写（Task 15 落地）
+///
+/// Task 13 只建了表；**§10.2 的恢复链要写 `plan` 行**——本 task 落它的行级 I/O：
+/// [`save_plan`]（裸 `INSERT` 一行版本）与 [`load_plan`]（按 `(id, major, minor)` 读回）。
+/// `type` / `review_state` 两列的表外取值读回 [`PlanError::UnknownType`] /
+/// [`PlanError::UnknownReview`]（枚举列纪律的读回侧；Task 13 预告的「随行级 I/O 落地」
+/// 即此）；两条编码对（`PlanType` / `ReviewState` 的 `as_str` / `parse`）也随之下
+/// **收窄回 `pub(crate)`**（Task 13 的加宽申报写明了收窄时点）。
+/// 修订语义的另一半（旧版本转 `SUPERSEDED`）在 [`crate::apply_result`] 的 Plan 更新
+/// 里落库（Task 13 预告的「落库版修订」）。
+///
+/// # `decision` 与 `decision_result` 两张表的形状（Task 15 追加）
+///
+/// - `decision` 表：主键 `id`——[`DecisionId`] 是本层补的记录键（§331 没给，见
+///   [`crate::DecisionId`] 与 `decision.rs` 的申报）。五列 = [`Decision`] 的五个成员
+///   （`id` / `intent_id` / `issue` / `options` / `blocking`）。
+///   `options` 列是 **JSON 对象数组**（元素 `{"option": ..., "consequence": ...}`——
+///   等长的配对在库里是**一组对象**，不是两个平行数组：两个平行列在库里可不等长，
+///   而 §106 要的是「每个选项带后果」的配对）。`blocking` 存 INTEGER 0/1；
+///   读回时非 0/1 是 [`DecisionError::InvalidBlocking`]（不静默当 `true`）。
+/// - `decision_result` 表：主键 **`decision_id`**——「一个 Decision 恰一条结果」
+///   （§10.2 的 `DecisionResult` 是「对那次询问的回答」；同 `(id, version)` 的失败
+///   closed 处置：第二个结果撞主键得 `Err`，不静默第二条、不覆写。若复审裁「同一
+///   决策的多个结果」要可表达，改主键是一处小改）。五列 = [`DecisionResult`] 的五个
+///   成员；`contract_update` / `plan_update` 两列是 JSON 或 `NULL`（`NULL`＝那一侧的
+///   `Option::None`＝本次决定不动它）。**本表今天只写不读**——§332 的消费方
+///   （执行层）未建，读回路径随第一个真实消费者落地（不发明 `load_decision_result`）。
+/// - **两张表都不建外键**（同其余五张表的处置：跨记录对应关系由写路径的调用方保证）。
 pub fn p4_semantics_migrations() -> Vec<Migration> {
     vec![Migration::new(
         110,
@@ -240,6 +272,20 @@ pub fn p4_semantics_migrations() -> Vec<Migration> {
             acceptance_conditions TEXT NOT NULL,
             review_state          TEXT NOT NULL,
             PRIMARY KEY (id, major, minor)
+        );
+        CREATE TABLE decision (
+            id        TEXT PRIMARY KEY NOT NULL,
+            intent_id TEXT NOT NULL,
+            issue     TEXT NOT NULL,
+            options   TEXT NOT NULL,
+            blocking  INTEGER NOT NULL
+        );
+        CREATE TABLE decision_result (
+            decision_id     TEXT PRIMARY KEY NOT NULL,
+            option_index    INTEGER NOT NULL,
+            decided_at      INTEGER NOT NULL,
+            contract_update TEXT,
+            plan_update     TEXT
         );",
     )]
 }
@@ -986,4 +1032,513 @@ fn load_requirements(
         })
     })
     .collect()
+}
+
+// ===== `plan` 表的行级读写（设计 §9.1；Task 15 落地 Task 13 预告的那一半） =====
+
+/// 写一行 `plan` 版本。**裸 `INSERT`，不是 `INSERT OR REPLACE`**（同 `contract` 的
+/// `(id, version)` 与 `alias` 表的处置）：同 `(id, major, minor)` 的第二次写入由
+/// **复合主键**拒绝——多版本并存（§213）的落库形态是「一个版本一行」，
+/// 允许覆盖会让「历史版本不变」这件事重新可表达。
+///
+/// # 为什么没有 `occurred_at`（与 [`save_contract`] 不同）
+///
+/// `plan` 表**没有时间列**（§228 的十字段里没有创建 / 更新时刻），也没有与它挂钩的
+/// 事件 / 审计（§5.4 的写入点表里没有 plan 行），故本函数没有可给时间的消费者。
+/// **修订语义的另一半**（旧版本转 `SUPERSEDED`）不在本函数里——它是
+/// [`crate::apply_result`] 的 Plan 更新（「修订」是一次动作的两件事，Task 13 的
+/// [`crate::revise`] 已把值层写死；落库版的这两件事同址在调用它的恢复链路里）。
+///
+/// # 写入次序与失败路径
+///
+/// 只写一行；失败返回 `Err`（撞主键也走 [`PlanError::Persist`] 的 `Database` 形状，
+/// 同 [`crate::save_contract`]）。**本函数不自己 `commit`**（同其余写函数的纪律）。
+pub fn save_plan(tx: &Tx<'_>, plan: &Plan) -> Result<(), PlanError> {
+    tx.execute(
+        "INSERT INTO plan (id, major, minor, intent_id, type, objectives, milestones, \
+                           assumptions, risks, acceptance_conditions, review_state) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        &[
+            Value::text(plan.id.as_str()),
+            Value::Int(i64::from(plan.version.major)),
+            Value::Int(i64::from(plan.version.minor)),
+            Value::text(plan.intent_id.as_str()),
+            Value::text(plan.r#type.as_str()),
+            Value::text(encode_plan_column(&plan.objectives, "objectives")?),
+            Value::text(encode_plan_column(&plan.milestones, "milestones")?),
+            Value::text(encode_plan_column(&plan.assumptions, "assumptions")?),
+            Value::text(encode_plan_column(&plan.risks, "risks")?),
+            Value::text(encode_plan_column(
+                &plan.acceptance_conditions,
+                "acceptance_conditions",
+            )?),
+            Value::text(plan.review_state.as_str()),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 按 `(id, version)` 读一条 Plan。**不存在返回 `Ok(None)`**（那不是错误，同
+/// [`load_contract`]）。
+///
+/// `version` 必须**显式给出**（同 [`load_contract`]）：两段式版本的「最近一版」由
+/// 调用方自己先算（本函数不替它挑）。
+///
+/// `type` / `review_state` 是表外取值时返回 [`PlanError::UnknownType`] /
+/// [`PlanError::UnknownReview`]，**不取默认值**；列表列不是 JSON 字符串数组时返回
+/// [`PlanError::Persist`] 的 `Database` 形状（「容器坏」与「表外取值」两类失败的分工，
+/// 同 [`load_specification`]）。
+pub fn load_plan(
+    tx: &Tx<'_>,
+    id: &PlanId,
+    version: PlanVersion,
+) -> Result<Option<Plan>, PlanError> {
+    let rows = tx.query(
+        "SELECT intent_id, type, objectives, milestones, assumptions, risks, \
+                acceptance_conditions, review_state \
+         FROM plan WHERE id = ?1 AND major = ?2 AND minor = ?3",
+        &[
+            Value::text(id.as_str()),
+            Value::Int(i64::from(version.major)),
+            Value::Int(i64::from(version.minor)),
+        ],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let raw_type = text_at(&row, 1)?;
+    let plan_type = PlanType::parse(&raw_type).ok_or(PlanError::UnknownType { value: raw_type })?;
+    let raw_review = text_at(&row, 7)?;
+    let review_state =
+        ReviewState::parse(&raw_review).ok_or(PlanError::UnknownReview { value: raw_review })?;
+    Ok(Some(Plan {
+        id: id.clone(),
+        version,
+        intent_id: IntentId::from_str(&text_at(&row, 0)?),
+        r#type: plan_type,
+        objectives: decode_plan_column(&text_at(&row, 2)?, "objectives")?,
+        milestones: decode_plan_column(&text_at(&row, 3)?, "milestones")?,
+        assumptions: decode_plan_column(&text_at(&row, 4)?, "assumptions")?,
+        risks: decode_plan_column(&text_at(&row, 5)?, "risks")?,
+        acceptance_conditions: decode_plan_column(&text_at(&row, 6)?, "acceptance_conditions")?,
+        review_state,
+    }))
+}
+
+/// `plan` 表的列表列容器编码：JSON 字符串数组（与 [`encode_members`] 同形，**只做
+/// 容器**——元素是 [`Opaque`]，直接 `as_str`）。**不复用 [`encode_members`]**：那一个
+/// 的失败消息指向 `specification` 表，复用会让错误指错表。
+fn encode_plan_column(items: &[Opaque], column: &str) -> Result<String, PersistError> {
+    let strs: Vec<&str> = items.iter().map(Opaque::as_str).collect();
+    serde_json::to_string(&strs)
+        .map_err(|e| PersistError::Database(format!("plan.{column} 不可序列化为 JSON: {e}")))
+}
+
+/// [`encode_plan_column`] 的逆。**容器坏了才报错**：元素是自由文本。
+fn decode_plan_column(raw: &str, column: &str) -> Result<Vec<Opaque>, PersistError> {
+    let strs: Vec<String> = serde_json::from_str(raw).map_err(|e| {
+        PersistError::Database(format!("plan.{column} 不是字符串数组（{raw}）: {e}"))
+    })?;
+    Ok(strs.iter().map(|s| Opaque::from_str(s)).collect())
+}
+
+// ===== `decision` 表的行级读写与 §331 的创建（设计 §10.1；Task 15） =====
+
+/// 创建一张 Decision：写 `decision` 行 ＋ 恰一条 `EventType::DecisionRequired`
+/// （§5.4 的写入点之一，本层是它的首个生产方）。**本函数不自己 `commit`**（同其余
+/// 写函数的纪律：事务由调用方持有并提交；任一步失败后调用方必须回滚）。
+///
+/// # `occurred_at`：签名比任务简报的速写多一个参数（**申报**）
+///
+/// 简报 Step 3 的速写只给了 `Decision` 与 `DecisionOption` 的形状，未点
+/// `create_decision` 的签名；事件必填 `occurred_at`（`Tx::append_event`），而本层
+/// **不取系统时钟**——故只能由调用方给（先例：本 crate 的 `save_intent`
+/// 用 `created_at`、[`crate::save_contract`] 的 `occurred_at` 参数）。
+///
+/// # `blocking` 照收调用方给出的事实
+///
+/// 本函数**不从任何判定算 `blocking`**（§10.1 的两个触发点是调用方的场景）；
+/// `false` 的触发条件本层不发明（见 `decision.rs` 的模块文档）。
+///
+/// # 事件 id 派生为 `decision/{id}/required`
+///
+/// 同 `save_intent` 的 `intent/{id}/created` 的豁免判据：**一张决策单的首次落库恰
+/// 一次**（`decision.id` 是主键），故派生 id 不可复用。事件的 `occurred_at` 与
+/// payload 的 `decision_id` 见 [`create_decision`] 的调用点；事件写在行之后——
+/// 行写失败（如表不存在 / 同 id 二次创建撞主键）时不产生指向不存在决策单的事件。
+///
+/// 照片：`tests/decision.rs` 的
+/// `a_decision_required_event_is_written_on_creation` 与
+/// `a_second_creation_of_the_same_id_hits_the_primary_key`。
+pub fn create_decision(
+    tx: &Tx<'_>,
+    decision: &Decision,
+    occurred_at: i64,
+) -> Result<(), DecisionError> {
+    tx.execute(
+        "INSERT INTO decision (id, intent_id, issue, options, blocking) VALUES (?1, ?2, ?3, ?4, ?5)",
+        &[
+            Value::text(decision.id.as_str()),
+            Value::text(decision.intent_id.as_str()),
+            Value::text(decision.issue.as_str()),
+            Value::text(encode_options(&decision.options)),
+            Value::Int(i64::from(decision.blocking)),
+        ],
+    )?;
+
+    let event = Event::new(
+        EventType::DecisionRequired,
+        format!("decision/{}/required", decision.id.as_str()),
+        occurred_at,
+        serde_json::json!({ "decision_id": decision.id.as_str() }),
+    )
+    .with_intent(decision.intent_id.as_str());
+    tx.append_event(&event)?;
+    Ok(())
+}
+
+/// 按 id 读一张 Decision。**不存在返回 `Ok(None)`**（那不是错误，同 [`load_intent`]）。
+///
+/// `blocking` 列不是 0/1 时返回 [`DecisionError::InvalidBlocking`]（带原始数值，
+/// **不取默认值**）；`options` 列不是 `{option, consequence}` 对象数组时返回
+/// [`DecisionError::Persist`] 的 `Database` 形状（「容器坏」与「表外取值」两类失败）。
+pub fn load_decision(tx: &Tx<'_>, id: &DecisionId) -> Result<Option<Decision>, DecisionError> {
+    let rows = tx.query(
+        "SELECT id, intent_id, issue, options, blocking FROM decision WHERE id = ?1",
+        &[Value::text(id.as_str())],
+    )?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(None);
+    };
+    let blocking = match int_at(&row, 4)? {
+        0 => false,
+        1 => true,
+        other => return Err(DecisionError::InvalidBlocking { value: other }),
+    };
+    Ok(Some(Decision {
+        id: DecisionId::from_str(&text_at(&row, 0)?),
+        intent_id: IntentId::from_str(&text_at(&row, 1)?),
+        issue: Opaque::from_str(&text_at(&row, 2)?),
+        options: decode_options(&text_at(&row, 3)?)?,
+        blocking,
+    }))
+}
+
+/// `options` 列的容器编码：JSON 数组，元素 `{"option": ..., "consequence": ...}`——
+/// **一组配对对象**（不是两个平行数组；理由见 [`p4_semantics_migrations`] 的文档）。
+fn encode_options(options: &[DecisionOption]) -> String {
+    let list: Vec<serde_json::Value> = options
+        .iter()
+        .map(|o| {
+            serde_json::json!({
+                "option": o.option.as_str(),
+                "consequence": o.consequence.as_str(),
+            })
+        })
+        .collect();
+    serde_json::Value::Array(list).to_string()
+}
+
+/// [`encode_options`] 的逆。**容器坏了才报错**（元素是自由文本，没有表外取值可言）。
+fn decode_options(raw: &str) -> Result<Vec<DecisionOption>, DecisionError> {
+    let items: Vec<serde_json::Value> = serde_json::from_str(raw).map_err(|e| {
+        PersistError::Database(format!("decision.options 不是 JSON 数组（{raw}）: {e}"))
+    })?;
+    let mut out = Vec::with_capacity(items.len());
+    for item in &items {
+        let (option, consequence) = match (
+            item.get("option").and_then(|v| v.as_str()),
+            item.get("consequence").and_then(|v| v.as_str()),
+        ) {
+            (Some(o), Some(c)) => (o, c),
+            _ => {
+                return Err(PersistError::Database(format!(
+                    "decision.options 的元素不是 {{option, consequence}} 对象: {item}"
+                ))
+                .into());
+            }
+        };
+        out.push(DecisionOption::new(
+            Opaque::from_str(option),
+            Opaque::from_str(consequence),
+        ));
+    }
+    Ok(out)
+}
+
+// ===== `decision_result` 表与 §332 的恢复链（设计 §10.2；Task 15） =====
+
+/// `DecisionResult` 落库：写 `decision_result` 行 ＋ 恰一条 `AuditKind::UserApprovals`
+/// 审计（§5.4 的写入点之一；**本层是它的第二个生产方**——第一个是
+/// `continuum-workspace` 的 Integration Gate，载荷形状不同，见 `tests/decision.rs` 的
+/// `a_user_approvals_audit_row_is_written_for_a_decision_result` 的申报）。
+/// **本函数不自己 `commit`**。
+///
+/// # 次序与失败路径
+///
+/// 先写行、再写审计（同 [`save_contract`] 的次序）：行写失败（如同 `decision_id` 的
+/// 二次落库撞主键）时不产生指向不存在结果的审计；审计写失败时行**已经留在事务里**
+/// ——调用方必须回滚。审计的 `occurred_at` 取 `r.decided_at`（本层不取时钟；
+/// 决定时刻是记录里那一个）。
+///
+/// payload 是**决策单与被选项**（`decision_id` ＋ `option_index`）——与 Gate 的
+/// 操作名载荷同 kind 不同形，读 `audit_log` 的一方不得假定「一个 kind 一种载荷」
+/// （§5.4、§16 第 33 条）。
+pub fn save_decision_result(tx: &Tx<'_>, r: &DecisionResult) -> Result<(), DecisionError> {
+    let contract_update = r.contract_update.as_ref().map(encode_contract_update);
+    let plan_update = r.plan_update.as_ref().map(encode_plan_update);
+    tx.execute(
+        "INSERT INTO decision_result (decision_id, option_index, decided_at, contract_update, \
+                                       plan_update) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        &[
+            Value::text(r.decision_id.as_str()),
+            Value::Int(r.option_index as i64),
+            Value::Int(r.decided_at),
+            opt_text(contract_update.as_deref()),
+            opt_text(plan_update.as_deref()),
+        ],
+    )?;
+
+    tx.append_audit(
+        AuditKind::UserApprovals,
+        r.decided_at,
+        Value::text(
+            serde_json::json!({
+                "decision_id": r.decision_id.as_str(),
+                "option_index": r.option_index,
+            })
+            .to_string(),
+        ),
+    )?;
+    Ok(())
+}
+
+/// §332 的恢复链（§10.2），**四步同一事务**——本函数不自己 `commit`：
+///
+/// 1. `DecisionResult` 落库（[`save_decision_result`]：行 ＋ `UserApprovals` 审计）；
+/// 2. Contract 新版本（若 `r.contract_update` 是 `Some`）；
+/// 3. Plan 新版本（若 `r.plan_update` 是 `Some`）；旧版本转 `SUPERSEDED`；
+/// 4. Intent 状态回迁（`SUSPENDED` → `RUNNING`，经 [`crate::apply_intent_transition`]；
+///    事件 id 派生为 `decision/{id}/resume`——一个决策恰一条结果，故恰一次恢复）。
+///
+/// **`Graph invalidation` 不在本层**（§332 的四步里那一步归执行层，本层不碰图，§8.2）。
+///
+/// # 输入只有 `r`（§107）
+///
+/// 「不得将其视为普通会话消息并重新解释整个任务」的落点：Contract / Plan 的新版本
+/// 是**从基准版本拷贝再套指名 patch**（[`patch_contract`] / [`patch_plan`]），
+/// 不是重新生成——照片 (a) 见 `tests/decision.rs` 的
+/// `a_decision_result_changes_only_the_fields_it_names`。
+///
+/// # 次序与失败路径
+///
+/// 先**预读并校验**（Decision 存在、`option_index` 在界内、两个 update 的基准存在、
+/// 指名改的 requirement 都在基准里），**再**按上列次序写——非法输入不写任何一行
+/// （同 [`crate::apply_intent_transition`] 的「先判后写」）。写到一半失败（缺
+/// `audit_log` 表、新版本撞主键、Intent 回迁非法）时，前面的写入**已经留在事务里**
+/// ——调用方必须回滚，不得提交。四张表（`decision_result` / `contract` / `plan` /
+/// `intent`）在回滚后都没有半写行的照片：`tests/decision.rs` 的
+/// `the_recovery_chain_is_atomic`（四个失败点各起一个库）。
+pub fn apply_result(tx: &Tx<'_>, r: &DecisionResult) -> Result<(), DecisionError> {
+    // ---- 预读与校验（不写任何一行）----
+    let Some(decision) = load_decision(tx, &r.decision_id)? else {
+        // 不静默创建——登记是 `create_decision` 的活（同 `UnknownIntent` 的处置）。
+        return Err(DecisionError::UnknownDecision {
+            id: r.decision_id.as_str().to_owned(),
+        });
+    };
+    if r.option_index >= decision.options.len() {
+        return Err(DecisionError::UnknownOption {
+            decision_id: r.decision_id.as_str().to_owned(),
+            index: r.option_index,
+        });
+    }
+
+    let new_contract = match &r.contract_update {
+        None => None,
+        Some(update) => {
+            let Some(base) = load_contract(tx, &update.id, update.base_version)? else {
+                return Err(DecisionError::UnknownContract {
+                    id: update.id.as_str().to_owned(),
+                    version: update.base_version,
+                });
+            };
+            Some(patch_contract(&base, update)?)
+        }
+    };
+
+    let new_plan = match &r.plan_update {
+        None => None,
+        Some(update) => {
+            let Some(base) = load_plan(tx, &update.id, update.base_version)? else {
+                return Err(DecisionError::UnknownPlan {
+                    id: update.id.as_str().to_owned(),
+                    major: update.base_version.major,
+                    minor: update.base_version.minor,
+                });
+            };
+            Some((patch_plan(&base, update), update.base_version))
+        }
+    };
+
+    // ---- 写入（同一事务的四个动作，次序固定）----
+    save_decision_result(tx, r)?;
+    if let Some(contract) = &new_contract {
+        save_contract(tx, contract, r.decided_at)?;
+    }
+    if let Some((plan, base_version)) = &new_plan {
+        save_plan(tx, plan)?;
+        supersede_plan_version(tx, &plan.id, *base_version)?;
+    }
+    apply_intent_transition(
+        tx,
+        &decision.intent_id,
+        IntentStatus::Running,
+        r.decided_at,
+        &format!("decision/{}/resume", r.decision_id.as_str()),
+    )?;
+    Ok(())
+}
+
+/// 从基准 Contract 拷贝再套指名 patch——**新版本 = `base_version + 1`**
+/// （推进规则与照片见 [`crate::ContractUpdate`] 的文档）。
+///
+/// 指名一个不在基准里的 requirement id 是 [`DecisionError::UnknownRequirement`]
+/// （同 Constraint Validator 悬空键的 fail-closed 处置：判不了走 `Err`，不静默添加）。
+/// 未被指名的字段**逐项从基准拷贝**（照片 (a) 的机制就是这个「先拷贝再改」）。
+fn patch_contract(
+    base: &TaskContract,
+    update: &ContractUpdate,
+) -> Result<TaskContract, DecisionError> {
+    let mut requirements = base.requirements.clone();
+    for patch in &update.requirements {
+        let Some(target) = requirements
+            .iter_mut()
+            .find(|requirement| requirement.id.as_str() == patch.id.as_str())
+        else {
+            return Err(DecisionError::UnknownRequirement {
+                contract_id: update.id.as_str().to_owned(),
+                version: update.base_version,
+                id: patch.id.as_str().to_owned(),
+            });
+        };
+        if let Some(class) = patch.class {
+            target.class = class;
+        }
+        if let Some(expression) = &patch.expression {
+            target.expression = expression.clone();
+        }
+        if let Some(source) = &patch.source {
+            target.source = source.clone();
+        }
+        if let Some(verification_requirement) = &patch.verification_requirement {
+            target.verification_requirement = verification_requirement.clone();
+        }
+    }
+    Ok(TaskContract {
+        id: base.id.clone(),
+        version: base.version + 1,
+        intent_id: base.intent_id.clone(),
+        requirements,
+        budget: base.budget.clone(),
+        authority_limit: base.authority_limit.clone(),
+        data_policy: base.data_policy.clone(),
+        model_policy: base.model_policy.clone(),
+        node_policy: base.node_policy.clone(),
+        acceptance_predicate: base.acceptance_predicate.clone(),
+    })
+}
+
+/// 从基准 Plan 拷贝再套指名 patch（`None` 字段不动；`Some` 是整列替换），
+/// 并按修订语义推进版本：`major` +1、`minor` 归零、`review_state = DRAFT`。
+///
+/// 值层的两件事与 [`crate::revise`] 同源（修订 = 新版本 + 旧版本进 `SUPERSEDED`）；
+/// 这里做的是第一件，第二件在 [`supersede_plan_version`]。
+fn patch_plan(base: &Plan, update: &PlanUpdate) -> Plan {
+    let mut next = base.clone();
+    next.version = base.version.next_material();
+    next.review_state = ReviewState::Draft;
+    if let Some(objectives) = &update.objectives {
+        next.objectives = objectives.clone();
+    }
+    if let Some(milestones) = &update.milestones {
+        next.milestones = milestones.clone();
+    }
+    if let Some(assumptions) = &update.assumptions {
+        next.assumptions = assumptions.clone();
+    }
+    if let Some(risks) = &update.risks {
+        next.risks = risks.clone();
+    }
+    if let Some(acceptance_conditions) = &update.acceptance_conditions {
+        next.acceptance_conditions = acceptance_conditions.clone();
+    }
+    next
+}
+
+/// 修订语义的另一半：旧版本那一行的 `review_state` 转 `SUPERSEDED`（**只动这一列**，
+/// 其余逐项不变——同 [`crate::revise`] 的值层）。
+///
+/// `plan` 表因此有**一处** `UPDATE` 路径（与 `contract` 的「无 UPDATE」不同）——
+/// 依据是 §9.2「旧版本进 `SUPERSEDED`」这件事本身；本层没有别的更新 `plan` 的路径。
+fn supersede_plan_version(
+    tx: &Tx<'_>,
+    id: &PlanId,
+    version: PlanVersion,
+) -> Result<(), PlanError> {
+    tx.execute(
+        "UPDATE plan SET review_state = ?2 WHERE id = ?1 AND major = ?3 AND minor = ?4",
+        &[
+            Value::text(id.as_str()),
+            Value::text(ReviewState::Superseded.as_str()),
+            Value::Int(i64::from(version.major)),
+            Value::Int(i64::from(version.minor)),
+        ],
+    )?;
+    Ok(())
+}
+
+/// `ContractUpdate` 的 JSON 编码（`decision_result.contract_update` 列）：
+/// requirement patch 逐条落成对象数组，`RequirementClass` 的编码取
+/// [`crate::RequirementClass::as_str`]（**与类型同址**，本文件不内联字面量）。
+fn encode_contract_update(update: &ContractUpdate) -> String {
+    let requirements: Vec<serde_json::Value> = update
+        .requirements
+        .iter()
+        .map(|patch| {
+            serde_json::json!({
+                "id": patch.id.as_str(),
+                "class": patch.class.map(|class| class.as_str()),
+                "expression": patch.expression.as_ref().map(|o| o.as_str()),
+                "source": patch.source.as_ref().map(|o| o.as_str()),
+                "verification_requirement": patch.verification_requirement.as_ref().map(|v| v.as_str()),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "id": update.id.as_str(),
+        "base_version": update.base_version,
+        "requirements": requirements,
+    })
+    .to_string()
+}
+
+/// `PlanUpdate` 的 JSON 编码（`decision_result.plan_update` 列）：五个列表列各是
+/// `null`（不动）或字符串数组（整列替换）。
+fn encode_plan_update(update: &PlanUpdate) -> String {
+    fn list(items: &[Opaque]) -> Vec<&str> {
+        items.iter().map(Opaque::as_str).collect()
+    }
+    serde_json::json!({
+        "id": update.id.as_str(),
+        "base_major": update.base_version.major,
+        "base_minor": update.base_version.minor,
+        "objectives": update.objectives.as_deref().map(list),
+        "milestones": update.milestones.as_deref().map(list),
+        "assumptions": update.assumptions.as_deref().map(list),
+        "risks": update.risks.as_deref().map(list),
+        "acceptance_conditions": update.acceptance_conditions.as_deref().map(list),
+    })
+    .to_string()
 }

@@ -1,7 +1,9 @@
 //! 本 crate 的错误类型。计划「文件结构」一节把 `IntentError、SpecError、ContractError、
-//! PlanError、DecisionError、ConstraintError` 都列在 `src/error.rs`；本 crate 至今落
-//! 前五枚（`IntentError`、Task 9 的 `IntentStatusError`、Task 10 的 `SpecError`、
-//! Task 11 的 `ContractError` 与 Task 13 的 `PlanError`）。
+//! PlanError、DecisionError、ConstraintError` 都列在 `src/error.rs`；**本文件落六枚**：
+//! `IntentError`（Task 8）、`IntentStatusError`（Task 9）、`SpecError`（Task 10）、
+//! `ContractError`（Task 11）、`PlanError`（Task 13）、`DecisionError`（Task 15）。
+//! **`ConstraintError` 不在这里**——Task 16 落地时收在 `constraint.rs`（与
+//! `VerificationRequirement` 的判定面同址；计划那一格的张力见 Task 16 的台账条目）。
 
 use continuum_persist::PersistError;
 
@@ -169,29 +171,39 @@ pub enum ContractError {
     Persist(#[from] PersistError),
 }
 
-/// Plan 的审查状态机与执行门的错误（Task 13）。
+/// Plan 的审查状态机与执行门的错误（Task 13）、`plan` 的行级读写（Task 15）。
 ///
-/// # 两枚各有真实产生方，一条不漏
+/// # 五枚各有真实产生方，一条不漏
 ///
 /// - [`PlanError::IllegalReview`]：迁移对不在 §9.2 的迁移表内——由
 ///   [`crate::ReviewState::transition`] 的查表处产出，`from` / `to` 原样带出。
 /// - [`PlanError::UserApprovalRequired`]：§229 的执行门——`STRATEGIC` 的 Plan 未经
 ///   `USER_APPROVED` 被要求执行，由 [`crate::ReviewState::reaches_ready`] 产出，
 ///   `plan_type` 与 `state` 是**当时那一对**（不是被映射过的任何东西）。
+/// - [`PlanError::UnknownType`] / [`PlanError::UnknownReview`]（Task 15 新增）：
+///   `plan.type` / `plan.review_state` 两列是**封闭枚举**（编码 / 解码挂在
+///   [`crate::PlanType::as_str`] / `parse` 与 [`crate::ReviewState::as_str`] / `parse`
+///   上，与类型同址），库里读到表外取值（历史行、被外部改过的行）时由
+///   [`crate::load_plan`] 的解码处产出，**带库里那一个原始串、不取默认值**。
+///   照片：`tests/plan.rs` 的
+///   `enum_codes_use_lowercase_underscore_and_reject_out_of_table_values`（经库读回）。
+/// - [`PlanError::Persist`]（Task 15 新增）：`Tx` 的往返失败，`#[from]` 转出——
+///   **`(id, major, minor)` 的二次写**（`save_plan` 的裸 `INSERT`）也走这一枚的
+///   `Database` 形状（同 [`ContractError::Persist`] 的处置）。**不吞成上面两枚**：
+///   数据库层的失败若被降级，调用方会以为「数据就是这样」，而真相是这次压根没读到。
 ///
-/// # 这不是落库错误（与 [`ContractError`] 的分野）
+/// # Task 13 时此处没有 `Persist` 一枚（留档）
 ///
-/// 本 task 的 `plan` 表没有行级读写（表由 Task 13 建、行级 I/O 随其后用它的 task
-/// 落地），故本类型**没有** `Persist` 一枚——一枚零产生方的转发变体正是本仓
-/// 裁删过的那一类（「零产生方的死物」，见 `continuum-model-registry` 的
-/// `RoutingError::Persist` 处置）；它随行级 I/O 一起加。
+/// Task 13 的 `plan` 表没有行级读写，故当时的抉择是「不为零产生方的错误变体留位」
+/// ——那一枚随行级 I/O（Task 15）落地，本 task 加上的就是它。上面两枚「表外取值」
+/// 同此（Task 13 的 `plan.rs` 预告「表外取值读回具体 `Err` 的处置随行级 I/O 落地」）。
 ///
 /// # 照片
 ///
-/// 两枚各有直接照片，都在 `tests/plan.rs`：`unlisted_review_pairs_are_rejected`
+/// 前两枚的直接照片在 `tests/plan.rs`：`unlisted_review_pairs_are_rejected`
 /// （逐条断言 `from` / `to` 原样带出）与
 /// `a_strategic_plan_cannot_be_executed_without_user_approval`
-/// （断言 `plan_type` / `state` 是那一对）。
+/// （断言 `plan_type` / `state` 是那一对）；后三枚见上（经库）。
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum PlanError {
     /// 迁移对不在 §9.2 的审查迁移表内。`from` / `to` 原样带出——只说「这个迁移不合法」
@@ -207,4 +219,90 @@ pub enum PlanError {
         plan_type: PlanType,
         state: ReviewState,
     },
+
+    /// `plan.type` 列是表外取值。`value` 是**库里那一个**原始取值（Task 15）。
+    #[error("表外的 plan type 取值: {value}")]
+    UnknownType { value: String },
+
+    /// `plan.review_state` 列是表外取值。`value` 同上（Task 15）。
+    #[error("表外的 plan review_state 取值: {value}")]
+    UnknownReview { value: String },
+
+    /// `Tx` 的往返失败（含 `(id, major, minor)` 撞主键）。Task 15 随行级 I/O 新增。
+    #[error(transparent)]
+    Persist(#[from] PersistError),
+}
+
+/// Decision 的落库 / 读回与 §332 恢复链的错误（Task 15）。
+///
+/// # 十枚各有真实产生方，一条不漏
+///
+/// - [`DecisionError::InvalidBlocking`]：`decision.blocking` 列的表外取值（不是 0/1）
+///   ——由 [`crate::load_decision`] 的解码处产出，**带原始数值、不取默认值**
+///   （枚举 / 布尔列纪律的读回侧）。
+/// - [`DecisionError::UnknownDecision`]：`apply_result` 指向的 `decision_id` 不存在
+///   ——**不静默创建**（同 [`IntentError::UnknownIntent`] 的处置）；`id` 是入参那一个。
+/// - [`DecisionError::UnknownOption`]：`option_index` 越界（「指向某个
+///   `DecisionOption`」指向不存在的项）——不钳到某一项；`decision_id` 与 `index`
+///   原样带出。
+/// - [`DecisionError::UnknownContract`]：`ContractUpdate` 的基准版本不存在——
+///   §226 的「新版本」要以一个真实基准起算，没有基准就不静默新建。
+/// - [`DecisionError::UnknownRequirement`]：`RequirementUpdate` 指名的 id 不在基准
+///   Contract 里——同 Constraint Validator 悬空键的 fail-closed 处置（判不了走 `Err`，
+///   不静默添加一个 requirement）。
+/// - [`DecisionError::UnknownPlan`]：`PlanUpdate` 的基准版本不存在（同上，不静默新建）。
+/// - [`DecisionError::Contract`] / [`DecisionError::Plan`] / [`DecisionError::Intent`]：
+///   §332 恢复链三步各自的子错误，`#[from]` 转出（同 `SpecError::Intent` 对
+///   `IntentError` 的组合写路径形状）——调用方按子系统分辨失败来源，不吞成一枚。
+/// - [`DecisionError::Persist`]：`decision` / `decision_result` 两张表自己的往返失败
+///   （含 `decision_result` 主键撞键——一个决策恰一个回答），`#[from]` 转出。
+///
+/// **六枚「表外 / 指向不存在的」是分开的，不合并成一枚**：合并之后调用方不再能
+/// 分辨该修哪一处（同 [`IntentError`] 的两枚表外取值与 P3D 的 `UnknownModel` 的分辨
+/// 原则）。**红条件**各见 `tests/decision.rs` 的对应用例。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DecisionError {
+    /// `decision.blocking` 列不是 0/1。`value` 是**库里那一个**原始数值。
+    #[error("表外的 decision blocking 取值: {value}")]
+    InvalidBlocking { value: i64 },
+
+    /// `apply_result` 指向的 Decision 不存在。`id` 是**入参那一个**的里子串。
+    #[error("decision 不存在: {id}")]
+    UnknownDecision { id: String },
+
+    /// `option_index` 越界（指向的 DecisionOption 不存在）。两个数原样带出。
+    #[error("decision {decision_id} 没有第 {index} 项选项")]
+    UnknownOption { decision_id: String, index: usize },
+
+    /// `ContractUpdate` 的基准版本不存在。`id` / `version` 是**入参那一对**。
+    #[error("contract 不存在: {id} v{version}")]
+    UnknownContract { id: String, version: u32 },
+
+    /// `RequirementUpdate` 指名的 requirement 不在基准 Contract 里。
+    #[error("contract {contract_id} v{version} 里没有 requirement: {id}")]
+    UnknownRequirement {
+        contract_id: String,
+        version: u32,
+        id: String,
+    },
+
+    /// `PlanUpdate` 的基准版本不存在。
+    #[error("plan 不存在: {id} v{major}.{minor}")]
+    UnknownPlan { id: String, major: u32, minor: u32 },
+
+    /// 恢复链里 Contract 侧的失败（`load_contract` / `save_contract`）。
+    #[error(transparent)]
+    Contract(#[from] ContractError),
+
+    /// 恢复链里 Plan 侧的失败（`load_plan` / `save_plan`）。
+    #[error(transparent)]
+    Plan(#[from] PlanError),
+
+    /// 恢复链里 Intent 回迁的失败（[`crate::apply_intent_transition`]）。
+    #[error(transparent)]
+    Intent(#[from] IntentError),
+
+    /// `Tx` 的往返失败（含 `decision_result` 撞主键）。
+    #[error(transparent)]
+    Persist(#[from] PersistError),
 }

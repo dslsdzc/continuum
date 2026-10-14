@@ -1,0 +1,21 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/compile_fail/a_decision_option_cannot_be_built_without_a_consequence.rs:21:13
+   |
+21 |     let _ = DecisionOption::new(Opaque::from_str("使用云 GPU"));
+   |             ^^^^^^^^^^^^^^^^^^^-------------------------------- argument #2 of type `Opaque` is missing
+   |
+note: associated function defined here
+  --> src/decision.rs
+   |
+   |     pub fn new(option: Opaque, consequence: Opaque) -> Self {
+   |            ^^^
+help: provide the argument
+   |
+21 |     let _ = DecisionOption::new(Opaque::from_str("使用云 GPU"), /* Opaque */);
+   |                                                               ++++++++++++++
+
+error[E0063]: missing field `consequence` in initializer of `DecisionOption`
+  --> tests/compile_fail/a_decision_option_cannot_be_built_without_a_consequence.rs:23:13
+   |
+23 |     let _ = DecisionOption {
+   |             ^^^^^^^^^^^^^^ missing `consequence`

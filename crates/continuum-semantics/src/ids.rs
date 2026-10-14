@@ -1,11 +1,12 @@
-//! 本层的标识类型：`IntentId` / `PlanId` / `ContractId` / `RequirementId`
-//! （计划「文件结构」一节把前三个与 `RequirementId` 归在 `src/ids.rs`，
+//! 本层的标识类型：`IntentId` / `PlanId` / `ContractId` / `RequirementId` / `DecisionId`
+//! （计划「文件结构」一节把它们归在 `src/ids.rs`，
 //! `docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:300`）。
 //!
-//! # 四个都是不透明串，且**不共享一个类型**
+//! # 五个都是不透明串，且**不共享一个类型**
 //!
 //! §222 只给了 `Intent.id` 这个名字，没给取值域；`PlanId` / `ContractId` / `RequirementId`
-//! 同理（§228 / §224 都只有字段名）。故四者都是**不透明串**：本层保存事实，不发明取值域。
+//! / `DecisionId` 同理（§228 / §224 / §331 都只有字段名）。故五者都是**不透明串**：
+//! 本层保存事实，不发明取值域。
 //!
 //! **为什么不合并成一个 `Id(String)`**：那样 `intent_id` 与 `contract_id` 会在类型上
 //! 可以互换——把一枚 `PlanId` 传进要 `IntentId` 的位置会编得过。四枚类型各自独立
@@ -113,5 +114,31 @@ impl RequirementId {
     /// 从任意串构造。**无校验**（同 [`IntentId::from_str`]）。
     pub fn from_str(s: &str) -> Self {
         RequirementId(s.to_owned())
+    }
+}
+
+/// §331 的 `Decision` 的**记录键**（Task 15）。
+///
+/// # 一处申报：§331 没给 Decision 一个 `id` 字段
+///
+/// §331 的 `Decision { issue, options[], consequences[], blocking }` 里没有 id——
+/// 而「落库与读回」（§10.1 末段）与「`DecisionResult` 指向某个 `Decision`」（§10.2）
+/// 都需要一个键。本层照 [`crate::ContractRef`] 补 `version` 的同一判据**补这个键**：
+/// `decision` 表的主键，由调用方给（**本层不派生 id**——同 `Event::new` 的 `event_id`
+/// 由调用方分配；派生 id 的豁免只给过「恰一次」能被结构保证的那两处）。
+///
+/// 处置与其余四枚逐字相同：不透明串、无校验、不改写不裁剪、无 `PartialEq`。
+#[derive(Debug, Clone)]
+pub struct DecisionId(String);
+
+impl DecisionId {
+    /// 取里子串。**不改写、不裁剪**。
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// 从任意串构造。**无校验**（同 [`IntentId::from_str`]）。
+    pub fn from_str(s: &str) -> Self {
+        DecisionId(s.to_owned())
     }
 }

@@ -6,10 +6,9 @@
 //! （`docs/superpowers/plans/2026-10-06-p4-semantic-layer.md:308`）；
 //! §341 的八项视图在 [`crate::review_view`]，本文件不含它。本文件与 `persist.rs` 的
 //! 分工照 Task 8／10／11 的惯例：**本文件是 §228 的词汇与记录体**，
-//! `persist.rs` 是 `plan` 表（迁移 110 的第五张表）。**本 task 的 `plan` 表没有行级
-//! 读写**——表由本 task 建、列清单由 `tests/plan.rs` 钉；行级 I/O（`save_plan` 一类）
-//! 随第一个有 I/O 用例的 task（§10.2 的恢复链要写 `plan` 行）落地，本文件因此
-//! **不含 I/O**。
+//! `persist.rs` 是 `plan` 表（迁移 110 的第五张表）。**`plan` 表的行级读写
+//! （[`crate::save_plan`] / [`crate::load_plan`]）由 Task 15 落地**（§10.2 的恢复链
+//! 要写 `plan` 行）——本文件因此不含 I/O：写读在 `persist.rs`。
 //!
 //! # §228 的 `version` 取两段（本设计的决定，§9.1）
 //!
@@ -106,14 +105,14 @@ impl PlanVersion {
 /// # 编码（小写、多词接 `_`）与 `as_str` / `parse` 同址
 ///
 /// [`PlanType::as_str`] **无通配臂**：加第三枚即**编译不过**；解码走带通配臂的
-/// [`PlanType::parse`]（输入是开放集）。`plan` 表的 `type` 列用它落库
-/// （表已建，行级读写随其后用它的 task；表外取值读回具体 `Err` 的处置也在那时落地）。
+/// [`PlanType::parse`]（输入是开放集）。`plan` 表的 `type` 列用它落库；表外取值
+/// 读回 [`crate::PlanError::UnknownType`]（经 [`crate::load_plan`]，Task 15 落地）。
 ///
-/// # 为什么这一对是 `pub`（加宽申报，与 `RequirementClass` 的 `pub(crate)` 不同）
+/// # 编码对的可见性：加宽（Task 13）→ **收窄（Task 15 兑现）**
 ///
-/// 两条理由：
+/// Task 13 时这一对是 `pub`，加宽申报的两条当时理由是：
 ///
-/// 1. **照片的可核位置**：本 task 的 `plan` 表**没有行级读写**（行级 I/O 随其后用它的
+/// 1. **照片的可核位置**：当时 `plan` 表**没有行级读写**（行级 I/O 随其后用它的
 ///    task 落地），故「编码字面量逐枚」「`parse` 的定义域」这两件事唯一能落在
 ///    **集成测试**（`tests/plan.rs` 的
 ///    `enum_codes_use_lowercase_underscore_and_reject_out_of_table_values`）里的方式
@@ -124,11 +123,16 @@ impl PlanVersion {
 ///    这件事（本仓对豁免的既有处置见 `continuum-model-registry` 的 Task 7 复盘：
 ///    豁免要带复核义务）。加宽到 `pub` 比一个要长期背着复核义务的豁免更干净。
 ///
-/// **收窄回 `pub(crate)` 的时点是行级 I/O 落地之后**（那时照片可经落库 raw 读列，
-/// 同 [`crate::RequirementClass`] 的现状）——这是一处有复核条件的加宽，不是永久决定。
+/// 加宽时同时写明了复核条件：**「收窄回 `pub(crate)` 的时点是行级 I/O 落地之后
+/// （那时照片可经落库 raw 读列，同 [`crate::RequirementClass`] 的现状）」**。
+/// **Task 15 兑现了它**：`plan` 的行级读写（[`crate::save_plan`] / [`crate::load_plan`]）
+/// 落地后，照片改经库（同上那条用例：raw 读列逐枚断言 ＋ `load_plan` 读回表外取值），
+/// 这一对因此**收窄回 `pub(crate)`**。
 impl PlanType {
     /// 两枚之一 → 落库字面量。**全函数**（闭集两枚）。**无通配臂**。
-    pub fn as_str(&self) -> &'static str {
+    ///
+    /// `pub(crate)`：可见性的加宽—收窄经过见类型文档（Task 15 兑现了收窄条件）。
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             PlanType::Strategic => "strategic",
             PlanType::Execution => "execution",
@@ -138,7 +142,7 @@ impl PlanType {
     /// [`PlanType::as_str`] 的逆。**定义域是所有串**，认不出就是 `None`
     /// （形状照 [`crate::IntentKind::parse`]：返回 `Option` 而不返回一枚「未知」变体）。
     /// **带通配臂是刻意的**（与 `as_str` 的无通配相反）：这一边的输入是开放集。
-    pub fn parse(s: &str) -> Option<PlanType> {
+    pub(crate) fn parse(s: &str) -> Option<PlanType> {
         match s {
             "strategic" => Some(PlanType::Strategic),
             "execution" => Some(PlanType::Execution),
@@ -164,11 +168,12 @@ pub enum PlanType {
 ///
 /// # 编码与 `as_str` / `parse` 同址
 ///
-/// 同 [`PlanType`]（含「为什么是 `pub`」的加宽申报）：`as_str` 无通配臂、
-/// `parse` 带走通配臂；`plan` 表的 `review_state` 列用它落库。
+/// 同 [`PlanType`]（含「加宽（Task 13）→ 收窄（Task 15）」的处置与依据）：
+/// `as_str` 无通配臂、`parse` 带走通配臂；`plan` 表的 `review_state` 列用它落库，
+/// 表外取值读回 [`crate::PlanError::UnknownReview`]（经 [`crate::load_plan`]）。
 impl ReviewState {
     /// 六枚之一 → 落库字面量。**全函数**（闭集六枚）。**无通配臂**。
-    pub fn as_str(&self) -> &'static str {
+    pub(crate) fn as_str(&self) -> &'static str {
         match self {
             ReviewState::Draft => "draft",
             ReviewState::SelfReviewed => "self_reviewed",
@@ -181,7 +186,7 @@ impl ReviewState {
 
     /// [`ReviewState::as_str`] 的逆。**定义域是所有串**，认不出就是 `None`（理由同
     /// [`PlanType::parse`]）。
-    pub fn parse(s: &str) -> Option<ReviewState> {
+    pub(crate) fn parse(s: &str) -> Option<ReviewState> {
         match s {
             "draft" => Some(ReviewState::Draft),
             "self_reviewed" => Some(ReviewState::SelfReviewed),
@@ -314,7 +319,7 @@ impl ReviewState {
 ///
 /// | §228 字段 | 本结构体 | 说明 |
 /// |---|---|---|
-/// | `id` | [`PlanId`] | 落库主键的第一段（行级读写随后续 task） |
+/// | `id` | [`PlanId`] | 落库主键的第一段（行级读写由 Task 15 落地，见模块文档） |
 /// | `version` | [`PlanVersion`] | **两段式是本设计的决定**（§9.1，见模块文档） |
 /// | `intent_id` | [`IntentId`] | 不建外键（同 `intent.contract_id` 的处置） |
 /// | `type` | [`PlanType`] | Rust 关键字，用 raw identifier `r#type` 承载——**字段名没有**改成 `plan_type` |
@@ -376,10 +381,12 @@ pub struct Plan {
 ///
 /// # 为什么是纯函数、不碰库
 ///
-/// 本 task 的 `plan` 表没有行级读写（见模块文档）——修订的**两件事**在值层面
-/// 断言（`tests/plan.rs` 的 `a_revision_is_a_new_version_and_the_old_one_becomes_superseded`，
-/// 一条用例断言两件事都成立）；落库版的修订（INSERT 新版本 ＋ UPDATE 旧版本行）
-/// 随行级 I/O 一起落地。**这不是漏项**：规范要的是「不是原地改状态」这个事实，
+/// 修订的**两件事**在值层面断言（`tests/plan.rs` 的
+/// `a_revision_is_a_new_version_and_the_old_one_becomes_superseded`，一条用例断言
+/// 两件事都成立）；**落库版的修订（INSERT 新版本 ＋ UPDATE 旧版本行）已由 Task 15
+/// 落地**——[`crate::save_plan`]（新版本）＋ [`crate::apply_result`] 的 Plan 更新
+/// （旧版本行转 `SUPERSEDED`）。本函数仍是纯函数、不碰库（照它被两个值操作共用的
+/// 形状）。**这不是漏项**：规范要的是「不是原地改状态」这个事实，
 /// 本函数在类型上把它钉住——「原地改状态」的实现在那条用例里至少红一件。
 ///
 /// # 红条件（写在用例里）
@@ -402,9 +409,16 @@ pub fn revise(plan: &Plan) -> (Plan, Plan) {
 /// §339（`docs/spec/05-normative.md:2621-2643`）给四个词：
 /// `BLOCKER` / `MAJOR` / `MINOR` / `SUGGESTION`。**四值各一条照片**（`tests/plan.rs`
 /// 的 `every_review_finding_severity_has_a_photo`：各构造一枚、断言是**哪一枚**，
-/// 判别式读出经穷尽 `match`、不带 `..`）；落库字面量（小写）与 `parse` 定义域的照片
-/// 在同文件的 `enum_codes_use_lowercase_underscore_and_reject_out_of_table_values`
-/// （编码对为 `pub` 的加宽申报同 [`PlanType`]）。
+/// 判别式读出经穷尽 `match`、不带 `..`）；编码字面量（小写）与 `parse` 定义域的照片
+/// 在同文件的 `enum_codes_use_lowercase_underscore_and_reject_out_of_table_values`。
+///
+/// # 为什么这一对编码仍是 `pub`（与 [`PlanType`] / [`ReviewState`] 的收窄不同）
+///
+/// **`Severity` 没有表**（§339／§340 的审查记录不落库，见 [`ReviewFindingRecord`]），
+/// 故 Task 15 收窄 `PlanType` / `ReviewState` 的那条依据——「行级 I/O 落地后照片可经
+/// 库读回」——对它**没有可用的库面**：照片只能直调这一对（收进 `pub(crate)` 会让
+/// 照片失去 crate 外可核性，且无消费者会触发 `dead_code`）。这一对因此保持 `pub`，
+/// 收窄时点是「它有了落库形态或 crate 内消费者」之后。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     /// §339 的 `BLOCKER`。

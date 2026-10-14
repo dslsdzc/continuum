@@ -18,7 +18,7 @@
 //! | `the_user_review_view_has_exactly_the_eight_lines_of_341` | §341 的八项**逐项**（穷尽解构，**不带 `..`**）——**多一项即红、少一项即红、`成本` 与 `权限` 合并成一项即红** | 加／少／改名／合并即**编译不过**（负向守卫，本仓接受否定式照片） |
 //! | `the_user_review_view_has_no_field_pointing_at_internal_steps` | **否定式照片**：`src/review_view.rs` 里 `UserReviewView` 的字段集合**恰为八项**（源码面运行期对钉——编译期那半边在上一条） | 源码里多／少／改名／合并一个字段而清单未同步即红（词法扫描的限度写在用例里） |
 //! | `the_plan_table_has_exactly_the_expected_columns` | `PRAGMA table_info(plan)` 实际列 vs 手写期望，**逐列** | 加／少／改一列即红 |
-//! | `enum_codes_use_lowercase_underscore_and_reject_out_of_table_values` | `PlanType` 两枚、`ReviewState` 六枚、`Severity` 四枚的落库字面量**逐枚**（小写、多词接 `_`）＋ `parse` 的定义域（表外取值得 `None`） | 编码改成大写／去掉 `_`／与邻枚编成同一个串／表外取值被猜成某一枚即红 |
+//! | `enum_codes_use_lowercase_underscore_and_reject_out_of_table_values` | `PlanType` 两枚、`ReviewState` 六枚的落库字面量**逐枚**（小写、多词接 `_`）＋表外取值读回**具体 `Err`**——**经库**（两条编码对已随 Task 15 的行级 I/O 落地收窄为 `pub(crate)`，照片改由 `save_plan` 写入、raw 读列与 `load_plan` 读回）；`Severity` 四枚（无表，编码对仍是 `pub`）直接断言 | 编码改成大写／去掉 `_`／与邻枚编成同一个串／表外取值被猜成某一枚即红 |
 //!
 //! # 两处读法申报（写在用例里，收件人：复审者）
 //!
@@ -35,8 +35,9 @@
 //!
 //! `new_db()` 与 `tests/contract.rs` 的夹具同形（P0 内建迁移 ＋ 本 crate 迁移 110，
 //! 建库后必须 `migrate()`）；`sample_plan` **每个字段都取一个非默认值**，好让
-//! 「哪个字段没入表／与邻字段写串」这类错在读回比对里现形（本条 task 只建表，
-//! 行级读写是后续 task 的——**本文件里库只用于表列清单**）。
+//! 「哪个字段没入表／与邻字段写串」这类错在读回比对里现形。本文件本来只用于表列
+//! 清单；**Task 15 的 `save_plan` / `load_plan` 落地后**，编码列那条用例也走库
+//! （两条枚举编码对的收窄时点即此处）。
 //!
 //! # §340 的判定没有照片（照实写在此处）
 //!
@@ -51,8 +52,8 @@ use continuum_canonical::Opaque;
 use continuum_persist::{Db, Migration, Tx, Value, builtin_migrations};
 use continuum_semantics::{
     IntentId, ModelRefRef, Plan, PlanError, PlanId, PlanType, PlanVersion, ReviewFinding,
-    ReviewFindingRecord, ReviewState, ReviewIndependence, Severity, UserReviewView,
-    p4_semantics_migrations, revise,
+    ReviewFindingRecord, ReviewState, ReviewIndependence, Severity, UserReviewView, load_plan,
+    p4_semantics_migrations, revise, save_plan,
 };
 
 /// 建一个只装了 P0 内建迁移 ＋ 本 crate 迁移的临时库（与 `tests/contract.rs` 的夹具同形）。
@@ -90,6 +91,27 @@ fn sample_finding(severity: Severity) -> ReviewFinding {
         problem: Opaque::from_str("problem-1"),
         evidence: Opaque::from_str("evidence-1"),
         recommendation: Opaque::from_str("recommendation-1"),
+    }
+}
+
+/// `sample_plan` 的版本（v1.0）——`load_plan` / raw 读列的定位参数。
+fn sample_version() -> PlanVersion {
+    PlanVersion { major: 1, minor: 0 }
+}
+
+/// `plan` 表某一行的一列（raw 读——编码用例的判据是**库里那一列的字面量**，
+/// 不是类型方法）。
+fn raw_plan_column(tx: &Tx<'_>, id: &str, column: &str) -> String {
+    let rows = tx
+        .query(
+            &format!("SELECT {column} FROM plan WHERE id = ?1 AND major = 1 AND minor = 0"),
+            &[Value::text(id)],
+        )
+        .unwrap();
+    assert_eq!(rows.len(), 1, "plan 表里应有恰一行 {id:?} v1.0");
+    match &rows[0][0] {
+        Value::Text(s) => s.clone(),
+        other => panic!("`{column}` 列应是文本，实得 {other:?}"),
     }
 }
 
@@ -667,10 +689,11 @@ fn struct_field_names(source: &str, name: &str) -> Vec<String> {
 ///
 /// - `id`（主键第一段）；`version` 拆成 `major` ＋ `minor` 两列（两段式版本的落库形态，
 ///   §9.1）——它们连同 `id` 构成复合主键，同 `(id, major, minor)` 的二次写由主键拒绝
-///   （与 `contract` 的 `(id, version)` 同一条处置，行级读写在后续 task）；
+///   （与 `contract` 的 `(id, version)` 同一条处置；`save_plan` 的裸 `INSERT` 由
+///   Task 15 落地，同 `(id, major, minor)` 的二次写随它撞键得 `Err`）；
 /// - `type` / `review_state` 是两个**枚举列**（编码小写、多词接 `_`——`PlanType` /
 ///   `ReviewState` 的 `as_str`／`parse` 与类型同址，表外取值读回具体 `Err` 的处置
-///   随行级读写落地）；
+///   由 Task 15 的 `load_plan` 落地——`PlanError::UnknownType` / `UnknownReview`）；
 /// - 五个列表列（`objectives` / `milestones` / `assumptions` / `risks` /
 ///   `acceptance_conditions`）是 JSON 字符串数组（同 `specification` 的五个列表列）。
 ///
@@ -709,54 +732,94 @@ fn the_plan_table_has_exactly_the_expected_columns() {
     tx.commit().unwrap();
 }
 
-/// 三对枚举的落库编码：**逐枚**字面量（钉「小写、多词接 `_`」——枚举列纪律）、
-/// `parse` 的往返、表外取值得 `None`（**不取默认值**；「读回具体 `Err`」的处置随
-/// `plan` 的行级 I/O 落地，见 `src/plan.rs` 的模块文档）。
+/// `plan` 表的两个枚举列（`type` / `review_state`）与 `Severity` 的落库编码：
+/// **逐枚**字面量（钉「小写、多词接 `_`」——枚举列纪律）＋表外取值读回**具体 `Err`**
+/// （**不取默认值**）。
 ///
-/// 这一对编码为 `pub` 的加宽申报写在 `src/plan.rs` 的 `PlanType::as_str` 文档里
-/// （两条理由：本 task 的 `plan` 表无行级读写，照片只能落在集成测试；0 warning 下
-/// `pub(crate)` 无消费者会触发 `dead_code`）。**收窄回 `pub(crate)` 的时点是行级 I/O
-/// 落地之后**。
+/// # 两半的照片各在哪（Task 15 兑现 Task 13 的收窄条件）
+///
+/// `PlanType` / `ReviewState` 的编码对曾为 `pub`（加宽申报的两条理由在本 task 写于
+/// `src/plan.rs`：本 task 的 `plan` 表无行级读写，照片只能落在集成测试）——**收窄回
+/// `pub(crate)` 的时点即行级 I/O 落地之后**。Task 15 的 `save_plan` / `load_plan`
+/// 落地后照片改经库：各枚 `save_plan` 写一行、raw 读列断言字面量；表外取值经
+/// `load_plan` 读回 [`PlanError::UnknownType`] / [`PlanError::UnknownReview`]。
+/// `Severity` **没有表**（§339 的审查记录不落库），编码对仍是 `pub`——四枚直接断言。
 ///
 /// 红条件：把某一枚编成大写／去掉 `_`／与邻枚编成同一个串即红；`parse` 对表外
-/// 取值给出某一枚（而不是 `None`）即红。
+/// 取值给出某一枚（而不是具体 `Err`）即红。
 #[test]
 fn enum_codes_use_lowercase_underscore_and_reject_out_of_table_values() {
-    // PlanType 两枚。
-    assert_eq!(PlanType::Strategic.as_str(), "strategic");
-    assert_eq!(PlanType::Execution.as_str(), "execution");
-    assert_eq!(PlanType::parse("strategic"), Some(PlanType::Strategic));
-    assert_eq!(PlanType::parse("execution"), Some(PlanType::Execution));
-    assert_eq!(PlanType::parse("nonsense"), None);
+    let (_d, db) = new_db();
+    let tx = db.begin().unwrap();
 
-    // ReviewState 六枚。
-    assert_eq!(ReviewState::Draft.as_str(), "draft");
-    assert_eq!(ReviewState::SelfReviewed.as_str(), "self_reviewed");
-    assert_eq!(ReviewState::AiReviewed.as_str(), "ai_reviewed");
-    assert_eq!(ReviewState::UserApproved.as_str(), "user_approved");
-    assert_eq!(ReviewState::Rejected.as_str(), "rejected");
-    assert_eq!(ReviewState::Superseded.as_str(), "superseded");
-    assert_eq!(ReviewState::parse("draft"), Some(ReviewState::Draft));
-    assert_eq!(
-        ReviewState::parse("self_reviewed"),
-        Some(ReviewState::SelfReviewed)
-    );
-    assert_eq!(
-        ReviewState::parse("ai_reviewed"),
-        Some(ReviewState::AiReviewed)
-    );
-    assert_eq!(
-        ReviewState::parse("user_approved"),
-        Some(ReviewState::UserApproved)
-    );
-    assert_eq!(ReviewState::parse("rejected"), Some(ReviewState::Rejected));
-    assert_eq!(
-        ReviewState::parse("superseded"),
-        Some(ReviewState::Superseded)
-    );
-    assert_eq!(ReviewState::parse("nonsense"), None);
+    // PlanType 两枚：各写一行，raw 读 `type` 列。
+    for (ty, code) in [
+        (PlanType::Strategic, "strategic"),
+        (PlanType::Execution, "execution"),
+    ] {
+        let mut plan = sample_plan(&format!("p-type-{code}"));
+        plan.r#type = ty;
+        save_plan(&tx, &plan).unwrap();
+        assert_eq!(
+            raw_plan_column(&tx, &format!("p-type-{code}"), "type"),
+            code,
+            "PlanType 的落库字面量应是「小写、多词接 `_`」（经库读回）"
+        );
+    }
 
-    // Severity 四枚。
+    // ReviewState 六枚：同上，raw 读 `review_state` 列。
+    for (state, code) in [
+        (ReviewState::Draft, "draft"),
+        (ReviewState::SelfReviewed, "self_reviewed"),
+        (ReviewState::AiReviewed, "ai_reviewed"),
+        (ReviewState::UserApproved, "user_approved"),
+        (ReviewState::Rejected, "rejected"),
+        (ReviewState::Superseded, "superseded"),
+    ] {
+        let mut plan = sample_plan(&format!("p-review-{code}"));
+        plan.review_state = state;
+        save_plan(&tx, &plan).unwrap();
+        assert_eq!(
+            raw_plan_column(&tx, &format!("p-review-{code}"), "review_state"),
+            code,
+            "ReviewState 的落库字面量应是「小写、多词接 `_`」（经库读回）"
+        );
+    }
+
+    // 表外取值：读回**具体 `Err`**（带原始串、不取默认值）。
+    tx.execute(
+        "UPDATE plan SET type = 'nonsense' WHERE id = 'p-type-strategic'",
+        &[],
+    )
+    .unwrap();
+    let err = load_plan(&tx, &PlanId::from_str("p-type-strategic"), sample_version()).unwrap_err();
+    assert_eq!(
+        err,
+        PlanError::UnknownType {
+            value: "nonsense".to_owned()
+        },
+        "type 的表外取值应原样带出（不是被猜成某一枚）"
+    );
+    tx.execute(
+        "UPDATE plan SET type = 'strategic' WHERE id = 'p-type-strategic'",
+        &[],
+    )
+    .unwrap();
+    tx.execute(
+        "UPDATE plan SET review_state = 'nonsense' WHERE id = 'p-review-draft'",
+        &[],
+    )
+    .unwrap();
+    let err = load_plan(&tx, &PlanId::from_str("p-review-draft"), sample_version()).unwrap_err();
+    assert_eq!(
+        err,
+        PlanError::UnknownReview {
+            value: "nonsense".to_owned()
+        },
+        "review_state 的表外取值应原样带出"
+    );
+
+    // Severity 四枚（**没有表**——编码对仍是 `pub`，理由见上面与 `src/plan.rs`）。
     assert_eq!(Severity::Blocker.as_str(), "blocker");
     assert_eq!(Severity::Major.as_str(), "major");
     assert_eq!(Severity::Minor.as_str(), "minor");
@@ -766,4 +829,6 @@ fn enum_codes_use_lowercase_underscore_and_reject_out_of_table_values() {
     assert_eq!(Severity::parse("minor"), Some(Severity::Minor));
     assert_eq!(Severity::parse("suggestion"), Some(Severity::Suggestion));
     assert_eq!(Severity::parse("nonsense"), None);
+
+    tx.commit().unwrap();
 }

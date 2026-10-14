@@ -410,6 +410,11 @@ fn the_layer_has_no_function_that_takes_a_verification_requirement_as_a_judging_
         "src/contract.rs: pub struct VerificationRequirement(String);",
         // `contract.rs`：`Requirement` 的字段声明（类型名出现在这里）。
         "src/contract.rs: pub verification_requirement: VerificationRequirement,",
+        // `decision.rs`：`RequirementUpdate` 的字段声明（`Option` 承载「不改」——
+        // 它是 patch 的**值**，不是判定输入）。
+        "src/decision.rs: pub verification_requirement: Option<VerificationRequirement>,",
+        // `decision.rs`：import（Task 15 的 `RequirementUpdate` 要用这个类型）。
+        "src/decision.rs: use crate::contract::{RequirementClass, VerificationRequirement};",
         // `lib.rs`：re-export（crate 外可命名这个类型）。
         "src/lib.rs: pub use contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};",
         // `persist.rs`：import。

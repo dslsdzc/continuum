@@ -2,7 +2,8 @@
 //!
 //! 本 crate 是 P4 的**语义层**成员，落《工程》§2.1 组件表里 Intent 存储与状态机
 //! 那一格（§222 / §223）以及它之后的 Specification / Contract / Plan / Decision /
-//! Constraint Validator（后三者由后续 task 追加进本 crate）。
+//! Constraint Validator——后五者由 Task 10／11／13／15／16 逐一追加，**Task 15 之后
+//! 全部落地**。
 //!
 //! # 本层不依赖任何下层（设计 §1.2／§1.2.3）
 //!
@@ -194,25 +195,60 @@
 //! `affected_scope` 的表外取值往返、输入面签名（`fn` 指针标注 ＋ 两个阈值判据真的
 //! 被调用）。
 //!
+//! Task 15 落 §331 的 Decision 对象与 §332 的恢复链（设计 §10.1／§10.2）：
+//!
+//! - **§331 的五个成员**（[`Decision`]）：`issue` / `options`（一组
+//!   [`DecisionOption`]＝「选项 ＋ 后果」的配对，§106 的「每个选项带后果」落在
+//!   [`DecisionOption::new`] 的**构造期**——「等长」由类型保证）／`blocking`；
+//!   另补 `id` 与 `intent_id` 两个字段（申报在 [`DecisionId`] 与 `decision.rs`）；
+//! - **`blocking` 是被给的事实**：本层只在 §10.1 的两个触发点写 `true`（经
+//!   [`create_decision`] 照收），**不发明 `false` 的触发条件**（§16 第 16 条）；
+//! - **§107 的 `DecisionResult`**：指向某个 `Decision` 与某个 `DecisionOption`
+//!   （`decision_id` ＋ `option_index`）＋ 对 Contract/Plan 的**指名 patch**
+//!   （[`ContractUpdate`] / [`PlanUpdate`]，形状是本实现的落点）＋ `decided_at`；
+//!   [`apply_result`] 的输入只有它——不是自由文本、不重跑 Intent Compiler；
+//! - **§332 的恢复链四步同一事务**（[`apply_result`]，**不自己 `commit`**）：
+//!   `DecisionResult` 落库（[`save_decision_result`]：行 ＋ `UserApprovals` 审计）
+//!   → Contract/Plan 新版本（前者 `base + 1`；后者 `major` +1、`DRAFT`、旧版本转
+//!   `SUPERSEDED`）→ Intent 从 `SUSPENDED` 回 `RUNNING`（`Graph invalidation`
+//!   归执行层）；失败路径**四张表**（`decision_result` / `contract` / `plan` /
+//!   `intent`）无半写行；
+//! - **两张新表**（迁移 110 的第六、七张表，§2.4 的七张由此齐）：`decision`
+//!   （`options` 存一组配对对象）与 `decision_result`（主键 `decision_id`——
+//!   一个决策恰一个回答）；`plan` 的行级 I/O（[`save_plan`] / [`load_plan`]，Task 13
+//!   预告的那一半）随本 task 落地，`PlanType` / `ReviewState` 的编码对随之下
+//!   **收窄回 `pub(crate)`**（Task 13 写明的收窄条件）；
+//! - **§5.4 的另外两个写入点**：[`create_decision`] 写 `DecisionRequired` 事件；
+//!   [`save_decision_result`] 写 `UserApprovals` 审计（**本层是它的第二个生产方**
+//!   ——第一个是 `continuum-workspace` 的 Integration Gate，同一 kind 下不保证载荷
+//!   同形，§16 第 33 条）。
+//!
+//! 以 `tests/decision.rs` 的十余条用例钉住：等长读回（枚举三档）＋ trybuild 反例／
+//! 正控制、两个触发点的 `blocking == true`、公开面恰好一个 `Decision`、
+//! `DecisionRequired` 恰一条、只改被指名字段（逐项）、无「文本重编译」路径、
+//! 恢复链失败路径四张表无半写、`UserApprovals` 恰一条（第二生产方）、
+//! 『指向』的 fail-closed 两侧、表外取值具体 `Err`、同 id 二次创建撞主键。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
-//! - **§5.4 的其余三个写入点**：`PlanReviewRequired` / `DecisionRequired`
-//!   （`EventType`）与 `UserApprovals`（`AuditKind`）由用它们的 task 落
-//!   （`DecisionRequired` 与 `UserApprovals` 归 Task 15；**`PlanReviewRequired`
-//!   尚无归属 task**——Task 13 的用例清单不含事件条目，本 task 不为它发明写入点）。
-//!   本 crate 今日的写入点：`events` 两条（`IntentCreated` / `IntentCompleted`，
-//!   Task 8 / 9）＋ `audit_log` 一条（`ContractChanges`，Task 11，
-//!   见 [`save_contract`]）。
+//! - **§5.4 的最后一个无归属写入点**：`PlanReviewRequired`（`EventType`）
+//!   ——**尚无归属 task**（Task 13 的用例清单不含事件条目，本 crate 至今不为它
+//!   发明写入点）。本 crate 今日的写入点：`events` 三条（`IntentCreated` /
+//!   `IntentCompleted` / `DecisionRequired`，Task 8／9／15）＋ `audit_log` 两条
+//!   （`ContractChanges` / `UserApprovals`，Task 11／15，见 [`save_contract`] /
+//!   [`save_decision_result`]）。
 //! - **不建 ADFIR 图、不引用 `continuum-graph`**：`graph_id` 取不透明串
 //!   （[`GraphIdRef`]，设计 §1.2.3 的规则 3），故本 crate 对执行层的依赖边为零
 //!   （照片：`tests/intent.rs` 的 `graph_id_and_product_id_are_opaque_strings`——
 //!   它扫本 crate 的 `src/`，断言执行层 crate 的**下划线标识符拼法**零命中）。
-//! - 迁移 110 的其余两张表（`decision` / `decision_result`）由 Task 15
-//!   追加进**同一个迁移项的 SQL**（不是第二个 110 号项——那会被 `migrate()` 静默跳过，
-//!   见 [`p4_semantics_migrations`] 的文档）。
+//! - **迁移 110 的七张表已齐**（Task 15 的 `decision` / `decision_result` 追加进
+//!   **同一个迁移项的 SQL**——不是第二个 110 号项，那会被 `migrate()` 静默跳过，
+//!   见 [`p4_semantics_migrations`] 的文档）。**110 段此后不应再有新表**；
+//!   §332 的 `Graph invalidation` 与 `Resume` 的执行侧（节点解禁、任务续跑）归执行层。
 
 mod constraint;
 mod contract;
+mod decision;
 mod diff;
 mod error;
 mod ids;
@@ -228,16 +264,20 @@ pub use constraint::{
     CandidatePlan, ConstraintError, ConstraintVerdict, PlanFootprint, ViolatedProhibition, validate,
 };
 pub use contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
+pub use decision::{
+    ContractUpdate, Decision, DecisionOption, DecisionResult, PlanUpdate, RequirementUpdate,
+};
 pub use diff::{ContractDiff, DiffClass, DiffEntry, UnjudgedChange, UnjudgedReason, diff};
-pub use error::{ContractError, IntentError, IntentStatusError, PlanError, SpecError};
-pub use ids::{ContractId, IntentId, PlanId, RequirementId};
+pub use error::{ContractError, DecisionError, IntentError, IntentStatusError, PlanError, SpecError};
+pub use ids::{ContractId, DecisionId, IntentId, PlanId, RequirementId};
 pub use intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
 pub use intent_tx::apply_intent_transition;
 pub use persist::{
-    list_children, load_contract, load_intent, load_specification, p4_semantics_migrations,
-    save_contract, save_intent, save_intent_with_specification,
+    apply_result, create_decision, list_children, load_contract, load_decision, load_intent,
+    load_plan, load_specification, p4_semantics_migrations, save_contract, save_decision_result,
+    save_intent, save_intent_with_specification, save_plan,
 };
 pub use plan::{
     ModelRefRef, Plan, PlanType, PlanVersion, ReviewFinding, ReviewFindingRecord, ReviewState,

@@ -1,4 +1,4 @@
-//! Task 10／11 的**编译期**用例：crate 外「写不出来」的不可表达性命题，
+//! Task 10／11／15 的**编译期**用例：crate 外「写不出来」的不可表达性命题，
 //! 各配一份 `tests/compile_fail/*.rs` ＋ 同名 `.stderr`；Task 11 起另配
 //! `tests/compile_pass/*.rs`（**应编得过**的正控制）。
 //!
@@ -10,8 +10,13 @@
 //!
 //! # 本目录的样例**逐份点名**（便于对数：这段点名的项数必须等于目录里 `.rs` 的份数）
 //!
-//! `tests/compile_fail/`（**六份**，应编不过）：
+//! `tests/compile_fail/`（**七份**，应编不过）：
 //!
+//! - **`a_decision_option_cannot_be_built_without_a_consequence`** —— §106 的「每个选项
+//!   带后果」落在**构造期**：`DecisionOption::new` 少给第二个参数（E0061 那一类）与
+//!   结构体字面量少 `consequence` 字段（E0063 那一类）**两面都编不过**——不存在
+//!   「只带选项」的记录形态。预期错误码逐枚见实跑取值的 `.stderr`。
+//!   正控制是同名的 compile_pass 那份（两参 `new` 编得过）。（Task 15 追加。）
 //! - **`a_specification_cannot_be_constructed_outside_the_crate`** —— `Specification` 的
 //!   六个字段私有、无公开构造函数，故 crate 外拼不出结构体字面量（哪怕六个字段全列齐）。
 //!   它钉 §227 两句 MUST 的类型落点里「唯一构造入口是 `SpecDraft::finalize`」那一半；
@@ -39,8 +44,14 @@
 //!   三份合起来是「公开方法集只有 `as_str` / `from_str`」的可判形态。
 //!   （Task 11 追加。）
 //!
-//! `tests/compile_pass/`（**一份**，**应编得过**，是上面那三份反例的正控制）：
+//! `tests/compile_pass/`（**两份**，**应编得过**，各是它那份反例的正控制）：
 //!
+//! - **`decision_option_new_takes_option_and_consequence`** ——
+//!   `DecisionOption::new(option, consequence)` 编得过、两个字段读得出：
+//!   §106 的「每个选项带后果」是「两个都要」，**不是**「没有公开面」。
+//!   **没有它**，`a_decision_option_cannot_be_built_without_a_consequence` 的绿可以来自
+//!   「把 `new` 改成一参／字段删光」这类与判据无关的坏法（恒绿的守卫比没有更坏）。
+//!   （Task 15 追加。）
 //! - **`verification_requirement_as_str_is_usable`** —— `VerificationRequirement::from_str` /
 //!   `as_str` 编得过：§7.2 的禁读是「没有判定方法」，**不是**「没有公开面」。
 //!   **没有它**，三份 `verification_requirement_has_no_*` 的绿可以来自「把公开面删光」
@@ -77,8 +88,9 @@
 // **公开 API 从 crate 外真的拿得到**那一侧的证据因此不止一处：`tests/spec.rs` /
 // `tests/contract.rs`（整份都是 crate 外代码）与 `tests/compile_pass/` 的正控制。
 
-/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**六份**。
-const COMPILE_FAIL_SAMPLES: [&str; 6] = [
+/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**七份**。
+const COMPILE_FAIL_SAMPLES: [&str; 7] = [
+    "a_decision_option_cannot_be_built_without_a_consequence",
     "a_draft_without_unknowns_cannot_be_finalized",
     "a_specification_cannot_be_constructed_outside_the_crate",
     "conflict_and_undefined_behaviour_are_types_only",
@@ -87,8 +99,11 @@ const COMPILE_FAIL_SAMPLES: [&str; 6] = [
     "verification_requirement_has_no_is_satisfied",
 ];
 
-/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**一份**。
-const COMPILE_PASS_SAMPLES: [&str; 1] = ["verification_requirement_as_str_is_usable"];
+/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**两份**。
+const COMPILE_PASS_SAMPLES: [&str; 2] = [
+    "decision_option_new_takes_option_and_consequence",
+    "verification_requirement_as_str_is_usable",
+];
 
 /// 两条通配收走两个目录——**清单的同步由下一条用例对钉**。
 #[test]
