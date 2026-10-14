@@ -8,7 +8,7 @@
 //! | `the_candidate_plan_is_a_value_of_a_plan_plus_a_footprint` | **输入面签名**：`CandidatePlan<'a> { plan: &'a Plan, footprint: &'a PlanFootprint }` 两字段**逐项穷尽解构**（不带 `..`）；`validate` 的 `fn` 指针标注钉死四参数与返回类型（**不收 `&Tx`、不收 `&dyn` 来源**——§1.2.3 规则 3：跨层输入以值进入） | 加一个参数（如 `&Tx`）／换返回类型／改字段名即**编译不过** |
 //! | `the_four_footprint_fields_are_all_declared` | `PlanFootprint` 四字段**逐项**（穷尽解构，不带 `..`）：`authority` / `privacy_class` / `external_effects` / `estimated_cost` | 加／少／改名一个字段即**编译不过** |
 //! | `the_seven_may_changes_are_all_allowed` | §225 的 MAY **七条逐项**：各构造一条 `execution_policy`、断言 `Satisfied`（放行）；表长恰 7 | 把任一条 MAY 误当禁令拦下即红（**该条红**） |
-//! | `the_three_prohibitions_are_all_blocked` | §225 的 MUST NOT 后三条**逐项**：各一条，断言 `ViolatesProhibition { what }` 且 `what` 是**对应那一枚**（`Authority` / `Privacy` / `Effect`）；表长恰 3 | 不拦（**移除档**）／拦成另一枚（`what` 断言红） |
+//! | `the_three_prohibitions_are_all_blocked` | §225 的 MUST NOT 后三条**逐项**：各一条，断言 `ViolatesProhibition { what }` 且 `what` 是**对应那一枚**（`Authority` / `Privacy` / `Effect`）；表长恰 3；**第三条禁令的两个文档字面**（§225 原文版与设计 §11.2／brief 的省略版）各自被拦 | 不拦（**移除档**）／拦成另一枚（`what` 断言红） |
 //! | `the_node_side_inputs_keep_their_original_types` | **输入面签名第二侧**：`Node.constraints` 以 `&[String]`、`Node.execution_policy` 以 `&serde_json::Value` 进入（`fn` 指针标注），**不经过本层的类型转换**；第二侧：本 crate 的 `src/` 里执行层 crate 的下划线拼法零命中 | 换成本层自定义类型即**编译不过**；取执行层类型即源码扫描红 |
 //! | `a_violation_of_a_required_requirement_is_blocked` | 裁决第 1 条（§11.3）：键**命中**一条 `class = REQUIRED` 的 Requirement → `ViolatesRequired { requirement }`，断言 `requirement` 是**那一个** | 不拦（**移除档**）／带上别的 id |
 //! | `a_violation_of_the_other_three_classes_is_not_blocked` | 裁决第 2–4 条：`PREFERRED` / `FLEXIBLE` / `UNSPECIFIED` **各一条**「违反但不拦下」（§224 的四类含义） | 把所有 class 的违反一律拦下（**放宽档**——这三条红） |
@@ -28,11 +28,13 @@
 //!
 //! - **`execution_policy` 的形状是本层读的**：`Node.execution_policy` 的结构规范未给
 //!   （§236 只有字段名，`docs/spec/05-normative.md:558-580`）。本用例集把它读作
-//!   **一组变更名的 JSON 数组**（元素为 §225 清单的原文词）；命中 MUST NOT 后三条 → 拦、
+//!   **一组变更名的 JSON 数组**（元素为清单在文档里逐字出现过的写法——§225 与
+//!   设计 §11.2 正文；第三条禁令因此有两个字面）；命中 MUST NOT 后三条 → 拦、
 //!   命中 MAY 七条或不命中任何清单条目 → 放行。读法的边界与代价写在 `src/constraint.rs`。
-//! - **第三条禁令的字面照 §225 原文**作「擅自增加高风险外部副作用」（含「擅自」二字）：
-//!   §11.3 的对应表逐字如此；本 brief 与设计 §11.2 正文的「增加高风险外部副作用」是
-//!   同一枚的简称。
+//! - **第三条禁令有**两个**文档逐字有源的字面**：「擅自增加高风险外部副作用」（§225
+//!   原文与 §11.3 的对应表）与「增加高风险外部副作用」（设计 §11.2 正文与 task brief
+//!   的转述——§11.2 明说它「属 MUST NOT（拦下）」）。**两个都拦**（fix 轮 1 订正：
+//!   此前只收含「擅自」的那一条）。
 //! - **`constraints` 的键命中 `REQUIRED` 的那一路**：§11.3 判据 3 的订正段写死了
 //!   「命中之后**按 REQUIRED 那一路去判**」——即一个键命中 `REQUIRED` 的 Requirement
 //!   时为 `ViolatesRequired`；命中非 `REQUIRED` 时裁决由该 Requirement 的 `class` 决定。
@@ -217,7 +219,8 @@ fn the_seven_may_changes_are_all_allowed() {
 /// §225 的 MUST NOT 后三条**逐项**（§11.2 的 10 条之 3）：各一条，
 /// 断言 `ViolatesProhibition { what }` 且 `what` 是**对应那一枚**。
 ///
-/// 字面照 §225 原文（含「擅自」——见文件头的读法申报）。
+/// 第三条禁令有**两个文档逐字有源的字面**（§225 原文版与设计 §11.2／brief 的省略版），
+/// 补一条省略字面的输入——**两条字面各自被拦**（fix 轮 1；见文件头的读法申报）。
 ///
 /// **红条件**：不拦（**移除档**）即该条红；拦成另一枚（`what` 不是对应那枚）即该条红。
 #[test]
@@ -241,6 +244,19 @@ fn the_three_prohibitions_are_all_blocked() {
                 assert_eq!(what, expected, "{change} 应对应 {expected:?} 那一枚");
             }
             other => panic!("{change} 属 §225 的 MUST NOT 后三条，应拦下，实得 {other:?}"),
+        }
+    }
+
+    // 第三条禁令的**两个文档字面**各自被拦：§225 原文版（上面主表已跑）与
+    // 设计 §11.2 正文 / task brief 的省略版（§11.2 明说它「属 MUST NOT（拦下）」）。
+    // fix 轮 1 补——只有含「擅自」的那一条曾被拦，省略版走 `None` 被放行。
+    for change in ["擅自增加高风险外部副作用", "增加高风险外部副作用"] {
+        let policy = serde_json::json!([change]);
+        match validate(&candidate, &contract, &[], &policy) {
+            Ok(ConstraintVerdict::ViolatesProhibition { what }) => {
+                assert_eq!(what, ViolatedProhibition::Effect, "{change} 应对应 Effect 那一枚");
+            }
+            other => panic!("{change} 属 §225 的 MUST NOT，应拦下，实得 {other:?}"),
         }
     }
 }
