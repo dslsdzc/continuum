@@ -141,6 +141,32 @@
 //! 独立性字段逐项、同模型同上下文可观察、八项视图的三侧负向守卫、八项无内部步骤
 //! 字段（源码面对钉）、`plan` 表列清单逐列、三对枚举的编码逐枚。
 //!
+//! Task 16 落 §225 的 Contract 不可越权原则与 §6 的 Constraint Violation Gate
+//! （设计 §11.2／§11.3／§11.4）：
+//!
+//! - **两条拦下路径**：[`ConstraintVerdict::ViolatesRequired`]（`constraints` 里的键
+//!   命中一条 `class = REQUIRED` 的 Requirement——§11.3 判据 3 的订正段：「命中之后
+//!   按 REQUIRED 那一路去判」）与 [`ConstraintVerdict::ViolatesProhibition`]
+//!   （§225 的 MUST NOT 后三条，`what` 指出是哪一枚）；
+//! - **「判不了」走 `Err`**：[`ConstraintError::UnknownConstraintKey`]——触发条件是
+//!   「`key` 不在当前 Contract 的 Requirement id 集合里」，**与 `class` 无关**；
+//!   三侧照片（悬空键 `Err`／空表不是 `Err`／命中非 REQUIRED 键不是 `Err`）**合起来
+//!   才算钉住**；
+//! - **输入面是值**：[`CandidatePlan`]（§228 的 `Plan` ＋ [`PlanFootprint`]——§225
+//!   后三条的对偶声明的载体，Task 14 的 `classify` 复用它）＋ 图侧以**原样类型**
+//!   进入的 `&[String]` / `&serde_json::Value`（不经过本层的类型转换）；
+//! - **`execution_policy` 的读法**（**本设计的读法**，申报在 `constraint.rs` 的模块
+//!   文档里）：一组变更名的 JSON 数组，字面取 §225 清单的原文词；命中禁令三条 →
+//!   拦、其余 → 放行。读法的边界（未知条目不拦、逐字比对、非数组视为无声明）与代价
+//!   与读法同址；
+//! - **§11.4**：[`validate`] **自己不挂起、不写 Intent 状态**——只返回裁决
+//!   （不收 `&Tx`、不写任何表）。
+//!
+//! 以 `tests/constraint.rs` 的十条用例钉住：输入面两条（`fn` 指针标注 ＋ 穷尽解构）、
+//! `execution_policy` 的 7（MAY 逐项放行）＋ 3（MUST NOT 后三条逐项拦下）＝ 10 条、
+//! 原样类型一条（含 `src/` 的执行层 crate 拼法零命中）、裁决五条（REQUIRED 一条 ＋
+//! 三 class 的「违反但不拦下」）、「判不了」三侧。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
 //! - **§5.4 的其余三个写入点**：`PlanReviewRequired` / `DecisionRequired`
@@ -158,6 +184,7 @@
 //!   追加进**同一个迁移项的 SQL**（不是第二个 110 号项——那会被 `migrate()` 静默跳过，
 //!   见 [`p4_semantics_migrations`] 的文档）。
 
+mod constraint;
 mod contract;
 mod diff;
 mod error;
@@ -169,6 +196,9 @@ mod plan;
 mod review_view;
 mod spec;
 
+pub use constraint::{
+    CandidatePlan, ConstraintError, ConstraintVerdict, PlanFootprint, ViolatedProhibition, validate,
+};
 pub use contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
 pub use diff::{ContractDiff, DiffClass, DiffEntry, UnjudgedChange, UnjudgedReason, diff};
 pub use error::{ContractError, IntentError, IntentStatusError, PlanError, SpecError};
