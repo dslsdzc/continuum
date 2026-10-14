@@ -95,6 +95,25 @@
 //! `ContractChanges` 恰一条且与 INSERT 同事务、六个 Opaque 字段逐项往返、
 //! `RequirementId` 的不改写照片。
 //!
+//! Task 12 落 §226 的 ContractDiff（设计 §8.1／§8.2）：
+//!
+//! - **四类差异的判定**：[`DiffClass`] **恰好四枚**（`Added` / `Removed` /
+//!   `Strengthened` / `Weakened`）——id 集判增删；同 id 比 `class` 的序
+//!   （`UNSPECIFIED < FLEXIBLE < PREFERRED < REQUIRED`——**本设计推出来的序、
+//!   不是原文给的**，§8.1 的订正段）；`class` 相同而 `expression` 变了**不下判**
+//!   （§224 未给表达式语法，「Requirement 表达式的语义比较」这一步本层没有，
+//!   §16 第 12 条）；
+//! - **未判定走并列字段** [`UnjudgedChange`]（`ContractDiff.unjudged`）：它是
+//!   「记录」，不是差异类，**不进 `entries`、不进 `DiffClass`**（§8.1 的订正段）；
+//! - **纯函数**：[`diff`] 收两个 [`ContractRef`] ＋ 两侧 [`Requirement`] 集合——
+//!   不收 `&Tx`、不读写库、不调 `propagate_invalidation`、不引用 `continuum-graph`
+//!   （§8.2；今天这条边没有消费者，§16 第 13 条）。
+//!
+//! 以 `tests/diff.rs` 的七条用例钉住：四枚各一条（枚名经穷尽 `match` 读出——
+//! 加第五枚即编译不过）、id 集判增删、序升/降、**三对逐对**的序、同 class 异
+//! expression 进 `unjudged` 且不在 `entries`、字段清单逐项（穷尽解构、不带 `..`）、
+//! 签名只有两个 ref ＋ 两侧集合（`fn` 指针类型标注）。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
 //! - **§5.4 的其余三个写入点**：`PlanReviewRequired` / `DecisionRequired`
@@ -111,6 +130,7 @@
 //!   见 [`p4_semantics_migrations`] 的文档）。
 
 mod contract;
+mod diff;
 mod error;
 mod ids;
 mod intent;
@@ -119,6 +139,7 @@ mod persist;
 mod spec;
 
 pub use contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
+pub use diff::{ContractDiff, DiffClass, DiffEntry, UnjudgedChange, UnjudgedReason, diff};
 pub use error::{ContractError, IntentError, IntentStatusError, SpecError};
 pub use ids::{ContractId, IntentId, PlanId, RequirementId};
 pub use intent::{
