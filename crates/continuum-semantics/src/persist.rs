@@ -1,6 +1,9 @@
-//! `intent` / `specification` / `contract` / `contract_requirement` 四张表
+//! `intent` / `specification` / `contract` / `contract_requirement` / `plan` 五张表
 //! （迁移 **110**）与它们的行级读写
-//! （设计 §5.1／§5.2／§5.4／§6.1／§6.2／§7.1／§7.3）。
+//! （设计 §5.1／§5.2／§5.4／§6.1／§6.2／§7.1／§7.3／§9.1）。
+//! **`plan` 表由 Task 13 建表、行级 I/O 随后续 task**（本 task 的用例清单没有
+//! I/O 用例；§10.2 的恢复链要写 `plan` 行——它的写读函数随第一个有 I/O 用例的
+//! task 落地，见 [`p4_semantics_migrations`] 的文档）。
 //!
 //! # 本文件与 `intent.rs` 的分工（一处与计划正文不同的落点，理由在此）
 //!
@@ -21,7 +24,7 @@
 //! Task 20 之后不得再改）。**「追加」的落点是同一个迁移项的 SQL 字符串**——
 //! 见 [`p4_semantics_migrations`] 的文档（第二个 110 号迁移项会被 `migrate()`
 //! 静默跳过）。Task 8 加 `intent`；**Task 10 加 `specification`**；
-//! **Task 11 加 `contract` 与 `contract_requirement`**。
+//! **Task 11 加 `contract` 与 `contract_requirement`**；**Task 13 加 `plan`**。
 //!
 //! 编号 **110**：1、2 是 `continuum-persist` 的内建（events、audit_log），10 是 P1 的
 //! artifact，20 是 P1 的 graph，30 是 P2 的 workspace，40 是 P2 的 effect，41 是 P2 的
@@ -84,8 +87,8 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
                        parent_intent, contract_id, contract_version, active_plan_id, graph_id, \
                        product_id, completion_predicate";
 
-/// 本 crate 的四张表（`intent` / `specification` / `contract` / `contract_requirement`）
-/// 上注册的迁移（设计 §2.4 的 110 段）。
+/// 本 crate 的五张表（`intent` / `specification` / `contract` / `contract_requirement` /
+/// `plan`）上注册的迁移（设计 §2.4 的 110 段）。
 ///
 /// # 110 是**一个迁移项**，表**逐表追加进它的 SQL**
 ///
@@ -94,7 +97,7 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 /// （`crates/continuum-persist/src/db.rs:103-112`），同号的第二个迁移项会被**静默跳过**
 /// （第二个表永不建）。照片是 `tests/intent.rs` 的
 /// `the_migration_registers_every_table_of_the_110_item`：它断言
-/// **`len() == 1`**、并逐表断言 SQL 里每张表都在（Task 8–11 共四张），
+/// **`len() == 1`**、并逐表断言 SQL 里每张表都在（Task 8–13 共五张），
 /// 那条 `len() == 1` 正是这件事的守卫。
 ///
 /// 〔订正（2026-10-14，Task 10）〕本注释初版写「其余六张……追加进**同一个**
@@ -143,6 +146,31 @@ const COLUMNS: &str = "id, version, kind, goal, status, priority, created_at, up
 ///   §7.2 的「只存不判」：禁读的是**方法**，不是列。
 /// - **两张表都不建外键**（同 `intent.contract_id` 的处置）：跨记录对应关系由写路径的
 ///   调用方保证，本层不在库里登记引用约束。
+///
+/// # `plan` 表的形状（Task 13 追加）
+///
+/// - 主键 `(id, major, minor)`——§228 的 `version` 是**两段式**（§9.1：`major` 在
+///   MATERIAL 时 +1、`minor` 在 MINOR 时 +1），故版本拆成两列、连同 `id` 构成复合
+///   主键：多版本并存（§213 的版本化）、同 `(id, major, minor)` 的二次写由主键拒绝
+///   （与 `contract` 的 `(id, version)` 同一条处置；`INSERT`／读函数随行级 I/O 落地）。
+/// - 十一个列：[`crate::Plan`] 的十个字段里**九个直接成列**（`id` / `intent_id` /
+///   `type` / `objectives` / `milestones` / `assumptions` / `risks` /
+///   `acceptance_conditions` / `review_state`），`version` **拆成两列**（`major` ＋
+///   `minor`）——9 ＋ 2 ＝ 11。
+///   **列清单逐列的照片**：`tests/plan.rs` 的
+///   `the_plan_table_has_exactly_the_expected_columns`。
+/// - `type` / `review_state` 是两个**枚举列**（编码 / 解码挂在
+///   `PlanType::as_str`／`parse` 与 `ReviewState::as_str`／`parse` 上，与类型同址），
+///   表外取值读回具体 `Err` 的处置随行级 I/O 落地（PlanError 的相应变体也在那时加——
+///   本 task 不为零产生方的错误变体留位）。
+/// - 五个列表列（`objectives` / `milestones` / `assumptions` / `risks` /
+///   `acceptance_conditions`）按 JSON 字符串数组存（同 `specification` 的五个列表列
+///   的容器处置）。
+/// - **不建外键**（同其余四张表的处置）。
+///
+/// **本 task 只建表、不落行级 I/O**：`plan` 的行级读写（`save_plan` 一类）随第一个
+/// 有 I/O 用例的 task 落地（§10.2 的恢复链要写 `plan` 行）；本 task 的 `tests/plan.rs`
+/// 只钉表列清单与迁移守卫（`tests/intent.rs` 同步为逐表清单加 `plan` 一行）。
 pub fn p4_semantics_migrations() -> Vec<Migration> {
     vec![Migration::new(
         110,
@@ -198,6 +226,20 @@ pub fn p4_semantics_migrations() -> Vec<Migration> {
             source                   TEXT NOT NULL,
             verification_requirement TEXT NOT NULL,
             PRIMARY KEY (contract_id, contract_version, id)
+        );
+        CREATE TABLE plan (
+            id                    TEXT NOT NULL,
+            major                 INTEGER NOT NULL,
+            minor                 INTEGER NOT NULL,
+            intent_id             TEXT NOT NULL,
+            type                  TEXT NOT NULL,
+            objectives            TEXT NOT NULL,
+            milestones            TEXT NOT NULL,
+            assumptions           TEXT NOT NULL,
+            risks                 TEXT NOT NULL,
+            acceptance_conditions TEXT NOT NULL,
+            review_state          TEXT NOT NULL,
+            PRIMARY KEY (id, major, minor)
         );",
     )]
 }

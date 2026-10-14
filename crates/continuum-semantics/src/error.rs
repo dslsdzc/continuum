@@ -1,11 +1,12 @@
 //! 本 crate 的错误类型。计划「文件结构」一节把 `IntentError、SpecError、ContractError、
 //! PlanError、DecisionError、ConstraintError` 都列在 `src/error.rs`；本 crate 至今落
-//! 前四枚（`IntentError`、Task 9 的 `IntentStatusError`、Task 10 的 `SpecError` 与
-//! Task 11 的 `ContractError`）。
+//! 前五枚（`IntentError`、Task 9 的 `IntentStatusError`、Task 10 的 `SpecError`、
+//! Task 11 的 `ContractError` 与 Task 13 的 `PlanError`）。
 
 use continuum_persist::PersistError;
 
 use crate::intent::{IntentKind, IntentStatus};
+use crate::plan::{PlanType, ReviewState};
 
 /// §223 的 `COMPLETED → EVOLVING` 只在 `kind = PRODUCT` 时合法（原文「Product Intent MAY……」）。
 ///
@@ -166,4 +167,44 @@ pub enum ContractError {
     /// `Tx` 的往返失败（含 `(id, version)` 撞主键）。
     #[error(transparent)]
     Persist(#[from] PersistError),
+}
+
+/// Plan 的审查状态机与执行门的错误（Task 13）。
+///
+/// # 两枚各有真实产生方，一条不漏
+///
+/// - [`PlanError::IllegalReview`]：迁移对不在 §9.2 的迁移表内——由
+///   [`crate::ReviewState::transition`] 的查表处产出，`from` / `to` 原样带出。
+/// - [`PlanError::UserApprovalRequired`]：§229 的执行门——`STRATEGIC` 的 Plan 未经
+///   `USER_APPROVED` 被要求执行，由 [`crate::ReviewState::reaches_ready`] 产出，
+///   `plan_type` 与 `state` 是**当时那一对**（不是被映射过的任何东西）。
+///
+/// # 这不是落库错误（与 [`ContractError`] 的分野）
+///
+/// 本 task 的 `plan` 表没有行级读写（表由 Task 13 建、行级 I/O 随其后用它的 task
+/// 落地），故本类型**没有** `Persist` 一枚——一枚零产生方的转发变体正是本仓
+/// 裁删过的那一类（「零产生方的死物」，见 `continuum-model-registry` 的
+/// `RoutingError::Persist` 处置）；它随行级 I/O 一起加。
+///
+/// # 照片
+///
+/// 两枚各有直接照片，都在 `tests/plan.rs`：`unlisted_review_pairs_are_rejected`
+/// （逐条断言 `from` / `to` 原样带出）与
+/// `a_strategic_plan_cannot_be_executed_without_user_approval`
+/// （断言 `plan_type` / `state` 是那一对）。
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PlanError {
+    /// 迁移对不在 §9.2 的审查迁移表内。`from` / `to` 原样带出——只说「这个迁移不合法」
+    /// 而不给是哪一对，调用方无法判断是来源错还是目标错（形状取自
+    /// [`IntentStatusError::Illegal`]）。
+    #[error("迁移 {from:?} → {to:?} 不在 §9.2 的审查迁移表内")]
+    IllegalReview { from: ReviewState, to: ReviewState },
+
+    /// `STRATEGIC` 的 Plan 未经 `USER_APPROVED` 不得执行（§229）。
+    /// `plan_type` / `state` 是**当时那一对**。
+    #[error("Strategic Plan 未经 USER_APPROVED 不得执行（§229）：plan_type = {plan_type:?}、review_state = {state:?}")]
+    UserApprovalRequired {
+        plan_type: PlanType,
+        state: ReviewState,
+    },
 }

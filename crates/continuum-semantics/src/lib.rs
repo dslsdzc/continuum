@@ -114,10 +114,39 @@
 //! expression 进 `unjudged` 且不在 `entries`、字段清单逐项（穷尽解构、不带 `..`）、
 //! 签名只有两个 ref ＋ 两侧集合（`fn` 指针类型标注）。
 //!
+//! Task 13 落 §228 的 Plan、§229／§338 的审查状态机与 §341 的八项视图
+//! （设计 §9.1／§9.2／§9.3／§9.5）：
+//!
+//! - **§228 的十字段**（[`Plan`]）：`version` 取**两段式**（[`PlanVersion`]——
+//!   本设计的决定，§228 只给 `version` 一个字段名；`major` 在 MATERIAL 时 +1、
+//!   `minor` 在 MINOR 时 +1）；`type` 是封闭两值 [`PlanType`]；`r#type` 用 raw
+//!   identifier 照录 §228 的字段名；
+//! - **§229 的六态与 §9.2 的迁移表**（[`ReviewState::transition`]：九对逐条、
+//!   终态无出边、六态自环全非法）与**执行门**（[`ReviewState::reaches_ready`]：
+//!   `STRATEGIC` 未经 `USER_APPROVED` 得 [`PlanError::UserApprovalRequired`]、
+//!   `EXECUTION` 同路径 `Ok`——两侧都钉）；
+//! - **「修订」不是第六个态**（§9.2）：[`revise`] 产生新版本（`DRAFT`、major +1）
+//!   并让旧版本进 `SUPERSEDED`（一条用例断言两件事都成立）；
+//! - **§339／§340**（[`ReviewFinding`] / [`Severity`] / [`ReviewIndependence`] /
+//!   [`ReviewFindingRecord`]）：四 severity 逐枚照片；三条独立性事实**必填**、
+//!   「同一模型 + 同一上下文」的审查**可观察**（三条是 SHOULD，判定没有照片——
+//!   §16 第 14 条）；`ModelRefRef` 是不透明 `String`（§1.2.3 规则 3）；
+//! - **§341 的八项视图**（[`UserReviewView`]，`review_view` 模块）：字段恰好八项、
+//!   不合并任何两行（**三侧**负向守卫；本组件不是 UI）；
+//! - **`plan` 表**（迁移 110 的第五张表，§9.1）：主键 `(id, major, minor)`；
+//!   **本 task 只建表**——行级 I/O 随第一个有 I/O 用例的 task 落地。
+//!
+//! 以 `tests/plan.rs` 的十四条用例钉住：十字段逐项、两段式版本两侧、迁移表九对
+//! 逐条与未列出的对（含六态自环全数）、执行门两侧、修订的两件事、四 severity 逐枚、
+//! 独立性字段逐项、同模型同上下文可观察、八项视图的三侧负向守卫、八项无内部步骤
+//! 字段（源码面对钉）、`plan` 表列清单逐列、三对枚举的编码逐枚。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
 //! - **§5.4 的其余三个写入点**：`PlanReviewRequired` / `DecisionRequired`
-//!   （`EventType`）与 `UserApprovals`（`AuditKind`）由用它们的 task 落（Task 13 / 15）。
+//!   （`EventType`）与 `UserApprovals`（`AuditKind`）由用它们的 task 落
+//!   （`DecisionRequired` 与 `UserApprovals` 归 Task 15；**`PlanReviewRequired`
+//!   尚无归属 task**——Task 13 的用例清单不含事件条目，本 task 不为它发明写入点）。
 //!   本 crate 今日的写入点：`events` 两条（`IntentCreated` / `IntentCompleted`，
 //!   Task 8 / 9）＋ `audit_log` 一条（`ContractChanges`，Task 11，
 //!   见 [`save_contract`]）。
@@ -125,7 +154,7 @@
 //!   （[`GraphIdRef`]，设计 §1.2.3 的规则 3），故本 crate 对执行层的依赖边为零
 //!   （照片：`tests/intent.rs` 的 `graph_id_and_product_id_are_opaque_strings`——
 //!   它扫本 crate 的 `src/`，断言执行层 crate 的**下划线标识符拼法**零命中）。
-//! - 迁移 110 的其余三张表（`plan` / `decision` / `decision_result`）由 Task 13／15
+//! - 迁移 110 的其余两张表（`decision` / `decision_result`）由 Task 15
 //!   追加进**同一个迁移项的 SQL**（不是第二个 110 号项——那会被 `migrate()` 静默跳过，
 //!   见 [`p4_semantics_migrations`] 的文档）。
 
@@ -136,11 +165,13 @@ mod ids;
 mod intent;
 mod intent_tx;
 mod persist;
+mod plan;
+mod review_view;
 mod spec;
 
 pub use contract::{Requirement, RequirementClass, TaskContract, VerificationRequirement};
 pub use diff::{ContractDiff, DiffClass, DiffEntry, UnjudgedChange, UnjudgedReason, diff};
-pub use error::{ContractError, IntentError, IntentStatusError, SpecError};
+pub use error::{ContractError, IntentError, IntentStatusError, PlanError, SpecError};
 pub use ids::{ContractId, IntentId, PlanId, RequirementId};
 pub use intent::{
     ContractRef, GraphIdRef, Intent, IntentKind, IntentStatus, Priority, ProductIdRef,
@@ -150,6 +181,11 @@ pub use persist::{
     list_children, load_contract, load_intent, load_specification, p4_semantics_migrations,
     save_contract, save_intent, save_intent_with_specification,
 };
+pub use plan::{
+    ModelRefRef, Plan, PlanType, PlanVersion, ReviewFinding, ReviewFindingRecord, ReviewState,
+    ReviewIndependence, Severity, revise,
+};
+pub use review_view::UserReviewView;
 pub use spec::{
     AcceptancePredicate, Conflict, ForbiddenState, Goal, Invariant, Preference, SpecDraft,
     Specification, UndefinedBehavior, Unknown, Unknowns,
