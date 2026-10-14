@@ -8,6 +8,9 @@
 //! | `each_of_the_ten_examples_of_230_classifies_as_the_spec_says` | §230 的十个例**逐项一条**（五个 MINOR ＋ 五个 MATERIAL，**不抽代表**）；表长恰 10 | 把 MATERIAL 的某一例判成 MINOR（**放宽档**——那一行红） |
 //! | `a_model_swap_is_a_minor_change` | **直接调用**（不经表）：MINOR **首例**「模型替换」——两 Plan 与两 footprint 逐字段相等 | 同路径误判即红 |
 //! | `a_major_architecture_change_is_material` | **直接调用**（不经表）：MATERIAL **首例**「重大架构变化」——计划内容变化 | 同路径误判即红 |
+//! | `a_risks_only_change_is_material` | **直接调用**（不经表）：`risks` **单独**变化（其余不动）→ `Material`——钉五列表析取的 **risks 那一臂**（fix 轮 1 的评审 Important） | 删掉 risks 那一支（风险单独变化漏判 MINOR）即红 |
+//! | `an_assumptions_only_change_is_material` | **直接调用**（不经表）：`assumptions` **单独**变化 → `Material`——钉 **assumptions 那一臂** | 删掉 assumptions 那一支即红 |
+//! | `a_list_length_change_is_material` | **直接调用**（不经表）：某列表**追加一项**（长度变化）→ `Material`——钉 `same_list` 的 **`len` 比较那一臂**（`zip` 只比到短侧） | `len` 比较恒真（追加项被漏判、套件其余全绿）即红 |
 //! | `a_material_change_re_triggers_the_review_gate` | §230 的 MUST：MATERIAL 产出**新版本**（major +1）且 `review_state == DRAFT`；**反面**：MINOR 不重触发（minor +1、审查态保持）。**两侧都钉** | MATERIAL 不重置审查门（**移除档**）；或 MINOR 也重置（反面那半边红） |
 //! | `affected_scope_is_opaque` | §230 未给 `affected_scope` 的取值域 → 不透明值：**表外取值**逐字节往返；字段清单逐项（穷尽解构、不带 `..`） | 把取值域写死（拒表外取值）／值被改写即红 |
 //! | `the_classification_reads_both_plans_and_both_footprints` | **输入面签名**：`classify` 的 `fn` 指针标注（两份 `Plan` ＋ 两份 `PlanFootprint` ＋ 阈值入参——R-B 的第五参）；两个阈值判据**真的被调用**（本层不自己比较） | 去掉阈值入参（回到四参）即**编译不过**；阈值判据被忽略（恒真判据不生效）即红 |
@@ -24,14 +27,19 @@
 //! 「模型替换 / 重试 / 并行调整 / 工具替换 / 内部步骤重排」与「重大架构变化 /
 //! Requirement 改变 / 权限扩大 / 成本显著扩大 / Milestone 目标变化」。
 //!
-//! # 表驱动的限度与两条直接调用（照实写）
+//! # 表驱动的限度与五条直接调用（照实写）
 //!
 //! **「表驱动用例也可能覆盖错路径」**（本仓已付过代价）：十条行共用一种构造形态时，
-//! 一条走对不必保证另一条也走对——**故另加两条「直接调用分类函数」的用例**（不经表），
-//! 分别点名两个 class 的**第一条**例：
+//! 一条走对不必保证另一条也走对——**故另加五条「直接调用分类函数」的用例**（不经表）：
 //!
-//! - `a_model_swap_is_a_minor_change`——「模型替换」（MINOR 首例）；
-//! - `a_major_architecture_change_is_material`——「重大架构变化」（MATERIAL 首例）。
+//! - 两个 class 的**第一条**例各一条：`a_model_swap_is_a_minor_change`（「模型替换」）、
+//!   `a_major_architecture_change_is_material`（「重大架构变化」）；
+//! - **三条臂级照片**（fix 轮 1 的评审 Important 补，2026-10-14）：十行表只覆盖了
+//!   objectives / acceptance_conditions / milestones 三个列表的**等长替换**；
+//!   `a_risks_only_change_is_material` 与 `an_assumptions_only_change_is_material`
+//!   钉五列表析取里 risks / assumptions 两支，`a_list_length_change_is_material`
+//!   钉 `same_list` 的**长度那一臂**——没有它们，删掉任一支或让 `len` 比较恒真
+//!   都有漏判而套件其余全绿的路径。
 //!
 //! # 读法申报（收件人：复审者）
 //!
@@ -280,6 +288,62 @@ fn a_major_architecture_change_is_material() {
         got,
         PlanChangeClass::Material,
         "重大架构变化（MATERIAL 首例）：应判 material，实得 {got:?}"
+    );
+}
+
+/// **直接调用**（不经表）：`risks` **单独**变化（其余不动）→ MATERIAL。
+///
+/// 钉 `plan_content_changed` 的 **risks 那一臂**（五列表析取中的一支）：十行表只用
+/// objectives / acceptance_conditions / milestones 三个列表构造，删掉 risks 那一支
+/// 会漏判「风险单独变化」而套件其余全绿（fix 轮 1 的评审 Important）。
+#[test]
+fn a_risks_only_change_is_material() {
+    let before = plan_tagged("direct-risks");
+    let mut after = before.clone();
+    after.risks = vec![Opaque::from_str("risk-direct-risks-2")];
+    let fp = footprint("authority-1", "cost-1");
+    let got = classify(&before, &after, &fp, &fp, &thresholds());
+    assert_eq!(
+        got,
+        PlanChangeClass::Material,
+        "risks 单独变化：应判 material，实得 {got:?}"
+    );
+}
+
+/// **直接调用**（不经表）：`assumptions` **单独**变化 → MATERIAL。
+///
+/// 钉 **assumptions 那一臂**（照片理由同 [`a_risks_only_change_is_material`]：
+/// 十行表没有 assumptions 的构造）。
+#[test]
+fn an_assumptions_only_change_is_material() {
+    let before = plan_tagged("direct-assumptions");
+    let mut after = before.clone();
+    after.assumptions = vec![Opaque::from_str("asm-direct-assumptions-2")];
+    let fp = footprint("authority-1", "cost-1");
+    let got = classify(&before, &after, &fp, &fp, &thresholds());
+    assert_eq!(
+        got,
+        PlanChangeClass::Material,
+        "assumptions 单独变化：应判 material，实得 {got:?}"
+    );
+}
+
+/// **直接调用**（不经表）：某列表**长度变化**（追加一项、前项不变）→ MATERIAL。
+///
+/// 钉 `same_list` 的 **`len` 比较那一臂**：没有这条照片，`a.len() == b.len()` 恒真时
+/// `zip` 只比到短侧——「追加一项」会被漏判 MINOR 而套件其余全绿（fix 轮 1 的
+/// 评审 Important 点名了这一格）。
+#[test]
+fn a_list_length_change_is_material() {
+    let before = plan_tagged("direct-append");
+    let mut after = before.clone();
+    after.objectives.push(Opaque::from_str("obj-direct-append-2"));
+    let fp = footprint("authority-1", "cost-1");
+    let got = classify(&before, &after, &fp, &fp, &thresholds());
+    assert_eq!(
+        got,
+        PlanChangeClass::Material,
+        "列表追加一项（长度变化）：应判 material，实得 {got:?}"
     );
 }
 
