@@ -21,6 +21,7 @@ members = [
     "crates/continuum-node",
     "crates/continuum-canonical",
     "crates/continuum-semantics",
+    "crates/continuum-budget",
 ]
 
 [workspace.package]

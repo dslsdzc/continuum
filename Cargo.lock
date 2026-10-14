@@ -65,6 +65,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-budget"
+version = "0.1.0"
+dependencies = [
+ "continuum-persist",
+ "continuum-semantics",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "trybuild",
+]
+
+[[package]]
 name = "continuum-canonical"
 version = "0.1.0"
 dependencies = [

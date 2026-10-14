@@ -1,0 +1,15 @@
+error[E0308]: mismatched types
+  --> tests/compile_fail/reservation_is_not_the_other_two_roles.rs:15:25
+   |
+15 |     let _: Allocation = a_reservation();
+   |            ----------   ^^^^^^^^^^^^^^^ expected `Allocation`, found `Reservation`
+   |            |
+   |            expected due to this
+
+error[E0308]: mismatched types
+  --> tests/compile_fail/reservation_is_not_the_other_two_roles.rs:18:24
+   |
+18 |     let _: Remaining = a_reservation();
+   |            ---------   ^^^^^^^^^^^^^^^ expected `Remaining`, found `Reservation`
+   |            |
+   |            expected due to this

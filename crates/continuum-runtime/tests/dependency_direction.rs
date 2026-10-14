@@ -165,6 +165,10 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `← continuum-persist` 由本 task 登记（intent 表）。
     // **允许集里没有 continuum-budget**——§11.5 的第 1 条守卫（两道门分离）。
     ("continuum-semantics", &["continuum-canonical", "continuum-persist"]),
+    // P4 语义层（设计 §2.1）：预算树、Allocation / Reservation / Remaining、账本、Budget Validator。
+    // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
+    // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
+    ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
