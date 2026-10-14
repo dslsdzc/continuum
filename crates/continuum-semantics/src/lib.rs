@@ -167,6 +167,33 @@
 //! 原样类型一条（含 `src/` 的执行层 crate 拼法零命中）、裁决五条（REQUIRED 一条 ＋
 //! 三 class 的「违反但不拦下」）、「判不了」三侧。
 //!
+//! Task 14 落 §230 的 Plan Change 分类（设计 §9.4）：
+//!
+//! - **两个 class 封闭**（[`PlanChangeClass`]：`Minor` / `Material`），MATERIAL 的
+//!   MUST（重触发审查门）落在 [`apply_plan_change`]——MATERIAL 产出新版本
+//!   （`major` +1）且 `review_state = DRAFT`；MINOR 不重触发（`minor` +1、审查态保持，
+//!   **两侧都钉**）；
+//! - **§230 的十个例逐项**（五个 MINOR ＋ 五个 MATERIAL）：**判定映射是本实现的
+//!   读法**（收件人：复审者）——MINOR 五例是执行 HOW 的变更（§225 的 MAY 清单与
+//!   它们重叠），在两 Plan 两 footprint 上不可见；MATERIAL 三条「内容变化」例
+//!   （重大架构变化 / Requirement 改变 / Milestone 目标变化）同判「计划内容
+//!   （§228 的五个列表）有任一变化」；
+//! - **[`PlanChange`] 的 `affected_scope` 是 [`continuum_canonical::Opaque`]**
+//!   （§230 未给取值域——§16 第 15 条，本层不发明）；
+//! - **`classify` 是五参**（R-B 裁决）：两份 [`Plan`] ＋ 两份 [`PlanFootprint`]
+//!   （§9.4 的四参）＋ `&MaterialThresholds`（第五参）——「『显著扩大』的阈值规范
+//!   未给」（§16 第 15 条），比较由调用方的两个**判定引用**承载，本层连比较都不发明
+//!   （处置链：设计 §9.4 → §16 第 15 条 → 计划遗留第四节 → R-B；与计划 Step 速写的
+//!   四参偏离在此申报）；
+//! - **纯函数**：[`classify`] / [`apply_plan_change`] 都不收 `&Tx`、不读写库
+//!   （`plan_change` 没有表——设计 §2.4 的 110 段七张表里没有它）。
+//!
+//! 以 `tests/plan_change.rs` 的七条用例钉住：两个 class 各一条（判别式经穷尽 `match`）、
+//! §230 的十例**逐项一条**（表驱动，不抽代表）、两条**直接调用**（两个 class 的
+//! 第一例：模型替换 / 重大架构变化——表驱动限度的对照）、重触发审查门的两侧、
+//! `affected_scope` 的表外取值往返、输入面签名（`fn` 指针标注 ＋ 两个阈值判据真的
+//! 被调用）。
+//!
 //! # 尚未做的（后续 task 的，不是本 crate 的终态）
 //!
 //! - **§5.4 的其余三个写入点**：`PlanReviewRequired` / `DecisionRequired`
@@ -193,6 +220,7 @@ mod intent;
 mod intent_tx;
 mod persist;
 mod plan;
+mod plan_change;
 mod review_view;
 mod spec;
 
@@ -214,6 +242,9 @@ pub use persist::{
 pub use plan::{
     ModelRefRef, Plan, PlanType, PlanVersion, ReviewFinding, ReviewFindingRecord, ReviewState,
     ReviewIndependence, Severity, revise,
+};
+pub use plan_change::{
+    MaterialThresholds, PlanChange, PlanChangeClass, apply_plan_change, classify,
 };
 pub use review_view::UserReviewView;
 pub use spec::{
