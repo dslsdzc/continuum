@@ -1579,7 +1579,7 @@ git commit -m "feat(semantics): Plan 审查状态机、ReviewIndependence 与 §
   `PlanFootprint` 的两个 `estimated_cost` / `authority` 以不透明值传入，比较由调用方给出的
   `MaterialThresholds` 一类入参承载（**若无该入参，则本层只能判「两者不相等即 MATERIAL」，
   而那句话在规范里没有依据**——**故本 task 的前置是先有 `PlanFootprint`（Task 16）与一个显式的阈值入参**；
-  阈值入参的形状属本计划自定，见 `## 遗留` 第五节）。
+  阈值入参的形状属本计划自定，见 `## 遗留` 第四节）。
 
 - [ ] **Step 2: 运行，确认失败**
 
