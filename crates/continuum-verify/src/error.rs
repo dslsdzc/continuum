@@ -4,7 +4,8 @@ use crate::evidence_type::EvidenceType;
 use crate::test_validity::TestValidityCheck;
 
 /// 本 crate 的失败面。变体逐 task 增量加（Task 2 的两枚是 §4.4 的两条；Task 3 追加
-/// `IncompleteTestValidityChecks`；后续 task 的变体随各自的产生方落地）。
+/// `IncompleteTestValidityChecks`；Task 4 追加 `UnknownVerificationPolicy` 与
+/// `ProfileMissing`；后续 task 的变体随各自的产生方落地）。
 ///
 /// **派生 `PartialEq`**：失败路径的用例要断言「是哪一种 `Err`」（本计划的纪律第 4 条），
 /// 而 `EvidenceWithoutArtifact` 的十三型逐型断言还要求载荷里的 `EvidenceType` 可比较
@@ -36,4 +37,18 @@ pub enum VerifyError {
         missing: Vec<TestValidityCheck>,
         repeated: Vec<TestValidityCheck>,
     },
+
+    /// `VerificationPolicy::from_value` 拿到的值非空但不认识（§5.1 第 2 条）：缺字段、
+    /// 多出未定义字段、`min_verifier_level` 不是五级序里的值、`required_evidence_types`
+    /// 含未知类型名。取 `Err` 而不是取默认：一个写着内容的策略被当成空策略，正是
+    /// 「静默放宽」。
+    #[error(
+        "verification_policy 非空但不认识（§5.1 第 2 条）：缺字段、多出未定义字段、min_verifier_level 不在五级序内或 required_evidence_types 含未知类型名"
+    )]
+    UnknownVerificationPolicy,
+
+    /// 无验证档案（§5.3 第 3 条）：**不是「无要求」**——把它当默认会让每项 REQUIRED
+    /// 的 required 集合为空、覆盖判定无缺项，即「无档案 ⇒ 无要求 ⇒ 不阻断」（fail-open）。
+    #[error("缺 VerificationProfile：无档案是错，不是「无要求」（§5.3 第 3 条）")]
+    ProfileMissing,
 }

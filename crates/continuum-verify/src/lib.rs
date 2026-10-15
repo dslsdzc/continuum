@@ -6,8 +6,10 @@
 //! `Completion Predicate 判定` / `Test Validity Verifier`）。Task 1 建骨架与
 //! §258 的 [`EvidenceType`]（十四臂，设计 §4.2）；Task 2 落 §4 的 [`Evidence`] 数据模型
 //! 与它唯一的产生点 [`Evidence::from_tool_result`]（§89）；Task 3 落 §191 的
-//! [`TestValidity`]（五检查、三档聚合与五臂齐，设计 §6.4）；其余类型与判定由后续 task
-//! 逐一追加。
+//! [`TestValidity`]（五检查、三档聚合与五臂齐，设计 §6.4）；Task 4 落 §5 的节点级
+//! [`VerificationPolicy`]（§5.1 的严格解析）、任务级 [`VerificationProfile`] 与它的
+//! 取得点 [`profile_for`]（§5.2/§5.3）、§262 的五级序 [`VerifierLevel`]；其余类型与
+//! 判定由后续 task 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
 //!
@@ -21,20 +23,26 @@
 //! （[`RequirementId`] 是本块定义的一枚，与 P4 的同名类型是两个类型，见设计 §4.3.1
 //! 的订正段），**不登记指向 `continuum-semantics` 的边**（设计 §6.1）。
 //!
-//! # 本 task（Task 3）明确不做
+//! # 本 task（Task 4）明确不做
 //!
-//! - **不建 Test Validity Verifier 的产生者**（设计 §6.5 的处置）：「谁跑这五个检查、
-//!   什么时候跑、输入取自哪里（源码／制品／`Evidence<Test>`）」规范未给，在未给期间造一个
-//!   等于替 §191 选了一条它没写的执行路径；本块只定义记录（[`TestValidity`]）与它的形状
-//!   校验（五臂齐），产生者留缺口。
-//! - **不建 `coverage` / `counts`（Task 5）与 §5 的策略类型（Task 4）**：由用它们的 task
-//!   逐一追加，本 task 不预放占位。
+//! - **不建 `VerificationProfile` 的生成器**（设计 §5.3 第 1 条）：生成者未定
+//!   （A6/OPEN-009），本块只冻结取得点 [`profile_for`]；[`VerificationProfileSource`]
+//!   的形态本轮不决定（来自 Contract 的哪一字段取决于 OPEN-009 怎么解），只取
+//!   「有档案 / 没有档案」两臂。
+//! - **`optional_evidence_types` / `fuzz_budget` / `mutation_threshold` /
+//!   `property_requirements` 只存不判**（§5.2）：规范未给它们的用途或量纲，本块不派活。
+//! - **`crates/continuum-graph/src/node.rs` 只改 `:19` 一行注记**：`verification_policy`
+//!   字段类型仍是 `serde_json::Value`（设计 §2.3 的裁定：给字段定型会造出执行层与
+//!   跨领域层之间的 2-环）。
 
 mod contract_view;
 mod error;
 mod evidence;
 mod evidence_type;
+mod policy;
+mod profile;
 mod test_validity;
+mod verifier_level;
 
 pub use contract_view::RequirementId;
 pub use error::VerifyError;
@@ -43,4 +51,7 @@ pub use evidence::{
     EvidenceSubject, WorkerCompletionDeclaration,
 };
 pub use evidence_type::EvidenceType;
+pub use policy::VerificationPolicy;
+pub use profile::{VerificationProfile, VerificationProfileSource, profile_for};
 pub use test_validity::{CheckVerdict, TestValidity, TestValidityCheck, Validity};
+pub use verifier_level::VerifierLevel;
