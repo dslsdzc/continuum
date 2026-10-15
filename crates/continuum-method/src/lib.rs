@@ -3,8 +3,9 @@
 //! 算子 id 文本，设计 §4.3）。规划 §一：「把『这一类任务怎样做得可靠』从
 //! ADFIR 的图结构里分出来」。
 //!
-//! **Task 1 落骨架**：本 task 导出 [`MethodId`] 与 [`MethodError`]；
-//! `mod id; mod error;` 按规划的文件结构逐 task 增量追加。
+//! **Task 1 落骨架**（[`MethodId`] 与 [`MethodError`]），**Task 2 加
+//! [`MethodDomain`]**（§187 的四个目录名，封闭枚举）；`mod` 清单按规划的
+//! 文件结构逐 task 增量追加。
 //!
 //! # 依赖面：workspace 内为空集（设计 §3.2／§9）
 //!
@@ -21,8 +22,10 @@
 //! `operator` 注册表，文本的核对只能落在消费块。外部依赖只有 `thiserror`
 //! （[`MethodError`] 上派生 `std::error::Error`）。
 
+mod domain;
 mod error;
 mod id;
 
+pub use domain::MethodDomain;
 pub use error::MethodError;
 pub use id::MethodId;
