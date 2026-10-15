@@ -314,7 +314,12 @@ dependencies = [
 name = "continuum-verify"
 version = "0.1.0"
 dependencies = [
+ "continuum-artifact",
+ "continuum-graph",
+ "continuum-operator",
  "serde",
+ "serde_json",
+ "thiserror",
 ]
 
 [[package]]

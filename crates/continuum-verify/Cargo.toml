@@ -9,6 +9,19 @@ rust-version.workspace = true
 # `#[derive(Serialize, Deserialize)]` ＋ `#[serde(rename_all = "snake_case")]`（设计 §4.2）。
 # **落库列不依赖它**：`as_str` / `parse` 是列编码唯一的产生点，派生的 serde 表示
 # 不被用来落库（沿用 `ArtifactType::as_str` 文档里那条口径）。
-# `serde_json` / `thiserror` / `trybuild` / `tempfile` 与三条内部依赖由需要它们的
-# task 增量加（计划 Task 1 的 Step 1）。
 serde = { workspace = true }
+# Task 2 起的使用点：`evidence.rs` 的 `EvidenceStrength` / `EvidenceScope` 的载荷是
+# `serde_json::Value`（设计 §4.3.4 逐字给出）。**外部 crate 按需加、不进 `ALLOWED`**
+# （计划 Global Constraints）——那张表只逐对断言 workspace 成员之间的边。
+serde_json = { workspace = true }
+# Task 2 起的使用点：`error.rs` 的 `VerifyError` 派生 `thiserror::Error`。
+thiserror = { workspace = true }
+# Task 2 起登记三条内部边（`crates/continuum-runtime/tests/dependency_direction.rs`
+# 的 `ALLOWED` 条目同步为这三条；`cargo tree --edges all` 把 dev 边也算进依赖，
+# 本 crate 本 task 无 dev 边）：
+# `Evidence.artifact_refs` 取 `ArtifactId`（`continuum-artifact`）；
+# `EvidenceProducer::Node` 取 `NodeId`（`continuum-graph`）与 `BackendId`（`continuum-operator`）。
+# `continuum-persist` / `continuum-events` 由 Task 9 增量加。
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-graph = { path = "../continuum-graph" }
+continuum-operator = { path = "../continuum-operator" }
