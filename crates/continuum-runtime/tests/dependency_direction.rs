@@ -196,6 +196,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 升成普通依赖**（理由是注册迁移与钩子）。`cargo tree --edges all` 把 dev 边算进依赖，
     // 故与普通边一样登记（`docs/superpowers/p3bcdf-followups.md` §四.1）。
     //
+    // P4 的 Task 20 起加上 continuum-canonical 与 continuum-semantics（budget 同 task 由
+    // dev 升为普通依赖）：装配处注册三者的迁移与预算恢复钩子——`main.rs` 的
+    // `runtime_migrations()` 追加 100／110／120 三行，`recover_cmd::run` 注册
+    // `BudgetReservationRecovery`（挂 `MarkLostExecutions`）。上一段「本 task 只把它作
+    // dev 边用」说的是 Task 19 当时的状态，自本 task 起 budget 是普通依赖。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条今天对 sandbox 与 events 成立
     // （**core 与 provider 已不成立**——下方的订正块记着这两处的使用点）：
@@ -237,6 +243,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
         &[
             "continuum-artifact",
             "continuum-budget",
+            "continuum-canonical",
             "continuum-capability",
             "continuum-core",
             "continuum-effect",
@@ -248,6 +255,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-provider",
             "continuum-sandbox",
             "continuum-secrets",
+            "continuum-semantics",
             "continuum-workspace",
         ],
     ),

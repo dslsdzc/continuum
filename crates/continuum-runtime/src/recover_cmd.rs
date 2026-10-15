@@ -18,11 +18,20 @@ use std::sync::atomic::Ordering;
 
 /// 打开数据库、应用迁移、注册恢复钩子并跑完五个阶段，产出打到 stdout。
 ///
-/// 注册两个钩子，各占 §319 的一个阶段：
+/// 注册三个钩子，各占 §319 的一个阶段：
 /// - [`MarkRunningNodesLost`]（P1）：`RUNNING` / `VERIFYING` 的节点标 `LOST`；
 /// - [`MarkExecutingAsUnknown`]（P2 下篇）：停在 `EXECUTING` 的效应标 `UNKNOWN`。
 ///   这一支**不猜**成 `COMMITTED` / `FAILED`——进程死在外部操作执行到一半时，
-///   外部究竟做没做成本进程无从得知（设计第 6.4 节）。
+///   外部究竟做没做成本进程无从得知（设计第 6.4 节）；
+/// - [`continuum_budget::BudgetReservationRecovery`]（P4 本层）：把悬空的预算预留
+///   按预扣额结算（设计 §12.3 的第二处）；它挂在 `MarkLostExecutions` 上。
+///
+/// **`mark lost executions` 这一态此前没有任何钩子注册**：第一个钩子的文档自称覆盖
+/// 「`reconcile running nodes` 与 `mark lost executions`」两个阶段，而它的 `phase()`
+/// 只返回 `ReconcileRunningNodes`（见 [`crate::recovery`] 的两处文档）——§319 点名的
+/// 那一态在注册侧一直空着，上面第三个钩子把它补上（唯一可观察证据：`tests/startup.rs`
+/// 的 `the_mark_lost_executions_phase_now_has_exactly_one_hook`）。**`RecoveryPhase`
+/// 的五态一个不动、不新增阶段。**
 ///
 /// 两个计数都从钩子的 `counter()` 读出：`run` 只拿得到 `&self`，计数经内部可变性带出，
 /// 报的是**本次**恢复做了多少（见 `continuum_effect::recovery` 的 `counter` 说明）。
@@ -34,10 +43,12 @@ pub fn run(path: &Path) -> Result<(), PersistError> {
     let nodes = MarkRunningNodesLost::new();
     let lost = nodes.counter();
     let effects = MarkExecutingAsUnknown::new();
+    let budget = continuum_budget::BudgetReservationRecovery;
 
     let mut registry = RecoveryRegistry::new();
     registry.register(Box::new(nodes));
     registry.register(Box::new(effects));
+    registry.register(Box::new(budget));
     let report = run_recovery(&db, &registry)?;
     println!("跳过记录 {} 条", report.skipped_records);
     // 效应的条数不打印：设计第 4.1 节只要求「各阶段的钩子数与跳过记录数」，而那两样

@@ -1,6 +1,6 @@
 //! Runtime 入口：解析子命令并分派（设计下篇第 4.1 节）。
 //!
-//! 迁移集合为 P0 内置迁移加 P1、P2、P3 各层迁移；恢复钩子由各层注册。
+//! 迁移集合为 P0 内置迁移加 P1、P2、P3、P4 各层迁移；恢复钩子由各层注册。
 
 use continuum_persist::Migration;
 use continuum_runtime::cli::{self, Command};
@@ -78,7 +78,7 @@ fn main() -> ExitCode {
 
 /// 本驱动全量注册的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy、
 /// effect）+ P3（capability 的 `tool` 表；子项目 D 的 `model_registry` / `model_profile` /
-/// `model_skill_score` 三张表）。
+/// `model_skill_score` 三张表）+ P4（`alias` 表；语义层七表；预算树与账本）。
 ///
 /// `recover` 与 `task` 共用同一份，两处各写一份清单会让「注册的集合」有两个来源：
 /// `task` 要 `workspace` 表（设计第 4.2 节第 3 步落库），若它那份少一条，症状要到
@@ -95,6 +95,11 @@ fn main() -> ExitCode {
 /// `model_registry` / `model_profile` / `model_skill_score` 由 §3.1 的一条迁移建出，
 /// 注册在下面这一行里。**它的消费方（子项目 G 的模型调用路径）本轮尚不存在**——
 /// 这一句是给后来者的：这张清单里那三张表没有本轮的使用者，不是漏接了，是使用者还没建。
+///
+/// **P4 本层的三条由 Task 20（装配 task）加上**（100 `alias`、110 语义七表、120 预算树
+/// 与账本）：三个 crate 各自交付迁移函数，注册点就是最下面这三行。它们在装配之前只被
+/// 各自的测试库应用过；装配之后 `migrate()` 会按 version 跳过已应用者——**110 的 SQL
+/// 不得再改**（设计 §13.2 第 2 条点名的静默失效）。
 pub(crate) fn runtime_migrations() -> Vec<Migration> {
     let mut migrations = continuum_persist::builtin_migrations();
     migrations.extend(continuum_artifact::p1_artifact_migrations());
@@ -104,9 +109,13 @@ pub(crate) fn runtime_migrations() -> Vec<Migration> {
     migrations.extend(continuum_effect::p2_effect_migrations());
     migrations.extend(continuum_capability::p3_capability_migrations());
     migrations.extend(continuum_model_registry::p3d_model_migrations());
+    migrations.extend(continuum_canonical::p4_canonical_migrations());   // 100：alias
+    migrations.extend(continuum_semantics::p4_semantics_migrations());   // 110：七张表
+    migrations.extend(continuum_budget::p4_budget_migrations());         // 120：树与账本
     migrations
 }
 
 // `recover` 的实现已移进 [`recover_cmd`]（与 `task_cmd` 对称）：本模块只做分发与
-// 装配清单。恢复钩子的注册（P1 的 `MarkRunningNodesLost` 与本子项目的
-// `MarkExecutingAsUnknown`）在那边的 [`recover_cmd::run`] 里。
+// 装配清单。恢复钩子的注册（P1 的 `MarkRunningNodesLost`、P2 下篇的
+// `MarkExecutingAsUnknown` 与 P4 本层的 `BudgetReservationRecovery`）在那边的
+// [`recover_cmd::run`] 里。
