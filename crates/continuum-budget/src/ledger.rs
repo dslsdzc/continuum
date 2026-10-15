@@ -1,5 +1,7 @@
-//! 预算账本：行的词汇（[`LedgerKind`]）、余额的现算（`balances`）与悬空预扣的
-//! 检出（[`dangling_reservations`]）。
+//! 预算账本：行的词汇（[`LedgerKind`]）、余额的现算（`balances`）、悬空预扣的
+//! 检出（[`dangling_reservations`]）与**逐条**的未消化读法
+//! （`undigested_reserve_rows`——恢复钩子「按预扣结算」的输入，crate 内；
+//! 理由：账本按**条数**配对，只写一条 `settle` 行消化不完 N 条悬空）。
 //!
 //! # 账本表（设计 §12.2）
 //!
@@ -20,7 +22,7 @@
 //!   行的条数」等量的**最早** `reserve` 行视为已消化；其余 `reserve` 行的额之和
 //!   就是 `reserved`（在飞的预扣）。
 
-use continuum_persist::Tx;
+use continuum_persist::{PersistError, Tx};
 
 use crate::dimensions::{ALL, DimensionKind, rank};
 use crate::error::BudgetError;
@@ -83,6 +85,21 @@ pub struct DanglingReservation {
     pub amount: i64,
 }
 
+/// 一条**未消化**的 `reserve` 行（crate 内）：原额与它自己的 `at`——
+/// [`undigested_reserve_rows`] 的输出、恢复钩子（[`crate::BudgetReservationRecovery`]）
+/// 的输入。
+///
+/// 字段 `pub(crate)`：crate 内的纯数据，没有需要靠私有性守的不变量。
+pub(crate) struct UndigestedReserve {
+    pub(crate) owner: BudgetOwner,
+    pub(crate) dimension: DimensionKind,
+    /// 该 `reserve` 行的**原额**（不是和——逐条的读法，理由见
+    /// [`undigested_reserve_rows`] 的文档）。
+    pub(crate) amount: i64,
+    /// 该 `reserve` 行自己的 `at`（钩子写的 `settle` 行沿用它）。
+    pub(crate) at: i64,
+}
+
 /// 一维上的账本行（已解码），按插入序。
 type Row = (DimensionKind, LedgerKind, i64);
 
@@ -140,8 +157,9 @@ pub(crate) fn balances(rows: &[Row]) -> ([i64; 5], [i64; 5]) {
 /// # 本函数是设计 §12.3 第 2 处的输入
 ///
 /// 恢复钩子（`RecoveryPhase::MarkLostExecutions`）**按预扣结算**悬空的预留，
-/// 不释放——它的输入就是本函数（§12.3：「一次执行如果没有实际读数，就按预扣额
-/// 结算；不退余量」）。
+/// 不释放——它的输入走的是一条**逐条**的路径（`undigested_reserve_rows`，crate 内；
+/// 理由：账本按**条数**配对，只写一条 `settle` 行消化不完 N 条悬空）。本函数
+/// 是同一算法的**聚合读法**（未消化额**之和**），供「有没有悬空」的判读用。
 ///
 /// # 表外取值
 ///
@@ -149,14 +167,64 @@ pub(crate) fn balances(rows: &[Row]) -> ([i64; 5], [i64; 5]) {
 /// （[`crate::BudgetError::Persist`] 的 `Database` 形状——理由见
 /// [`crate::BudgetError`] 的申报段）。**不取默认值、不跳过那一行**。
 pub fn dangling_reservations(tx: &Tx<'_>) -> Result<Vec<DanglingReservation>, BudgetError> {
+    let rows = undigested_reserve_rows(tx)?;
+
+    // 同 `(owner, dimension)` 的逐条条目聚合为一条。**判据用条数而不是金额**：
+    // 未消化的条目可以全是 0 额（额度为零的预扣是合法的）——「有没有悬空」是
+    // 条数问题；聚合后的 `amount` 是未消化额之和（同 [`balances`] 的 `reserved` 口径）。
+    let mut dangling: Vec<DanglingReservation> = Vec::new();
+    for row in rows {
+        match dangling.last_mut() {
+            Some(last) if last.owner == row.owner && last.dimension == row.dimension => {
+                last.amount += row.amount;
+            }
+            _ => dangling.push(DanglingReservation {
+                owner: row.owner,
+                dimension: row.dimension,
+                amount: row.amount,
+            }),
+        }
+    }
+    Ok(dangling)
+}
+
+/// **逐条**未消化的 `reserve` 行——恢复钩子「按预扣结算」的输入（§12.3 第 2 处）。
+///
+/// # 为什么逐条（而不是 [`DanglingReservation`] 的「之和」）
+///
+/// 账本的消化按**条数**配对（见 [`balances`] 的算法）：一条 `settle` 行只消化
+/// 一条 `reserve` 行。若只拿着「未消化额之和」写一条 `settle` 行，条数上仍有
+/// `N − 1` 条 `reserve` 悬着——下一次恢复会再补一条**同样金额**的 `settle`
+/// （金额重复记账），要跑 N 次恢复才收敛。逐条写（每条 `settle` 行 = 对应
+/// `reserve` 行的**原额**）一次收敛，且「按预扣结算」在**每条预扣**上逐条成立。
+///
+/// # 每条的 `at` 是**该 `reserve` 行自己的**
+///
+/// 恢复钩子不收时钟（本层不取时钟，`RecoveryHook::run` 也没有 `at` 入参）——
+/// 同 effect 的 `MarkExecutingAsUnknown` 取「记录既有的 `updated_at`」的处置；
+/// `settle` 行落在与它对应的那条 `reserve` 行同一个时刻上。
+///
+/// # 排序
+///
+/// `(owner 键, 维度枚举序)`，同 [`dangling_reservations`]；**组内保持账本的
+/// 插入序**（`sort_by_key` 是稳定排序）——钩子按插入序逐条写 `settle` 行，
+/// FIFO 配对逐条对上。
+///
+/// # 表外取值
+///
+/// 同 [`dangling_reservations`]：三列任一读不回来时返回**具体 `Err`**、带原始串，
+/// **不取默认值、不跳过那一行**。
+pub(crate) fn undigested_reserve_rows(
+    tx: &Tx<'_>,
+) -> Result<Vec<UndigestedReserve>, PersistError> {
     let rows = load_ledger_rows(tx)?;
 
-    // 分组（保序）：每个 (owner, dimension) 一组——reserve 的额按序收集、
+    // 分组（保序）：每个 (owner, dimension) 一组——reserve 的 (额, at) 按序收集、
     // settle/release 的行数计数。
     struct Group {
         owner: BudgetOwner,
         dimension: DimensionKind,
-        reserves: Vec<i64>,
+        reserves: Vec<(i64, i64)>,
         digested: usize,
     }
     let mut groups: Vec<Group> = Vec::new();
@@ -165,8 +233,7 @@ pub fn dangling_reservations(tx: &Tx<'_>) -> Result<Vec<DanglingReservation>, Bu
         let owner = persist::decode_owner(&row.owner)?;
         let dimension = persist::decode_dimension(&row.dimension)?;
         let kind = persist::decode_kind(&row.kind)?;
-        // 先按不可变借用找位置（借用在 `position` 处结束），再取可变引用——
-        // 免得 `None` 分支里的 `push` 与 `iter_mut` 的借用冲突。
+        // 先按不可变借用找位置（借用在 `position` 处结束），再取可变引用。
         let index = groups
             .iter()
             .position(|g| g.owner == owner && g.dimension == dimension);
@@ -183,28 +250,24 @@ pub fn dangling_reservations(tx: &Tx<'_>) -> Result<Vec<DanglingReservation>, Bu
             }
         };
         match kind {
-            LedgerKind::Reserve => group.reserves.push(row.amount),
+            LedgerKind::Reserve => group.reserves.push((row.amount, row.at)),
             LedgerKind::Settle | LedgerKind::Release => group.digested += 1,
             LedgerKind::Allocate => {}
         }
     }
 
-    let mut dangling: Vec<DanglingReservation> = Vec::new();
+    let mut out: Vec<UndigestedReserve> = Vec::new();
     for group in groups {
         let digested = group.digested.min(group.reserves.len());
-        let undigested = group.reserves.len() - digested;
-        if undigested > 0 {
-            // **判据用条数而不是金额**：未消化的条目可以全是 0 额
-            // （额度为零的预扣是合法的）——「有没有悬空」是条数问题。
-            let amount: i64 = group.reserves[digested..].iter().sum();
-            dangling.push(DanglingReservation {
-                owner: group.owner,
+        for (amount, at) in &group.reserves[digested..] {
+            out.push(UndigestedReserve {
+                owner: group.owner.clone(),
                 dimension: group.dimension,
-                amount,
+                amount: *amount,
+                at: *at,
             });
         }
     }
-
-    dangling.sort_by_key(|d| (d.owner.as_key(), rank(d.dimension)));
-    Ok(dangling)
+    out.sort_by_key(|r| (r.owner.as_key(), rank(r.dimension)));
+    Ok(out)
 }

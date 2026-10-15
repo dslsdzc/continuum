@@ -224,19 +224,23 @@ pub(crate) fn children_sums(tx: &Tx<'_>, parent: &BudgetOwner) -> Result<[i64; 5
     Ok(sums)
 }
 
-/// 账本**全部**行（**原始串**，按插入序）——`dangling_reservations` 的输入：
+/// 账本**全部**行（**原始串**，按插入序）——`undigested_reserve_rows` 的输入：
 /// 它要读全表（跨 owner），且解码失败要报**具体是哪一列、哪个原始串**。
+/// `at` 一并读出：恢复钩子按预扣结算时，`settle` 行用**被消化那条 `reserve` 行
+/// 自己的 `at`**（恢复钩子不收时钟——本层不取时钟，同 effect 的
+/// `MarkExecutingAsUnknown` 对「记录既有时刻」的处置）。
 pub(crate) struct RawLedgerRow {
     pub(crate) owner: String,
     pub(crate) dimension: String,
     pub(crate) kind: String,
     pub(crate) amount: i64,
+    pub(crate) at: i64,
 }
 
 /// 读全表账本行。
 pub(crate) fn load_ledger_rows(tx: &Tx<'_>) -> Result<Vec<RawLedgerRow>, PersistError> {
     tx.query(
-        "SELECT owner, dimension, kind, amount FROM budget_ledger ORDER BY rowid",
+        "SELECT owner, dimension, kind, amount, at FROM budget_ledger ORDER BY rowid",
         &[],
     )?
     .iter()
@@ -246,6 +250,7 @@ pub(crate) fn load_ledger_rows(tx: &Tx<'_>) -> Result<Vec<RawLedgerRow>, Persist
             dimension: text_at(row, 1)?,
             kind: text_at(row, 2)?,
             amount: int_at(row, 3)?,
+            at: int_at(row, 4)?,
         })
     })
     .collect()

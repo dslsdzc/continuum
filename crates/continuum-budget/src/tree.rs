@@ -175,8 +175,9 @@ pub enum SettleOutcome {
 }
 
 /// 拒收含负值的 `Dimensions`（§12.2.1 的同一口径——本 crate 里**所有**吃
-/// `Dimensions` 的入口共用本检查、不做豁免）。
-fn reject_negative(dims: &Dimensions) -> Result<(), BudgetError> {
+/// `Dimensions` 的入口共用本检查、不做豁免：`allocate` / `reserve` / `settle` /
+/// `record_root` 与 Task 18 的 `check`）。
+pub(crate) fn reject_negative(dims: &Dimensions) -> Result<(), BudgetError> {
     match dims.first_negative() {
         Some((dimension, value)) => Err(BudgetError::NegativeAmount { dimension, value }),
         None => Ok(()),

@@ -11,7 +11,7 @@
 //!
 //! # 本目录的样例**逐份点名**（便于对数：这段点名的项数必须等于目录里 `.rs` 的份数）
 //!
-//! `tests/compile_fail/`（**六份**，应编不过）：
+//! `tests/compile_fail/`（**七份**，应编不过）：
 //!
 //! - **`allocation_has_no_public_constructor`** —— `Allocation` 的字段私有、
 //!   无公开构造函数，crate 外元组构造编不过。**逐角色各一份**（三份不合并）——
@@ -26,27 +26,37 @@
 //!   都是**类型不匹配**。逐角色各一份，不抽代表。
 //! - **`reservation_is_not_the_other_two_roles`** —— 同上，`Reservation` 为主语。
 //! - **`remaining_is_not_the_other_two_roles`** —— 同上，`Remaining` 为主语。
+//! - **`exploration_thresholds_has_no_default`**（**Task 18**）—— `ExplorationThresholds`
+//!   **没有** `Default`（也没有 inherent 的 `default`）：`network_transfer` /
+//!   `gpu_time` 两个阈值**原文只写 `threshold`、没有数值**（§7 末两行、§16 第 21 条），
+//!   是**必填入参**——「全默认」的构造等于替调用方发明这两个数。
 //!
-//! 前三条与后三条合起来是 plan 点名的两个命题：
+//! 前六条合起来是 plan 点名的两个命题：
 //! `each_role_has_exactly_one_constructor_and_no_second_public_path`（三反例 ＋
 //! 三正控制共**六份**）与 `the_three_roles_are_three_types`（三份逐角色）。
+//! **Task 18 的第七份是第三条命题的一半**（探索预算的「必填入参」——**编译期**命题，
+//! 没有运行期照片；另一半见 `tests/compile_pass/`），**不与前六条混算**。
 //! **「构造」与「读」要分清**：三个角色的读法（`dims()`、逐维读者）是公开的、
 //! **不构成**第二条构造路径（`dims()` 返回 `&Dimensions`，不是角色）——
 //! 判据是**类型**。**并写明作用域与时点**：「除设计指定的那个入口外无第二个
-//! 公开构造路径」是**在本 task 结束时**由这六份样例钉住的；「三个角色私有、
-//! 无公开构造函数」这一句在 P4 落地前只是**设计写死的承诺**，本 task 是它
+//! 公开构造路径」是**在本 task 结束时**由前六份样例钉住的；「三个角色私有、
+//! 无公开构造函数」这一句在 P4 落地前只是**设计写死的承诺**，Task 17 是它
 //! 第一次有代码层的照片。
 //!
-//! # `tests/compile_pass/`（**三份**，**应编得过**，各是它那份反例的正控制）
+//! # `tests/compile_pass/`（**四份**，**应编得过**，各是它那份反例的正控制）
 //!
 //! - **`an_allocation_comes_from_allocate`** —— `Allocation` 由分配方给出
 //!   （`allocate` 的签名可用、返回 `Allocation`）。**没有它**，三份反例的绿可以
 //!   来自「把入口删光」这类与判据无关的坏法（恒绿的守卫比没有更坏）。
 //! - **`a_reservation_comes_from_reserve`** —— `Reservation` 由 `reserve` 给出。
 //! - **`a_remaining_comes_from_remaining`** —— `Remaining` 由 `remaining()` 给出。
+//! - **`exploration_thresholds_needs_all_four_thresholds`**（**Task 18**）——
+//!   四个阈值**全给**才构造得出 `ExplorationThresholds`（字面量逐字段写出，
+//!   含「必填」的那两个），且 `check_exploration` 的签名可用。
 //!
-//! 六条（三反例 ＋ 三正控制）合起来才算钉住：只钉反例，「入口被删光」照样绿；
-//! 只钉正控制，「crate 外随手能造一个」照样绿。
+//! 前六条（三反例 ＋ 三正控制）合起来才算钉住：只钉反例，「入口被删光」照样绿；
+//! 只钉正控制，「crate 外随手能造一个」照样绿。**Task 18 的两份同此理**
+//! （第七份反例 ＋ 第四份正控制）：只钉 `has_no_default`，「把类型删光」照样绿。
 //!
 //! # 「通配自动收」不等于「清单自动更新」
 //!
@@ -64,21 +74,23 @@
 // **公开 API 从 crate 外真的拿得到**那一侧的证据因此不止一处：`tests/tree.rs` /
 // `tests/persist.rs`（整份都是 crate 外代码）与 `tests/compile_pass/` 的正控制。
 
-/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**六份**。
-const COMPILE_FAIL_SAMPLES: [&str; 6] = [
+/// 清单里点到的、**应编不过**的样例名（`tests/compile_fail/` 下 `.rs` 的文件名主干）——**七份**。
+const COMPILE_FAIL_SAMPLES: [&str; 7] = [
     "allocation_has_no_public_constructor",
     "allocation_is_not_the_other_two_roles",
+    "exploration_thresholds_has_no_default",
     "remaining_has_no_public_constructor",
     "remaining_is_not_the_other_two_roles",
     "reservation_has_no_public_constructor",
     "reservation_is_not_the_other_two_roles",
 ];
 
-/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**三份**。
-const COMPILE_PASS_SAMPLES: [&str; 3] = [
+/// 清单里点到的、**应编得过**的样例名（`tests/compile_pass/` 下 `.rs` 的文件名主干）——**四份**。
+const COMPILE_PASS_SAMPLES: [&str; 4] = [
     "a_remaining_comes_from_remaining",
     "a_reservation_comes_from_reserve",
     "an_allocation_comes_from_allocate",
+    "exploration_thresholds_needs_all_four_thresholds",
 ];
 
 /// 两条通配收走两个目录——**清单的同步由下一条用例对钉**。
