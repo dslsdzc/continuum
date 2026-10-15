@@ -8,8 +8,10 @@
 //! 与它唯一的产生点 [`Evidence::from_tool_result`]（§89）；Task 3 落 §191 的
 //! [`TestValidity`]（五检查、三档聚合与五臂齐，设计 §6.4）；Task 4 落 §5 的节点级
 //! [`VerificationPolicy`]（§5.1 的严格解析）、任务级 [`VerificationProfile`] 与它的
-//! 取得点 [`profile_for`]（§5.2/§5.3）、§262 的五级序 [`VerifierLevel`]；其余类型与
-//! 判定由后续 task 逐一追加。
+//! 取得点 [`profile_for`]（§5.2/§5.3）、§262 的五级序 [`VerifierLevel`]；Task 5 落
+//! §6.1–§6.3 的 Requirement Coverage（[`ContractView`] 一侧的四枚类型、[`CoverageVerdict`]
+//! 的两臂、[`counts`] 的五条计数规则与 [`coverage`] 的逐项判定）；其余类型与判定由
+//! 后续 task 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
 //!
@@ -36,6 +38,7 @@
 //!   跨领域层之间的 2-环）。
 
 mod contract_view;
+mod coverage;
 mod error;
 mod evidence;
 mod evidence_type;
@@ -44,7 +47,8 @@ mod profile;
 mod test_validity;
 mod verifier_level;
 
-pub use contract_view::RequirementId;
+pub use contract_view::{ContractRequirement, ContractView, RequirementClass, RequirementId};
+pub use coverage::{CoverageVerdict, IncompleteReason, RequirementCoverage, counts, coverage};
 pub use error::VerifyError;
 pub use evidence::{
     Claim, Evidence, EvidenceId, EvidenceProducer, EvidenceScope, EvidenceStrength,
