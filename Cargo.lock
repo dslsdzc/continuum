@@ -167,6 +167,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-method"
+version = "0.1.0"
+dependencies = [
+ "thiserror",
+]
+
+[[package]]
 name = "continuum-model-registry"
 version = "0.1.0"
 dependencies = [
