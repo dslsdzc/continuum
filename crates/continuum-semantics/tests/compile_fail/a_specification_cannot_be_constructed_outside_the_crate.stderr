@@ -1,0 +1,17 @@
+error[E0451]: fields `goals`, `invariants`, `acceptance_predicates`, `forbidden_states`, `preferences` and `unknowns` of struct `Specification` are private
+  --> tests/compile_fail/a_specification_cannot_be_constructed_outside_the_crate.rs:22:9
+   |
+21 |     let _ = Specification {
+   |             ------------- in this type
+22 |         goals: Vec::new(),
+   |         ^^^^^ private field
+23 |         invariants: Vec::new(),
+   |         ^^^^^^^^^^ private field
+24 |         acceptance_predicates: Vec::new(),
+   |         ^^^^^^^^^^^^^^^^^^^^^ private field
+25 |         forbidden_states: Vec::new(),
+   |         ^^^^^^^^^^^^^^^^ private field
+26 |         preferences: Vec::new(),
+   |         ^^^^^^^^^^^ private field
+27 |         unknowns: Unknowns::NoneFound,
+   |         ^^^^^^^^ private field

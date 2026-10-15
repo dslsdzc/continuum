@@ -1,0 +1,7 @@
+error[E0451]: field `mentions` of struct `CanonicalRepresentation` is private
+  --> tests/compile_fail/canonical_representation_is_not_constructible_outside.rs:21:9
+   |
+20 |     let _ = CanonicalRepresentation {
+   |             ----------------------- in this type
+21 |         mentions: Vec::new(),
+   |         ^^^^^^^^ private field

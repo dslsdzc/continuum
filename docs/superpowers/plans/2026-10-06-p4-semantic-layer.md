@@ -277,8 +277,13 @@ crates/continuum-canonical/
   src/risk.rs         ResolutionRisk
   src/binding.rs      ExplicitBinding、BindingSource
   src/ambiguity.rs    Canonicalized、CanonicalRepresentation、UnresolvedMention、finish
-  src/alias.rs        AliasScope、Alias、promote_alias、children 式的读函数
-  src/persist.rs      alias 表（迁移 100）
+  src/alias.rs        AliasScope、Alias、children 式的读函数
+  src/persist.rs      alias 表（迁移 100）、save_alias / load_alias / list_aliases / promote_alias
+  > **订正（2026-10-10，Task 7 实现期查出并交裁，裁定：以代码那一侧为准、改本行）**：原把 `promote_alias` 列在 `src/alias.rs`。
+  > **四条 I/O（`save_alias` / `load_alias` / `list_aliases` / `promote_alias`）同址更合理**——它们都要 `Tx`，
+  > 而 `alias.rs` 是不碰持久化的类型与映射那一层。实现按后者落，偏离写在 `src/persist.rs` 的文件头。
+  > **判据**：**「某某落在哪个文件」这类行，若实现期出现了更一致的归属，改的是计划那一行**——
+  > 计划的文件结构表是**一张意图图**，不是判据；而**代码里的归属一旦落下，就有后续 task 按它写**。
   src/error.rs        CanonicalError、AliasError
   tests/surface.rs        规范化与 mention 切分
   tests/canonical.rs      和类型、Temporal、Ambiguity Manager
@@ -293,7 +298,10 @@ crates/continuum-semantics/
   Cargo.toml
   src/lib.rs          导出面与 crate 文档
   src/ids.rs          IntentId、PlanId、ContractId、RequirementId、DecisionId
-  src/intent.rs       Intent、IntentKind、IntentStatus、Priority、ContractRef、GraphIdRef、ProductIdRef、迁移表
+  src/intent.rs       Intent、IntentKind、IntentStatus、Priority、ContractRef、GraphIdRef、ProductIdRef
+  > **订正（2026-10-10，Task 8 实现期查出）**：本行原**末尾还写「迁移表」**，而下一节 `src/persist.rs` 那行写「七张表的迁移 110」——
+  > **同一个迁移在两行里各属一次，自相抵**。实现按 `continuum-canonical` 的 alias 表先例把迁移落在 `persist.rs`
+  > （**类型层不碰持久化**那条分界的同一条），理由写在该文件头。
   src/spec.rs         Specification、SpecDraft、Unknowns、Unknown、Conflict、UndefinedBehavior、六元组的成员类型
   src/contract.rs     TaskContract、Requirement、RequirementClass、VerificationRequirement
   src/diff.rs         DiffClass、DiffEntry、UnjudgedChange、UnjudgedReason、ContractDiff、diff
@@ -526,8 +534,14 @@ git commit -m "feat(canonical): Canonicalized 两支互斥、Temporal Resolver �
   （a）`EntityId` 经 `as_str` / `from_str` 往返（多条，含空串的处置断言**具体**是哪一种）；
   （b）trybuild 编译失败样例：**在 crate 外**用元组构造写 `EntityId("x".to_owned())`（`.stderr` 实跑取值，
   不许凭记忆写）＋ 正控制 `EntityId::from_str("x")` 编译通过。
-  **红条件**：把 `EntityId` 的第 0 个字段改成 `pub`（**移除档**——那时 (b) 的样例从「编译失败」变成「编译通过」，
-  观测方式是「样例不再产出旧的 `.stderr`」，**这与「用例变红」不是一回事**，报告里要分清）。
+  **红条件**：把 `EntityId` 的第 0 个字段改成 `pub`（**移除档**——那时 (b) 的样例从「编译失败」变成「编译通过」）。
+  **观测方式是两层，要分清的是这两层**（**订正 2026-10-10，Task 3 实现期实测**）：
+  ① **跑 trybuild 的那条驱动用例当场变红**——实测 trybuild 报
+  `Expected test case to fail to compile, but it succeeded.`；
+  ② 与它**同名的运行期用例仍绿**（实测 `entity_id_round_trips_… ok`）。
+  **原稿写「观测方式是『样例不再产出旧的 `.stderr`』，这与『用例变红』不是一回事」，与实测不符**：
+  驱动用例确实红了，故那句会被读成「这一档红不了、因此不必指望它」。
+  改动本身（把 `EntityId` 的字段改成 `pub`）仍然是对的档位，错的只是**观测描述**。
   **「没有指向 `ToolId` / `ModelId` / `ConnectorId` 的转换」那一半不靠 trybuild 钉**——
   本 crate 的 `ALLOWED` 条目里没有 `continuum-core`，**那三个类型在本 crate 里根本写不出来**
   （写了即 `E0432` 未解析导入，**那是编译不过、不算变红**）；故这一半的判据是
@@ -537,12 +551,25 @@ git commit -m "feat(canonical): Canonicalized 两支互斥、Temporal Resolver �
 - `a_candidate_source_can_only_return_a_set`：§197 的分工（候选生成负责高召回，**不直接决定最终语义**）。
   **照片机制（写死）**：**trybuild 正例**——写一个只实现 `retrieve` 的 `CandidateSource` 实现，编译通过；
   **trybuild 反例**——调用一个不存在的方法（如 `source.pick_one(&m)`，返回单实体那个）编译不过（`.stderr` 实跑）。
-  **并写明这条守卫的限度**：它钉的是「本层不为单实体定义方法」，**不钉**「实现者内部返回唯一候选」——后者由 Task 5 的四条断言钉。
+  **并写明这条守卫的限度（订正 2026-10-10，Task 3 的评审查出）**：它钉的是「**本层没有 `pick_one` 这个口子**」——
+  **钉的是一个名字，不是一个性质**。**限度的内容要写两条**：
+  ① **不钉「别的名字的单实体方法」**：名字是开放集，`trybuild` 枚举不完——
+     给 trait 加一个形如 `fn pick(&self, m: &Mention) -> Candidate { self.retrieve(m).into_iter().next().unwrap() }`
+     的方法，**任何一份样例都不会红**；这半边由「**不内置任何来源、也不提供默认实现**」对冲。
+  ② 不钉「实现者内部返回唯一候选」——后者由 Task 5 的四条断言钉。
+  **原稿写「它钉的是『本层不为单实体定义方法』」——那句话超出了照片的射程**
+  （本仓「绝对措辞须有用例」那一族的又一实例：句子是真的意图，但没有任何一份样例能把它证伪）。
+  **不要为补满它加样例**：名字取不完，加了仍只是「钉住一个名字」。
 - `the_candidate_records_exactly_the_three_fields_of_272`：字段清单逐项，机制 = `let Candidate { entity_id, evidence, retrieval_score } = c;`
   **不带 `..`**（任一侧加字段即**编译不过**）。字段名照 §272：`entity_id` / `evidence[]` / `retrieval_score?`。
   **明写**：这是**编译期**照片，运行期无照片（纯数据声明）。
 - `a_score_is_optional_and_absent_is_not_zero`：`retrieval_score: Option<f64>`——**缺席与 `Some(0.0)` 可区分**，
-  两条（`None` 一条、`Some(0.0)` 一条，断言读回各自是哪一枚）。红条件：把 `Option` 换成默认 `0.0`（**移除档**）。
+  两条（`None` 一条、`Some(0.0)` 一条，断言读回各自是哪一枚）。
+  **本条没有运行期红条件**（**订正 2026-10-10，Task 3 实现期实测、评审核实**）：
+  原稿写「红条件：把 `Option` 换成默认 `0.0`（**移除档**）」——**实测那枚变异体产出的是 `could not compile`**
+  （`E0308`×7 ＋ `E0599 is_none`×2），**按本仓纪律「变异导致编译失败不算红」**，故它不是运行期观测。
+  ⇒ **这条性质今天只有编译期照片，力量来自类型、不来自断言**；用例注释里照实写明。
+  **不要为它发明运行期行为**：加一条「读回再判一次」的 helper 只会造出**等价变异体**（本仓已有的另一种假绿）。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -591,6 +618,31 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
 - Create: `crates/continuum-canonical/tests/resolver.rs`
 - Create: `crates/continuum-canonical/tests/compile_fail/*.rs`（追加）
 - Modify: `crates/continuum-canonical/src/lib.rs`
+- Modify: `crates/continuum-canonical/src/ambiguity.rs`、`crates/continuum-canonical/src/canonical.rs`
+  ——**本 task 不是只新建文件**：`ResolutionResult` 与它的载荷属本 task（就写在下面的 Produces 那一行），
+  而 Task 2 只能落 **「是哪一态」那一层的前向声明**（载荷留空，`ambiguity.rs` 的文件头写明接缝）。
+  本 task 补载荷，即**改 `ambiguity.rs` 里 `ResolutionResult` 的定义**（把那一态的前向声明换成带载荷的真定义）。
+  > **订正（2026-10-10，Task 4 实现期实测、评审核实）：原文此处还写着「与 `canonical.rs` 的 `finish` 签名」——
+  > 那是错的，两处都错**：① `finish` **不在 `canonical.rs`**，它在 `ambiguity.rs`（实测签名收 `Vec<(Mention, ResolutionResult)>`）；
+  > ② **它的签名不需要改**——载荷装在 `ResolutionResult` **里面**，签名本来就装得下，
+  > 实际只把 `Resolved` 写成 `Resolved(_)` 一处。
+  > **错的是这句话，不是活**：`ambiguity.rs` 的定义**确实改了**，而且改得更彻底（类型体整段移出）。
+  > **判据**：**「改某文件的签名」这类指令，要核那个签名是否真的装不下**——
+  > 装得下而要求改签名，会让人去动一个本来正确的界面。
+- Modify: `crates/continuum-canonical/tests/canonical.rs`
+  ——**Task 2 的 7 条用历经 `finish` 的夹具直接构造四态**，补载荷时这 7 条要一并改（不是新增一批）。
+- Modify: `crates/continuum-canonical/src/canonical.rs`（`UnresolvedMention` 的那一处，见下）
+  ——**本 task 也要处置 M-2-3**：`UnresolvedMention` 在**类型层**允许装 `ResolutionResult::Resolved`
+  （实测 `crates/continuum-canonical/src/canonical.rs:109-125`），该不变量**只由构造面保证**
+  （`src/canonical.rs:104-108` 的注释照实写了这一点）。这正是**「两支互为补集」唯一没被类型钉住的地方**，
+  而 Task 2 只能删掉恒真的异或断言、把这条留给本 task。**要么把它做成类型上不可表示，要么写明为什么不做**——
+  **不处置也是一种处置，但要写出来。**
+  > **本条来历（2026-10-09，P4 Task 2 实现期查出并交裁，裁定：写进本 task 的 Files）**：
+  > 计划 Task 2 那一节把 `finish` 排在 Task 2，而本 task 的 Produces 才给出 `ResolutionResult` 的载荷，
+  > **两处次序相抵**。Task 2 报了替代方案两条并都否掉（照录载荷⇒编不过；自定二元类型＋本 task 写映射⇒
+  > 发明计划外的公开名字、改掉简报逐字给定的签名）。**判据**：**一条跨 task 的改法只写在别处的正文里、
+  > 本 task 的 Files 不列它，brief 就看不到它**——`scripts/task-brief` 按 task 切文本，
+  > **落在 Files 之外的指令不进 brief**。
 
 **Interfaces:**
 - Consumes: Task 3 的 `EntityId` / `Candidate`
@@ -613,10 +665,16 @@ git commit -m "feat(canonical): 候选面——EntityId 与 CandidateSource 的�
   把它当准入规则会把「`project` 层可见的候选」在 `explicit` 约束下判成不合格，**而规范没这么说**。
 - `entity_kind_has_exactly_four_variants`（**四枚各一条**）：`Tool` / `Skill` / `Relation` / `ConnectorService`；
   机制 = 穷尽 `match` **不带 `..`**（加第五枚即**编译不过**）。
-- `a_connector_service_mention_resolves_to_the_connector_service_kind`（**正面一条**）：
-  `GitHub` 这类 mention 解出的候选，其 `CandidateFacts.kind` **恰是 `ConnectorService`**。
-- `a_connector_service_is_neither_a_tool_nor_a_skill`（**反面逐枚**）：
-  断言它**不是** `Tool`、**不是** `Skill`（逐枚两条，不是「不等于某个别的值」）。
+- `a_connector_service_candidate_is_accepted_by_the_connector_service_kind_constraint`（**正面一条**）：
+  `GitHub` 这类 mention 对应的候选，其 `CandidateFacts.kind` 是 `ConnectorService`，
+  故它在 `ExplicitConstraint::EntityKind(ConnectorService)` 下**合格**（承重的是那处 `satisfies`）。
+  > **用例名订正（2026-10-10，Task 4 评审后）**：原名 `a_connector_service_mention_resolves_to_the_connector_service_kind`
+  > ——「mention **解出**某个 kind」本层今天做不到（没有真实来源），名字比照片宽，已收窄为「被那条约束接受」。
+- `a_connector_service_candidate_is_rejected_by_the_tool_skill_and_relation_kind_constraints`（**反面逐枚**）：
+  断言它在 `EntityKind(Tool)` / `Skill` / `Relation` 三条约束下**都不合格**（逐枚三条，
+  不是「不等于某个别的值」；承重的是那三处 `satisfies`）。
+  > **用例名订正（2026-10-10，Task 4 评审后）**：原名 `a_connector_service_is_neither_a_tool_nor_a_skill`
+  > ——只点两枚、且断的是「值不等」而不是「判据不接受」，比照片宽，已收窄。
   **这三条依据写进注释**：`EntityKind` 是**四枚、不是 §198 的三枚**——§16 第 26 条本层认领了
   「服务名作为 mention 的解析目标」并写明「与其它实体**同形**处理」，而 `GitHub` / `Email`
   **不是 `Tool` / `Skill` / `Relation` 中任何一个**；只有三枚时调用方只能**硬塞**，
@@ -746,13 +804,22 @@ git commit -m "feat(canonical): 显式约束与满足判据、四态与两个数
 ### Task 5: §4.2 的四条断言——「不存在正确候选时不强行绑定」的可断言形态
 
 **Files:**
-- Create: `crates/continuum-canonical/src/resolver.rs`（续，四条断言的实现体）
+- Create: `crates/continuum-canonical/src/resolver.rs`（续，**判据**：工作集的定义与「四条断言 ↔ 用例名」的表）
+  > **订正（2026-10-10，Task 5 实现期实测、评审核实）：原文此处写的是「（续，四条断言的实现体）」——那是错的。**
+  > 实测：**四条断言的实现体在 Task 4 就已经落地**（`src/resolver.rs` 的判定路径），
+  > 本 task 改 `src/resolver.rs` 的**全部是注释**（工作集定义、断言↔用例名的表、两行实现注释），
+  > 判定路径**一字未改**。**后果**：本 task 的 Step 2「运行，确认失败」**空转**——七条新用例第一次跑就绿，
+  > **红证据只能来自变异轮**（八枚，逐枚真跑，全为运行期红）。
+  > **判据**：**一个 task 的 Files 若写「某某的实现体」，先核那个实现体是不是已经存在**——
+  > 排错了会同时废掉「先跑红」这一步与该 task 的实付内容。
+  > **同族**：Task 2→Task 4 的次序相抵、Task 7 的 `alias.rs`（那两处已各自订正）。
 - Create: `crates/continuum-canonical/tests/resolver.rs`（续）
 - Modify: `crates/continuum-canonical/src/lib.rs`
 
 **Interfaces:**
 - Consumes: Task 4 的 `ExplicitConstraint` / `CandidateFacts` / `ResolutionResult` / `RequiredStrength`、Task 3 的 `Candidate`
-- Produces: 无新公开类型（`resolve` 的判定路径补全）
+- Produces: **无新公开类型、无新公开项**（本 task 落的是**判据**：七条用例与 `resolve` 文档里的工作集定义；
+  与上面那条订正同源——`resolve` 的判定路径**已由 Task 4 补全**，本 task 未改它）
 
 - [ ] **Step 1: 写用例**（四条断言，三条在 fail-open 侧，故三条都必须有照片）
 
@@ -775,6 +842,14 @@ git commit -m "feat(canonical): 显式约束与满足判据、四态与两个数
   读成「检索器交出的那一集」则 §4.6 的注入**破了 A**；读成「解析器实际工作的那一集」则**注入后 A 恒真**、
   解析器可以自造任何实体而 A 永不响。故 A 拿的必须是**前者**。
 - `assertion_b_each_candidate_violating_a_different_constraint_is_not_resolved`（**fail-open 侧**）：
+  > **本条读载荷的方式（2026-10-10 补入，Task 4 的订正轮查出；与本计划 Task 6 那条同源、处置相同）**：
+  > Task 4 已把四支载荷的**字段转私有**（不变量：只有 `resolve` 产出 `ResolutionResult`），故**本 task 的用例
+  > ——它们住在 `tests/resolver.rs`（crate 外）——一律经只读访问器读**（`Resolved::entity` / `Ambiguous::surviving` /
+  > `Unknown::reason` / `candidate_count` 等，共十枚），**不许写按名解构**（`Unknown { reason, .. }`）
+  > **或结构体字面量**（`Unknown { reason: … }`）——**crate 外写不出**。
+  > **本 task 正文里凡写 `Unknown { reason: AllCandidatesRejected }` 一类，一律读作「经访问器读回来的那个值等于它」**，
+  > **不是**要你写那种 pattern。判据同本计划对 `Remaining` 的处置（`:2135-2136`）：**「字段私有」与「crate 外按名解构」不能同真**。
+
   **逐候选 N 条**——构造 N 个候选，每个恰好违反一条**不同的**显式约束；N 次结果的**每一次**都断言
   **不是 `Resolved`**，且**逐次断言**是 `Unknown { reason: AllCandidatesRejected }`（该候选是唯一候选且不合格）
   还是 `ConfirmRequired`。红条件：把「全部候选都不合格」也判成 `Resolved`（**放宽档**）。
@@ -835,6 +910,24 @@ git commit -m "feat(canonical): §4.2 的四条断言（A/B/C/D）与两侧守�
 **Interfaces:**
 - Consumes: Task 4 的 `RequiredStrength` / `ResolutionResult` / `CandidateSet` / `ExplicitConstraint`、Task 3 的 `Candidate`
 - Produces: `continuum_canonical::{ResolutionRisk, ExplicitBinding, BindingSource}`、`binding::apply`（注入点）
+
+> **本条读载荷的方式（2026-10-10 补入，Task 4 的订正轮查出）**：Task 4 已把四支载荷的**字段转私有**
+> （不变量：只有 `resolve` 产出 `ResolutionResult`），故**本 task 的用例——它们住在 `tests/resolver.rs`（crate 外）——
+> 一律经只读访问器读**（`Resolved::entity` / `Ambiguous::surviving` / `Unknown::reason` / `candidate_count` 等，共十枚），
+> **不许写按名解构**（`Unknown { reason, .. }`）**或结构体字面量**（`Unknown { reason: … }`）——**crate 外写不出**。
+> 本 task 正文里凡出现 `Unknown { reason: AllCandidatesRejected }` 一类的写法，**一律读作「断言经访问器读回来的那个值等于它」**，
+> **不是**要你写那种 pattern。
+> **判据同 Task 19 那处（`:2135-2136` 对 `Remaining` 的处置）**：**「字段私有」与「crate 外按名解构」不能同真**——
+> 该计划两处遇到同一形状，处置也同一：**读走访问器**。
+
+> **⚠️ 定点复核（2026-10-10 补入，Task 5 的评审查出，**必须在接上注入点之前判**）**：
+> Task 5 落了一条 **A 的注入守卫**用例，它的夹具里 `injected` 是**测试内的局部量**（`tests/resolver.rs` 的 `None`）。
+> 本 task 的注入形态决定那条守卫是否仍然成立，**两条走向结论相反**：
+> - **若注入是调用方传参**（设计 §4.6 的 `if let Some(b) = binding` 形状）⇒ 该调用点继续传 `None`，**守卫有效，不必重写**；
+> - **若注入由 `BoundTo` 约束自动发生** ⇒ 该夹具里 `e-pointed` **会被自动注入**，正确结果可能变成 `Resolved(e-pointed)`，
+>   而守卫的 `injected` 仍是 `None` ⇒ **它会把一个正确的实现判红**。
+> **设计 §4.6 的照片 (b) 恰好是同形夹具**，故这不是空担心的分岔。
+> **判据**：**先定形态，再动那条守卫**；若取后者，本 task 的守卫要跟着改（改夹具或改断言），**不是让实现去迁就它**。
 
 - [ ] **Step 1: 写用例**
 
@@ -905,10 +998,19 @@ git commit -m "feat(canonical): 风险门槛必填与 ExplicitBinding 的取值�
 ### Task 7: Alias 存储（迁移 100）、四作用域与「不自动永久化」
 
 **Files:**
-- Create: `crates/continuum-canonical/src/{alias.rs,persist.rs}`
+- Create: `crates/continuum-canonical/src/persist.rs`
+- **Modify: `crates/continuum-canonical/src/alias.rs`（续写，不是新建）**
+  ——`AliasScope` 与四作用域那一半**已由 Task 4 提前落在这个文件里**（Task 4 的 Produces 有两条以它为入参／出参的映射函数，
+  而计划原本把它排在本 task）。**本 task 只在这个文件上续写**，**不另起名字、不换家**。
 - Create: `crates/continuum-canonical/tests/alias.rs`
 - Modify: `crates/continuum-canonical/{src/lib.rs,src/error.rs,Cargo.toml}`（导出、`AliasError`、dep `continuum-persist`）
 - Modify: `crates/continuum-runtime/tests/dependency_direction.rs`（`ALLOWED` 加 `continuum-persist`）
+  > **本条来历（2026-10-10，P4 Task 4 实现期查出并交裁，裁定：写进本 task 的 Files）**：
+  > 计划把 `AliasScope` 排在本 task（`:942`、`:1000`，家是 `src/alias.rs`），而 Task 4 的 Produces（`:635`）
+  > 有两条映射函数以它为入参／出参——**两处次序相抵**。Task 4 的处置是把四枚词汇那一半**提前**落在 `src/alias.rs`。
+  > **故本 task 的 Files 原先写「Create」会与那半相撞**：照字面执行会新建一个已被写过的文件。
+  > **判据同 Task 2→Task 4 那一笔**：**一条跨 task 的改法只写在别处的正文里、本 task 的 Files 不列它，
+  > brief 就看不到它**——`scripts/task-brief` 按 task 切文本，**落在 Files 之外的指令不进 brief**。
 
 **Interfaces:**
 - Produces: `continuum_canonical::{AliasScope, Alias, AliasError, p4_canonical_migrations, save_alias, load_alias, list_aliases, promote_alias}`
@@ -993,7 +1095,11 @@ git commit -m "feat(canonical): alias 表（迁移 100）、四作用域与显�
 
 **Interfaces:**
 - Consumes: `continuum_canonical::EntityId`（§1.3 的类型边）；`continuum_persist::{Tx, Migration, Db, Value}`
-- Produces: `continuum_semantics::{IntentId, IntentKind, IntentStatus, Priority, ContractRef, GraphIdRef, ProductIdRef, Intent, IntentError, p4_semantics_migrations, save_intent, load_intent, list_children}`
+- Produces: `continuum_semantics::{IntentId, ContractId, PlanId, IntentKind, IntentStatus, Priority, ContractRef, GraphIdRef, ProductIdRef, Intent, IntentError, p4_semantics_migrations, save_intent, load_intent, list_children}`
+  > **订正（2026-10-10，Task 8 实现期查出）**：本行原**漏了 `ContractId` 与 `PlanId`**——而
+  > **`ContractRef` 与 `Intent.active_plan_id` 都要用它们**，且本计划 Task 11 逐字 `Consumes` `ContractId`。
+  > 实现把它们落进 `src/ids.rs`。**判据**：**产出行漏一枚类型，下游 task 的 `Consumes` 会指向一个没人产出的名字**——
+  > 而那条 `Consumes` 是**逐字给的**，读的人会以为它在上一节已经有了。
 
 - [ ] **Step 1: 建 crate 骨架、登记 members 与 `ALLOWED`**
 
@@ -1055,7 +1161,13 @@ pub struct ContractRef { pub id: ContractId, pub version: u32 }
 
 /// §222 的十五个字段。**语义内容的五个字段变化时 `version` +1，状态迁移不 +1**（§5.2 的设计决定）。
 pub struct Intent {
-    pub id: IntentId, pub version: u32, pub kind: IntentKind, pub goal: CanonicalRepresentation,
+    pub id: IntentId, pub version: u32, pub kind: IntentKind, pub goal: EntityId,
+    // **订正（2026-10-10，Task 8 实现期查出并交裁，裁定：取 `EntityId`）**：本行原速写为 `CanonicalRepresentation`，
+    // 与设计 §1.3 及本计划自己给 `continuum-semantics` 登记的那条 `ALLOWED` 注释（`EntityId`）相抵。
+    // **硬理由**：`CanonicalRepresentation` **在 crate 外造不出来**（字段私有、`new` 是 `pub(crate)`、唯一入口是 `finish`），
+    // 故它**不能是 `load_intent` 要从库里读回的字段**。
+    // **判据**：**一个要落库并读回的字段，其类型必须能从库里存的字节重构出来**——
+    // **不可构造的包装类型不能当持久字段**（否则「读回」这件事在类型上就写不出来）。
     pub status: IntentStatus, pub priority: Priority, pub created_at: i64, pub updated_at: i64,
     pub parent_intent: Option<IntentId>, pub contract_id: ContractRef, pub active_plan_id: Option<PlanId>,
     pub graph_id: Option<GraphIdRef>, pub product_id: Option<ProductIdRef>, pub completion_predicate: Opaque,
@@ -1467,7 +1579,7 @@ git commit -m "feat(semantics): Plan 审查状态机、ReviewIndependence 与 §
   `PlanFootprint` 的两个 `estimated_cost` / `authority` 以不透明值传入，比较由调用方给出的
   `MaterialThresholds` 一类入参承载（**若无该入参，则本层只能判「两者不相等即 MATERIAL」，
   而那句话在规范里没有依据**——**故本 task 的前置是先有 `PlanFootprint`（Task 16）与一个显式的阈值入参**；
-  阈值入参的形状属本计划自定，见 `## 遗留` 第五节）。
+  阈值入参的形状属本计划自定，见 `## 遗留` 第四节）。
 
 - [ ] **Step 2: 运行，确认失败**
 

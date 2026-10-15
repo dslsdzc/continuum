@@ -1,0 +1,37 @@
+[package]
+name = "continuum-budget"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`error.rs` 的 `BudgetError` 派生 `Error`。
+thiserror = { workspace = true }
+# 本 crate 的使用点（设计 §2.2 的两条边之一）：`tree.rs` 的 `BudgetOwner::Intent` 与
+# 另外两枚带 `intent` 字段的变体取 `IntentId`（§12.1 的 owner 四变体）。
+# 这条边由用它的这个 task 登记（`dependency_direction.rs` 的 `ALLOWED`），不推给别处。
+continuum-semantics = { path = "../continuum-semantics" }
+# 本 crate 的使用点（另一条边）：`persist.rs` 的迁移 120（`budget_node` / `budget_ledger`）
+# 与全部行级读写经 `Tx` / `Migration` / `Value` / `PersistError` 访问。
+# 数据库连接在 `continuum-persist` 内私有，本 crate 只经 `Tx` 访问。
+continuum-persist = { path = "../continuum-persist" }
+# 本 crate 的使用点：`tree.rs` 的 `BudgetOwner::as_key` / `parse`——owner 是**复合键**
+# （四个变体、字段是任意串），落库是 `budget_ledger.owner` 与 `budget_node.owner`
+# **一个文本列**，JSON 是它的无歧义承载（转义由 serde_json 保证，串字段可以含
+# 任何字符）。**外部 crate，按需加**（计划 Global Constraints 的
+# 「外部 crate 按需加，不进 `ALLOWED`」——那张表只逐对断言 workspace 成员之间的边）。
+serde_json = { workspace = true }
+
+[dev-dependencies]
+# 本 crate 的使用点：`tests/tree.rs` / `tests/persist.rs` 的落库用例各起一个临时库
+# （与 `continuum-canonical/tests/alias.rs` 的夹具同形）。它是**外部** crate，
+# 故不进 `dependency_direction.rs` 的 `ALLOWED`——那张表逐对断言的是 workspace 成员
+# 之间的边。**但会让 `Cargo.lock` 变化**，提交时按显式路径带上锁文件。
+tempfile = { workspace = true }
+# 本 crate 的使用点：`tests/type_level.rs` 用**六份**编译失败样例钉住两组「crate 外
+# 写不出」的命题（三对 `*_has_no_public_constructor`、三对 `*_is_not_the_other_two_roles`），
+# 并配**三份**编译通过的正控制（三个角色各自的入口可用）；`trybuild` 的用法与
+# `continuum-canonical` / `continuum-semantics` 同形。**它是外部 crate，不进
+# `dependency_direction.rs` 的 `ALLOWED`**（同 tempfile 的理由）。**只在测试目标里用**：
+# `src/` 里没有一行读它。
+trybuild = { workspace = true }

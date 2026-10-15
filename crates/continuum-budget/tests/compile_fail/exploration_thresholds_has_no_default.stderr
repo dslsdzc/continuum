@@ -1,0 +1,16 @@
+error[E0599]: no function or associated item named `default` found for struct `ExplorationThresholds` in the current scope
+  --> tests/compile_fail/exploration_thresholds_has_no_default.rs:26:36
+   |
+26 |     let _ = ExplorationThresholds::default();
+   |                                    ^^^^^^^ function or associated item not found in `ExplorationThresholds`
+   |
+note: if you're trying to build a new `ExplorationThresholds`, consider using `ExplorationThresholds::spec_defaults` which returns `ExplorationThresholds`
+  --> src/exploration.rs
+   |
+   |     pub fn spec_defaults(network_transfer: i64, gpu_time: i64) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+help: there is an associated function `spec_defaults` with a similar name
+  --> src/exploration.rs
+   |
+   |     pub fn spec_defaults(network_transfer: i64, gpu_time: i64) -> Self {
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

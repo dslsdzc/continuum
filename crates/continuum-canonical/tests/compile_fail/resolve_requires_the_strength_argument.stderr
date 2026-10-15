@@ -1,0 +1,31 @@
+error[E0061]: this function takes 5 arguments but 4 arguments were supplied
+  --> tests/compile_fail/resolve_requires_the_strength_argument.rs:25:13
+   |
+25 |     let _ = resolve(&cs, None, &[], &confidence);
+   |             ^^^^^^^----------------------------- argument #5 of type `&RequiredStrength` is missing
+   |
+note: function defined here
+  --> src/resolver.rs
+   |
+   | pub fn resolve(
+   |        ^^^^^^^
+help: provide the argument
+   |
+25 |     let _ = resolve(&cs, None, &[], &confidence, /* &RequiredStrength */);
+   |                                                +++++++++++++++++++++++++
+
+error[E0308]: mismatched types
+  --> tests/compile_fail/resolve_requires_the_strength_argument.rs:28:50
+   |
+28 |     let _ = resolve(&cs, None, &[], &confidence, None::<RequiredStrength>);
+   |             -------                              ^^^^^^^^^^^^^^^^^^^^^^^^ expected `&RequiredStrength`, found `Option<RequiredStrength>`
+   |             |
+   |             arguments to this function are incorrect
+   |
+   = note: expected reference `&RequiredStrength`
+                   found enum `Option<RequiredStrength>`
+note: function defined here
+  --> src/resolver.rs
+   |
+   | pub fn resolve(
+   |        ^^^^^^^

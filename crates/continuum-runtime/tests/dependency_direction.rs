@@ -149,6 +149,26 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 设计 §6；收件人见 §10 第 8 条）——**不是漏登记**。
     // **不登记 core**：本设计对它零引用。**不登记 persist / events**：本设计不写库（§4.2）。
     ("continuum-node", &["continuum-artifact"]),
+    // P4 语义层（设计 §2.1）：Input Canonicalization Frontend 与 Reference Resolver。
+    // 本层不登记任何指向执行层／资源层／边界层的边；允许集只含 continuum-persist
+    // （alias 表经 Tx）与层内前驱。`continuum-semantics ← continuum-canonical` 是
+    // 反向的读取方，不在这里。
+    //
+    // P4 的 Task 7 起填入那条边：`alias` 表的迁移 100 与四条读写路径经 `Tx` 访问
+    // （设计 §4.6）。**上面几行的「只含 `continuum-persist`」在 Task 7 之前是「将来时」**
+    // ——那时数组是 `&[]`，本行注释写的是「允许集是空条目……今天还没有边」；
+    // Task 7 兑现了它。表是**允许集合**的转录（不是使用点派生），故这一格此前一直空着
+    // 不算错，只是当时还没有使用者。
+    ("continuum-canonical", &["continuum-persist"]),
+    // P4 语义层（设计 §2.1）：Intent / Specification / Contract / ContractDiff / Plan / Decision /
+    // Constraint Validator。`← continuum-canonical` 是 §1.3 的类型边（Intent.goal 取 EntityId）；
+    // `← continuum-persist` 由本 task 登记（intent 表）。
+    // **允许集里没有 continuum-budget**——§11.5 的第 1 条守卫（两道门分离）。
+    ("continuum-semantics", &["continuum-canonical", "continuum-persist"]),
+    // P4 语义层（设计 §2.1）：预算树、Allocation / Reservation / Remaining、账本、Budget Validator。
+    // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
+    // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
+    ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
@@ -169,6 +189,18 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // P3 子项目 B 的 Task 7 起加上 secrets：`main.rs` 的装配处在分派之前构造并持有
     // 密钥运行时（`src/secrets.rs` 的 `assemble`，设计 §4.1「驱动装配好传进来」、
     // §11 第 15 条把这条边的所有者写死为 B）。
+    //
+    // P4 的 Task 19 起加上 budget：**dev 边**——`tests/budget_projection.rs` 的形状乙
+    // 两条断言（裁定 §12.6.1）要在同一处穷尽解构 `continuum_budget::Remaining` 与
+    // `continuum_model_registry::BudgetView`；本 task 只把它作 dev 边用，**Task 20 才把它
+    // 升成普通依赖**（理由是注册迁移与钩子）。`cargo tree --edges all` 把 dev 边算进依赖，
+    // 故与普通边一样登记（`docs/superpowers/p3bcdf-followups.md` §四.1）。
+    //
+    // P4 的 Task 20 起加上 continuum-canonical 与 continuum-semantics（budget 同 task 由
+    // dev 升为普通依赖）：装配处注册三者的迁移与预算恢复钩子——`main.rs` 的
+    // `runtime_migrations()` 追加 100／110／120 三行，`recover_cmd::run` 注册
+    // `BudgetReservationRecovery`（挂 `MarkLostExecutions`）。上一段「本 task 只把它作
+    // dev 边用」说的是 Task 19 当时的状态，自本 task 起 budget 是普通依赖。
     //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条今天对 sandbox 与 events 成立
@@ -202,10 +234,16 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // ——本表断言的是工作区成员之间的边）。故上面 `("continuum-runtime", &[…])` 那一行**不动**，
     // 本文件两个方向（已声明而越界、本表列了却没用到）的断言全绿。
     // 反向的边（真依赖却没登记）由本文件的断言抓住，不会静默。
+    //
+    // **订正（P4 的 Task 19）**：上一段的「那一行不动」说的是 F 的 Task 3 当时；自本 task 起，
+    // 该行**含 `continuum-budget`**（本 task 新增的 dev 边，见上）。旧句留此，免得下一轮按它
+    // 得出「runtime 条目此后不再变」的错结论。
     (
         "continuum-runtime",
         &[
             "continuum-artifact",
+            "continuum-budget",
+            "continuum-canonical",
             "continuum-capability",
             "continuum-core",
             "continuum-effect",
@@ -217,6 +255,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-provider",
             "continuum-sandbox",
             "continuum-secrets",
+            "continuum-semantics",
             "continuum-workspace",
         ],
     ),

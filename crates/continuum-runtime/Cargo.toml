@@ -6,6 +6,16 @@ rust-version.workspace = true
 
 [dependencies]
 continuum-artifact = { path = "../continuum-artifact" }
+# P4 的 Task 19 起是 **dev 边**（`tests/budget_projection.rs` 的形状乙两条断言要在同一处
+# 穷尽解构 `continuum_budget::Remaining` 与 `continuum_model_registry::BudgetView`）；
+# **Task 20 升为普通依赖**——`main.rs` 的装配处注册 `p4_budget_migrations()`
+# （迁移 120），`recover_cmd::run` 注册 `BudgetReservationRecovery` 钩子
+# （挂 `MarkLostExecutions`）。
+continuum-budget = { path = "../continuum-budget" }
+# P4 的 Task 20 起：`main.rs` 的装配处注册 `p4_canonical_migrations()`（迁移 100 的
+# `alias` 表）；`tests/startup.rs` 的端到端用例经 `continuum_canonical::load_alias`
+# 断言表外 scope 读回具体 `Err`。
+continuum-canonical = { path = "../continuum-canonical" }
 # Task 4 起：`main.rs` 的装配处注册 `p3_capability_migrations()`（`tool` 表由用它的
 # 那个 task 注册）。Task 7 接强制点 (2) 时另会用到它的类型。
 continuum-capability = { path = "../continuum-capability" }
@@ -26,6 +36,9 @@ continuum-sandbox = { path = "../continuum-sandbox" }
 # 装配是为将来的消费者做的：装配出的那个运行时今天**没有真消费者**（唯一候选是 B 的
 # 连接器入口，按裁决 §七.3 不接），按使用是零消费者——见 `src/main.rs:32-37` 与 §八.2。
 continuum-secrets = { path = "../continuum-secrets" }
+# P4 的 Task 20 起：`main.rs` 的装配处注册 `p4_semantics_migrations()`
+# （迁移 110 的语义层七张表）。
+continuum-semantics = { path = "../continuum-semantics" }
 continuum-workspace = { path = "../continuum-workspace" }
 # Task 10 起：`task_cmd` 要构造第 2 级（`ExplicitCurrent`）那条内建规则，而 `Policy` 的
 # `condition` 只能经 `Condition::parse(&serde_json::Value)` 造出——`continuum-policy`

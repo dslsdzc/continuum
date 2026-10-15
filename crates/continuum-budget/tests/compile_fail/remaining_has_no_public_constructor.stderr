@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/remaining_has_no_public_constructor.rs:21:13
+   |
+21 |     let _ = Remaining(dims);
+   |             ^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/account.rs
+   |
+   | pub struct Remaining(pub(crate) Dimensions);
+   |                      ^^^^^^^^^^^^^^^^^^^^^ private field

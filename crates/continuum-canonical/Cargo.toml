@@ -1,0 +1,49 @@
+[package]
+name = "continuum-canonical"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`error.rs` 的 `CanonicalError` 派生 `Error`。
+thiserror = { workspace = true }
+# 本 crate 的使用点：`surface.rs` 的 `normalize` —— §270 Surface Normalizer 的
+# 「Unicode 归一」与「宽度归一」两步都是**兼容分解**（compatibility decomposition）的产物，
+# 故取 NFKC。设计 §3.1 只写了这两步的**名字**、没给实现手段；
+# **本行是本 task 对简报 Step 1 依赖清单的一处增补**（简报那张清单只列了 `thiserror`），
+# 理由写在这里：手写字符表**做不出完整的兼容分解**（`ﬁ` U+FB01 只是其中一枚），
+# 那种写法是一张残缺的表而不是「Unicode 归一」，与本仓「全量真实现不留桩」相抵。
+# **它不进 `dependency_direction.rs` 的 `ALLOWED`**：那张表逐对断言的是
+# **workspace 成员之间**的边（设计 §1.2.3 推论 1；「叶子 crate 的条目记实际依赖」
+# 这个口径见 §2.2）：比对的内层循环只遍历 workspace 成员
+# （`dependency_direction.rs` 的 `for other in &all_crates`），
+# 而 `unicode-normalization` 是**外部** crate，故它与本 crate 之间的这条边不进比对。
+# 〔订正（修复轮 1）〕本行初稿引的是「设计 §7.3」——§7.3 是「版本化（§226）与
+# `ContractRef`」，与依赖边无关。**话对、号码错**，旧号码记此。
+# 它会改 `Cargo.lock`（本 crate 的依赖列表多一项），故提交时按显式路径带上。
+unicode-normalization = { workspace = true }
+# Task 7 的使用点：`persist.rs` 的 `alias` 表迁移与行级读写经 `Tx` / `Migration` /
+# `PersistError` / `Value` 访问（设计 §4.6）。数据库连接在 `continuum-persist` 内私有，
+# 本 crate 只经 `Tx` 访问。**这是本 crate 唯一的 workspace 内边**，故它同时要把
+# `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 里本 crate 的
+# 条目从 `&[]` 改成 `&["continuum-persist"]`——那一行今天写着「本 crate 的允许集是空条目」，
+# 那是 Task 1 时的实况，本 task 起不再成立。
+continuum-persist = { path = "../continuum-persist" }
+
+[dev-dependencies]
+# Task 3 的使用点：`tests/type_level.rs` 用编译失败样例钉住三件 crate 外**写不出**的东西
+# （`EntityId` 的字面量构造、`CandidateSource` 上没有 `pick_one` 这个口子、
+# `CanonicalRepresentation` 的结构体字面量），`trybuild` 的用法与 `continuum-node` /
+# `continuum-model-registry` 同形（那两份 crate 的 `tests/` 下**只有** `compile_fail/`；
+# 本 crate 多一份 `compile_pass/` 的理由写在 `tests/type_level.rs` 文件头）。
+# **它是外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表逐对断言的是
+# **workspace 成员之间**的边（设计 §1.2.3 推论 1），比对的内层循环只遍历 workspace 成员
+# （`dependency_direction.rs` 的 `for other in &all_crates`）；`trybuild` 不在 members 里。
+# **但它会让 `Cargo.lock` 变化**（`continuum-canonical` 的依赖列表多一项），
+# 故提交时要按显式路径带上锁文件。
+# **只在测试目标里用**：`src/` 里没有一行读它。
+trybuild = { workspace = true }
+# Task 7 的使用点：`tests/alias.rs` 的落库用例各起一个临时库（与
+# `continuum-capability/tests/persist.rs` 的夹具同形）。它是**外部** crate，
+# 故同 `trybuild` 一样不进 `dependency_direction.rs` 的 `ALLOWED`。
+tempfile = { workspace = true }

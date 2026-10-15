@@ -1,0 +1,11 @@
+error[E0423]: cannot initialize a tuple struct which contains private fields
+  --> tests/compile_fail/allocation_has_no_public_constructor.rs:38:13
+   |
+38 |     let _ = Allocation(dims);
+   |             ^^^^^^^^^^
+   |
+note: constructor is not visible here due to private fields
+  --> src/account.rs
+   |
+   | pub struct Allocation(pub(crate) Dimensions);
+   |                       ^^^^^^^^^^^^^^^^^^^^^ private field

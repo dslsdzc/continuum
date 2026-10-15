@@ -1,0 +1,5 @@
+error[E0599]: no method named `evaluate` found for struct `VerificationRequirement` in the current scope
+  --> tests/compile_fail/verification_requirement_has_no_evaluate.rs:14:16
+   |
+14 |     let _ = vr.evaluate(&vr);
+   |                ^^^^^^^^ method not found in `VerificationRequirement`

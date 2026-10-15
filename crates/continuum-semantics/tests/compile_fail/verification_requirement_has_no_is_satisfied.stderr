@@ -1,0 +1,5 @@
+error[E0599]: no method named `is_satisfied` found for struct `VerificationRequirement` in the current scope
+  --> tests/compile_fail/verification_requirement_has_no_is_satisfied.rs:19:16
+   |
+19 |     let _ = vr.is_satisfied();
+   |                ^^^^^^^^^^^^ method not found in `VerificationRequirement`
