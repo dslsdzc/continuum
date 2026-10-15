@@ -44,17 +44,24 @@ fn two_outputs_are_rejected() {
 }
 
 #[test]
-fn six_types_round_trip_through_serde() {
-    for t in [
-        ArtifactType::SourceTree,
-        ArtifactType::Patch,
-        ArtifactType::TestResult,
-        ArtifactType::Text,
-        ArtifactType::Json,
-        ArtifactType::Blob,
-    ] {
+fn every_artifact_type_round_trips_through_serde() {
+    for t in ArtifactType::ALL {
         let text = serde_json::to_string(&t).expect("可序列化");
         let back: ArtifactType = serde_json::from_str(&text).expect("可反序列化");
         assert_eq!(back, t, "类型 {t:?} 往返不一致");
+
+        // 除往返外逐型再钉一件事：serde 串与 `as_str()` 逐字相同。
+        //
+        // 只断往返时这里有等价变异体：删掉 `artifact.rs` 的
+        // `#[serde(rename_all = "snake_case")]` 不红——`"SubtitleTrack"`
+        // 序列化后仍能解回 `SubtitleTrack`，往返照旧成立；能把两版分开的
+        // 输入就是这两个串本身。它同时也是 `artifact.rs` 里「`rename_all =
+        // "snake_case"` 给出的字符串与 `as_str` 逐型相同」那条注记的照片。
+        let serde_key = text.trim_matches('"');
+        assert_eq!(
+            serde_key,
+            t.as_str(),
+            "类型 {t:?} 的 serde 串应与 as_str() 逐字相同"
+        );
     }
 }
