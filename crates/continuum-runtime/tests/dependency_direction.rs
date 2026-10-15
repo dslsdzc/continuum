@@ -169,6 +169,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
     // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
     ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
+    // P5a 验证与证据判定（设计 §2.1）。本块是第 8 层，只依赖执行层与其下：
+    // continuum-artifact / continuum-graph / continuum-operator（Task 2 加）、
+    // continuum-persist / continuum-events（Task 9 加）。
+    // **不含 continuum-semantics**：`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，
+    // **不是**因为成环（见跨计划前置第二节的订正：按 §9.1 的箭头约定，本块依赖语义层沿链、不成环），
+    // 而是因为 `continuum-semantics` 今天在 `crates/` 下不存在。
+    ("continuum-verify", &[]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

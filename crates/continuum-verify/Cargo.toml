@@ -1,0 +1,14 @@
+[package]
+name = "continuum-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`evidence_type.rs` 的 `EvidenceType` 与 `ArtifactType` 同形的
+# `#[derive(Serialize, Deserialize)]` ＋ `#[serde(rename_all = "snake_case")]`（设计 §4.2）。
+# **落库列不依赖它**：`as_str` / `parse` 是列编码唯一的产生点，派生的 serde 表示
+# 不被用来落库（沿用 `ArtifactType::as_str` 文档里那条口径）。
+# `serde_json` / `thiserror` / `trybuild` / `tempfile` 与三条内部依赖由需要它们的
+# task 增量加（计划 Task 1 的 Step 1）。
+serde = { workspace = true }

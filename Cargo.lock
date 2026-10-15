@@ -311,6 +311,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-verify"
+version = "0.1.0"
+dependencies = [
+ "serde",
+]
+
+[[package]]
 name = "continuum-workspace"
 version = "0.1.0"
 dependencies = [
