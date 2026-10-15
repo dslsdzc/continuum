@@ -121,9 +121,9 @@
 //!
 //! # 用例
 //!
-//! 十条用例（输入面 2 ＋ `execution_policy` 10 条折成 2 个表驱动 fn ＋ 原样类型 1 ＋
-//! 裁决 5 条折成 2 个 ＋ 「判不了」三侧 3）全在 `tests/constraint.rs`，逐条的红条件
-//! 写在那里的文件头。
+//! 十二条用例（输入面 2 ＋ `execution_policy` 10 条折成 2 个表驱动 fn ＋ 原样类型 1 ＋
+//! 裁决 5 条折成 2 个 ＋ 「判不了」三侧 3 ＋ **读法边界 2**）全在 `tests/constraint.rs`，
+//! 逐条的红条件写在那里的文件头。
 
 use continuum_canonical::Opaque;
 
@@ -310,9 +310,9 @@ fn classify_change(name: &str) -> Option<ChangeKind> {
 ///
 /// # 照片
 ///
-/// `tests/constraint.rs` 的十条用例：签名两条（`fn` 指针标注 ＋ 穷尽解构）、
-/// `execution_policy` 的 7＋3 条逐项、裁决五条、判不了三侧。逐条的红条件在
-/// 那个文件的文件头。
+/// `tests/constraint.rs` 的十二条用例：签名两条（`fn` 指针标注 ＋ 穷尽解构）、
+/// `execution_policy` 的 7＋3 条逐项、裁决五条、判不了三侧、**读法边界两条**
+/// （表外条目不拦／非字符串元素跳过）。逐条的红条件在那个文件的文件头。
 pub fn validate(
     plan: &CandidatePlan<'_>,
     contract: &TaskContract,

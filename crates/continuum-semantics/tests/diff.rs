@@ -383,9 +383,12 @@ fn contract_diff_carries_the_two_versions_and_two_collections() {
     );
     // `unjudged` 是**并列字段，不是第四个差异类**：它和 `entries` 平级。
     assert_eq!(unjudged.len(), 1, "本夹具应恰一条未判定");
+    // 断言的是 `unjudged` 的 **id 集合**——不是「按 id 找一条、再断言它的 id 是那个 id」
+    //（那是恒真的自反断言，没有判别力）。
+    let unjudged_ids: Vec<&str> = unjudged.iter().map(|u| u.requirement_id.as_str()).collect();
     assert_eq!(
-        unjudged_of(&unjudged, "r-unjudged").requirement_id.as_str(),
-        "r-unjudged",
+        unjudged_ids,
+        vec!["r-unjudged"],
         "未判定项按 id 出现在并列字段 `unjudged` 里"
     );
 }

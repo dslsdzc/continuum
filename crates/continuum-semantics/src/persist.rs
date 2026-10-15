@@ -1274,6 +1274,15 @@ fn decode_options(raw: &str) -> Result<Vec<DecisionOption>, DecisionError> {
 /// `a_user_approvals_audit_row_is_written_for_a_decision_result` 的申报）。
 /// **本函数不自己 `commit`**。
 ///
+/// # 单独调用**不做指向性校验**（校验在 [`apply_result`] 的预读）
+///
+/// 本函数只写两行：它**不读 `decision` 表**——`decision_id` 是否存在、`option_index`
+/// 是否在界内，都是 [`apply_result`] 四步预读的一部分（「指向」fail-closed 两侧的照片
+/// 在 `tests/decision.rs` 的
+/// `a_result_pointing_at_a_missing_decision_or_option_is_rejected`）。**单独调用**本函数
+/// （不经 `apply_result`）可以落一条指向不存在决策的结果行；调用方要 fail-closed
+/// 就必须走 `apply_result`（或自己先读 `decision` 表）。
+///
 /// # 次序与失败路径
 ///
 /// 先写行、再写审计（同 [`save_contract`] 的次序）：行写失败（如同 `decision_id` 的

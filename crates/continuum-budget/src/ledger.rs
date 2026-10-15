@@ -120,7 +120,9 @@ type Row = (DimensionKind, LedgerKind, i64);
 ///
 /// 账本没有 `reservation_id` 列（五列写死），配对付不出「哪条 `reserve` 配哪条
 /// `settle`」的精确答案：**乱序结算并发预扣时，未消化金额可能错位**（「有没有
-/// 悬空」的条数判断不受顺序影响）。恢复钩子场景（进程死掉后悬空的是最后一条
+/// 悬空」的条数判断不受顺序影响）。错位的偏差**两侧都可能**，而**低估那一侧是
+/// fail-open 侧**（`reserved` 少算 ⇒ 上层的可用额偏大）——据实记在这里，不假装
+/// FIFO 把乱序也管住了。恢复钩子场景（进程死掉后悬空的是最后一条
 /// `reserve`）在 FIFO 下恰好正确——那是 `reserved` 最要紧的读法。
 pub(crate) fn balances(rows: &[Row]) -> ([i64; 5], [i64; 5]) {
     let mut settled = [0i64; 5];

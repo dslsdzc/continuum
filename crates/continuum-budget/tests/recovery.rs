@@ -4,6 +4,7 @@
 //! | 用例 | 钉的判据 | 红条件（档位） |
 //! |---|---|---|
 //! | `a_dangling_reserve_is_settled_at_the_reserved_amount_by_the_recovery_hook` | 钩子把悬空的 `reserve` 按预扣结算：`settled == reserved` 且 `reserved == 0`；**并断言 `hook.phase()` 是 `MarkLostExecutions`**（不是别的态） | 钩子改成「释放悬空预扣」（**移除档**——账本里会出现 `release` 行、`settled` 不涨） |
+//! | `every_dangling_reserve_is_settled_one_by_one_with_the_reserve_rows_own_at` | **N≥2 悬空**（同一 `(owner, money)` 两条）：钩子**逐条**写 `settle` 行（一条「和」的行在条数上留悬空）；且每条 `settle` 行的 `at` **沿用**它所消化那条 `reserve` 行自己的 `at`（钩子不收时钟） | 按「和」写一条 `settle` 行（**移除档**——收敛断言留残留）；`at` 取新时钟／别的值（**取反档**——逐条断言红） |
 //! | `the_recovery_hook_does_not_repeat_what_mark_running_nodes_lost_did` | **否定式照片**：跑一次钩子后 `adfir_node` 表的**行内容逐行不变**——本层只读「哪些运行已 LOST」这个既成事实、只记账，**不写节点状态** | 钩子在结算之外顺手写了节点表（**取反档**——「行内容逐行不变」红） |
 //! | `the_hook_is_not_registered_on_reconcile_incomplete_effects` | 签名层面 ＋ 一条否定式断言：`phase()` **不是** `ReconcileIncompleteEffects`（§13.1 的四步判据把三个备选逐条排除） | 挂到效应阶段（**取反档**）——那会让一处「效应语义」的改动波及预算记账 |
 //!
@@ -141,6 +142,25 @@ fn settled_by_dimension(tx: &Tx<'_>, owner: &str) -> [i64; 5] {
     out
 }
 
+/// 该 owner 的 `settle` 行，按插入序：`(维度, 额, at)` 三列。
+///
+/// （`at` 是「`settle` 行沿用它所消化那条 `reserve` 行自己的 `at`」这一判据的
+/// 唯一可读列。）
+fn settle_rows(tx: &Tx<'_>, owner: &str) -> Vec<(String, i64, i64)> {
+    tx.query(
+        "SELECT dimension, amount, at FROM budget_ledger \
+         WHERE owner = ?1 AND kind = 'settle' ORDER BY rowid",
+        &[Value::text(owner)],
+    )
+    .unwrap()
+    .into_iter()
+    .map(|row| match (&row[0], &row[1], &row[2]) {
+        (Value::Text(d), Value::Int(a), Value::Int(at)) => (d.clone(), *a, *at),
+        other => panic!("settle 行的形状不符（dimension/amount/at）: {other:?}"),
+    })
+    .collect()
+}
+
 /// `adfir_node` 的全部行（`node_id, state`，按 `node_id` 排序）。
 fn adfir_rows(tx: &Tx<'_>) -> Vec<(String, String)> {
     tx.query(
@@ -220,6 +240,94 @@ fn a_dangling_reserve_is_settled_at_the_reserved_amount_by_the_recovery_hook() {
         rows_of(&tx, digested_owner.as_key().as_str()),
         digested_rows_before,
         "已消化的预扣不许被钩子再结算一遍"
+    );
+}
+
+/// **N≥2 悬空 ＋ `settle` 行沿用 `reserve` 行自己的 `at`**（终审 Minor 12，两件事一条用例）。
+///
+/// # 为什么是同一 `(owner, 维度)` 上的两条
+///
+/// 这是「逐条结算」与「按和结算」分岔的唯一位置：只写一条和为 300 的 `settle` 行
+/// 在**条数**上仍留一条 `reserve` 悬着（`balances` 的消化按条数配对）、
+/// `dangling_reservations` 读到残留——下面的收敛断言因此有红法。两条悬空若落在两个
+/// 维度上，两种实现都各写两条行，这个分岔消失。
+///
+/// # 为什么 `at` 也要钉
+///
+/// 恢复钩子不收时钟（`RecoveryHook::run` 没有 `at` 入参）：它写的 `settle` 行的时刻是
+/// **被消化那条 `reserve` 行自己的 `at`**（`src/ledger.rs` 的 `undigested_reserve_rows`）。
+/// 同维度、金额可相同时，`at` 是能把 `settle` 行对回它所消化那条 `reserve` 行的列。
+#[test]
+fn every_dangling_reserve_is_settled_one_by_one_with_the_reserve_rows_own_at() {
+    let (_dir, db) = new_db();
+    let tx = db.begin().unwrap();
+
+    // 同一 owner、同一维度（money）上两条悬空预扣，`at` 各不相同（7、9）。
+    let owner = intent("i-two-dangling");
+    record_root(&tx, owner.clone(), all(1000), 0).unwrap();
+    reserve(
+        &tx,
+        owner.clone(),
+        Dimensions {
+            money: Some(100),
+            wall_time: None,
+            token: None,
+            gpu_time: None,
+            network_transfer: None,
+        },
+        7,
+    )
+    .unwrap();
+    reserve(
+        &tx,
+        owner.clone(),
+        Dimensions {
+            money: Some(200),
+            wall_time: None,
+            token: None,
+            gpu_time: None,
+            network_transfer: None,
+        },
+        9,
+    )
+    .unwrap();
+
+    // 前提：两条都悬空（同 (owner, money) 聚合后恰一条、额 300）。
+    let dangling = dangling_reservations(&tx).unwrap();
+    assert_eq!(dangling.len(), 1, "同 (owner, money) 的悬空聚合为一条");
+    assert_eq!(dangling[0].amount, 300, "两条悬空的额合计 300");
+
+    let hook = BudgetReservationRecovery;
+    hook.run(&tx).unwrap();
+
+    // (a) 逐条：恰两条 `settle` 行（不是一条和 300 的行）——额与 `at` 各自回指
+    // 它消化的那条 `reserve` 行（插入序：100@7、200@9）。
+    assert_eq!(
+        settle_rows(&tx, owner.as_key().as_str()),
+        vec![
+            ("money".to_owned(), 100, 7),
+            ("money".to_owned(), 200, 9),
+        ],
+        "每条 reserve 行对应一条同额 settle 行，且 settle 行的 at 沿用 reserve 行自己的"
+    );
+
+    // (b) 一次恢复即收敛：按和结算的实现会在这里留一条悬空。
+    assert!(
+        dangling_reservations(&tx).unwrap().is_empty(),
+        "逐条结清后没有悬空残留"
+    );
+    assert_eq!(
+        settled_by_dimension(&tx, owner.as_key().as_str()),
+        [300, 0, 0, 0, 0],
+        "money 维的 settle 合计 = 100 + 200"
+    );
+
+    // (c) 余量：1000 − 300。
+    let r = remaining(&tx, &owner).unwrap();
+    assert_eq!(
+        dim_of(r.dims(), DimensionKind::Money),
+        Some(700),
+        "remaining == 1000 − (100 + 200)——按预扣结算、余量不退"
     );
 }
 

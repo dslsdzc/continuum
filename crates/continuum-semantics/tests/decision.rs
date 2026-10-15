@@ -593,8 +593,9 @@ fn a_decision_required_event_is_written_on_creation() {
 /// - **Plan 侧**：新版本 v2.0（`major` +1——§9.2 的修订语义：新版本 `DRAFT`）存在；
 ///   `objectives` 是**指名的那个新值**（整列替换，不是拼接）；`milestones` /
 ///   `assumptions` / `risks` / `acceptance_conditions` / `type` / `intent_id` 逐项不变；
-///   旧版本 v1.0 仍在、`review_state = SUPERSEDED`、其余内容逐项不变（旧行只动
-///   `review_state` 一列——那是 §9.2「修订」语义的另一半，同 `revise` 的值层先例）。
+///   旧版本 v1.0 仍在、`review_state = SUPERSEDED`（**raw 差异集恰为 `{review_state}` 一列**）、
+///   其余内容逐项不变（旧行只动 `review_state` 一列——那是 §9.2「修订」语义的另一半，
+///   同 `revise` 的值层先例）。
 /// - **其余两张**：`decision_result` 恰一行（决策单与被选项）；Intent 回到 `RUNNING`。
 ///
 /// # 红条件
@@ -700,7 +701,21 @@ fn a_decision_result_changes_only_the_fields_it_names() {
     assert_eq!(
         plan_v1_after.len(),
         plan_v1_before.len(),
-        "旧 plan 行的列数不变"
+        "旧 plan 行的列数不变（先钉列数，下面的逐列比对才不含没比到的列）"
+    );
+    // 差异集**恰为** `{review_state}`（建表序第 10 列，见 `persist.rs` 的 `CREATE TABLE plan`）
+    // ——与上面 Contract 侧的整行 raw 比对同级强度；只比列数会让其余列被改都漂过去。
+    let differences: Vec<usize> = plan_v1_before
+        .iter()
+        .zip(&plan_v1_after)
+        .enumerate()
+        .filter(|(_, (before, after))| before != after)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(
+        differences,
+        vec![10],
+        "旧 plan 行的差异集应恰为 {{review_state}}（第 10 列）——其余列 raw 逐列不变"
     );
 
     let new = load_plan(&tx, &PlanId::from_str("p-1"), version(2, 0))

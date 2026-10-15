@@ -18,7 +18,7 @@
 //!
 //! | 用例 | 钉的判据 | 红条件（档位） |
 //! |---|---|---|
-//! | `remaining_and_budget_view_have_the_same_five_dimensions` | 两侧字段集**逐项**相同：两处**穷尽解构、一个 `..` 都不写** | 任一侧加字段／改维度名（**编译红**——实测见该用例）；字段互换（**取反档**——编译得过，靠逐维值断言逮） |
+//! | `remaining_and_budget_view_have_the_same_five_dimensions` | 两侧字段集**逐项**相同：两处**穷尽解构、一个 `..` 都不写** | 任一侧加字段／改维度名（**编译红**——实测 **`BudgetView` 侧**；`Dimensions` 侧同构、**未留档**）；字段互换（**取反档**——编译得过，靠逐维值断言逮） |
 //! | `the_projection_is_value_preserving_dimension_by_dimension` | 五个量纲**各一条**：投影值＝`remaining` 值，含 `None → None`（**不是 `Some(0)`**） | 把某维投影到另一维（**取反档**——逐维值断言红）；把某维的 `None` 折成 `Some(0)`（**移除档**——`None` 侧红） |
 //! | `none_is_not_some_zero_on_both_sides` | `None ≠ Some(0)`**两侧各一条**：本层 `Remaining` 侧 ＋ D 侧 `BudgetView` 两个直接构造的值 | 把某维的 `None` 折成 `Some(0)`（**移除档**）；D 侧字段不再是 `Option<i64>`（**编译红**——字面量/断言类型不符） |
 //!
@@ -200,7 +200,8 @@ fn project(r: &Remaining) -> BudgetView {
 /// # 红的时点（实测）
 ///
 /// 任一侧加一个字段、或改一个维度名 ⇒ **编译不过**（不是运行期红）。
-/// 实测（2026-10-15，rustc 1.95.0）：
+/// 实测（2026-10-15，rustc 1.95.0）——**只覆盖 `BudgetView` 侧**；`Dimensions`
+/// 侧的解构同构（加字段是同一型 `E0027`），但**未实测、未留档**：
 ///
 /// - **给 `BudgetView` 加一个字段**（`cpu_time`）：`error[E0027]: pattern does not
 ///   mention field `cpu_time``（本用例解构那一行）＋ `error[E0063]: missing field

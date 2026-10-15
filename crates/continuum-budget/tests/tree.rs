@@ -846,8 +846,9 @@ fn a_zero_actual_settles_within_and_refunds_everything() {
 ///
 /// 故本层**没有**任何「造一个 `SystemMaintenance` 节点」的生产路径——
 /// **第一侧照片即本用例的扫描半边**：`src/` 里 `SystemMaintenance` 的出现点
-/// **逐条等于白名单**，而白名单里的每一处都在**类型与编解码层**（定义 / 编码 / 解码 /
-/// 相等判定），**没有一处把它写进表**。**第二侧**是 Task 21 的源码面复核。
+/// **逐条等于白名单**，而白名单里的每一处都在**类型与编解码层**（定义 / 编码 / 解码；
+/// 相等判定自 2026-10-15 起比 `BudgetOwner::as_key` 的编码串，**不再逐字出现变体名**），
+/// **没有一处把它写进表**。**第二侧**是 Task 21 的源码面复核。
 ///
 /// # 红条件
 ///
@@ -908,8 +909,6 @@ fn the_tree_is_one_tree_with_five_owner_variants() {
     let expected = [
         // 解码层：`parse` 的变体分支（从库里读回时构造——它在读路径，不写表）。
         r#"src/tree.rs: "system_maintenance" => Some(BudgetOwner::SystemMaintenance),"#,
-        // 相等判定（`PartialEq` 的手写实现）——两个根同一。
-        "src/tree.rs: (BudgetOwner::SystemMaintenance, BudgetOwner::SystemMaintenance) => true,",
         // 编码层：`as_key` 的变体分支。
         r#"src/tree.rs: BudgetOwner::SystemMaintenance => "{\"kind\":\"system_maintenance\"}".to_owned(),"#,
         // 类型层：枚举的变体定义。

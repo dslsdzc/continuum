@@ -15,6 +15,8 @@
 //! | `unknown_constraint_key_is_an_error` | 「判不了」第一侧：串**不在当前 Contract 的 Requirement id 集合里** → `Err(UnknownConstraintKey { key })`，`key` 是**那一个** | 悬空键被当 `Satisfied`（**fail-open**）即红 |
 //! | `empty_constraints_is_not_an_error` | 「判不了」第二侧：空 `constraints` **不是** `Err`（`Node::new` 就置空，`crates/continuum-graph/src/node.rs:31`） | 空表被当 `Err`（**收紧档**）即红 |
 //! | `a_key_pointing_at_a_preferred_requirement_is_not_an_error` | 「判不了」第三侧（评审查出后补）：键**命中** `class = PREFERRED` 的 Requirement → **不是 `Err`、也不拦下**——`Err` 的触发条件是「**`key` 不在 id 集合里**」，**与 `class` 无关** | 「不指向 REQUIRED 就报错」的实现照样全绿的那一格——本用例专治它（否则它绕掉上面三条） |
+//! | `a_policy_entry_off_both_lists_is_not_blocked` | **读法边界一**（终审 Minor 11 补）：`execution_policy` 的条目**不在 §225 两张清单上** ⇒ 放行（`classify_change` 得 `None`——设计未给未知条目的处置，本层不为它发明 `Err`） | 未知条目被当禁令拦下（**收紧档**） |
+//! | `non_string_policy_elements_are_skipped_element_by_element` | **读法边界二**（终审 Minor 11 补）：数组里的**非字符串元素跳过**、不当变更名判，也不报错；且跳过是**逐元素**的——非字符串元素**不遮蔽**后续条目 | 非字符串元素报 `Err`／把后续元素一起跳掉（**移除档**——后半断言红）；后续禁令条目不被拦（同断言） |
 //!
 //! # 用例数写死：7 ＋ 3 ＝ 10
 //!
@@ -424,6 +426,61 @@ fn a_key_pointing_at_a_preferred_requirement_is_not_an_error() {
     );
     // 第二条：也不拦下（裁决由该 Requirement 的 `class` 决定）。
     assert_satisfied(result, "命中非 REQUIRED 的键：裁决由 `class` 决定——不拦下");
+}
+
+/// **读法边界一**（终审 Minor 11 补）：`execution_policy` 的条目**不在 §225 两张清单上**
+/// ⇒ 放行（`classify_change` 得 `None`）。
+///
+/// 设计未给「未知条目」的处置，本层**不为它发明 `Err`**（读法边界写在 `src/constraint.rs`
+/// 的模块文档）：只拦两张清单上有的，其余不拦。
+///
+/// **红条件**：未知条目被当禁令拦下（**收紧档**）。
+#[test]
+fn a_policy_entry_off_both_lists_is_not_blocked() {
+    let contract = sample_contract(Vec::new());
+    let plan = sample_plan();
+    let footprint = sample_footprint();
+    let candidate = CandidatePlan { plan: &plan, footprint: &footprint };
+
+    // 一个两处都不在的变更名（不是 MAY 七条、也不是 MUST NOT 后三条的任何字面）。
+    let policy = serde_json::json!(["换一种量子后端"]);
+    assert_satisfied(
+        validate(&candidate, &contract, &[], &policy),
+        "表外条目不拦（设计未给它的处置，本层不发明 Err）",
+    );
+}
+
+/// **读法边界二**（终审 Minor 11 补）：`execution_policy` 数组里**非字符串元素跳过**
+/// ——不当变更名判、也不报错；且跳过是**逐元素**的，非字符串元素**不遮蔽**后续条目。
+///
+/// **红条件**：非字符串元素报 `Err`（**移除档**——(a) 红）；把后续元素一起跳掉
+/// （**移除档**——(b) 的禁令不被拦即红）。
+#[test]
+fn non_string_policy_elements_are_skipped_element_by_element() {
+    let contract = sample_contract(Vec::new());
+    let plan = sample_plan();
+    let footprint = sample_footprint();
+    let candidate = CandidatePlan { plan: &plan, footprint: &footprint };
+
+    // (a) 全非字符串元素：跳过 ⇒ 放行（不是 `Err`、不是拦）。
+    let policy = serde_json::json!([42, null, {"变更": "换模型"}]);
+    assert_satisfied(
+        validate(&candidate, &contract, &[], &policy),
+        "非字符串元素跳过——不报错、不拦",
+    );
+
+    // (b) 跳过是逐元素的：非字符串元素**不遮蔽**后续的禁令条目。
+    let policy = serde_json::json!([42, "扩大权限"]);
+    match validate(&candidate, &contract, &[], &policy) {
+        Ok(ConstraintVerdict::ViolatesProhibition { what }) => {
+            assert_eq!(
+                what,
+                ViolatedProhibition::Authority,
+                "跳过 42 之后仍应拦下「扩大权限」那一枚"
+            );
+        }
+        other => panic!("非字符串元素不应遮蔽后续禁令条目，实得 {other:?}"),
+    }
 }
 
 /// 本 crate `src/` 下的全部 `.rs`（路径排序，消息里的次序因此确定）。

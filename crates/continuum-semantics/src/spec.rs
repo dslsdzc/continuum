@@ -363,8 +363,11 @@ impl UndefinedBehavior {
 /// 那是**一分不值的重复**（没有不变量、没有编码差异），换来的是**位置互换在编译期被挡**。
 ///
 /// **「不改写、不裁剪」「无校验」的照片**：`tests/spec.rs` 的往返用例让五个类型各自
-/// 过「什么字符都可能有」的串（`a_specification_has_exactly_the_six_tuple_fields`
+/// 过串（`a_specification_has_exactly_the_six_tuple_fields`
 /// 与 `save_intent_with_specification` 的编码路径），逐字节进什么出什么。
+/// **限度照实记**（终审 Minor 7 的收窄）：那组语料是普通串，**没有** `"` / `\`
+/// 一类需要转义的字符——容器是 JSON（`persist.rs` 的 `encode_members`，转义由
+/// serde_json 承担），但「带这类字符的串往返」**今天没有照片**。
 #[derive(Debug, Clone)]
 pub struct Goal(Opaque);
 

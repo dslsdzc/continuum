@@ -378,10 +378,14 @@ fn a_revision_is_a_new_version_and_the_old_one_becomes_superseded() {
         ReviewState::Draft,
         "新版本从 DRAFT 开始（§338 的循环）"
     );
+    // 逐项 `as_str` 比对（不是 `len()`）——内容的修改由调用方随后进行：本函数不发明内容，
+    // 也不许在拷贝路上丢项、换序或改名（len 相等会让这三类都漂过去）。
+    let revised_objectives: Vec<&str> = revised.objectives.iter().map(Opaque::as_str).collect();
+    let old_objectives: Vec<&str> = old.objectives.iter().map(Opaque::as_str).collect();
     assert_eq!(
-        revised.objectives.len(),
-        old.objectives.len(),
-        "修订产出的版本带着原内容（内容的修改由调用方随后进行——本函数不发明内容）"
+        revised_objectives,
+        old_objectives,
+        "修订产出的版本带着原内容（逐项 as_str 与旧版本相同——本函数不发明内容）"
     );
 
     // 第二件：旧版本转 SUPERSEDED（终态）。版本号不变——被取代的是原来那一版。

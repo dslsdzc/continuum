@@ -115,35 +115,20 @@ impl BudgetOwner {
     }
 }
 
-/// 两个 owner 相等 ⟺ 同变体且各字段的串相等（**手写而不是派生**）。
+/// 两个 owner 相等 ⟺ **编码后是同一个节点**（[`BudgetOwner::as_key`] 逐字节相等；
+/// **手写而不是派生**）。
 ///
 /// # 判据
 ///
 /// `IntentId` 没有 `PartialEq`（`ids.rs` 的模块文档：「本层没有给『两个 id 是同
 /// 一个』以外的任何判据」），而树键的相等判据就是「**编码后是同一个节点**」——
-/// 手写按 `as_str` 比较比派生更准确地表达这一点，且 [`BudgetError::UnknownOwner`]
-/// 的 `owner` 要能逐值比较（错误类型的断言形状）。
+/// 直接比 `as_key` 的编码串比派生更准确地表达这一点；且**加一枚变体不会静默落入
+/// 任何分支**（旧写法是一条 `match` 加 `_ => false` 通配臂，新变体与自身比较会
+/// 静默判不等）。另 [`BudgetError::UnknownOwner`] 的 `owner` 要能逐值比较
+/// （错误类型的断言形状）。
 impl PartialEq for BudgetOwner {
     fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (BudgetOwner::SystemMaintenance, BudgetOwner::SystemMaintenance) => true,
-            (BudgetOwner::Intent(a), BudgetOwner::Intent(b)) => a.as_str() == b.as_str(),
-            (
-                BudgetOwner::NodeRun { intent: a, node: n },
-                BudgetOwner::NodeRun { intent: b, node: m },
-            ) => a.as_str() == b.as_str() && n == m,
-            (
-                BudgetOwner::Exploration {
-                    intent: a,
-                    of_node: o,
-                },
-                BudgetOwner::Exploration {
-                    intent: b,
-                    of_node: p,
-                },
-            ) => a.as_str() == b.as_str() && o == p,
-            _ => false,
-        }
+        self.as_key() == other.as_key()
     }
 }
 

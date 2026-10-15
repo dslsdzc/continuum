@@ -96,7 +96,7 @@ fn load(tx: &Tx<'_>, id: &str) -> Intent {
         .unwrap_or_else(|| panic!("库里应有 {id:?}"))
 }
 
-/// 按 `index` 取一列文本。
+/// 把一个列值取为文本；非 `Value::Text` 直接炸（本文件里它必须出现在文本列上）。
 fn text_of(v: &Value) -> String {
     match v {
         Value::Text(s) => s.clone(),

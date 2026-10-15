@@ -47,7 +47,7 @@ use crate::ids::{ContractId, IntentId, RequirementId};
 ///
 /// 可观察的用处只有两处：`contract_requirement` 表的 `class` 列（落库走
 /// [`crate::save_contract`]、读回走 [`crate::load_contract`]），以及本 crate 内的判定
-/// （Task 14 的 Constraint Validator 判 `REQUIRED`——同 crate）。故先按 `pub(crate)` 收着，
+/// （Task 16 的 Constraint Validator 判 `REQUIRED`——同 crate）。故先按 `pub(crate)` 收着，
 /// 加宽是一字之改；同 [`crate::IntentKind::as_str`] 的收法。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequirementClass {

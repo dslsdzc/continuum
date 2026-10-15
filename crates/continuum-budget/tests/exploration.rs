@@ -40,7 +40,8 @@ const FIVE: [DimensionKind; 5] = [
     DimensionKind::NetworkTransfer,
 ];
 
-/// 只有 `d` 这一维取值 `v`，其余全 `None`。
+/// 只有 `d` 这一维取值 `v`；其余四维从 `all(0)` 出发——即全 `Some(0)`
+/// （可读、且在阈值内，不构成约束）。
 fn only(d: DimensionKind, v: i64) -> Dimensions {
     let mut out = all(0);
     match d {
