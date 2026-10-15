@@ -68,3 +68,11 @@ async-trait = { workspace = true }
 # **不用 `futures-util`**——`stream::iter` 在它里面，本仓不引它；判据见
 # `crates/continuum-provider/tests/common/mod.rs:31-32` 的同一句话（同一取舍的第二份副本）。
 futures-core = { workspace = true }
+# P4 的 Task 19 起的使用点：`tests/budget_projection.rs` 的形状乙两条断言（裁定 §12.6.1）
+# 要在同一个测试里穷尽解构 `continuum_budget::Remaining`（经 `dims()` 读法）与
+# `continuum_model_registry::BudgetView`，钉「五维字段集逐项相同」。
+# **本 task 只作 dev 边**（Task 20 升成普通依赖，理由是注册迁移与钩子）。
+# **它要同时进 `ALLOWED` 的 runtime 条目**——`cargo tree --edges all` 把 dev 边
+# 算进依赖，只改一处即红（`docs/superpowers/p3bcdf-followups.md` §四.1）；
+# `Cargo.lock` 同变，提交时按显式路径带上。
+continuum-budget = { path = "../continuum-budget" }

@@ -190,6 +190,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 密钥运行时（`src/secrets.rs` 的 `assemble`，设计 §4.1「驱动装配好传进来」、
     // §11 第 15 条把这条边的所有者写死为 B）。
     //
+    // P4 的 Task 19 起加上 budget：**dev 边**——`tests/budget_projection.rs` 的形状乙
+    // 两条断言（裁定 §12.6.1）要在同一处穷尽解构 `continuum_budget::Remaining` 与
+    // `continuum_model_registry::BudgetView`；本 task 只把它作 dev 边用，**Task 20 才把它
+    // 升成普通依赖**（理由是注册迁移与钩子）。`cargo tree --edges all` 把 dev 边算进依赖，
+    // 故与普通边一样登记（`docs/superpowers/p3bcdf-followups.md` §四.1）。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条今天对 sandbox 与 events 成立
     // （**core 与 provider 已不成立**——下方的订正块记着这两处的使用点）：
@@ -222,10 +228,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // ——本表断言的是工作区成员之间的边）。故上面 `("continuum-runtime", &[…])` 那一行**不动**，
     // 本文件两个方向（已声明而越界、本表列了却没用到）的断言全绿。
     // 反向的边（真依赖却没登记）由本文件的断言抓住，不会静默。
+    //
+    // **订正（P4 的 Task 19）**：上一段的「那一行不动」说的是 F 的 Task 3 当时；自本 task 起，
+    // 该行**含 `continuum-budget`**（本 task 新增的 dev 边，见上）。旧句留此，免得下一轮按它
+    // 得出「runtime 条目此后不再变」的错结论。
     (
         "continuum-runtime",
         &[
             "continuum-artifact",
+            "continuum-budget",
             "continuum-capability",
             "continuum-core",
             "continuum-effect",
