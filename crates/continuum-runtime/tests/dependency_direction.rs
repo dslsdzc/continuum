@@ -173,8 +173,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // continuum-artifact / continuum-graph / continuum-operator（Task 2 加）、
     // continuum-persist / continuum-events（Task 9 加）。
     // **不含 continuum-semantics**：`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，
-    // **不是**因为成环（见跨计划前置第二节的订正：按 §9.1 的箭头约定，本块依赖语义层沿链、不成环），
-    // 而是因为 `continuum-semantics` 今天在 `crates/` 下不存在。
+    // **不是**因为成环（见跨计划前置第二节的订正：按 §9.1 的箭头约定，本块依赖语义层沿链、不成环）。
+    // **不登记它是无条件的**（设计 §6.1）：本块以值承载 Contract / Requirement 身份、
+    // 不 `use` 语义层类型，故无实际用到的边可登记。
+    // 〔订正 2026-10-16〕`continuum-semantics` 已随 P4 合入；结论不变——不得登记该边，
+    // 理由是以值承载（此前「该 crate 尚不存在」的表述已过时）。
     ("continuum-verify", &[]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
