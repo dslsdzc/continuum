@@ -1,9 +1,10 @@
 //! 本 crate 的错误类型：`VerifyError`（设计 §2.2 的冻结清单）。变体逐 task 增量加。
 
 use crate::evidence_type::EvidenceType;
+use crate::test_validity::TestValidityCheck;
 
-/// 本 crate 的失败面。变体逐 task 增量加（Task 2 起的两枚是下面这两条，
-/// 后续 task 的变体随各自的产生方落地）。
+/// 本 crate 的失败面。变体逐 task 增量加（Task 2 的两枚是 §4.4 的两条；Task 3 追加
+/// `IncompleteTestValidityChecks`；后续 task 的变体随各自的产生方落地）。
 ///
 /// **派生 `PartialEq`**：失败路径的用例要断言「是哪一种 `Err`」（本计划的纪律第 4 条），
 /// 而 `EvidenceWithoutArtifact` 的十三型逐型断言还要求载荷里的 `EvidenceType` 可比较
@@ -22,4 +23,17 @@ pub enum VerifyError {
     /// 给出。放过去会让「谁确认的」不可判。
     #[error("HumanConfirmation 的生产者不是 Human（§4.4 第 2 条）")]
     HumanConfirmationFromNonHuman,
+
+    /// `TestValidity::new` 的 `checks` 未做到「五臂齐且不重复」（§6.4）。
+    ///
+    /// 缺臂与重复臂都随错误带回：只报「不齐」而不给是哪一臂，调用方要么重算要么去猜；
+    /// 而「重复补齐五条」正是要拦的那种输入（重复臂把缺席的臂静默填平），故两个名单分开给。
+    /// 两个名单都按 [`TestValidityCheck::ALL`] 的顺序排列。
+    #[error(
+        "TestValidity 的 checks 未做到五臂齐且不重复（§6.4）：缺臂 {missing:?}、重复臂 {repeated:?}"
+    )]
+    IncompleteTestValidityChecks {
+        missing: Vec<TestValidityCheck>,
+        repeated: Vec<TestValidityCheck>,
+    },
 }

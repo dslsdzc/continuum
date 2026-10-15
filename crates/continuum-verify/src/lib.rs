@@ -5,7 +5,8 @@
 //! `Independent Verifier` / `Verifier Adversary` / `Mutation Verification` /
 //! `Completion Predicate 判定` / `Test Validity Verifier`）。Task 1 建骨架与
 //! §258 的 [`EvidenceType`]（十四臂，设计 §4.2）；Task 2 落 §4 的 [`Evidence`] 数据模型
-//! 与它唯一的产生点 [`Evidence::from_tool_result`]（§89）；其余类型与判定由后续 task
+//! 与它唯一的产生点 [`Evidence::from_tool_result`]（§89）；Task 3 落 §191 的
+//! [`TestValidity`]（五检查、三档聚合与五臂齐，设计 §6.4）；其余类型与判定由后续 task
 //! 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
@@ -20,19 +21,20 @@
 //! （[`RequirementId`] 是本块定义的一枚，与 P4 的同名类型是两个类型，见设计 §4.3.1
 //! 的订正段），**不登记指向 `continuum-semantics` 的边**（设计 §6.1）。
 //!
-//! # 本 task（Task 2）明确不做
+//! # 本 task（Task 3）明确不做
 //!
-//! - **不检查**：`claim` 的内容、`strength` / `scope` 的值、`artifact_refs` 里制品是否
-//!   存在（那要查库，属于 `artifact_exists`，Task 9）、生产者的节点是否真属该图
-//!   （在 Task 6 的装配处查）——设计 §4.4 的「它不检查什么」逐条照办。
-//! - **`contract_view.rs` 本 task 只放 [`RequirementId`] 一枚**：`RequirementClass` /
-//!   `ContractRequirement` / `ContractView` 由 Task 5 追加到同一文件。
-//! - **不建设计 §2.2 冻结清单的其余类型**：由用它们的 task 逐一追加，本 task 不预放占位。
+//! - **不建 Test Validity Verifier 的产生者**（设计 §6.5 的处置）：「谁跑这五个检查、
+//!   什么时候跑、输入取自哪里（源码／制品／`Evidence<Test>`）」规范未给，在未给期间造一个
+//!   等于替 §191 选了一条它没写的执行路径；本块只定义记录（[`TestValidity`]）与它的形状
+//!   校验（五臂齐），产生者留缺口。
+//! - **不建 `coverage` / `counts`（Task 5）与 §5 的策略类型（Task 4）**：由用它们的 task
+//!   逐一追加，本 task 不预放占位。
 
 mod contract_view;
 mod error;
 mod evidence;
 mod evidence_type;
+mod test_validity;
 
 pub use contract_view::RequirementId;
 pub use error::VerifyError;
@@ -41,3 +43,4 @@ pub use evidence::{
     EvidenceSubject, WorkerCompletionDeclaration,
 };
 pub use evidence_type::EvidenceType;
+pub use test_validity::{CheckVerdict, TestValidity, TestValidityCheck, Validity};
