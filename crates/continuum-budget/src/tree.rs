@@ -233,7 +233,9 @@ pub fn allocate(
         owner: parent.clone(),
     })?;
     let parent_available = persist::available_of(tx, &parent, &parent_node)?;
-    let children = persist::children_sums(tx, &parent)?;
+    // 传 `dims`：下方的判定循环只读 `Some` 维的 `children`，聚合与检测都
+    // 只覆盖那些维（理由与实测见 `children_sums` 的文档）。
+    let children = persist::children_sums(tx, &parent, &dims)?;
 
     let values = dims.to_values();
     for (i, dimension) in ALL.iter().enumerate() {
