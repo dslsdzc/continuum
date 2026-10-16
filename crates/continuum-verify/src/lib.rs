@@ -13,8 +13,10 @@
 //! 的两臂、[`counts`] 的五条计数规则与 [`coverage`] 的逐项判定）；Task 6 落 §7 的
 //! Verifier 选择与隔离（[`select_verifier`] / [`independence_of`]、§7.5 的
 //! [`VerifierVerdict`] / [`VerdictAggregate`] / [`BlindVerdict`] / [`clamp_by_readability`]）
-//! 与两个输入面（[`InitialVerifierInput`] / [`PostBlindVerifierInput`]）；其余类型与判定由
-//! 后续 task 逐一追加。
+//! 与两个输入面（[`InitialVerifierInput`] / [`PostBlindVerifierInput`]）；Task 7 落 §8 的
+//! Completion Predicate 判定（§8.1 的十项 [`Conjunct`]、§8.2 的两臂 [`CompletionVerdict`]、
+//! §8.3 的逐项判据与 §8.4 的 [`CompletionInput`] / [`judge_completion`]，含 `undecidable`
+//! 列表的项类型 [`UndecidableItem`]）；其余类型与判定由后续 task 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
 //!
@@ -40,6 +42,8 @@
 //!   字段类型仍是 `serde_json::Value`（设计 §2.3 的裁定：给字段定型会造出执行层与
 //!   跨领域层之间的 2-环）。
 
+mod completion;
+mod conjunct;
 mod contract_view;
 mod coverage;
 mod error;
@@ -53,6 +57,8 @@ mod test_validity;
 mod verdict;
 mod verifier_level;
 
+pub use completion::{CompletionInput, CompletionVerdict, judge_completion};
+pub use conjunct::{Conjunct, UndecidableItem};
 pub use contract_view::{ContractRequirement, ContractView, RequirementClass, RequirementId};
 pub use coverage::{CoverageVerdict, IncompleteReason, RequirementCoverage, counts, coverage};
 pub use error::VerifyError;
