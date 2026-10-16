@@ -169,6 +169,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
     // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
     ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
+    // P5e 媒体领域算子（设计 §2.1）。本 task 只登记当时实际有的两条边；
+    // continuum-graph / continuum-method / continuum-verify 三条分别由需要它们的 task 追加
+    // （前两条是 dev 边，理由见各 task：生产代码对它们零调用）。
+    (
+        "continuum-media",
+        &["continuum-artifact", "continuum-operator"],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

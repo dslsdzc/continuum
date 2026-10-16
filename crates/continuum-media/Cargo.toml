@@ -1,0 +1,10 @@
+[package]
+name = "continuum-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-operator = { path = "../continuum-operator" }
+thiserror = { workspace = true }
