@@ -35,7 +35,8 @@ impl AdversaryOutcome {
     /// **构造不出** `AdversaryOutcome` 的值；本仓带 `ALL` 常量的各处成立的前提是那些类型
     /// 可在常量上下文里完整构造（照 P5e `2543aeb` 的订正与 P5c 的 `all_operators()` 形状）。
     /// 数目 `2` 写在**返回类型**里，使清单个数的改动仍**编译期可见**——删一臂必须同步改
-    /// 返回类型，而那一处改动会让 `tests/adversary.rs` 的数目断言红（纪律 1(a) 的锚点）。
+    /// 返回类型，而同步那一处后 `tests/adversary.rs` 的数目断言会在**运行期**红（点名走
+    /// 切片比较，不靠越界索引；纪律 1(a) 的锚点）。
     ///
     /// 载荷取样例值（空串），不承诺代表性：清单回答「有哪些臂」，载荷不参与这件事
     /// （同 [`VerifierVerdict::ALL`](crate::verdict::VerifierVerdict::ALL) 的处置）。
