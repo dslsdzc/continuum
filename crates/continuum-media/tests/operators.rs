@@ -134,7 +134,12 @@ fn a_second_identical_registration_returns_the_registry_error() {
             assert_eq!(id.as_str(), "media-import", "撞车的应是批次第一枚");
             assert_eq!(version.as_u32(), 1);
         }
-        // 本 task 的 MediaError 只有 Registry 一臂；内层非 Duplicate 即预期不成立。
+        // 本 crate 的 MediaError 另有 `UnverifiableDeterminism` 一臂（§5.4 的注册期
+        // 规则，落在 `tests/determinism.rs`）；本用例的输入是合法批次，这一臂不可能出现。
+        MediaError::UnverifiableDeterminism { .. } => {
+            panic!("合法批次重注册不应触发 UnverifiableDeterminism")
+        }
+        // 内层非 Duplicate 即预期不成立。
         MediaError::Registry(other) => panic!("应为 OperatorError::Duplicate，实际 {other:?}"),
     }
 }

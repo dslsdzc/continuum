@@ -239,15 +239,62 @@ fn verify_multimodal_operator() -> Operator {
     }
 }
 
+/// §5.4 的「逐位可复现的 backend」名单（封闭表，九枚，内容为设计 §5.4 定的）。
+/// 表之外一律拒绝——这一侧正是 fail-open 的反面。
+/// **本名单没有规范来源**（§245 只给「一个 Operator 多 backend」，不给 backend 的确定性）；
+/// 真正的判据是「该 backend 的什么属性使输出逐位可复现」（版本冻结？种子？浮点确定化？），
+/// 规范未给，缺口记在设计 §14 第 7 条（收件人：规范维护者）。
+/// **本表私有**：公开面只有 `register_media_operators` 的 `Err` 一臂；
+/// 用例侧的对照语料（`tests/determinism.rs` 的九枚）独立手写，不由本表喂。
+const BIT_REPRODUCIBLE_BACKENDS: [&str; 9] = [
+    "local-fs",
+    "ffmpeg",
+    "ffmpeg-scene-detect",
+    "ffmpeg-filtergraph",
+    "ffprobe",
+    "pyscenedetect",
+    "librosa",
+    "essentia",
+    "builtin",
+];
+
+/// §5.4 的注册期规则：声明 `Deterministic` 的算子，其每一个候选 backend 都必须在本 crate 的名单内。
+/// **先核后写**：先逐枚核，全部通过后再逐枚注册；任一枚不成即返回 `Err`，
+/// 此时注册表的内容与调用前逐枚相同（不留半注册）。
+/// 本规则**没有规范来源**（§245 只给「一个 Operator 多 backend」，不给 backend 的确定性）；
+/// 名单是本块定的，缺口记在设计 §14 第 7 条。
+fn verify_deterministic_backends(operators: &[Operator]) -> Result<(), MediaError> {
+    for operator in operators {
+        if operator.determinism != Determinism::Deterministic {
+            continue;
+        }
+        for backend in &operator.backend_candidates {
+            if !BIT_REPRODUCIBLE_BACKENDS.contains(&backend.as_str()) {
+                return Err(MediaError::UnverifiableDeterminism {
+                    operator: operator.id.clone(),
+                    backend: backend.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 /// 把给定的一批算子注册进给定注册表（`&all_operators()` 是常规实参）。
+/// **先核后写**：先逐枚核 §5.4 的声明，全部通过后再逐枚注册；任一枚不成即返回 `Err`，
+/// 此时注册表的内容与调用前逐枚相同（不留半注册）。
 /// 一枚媒体算子与既有算子同 (id, version) 是注册期的错误，**不静默跳过**。
 /// **参数带一批算子**（不是只吃 `all_operators()`）：§5.4 那条规则要能对**任意** `Operator` 触发。
+///
+/// **偏离最显然写法处**：最显然的写法是把 `verify` 与 `register` 合成一趟循环（少一次遍历）；
+/// **这里不是那样：因为「先核后写」那条性质的唯一可观察后果就是「违规时注册表没被动过」，
+/// 合成一趟之后它当场为假**（设计 §12.2 第 (i) 条的第二半，
+/// `tests/determinism.rs` 的 `an_out_of_list_backend_is_rejected_before_anything_is_written`）。
 pub fn register_media_operators(
     registry: &mut OperatorRegistry,
     operators: &[Operator],
 ) -> Result<(), MediaError> {
-    // 本 task 只是「逐枚 `register`、任一失败即返回」；「先核后写」的注册期规则
-    //（§5.4）由后续 task 落地。
+    verify_deterministic_backends(operators)?;
     for operator in operators {
         registry.register(operator.clone())?;
     }
