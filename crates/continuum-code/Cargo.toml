@@ -11,8 +11,8 @@ continuum-artifact = { path = "../continuum-artifact" }
 # 算子类型与它的全部伴生类型（`Operator` / `OperatorId` / `OperatorVersion` /
 # `Determinism` / `SideEffectClass` / `BackendId`；`OperatorError` 由
 # `CodeError::Registry` 一臂带出）。**只声明本 task 用得到的**——其余边由需要
-# 它们的 task 增量加，一次不声明齐（计划 Global Constraints）：graph、workspace
-# 已由 Task 4／Task 5 加为 dev 边（见下），余下 verify 一条 dev 边与 method 一条普通边。
+# 它们的 task 增量加，一次不声明齐（计划 Global Constraints）：graph、workspace、verify
+# 已由 Task 4／Task 5／Task 6 加为 dev 边（见下），余下 method 一条普通边。
 continuum-operator = { path = "../continuum-operator" }
 # `CodeError` 上派生 `Error`（`#[error(...)]` / `#[from]`），去掉即 `E0433`。
 thiserror = { workspace = true }
@@ -23,8 +23,19 @@ thiserror = { workspace = true }
 # **这是 dev 边，生产代码对它零引用**；`cargo tree --edges all` 把 dev 边算进依赖，
 # 故 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 同步登记。
 continuum-graph = { path = "../continuum-graph" }
+# Task 6 起的使用点：`tests/type_level.rs` 把「`Evidence` 只能经唯一产生点
+# `Evidence::from_tool_result` 得到」拍成**使用侧**的编译期照片（两份 `compile_fail`
+# 样例＋一份 `ui_pass` 正控制；设计 §6.2、P5a 设计 §4.4）。**这是 dev 边，生产代码
+# 对它零引用**；`cargo tree --edges all` 把 dev 边算进依赖，故 `ALLOWED` 同步登记
+# （同上；注释同形是为了两处对读时不必猜）。
+continuum-verify = { path = "../continuum-verify" }
 # Task 5 起的使用点：`tests/workspace_backends.rs` 对 `WorkspaceBackend` 做穷尽
 # `match`（设计 §4.2 的照片，§10.2 第 (p) 条）。**这是 dev 边，生产代码对它
 # 零引用**；`cargo tree --edges all` 把 dev 边算进依赖，故 `ALLOWED` 同步登记
 # （同上；注释同形是为了两处对读时不必猜）。
 continuum-workspace = { path = "../continuum-workspace" }
+# Task 6 起的使用点：trybuild 驱动 `tests/type_level.rs` 的编译期照片。
+# **外部 crate：不进 `ALLOWED`**——那张表只逐对断言 workspace 成员之间的边
+# （同上一条注释的口径）。**但它会让 `Cargo.lock` 的 `continuum-code` 依赖列表
+# 加一项**，故提交时按显式路径带上 lock（同 continuum-node 的先例）。
+trybuild = { workspace = true }

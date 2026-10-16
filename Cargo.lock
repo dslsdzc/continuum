@@ -108,8 +108,10 @@ dependencies = [
  "continuum-artifact",
  "continuum-graph",
  "continuum-operator",
+ "continuum-verify",
  "continuum-workspace",
  "thiserror",
+ "trybuild",
 ]
 
 [[package]]

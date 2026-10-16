@@ -207,14 +207,18 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 5 起加上 workspace：**dev 边**——`tests/workspace_backends.rs` 对
     // `WorkspaceBackend` 做穷尽 `match`（§4.2 的照片，§10.2 第 (p) 条），生产代码对它
     // 零引用（登记口径同上）。
-    // 其余两条边由需要它们的 task 增量加：verify 一条是 dev 边（唯一使用点是对应用例），
-    // method 是普通边。
+    // Task 6 起加上 verify：**dev 边**——`tests/type_level.rs` 的两份编译失败样例与
+    // 一份正控制样例把「`Evidence` 只能经唯一产生点 `Evidence::from_tool_result` 得到」
+    // 拍成**使用侧**的编译期照片（§6.2；P5a 设计 §4.4），生产代码对它零引用
+    // （登记口径同上）。
+    // 最后一条边由需要它的 task 增量加：method 是普通边（Task 7）。
     (
         "continuum-code",
         &[
             "continuum-artifact",
             "continuum-graph",
             "continuum-operator",
+            "continuum-verify",
             "continuum-workspace",
         ],
     ),
