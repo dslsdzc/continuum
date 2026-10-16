@@ -211,12 +211,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 一份正控制样例把「`Evidence` 只能经唯一产生点 `Evidence::from_tool_result` 得到」
     // 拍成**使用侧**的编译期照片（§6.2；P5a 设计 §4.4），生产代码对它零引用
     // （登记口径同上）。
-    // 最后一条边由需要它的 task 增量加：method 是普通边（Task 7）。
+    // Task 7 起加上 method：**普通边**——`src/methods.rs` 的签名消费 `MethodRegistry` /
+    // `MethodId` / `MethodError`（§7.1 的 `bind_code_methods`）。至此设计 §2.1 共写文件表
+    // 的六条边到齐（数组按字母序）。
     (
         "continuum-code",
         &[
             "continuum-artifact",
             "continuum-graph",
+            "continuum-method",
             "continuum-operator",
             "continuum-verify",
             "continuum-workspace",

@@ -8,11 +8,18 @@ rust-version.workspace = true
 # §3.2 的端口类型经它声明（`ArtifactType` 进 `Operator` 的
 # `input_schema` / `output_schema` 两字段）。
 continuum-artifact = { path = "../continuum-artifact" }
+# Task 7 起的使用点：`src/methods.rs` 的签名消费 `MethodRegistry` / `MethodId` /
+# `MethodError`（设计 §7.1 的 `bind_code_methods`）。**这是普通边（不是 dev 边）**：
+# 生产代码对它的引用就是那个签名本身；`cargo tree --edges all` 对普通边与 dev 边
+# 一视同仁，故 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`
+# 同步登记（数组按字母序）。
+continuum-method = { path = "../continuum-method" }
 # 算子类型与它的全部伴生类型（`Operator` / `OperatorId` / `OperatorVersion` /
 # `Determinism` / `SideEffectClass` / `BackendId`；`OperatorError` 由
 # `CodeError::Registry` 一臂带出）。**只声明本 task 用得到的**——其余边由需要
-# 它们的 task 增量加，一次不声明齐（计划 Global Constraints）：graph、workspace、verify
-# 已由 Task 4／Task 5／Task 6 加为 dev 边（见下），余下 method 一条普通边。
+# 它们的 task 增量加，一次不声明齐（计划 Global Constraints）；**至此设计 §2.1 共写
+# 文件表的六条边到齐**：method 一条普通边由 Task 7 加（见上），graph、workspace、
+# verify 三条 dev 边由 Task 4／Task 5／Task 6 加（见下）。
 continuum-operator = { path = "../continuum-operator" }
 # `CodeError` 上派生 `Error`（`#[error(...)]` / `#[from]`），去掉即 `E0433`。
 thiserror = { workspace = true }

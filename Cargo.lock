@@ -107,6 +107,7 @@ version = "0.1.0"
 dependencies = [
  "continuum-artifact",
  "continuum-graph",
+ "continuum-method",
  "continuum-operator",
  "continuum-verify",
  "continuum-workspace",
