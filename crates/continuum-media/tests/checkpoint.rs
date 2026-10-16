@@ -149,13 +149,16 @@ fn restoring_another_operators_checkpoint_is_rejected_and_leaves_state_unchanged
     let before = render.progress().clone();
 
     // 另一版本、同一算子的检查点：**直接构造**（`Progress` 字段全 pub，无需绕过路径）。
+    // **载荷刻意取与 `before` 不同的值**（`[7]` / `nvenc`）：若实现变成「先写回、后校验」
+    // （半恢复形态），状态会被写成这里的载荷、下面 `assert_progress_matches` 当场红；
+    // 载荷若与 `before` 相同，那一腿就没有判别力（写回结果恰好等于存前值、静默绿）。
     let alien = Progress {
         owner: CheckpointOwner {
             id: OperatorId::new("render"),
             version: OperatorVersion::new(2),
         },
-        completed_segments: Mutex::new(vec![5]),
-        selected_backend: Mutex::new(Some(BackendId::new("ffmpeg"))),
+        completed_segments: Mutex::new(vec![7]),
+        selected_backend: Mutex::new(Some(BackendId::new("nvenc"))),
     };
 
     let err = render
