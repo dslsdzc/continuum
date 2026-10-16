@@ -17,11 +17,20 @@ serde_json = { workspace = true }
 # Task 2 起的使用点：`error.rs` 的 `VerifyError` 派生 `thiserror::Error`。
 thiserror = { workspace = true }
 # Task 2 起登记三条内部边（`crates/continuum-runtime/tests/dependency_direction.rs`
-# 的 `ALLOWED` 条目同步为这三条；`cargo tree --edges all` 把 dev 边也算进依赖，
-# 本 crate 本 task 无 dev 边）：
+# 的 `ALLOWED` 条目同步；`cargo tree --edges all` 把 dev 边也算进依赖）：
 # `Evidence.artifact_refs` 取 `ArtifactId`（`continuum-artifact`）；
 # `EvidenceProducer::Node` 取 `NodeId`（`continuum-graph`）与 `BackendId`（`continuum-operator`）。
-# `continuum-persist` / `continuum-events` 由 Task 9 增量加。
+# Task 9 加两条：`continuum-events`——`record_verification_round` 写
+# `VerificationFailed` 取 `Event` / `EventType`；`continuum-persist`——迁移 130
+# 与四个写/读函数经 `Tx`。至此本 crate 的 `ALLOWED` 条目是五条（数组按字母序）。
 continuum-artifact = { path = "../continuum-artifact" }
+continuum-events = { path = "../continuum-events" }
 continuum-graph = { path = "../continuum-graph" }
 continuum-operator = { path = "../continuum-operator" }
+continuum-persist = { path = "../continuum-persist" }
+
+[dev-dependencies]
+# Task 9 起：`tests/persist.rs` 用 `Db::open_with(path, p5a_verify_migrations())` 起
+# 测试库（照 P4 对 `contract` 表的做法），临时目录经 `tempfile`。**外部 crate 按需加、
+# 不进 `ALLOWED`**（计划 Global Constraints 的同一条）。
+tempfile = { workspace = true }

@@ -1,14 +1,18 @@
 //! 本 crate 的错误类型：`VerifyError`（设计 §2.2 的冻结清单）。变体逐 task 增量加。
 
-use continuum_graph::NodeId;
+use continuum_graph::{GraphId, NodeId};
+use continuum_persist::PersistError;
 
 use crate::evidence::EvidenceId;
 use crate::evidence_type::EvidenceType;
 use crate::test_validity::TestValidityCheck;
+use crate::verdict::VerdictAggregate;
 
 /// 本 crate 的失败面。变体逐 task 增量加（Task 2 的两枚是 §4.4 的两条；Task 3 追加
 /// `IncompleteTestValidityChecks`；Task 4 追加 `UnknownVerificationPolicy` 与
-/// `ProfileMissing`；后续 task 的变体随各自的产生方落地）。
+/// `ProfileMissing`；后续 task 的变体随各自的产生方落地；Task 9 追加 `Persist` /
+/// `MissingEvidenceEdge` / `CounterexampleWithPassingAggregate`——持久层失败、
+/// §10.2 第 3 条的边核对与 §9.1 第 3 条的消费规则）。
 ///
 /// **派生 `PartialEq`**：失败路径的用例要断言「是哪一种 `Err`」（本计划的纪律第 4 条），
 /// 而 `EvidenceWithoutArtifact` 的十三型逐型断言还要求载荷里的 `EvidenceType` 可比较
@@ -89,4 +93,46 @@ pub enum VerifyError {
         evidence_id: EvidenceId,
         node: NodeId,
     },
+
+    /// §10.2 第 3 条的边核对：写 `evidence` 行时图上没有
+    /// `producer_node → verified_node` 的 `EdgeKind::Evidence` 边。
+    ///
+    /// **只在 `Node` 一支产生**：`Human` 的证据没有产生者节点（§4.3.3），其
+    /// `producer_node` 写 `NULL`、不核对——不变量与那一支不能同真（本 task 定的形状，
+    /// 申报见 `persist.rs` 的文件头与计划 `## 遗留` 第一节第 7 条）。
+    /// 载荷四枚（证据、图、两端）：只报「缺边」而不给这些，调用方无法定位。
+    #[error(
+        "图 {graph_id} 上没有 {producer_node} → {verified_node} 的 EdgeKind::Evidence 边，证据 {} 不得落库（§10.2 第 3 条）",
+        evidence_id.as_str()
+    )]
+    MissingEvidenceEdge {
+        evidence_id: EvidenceId,
+        graph_id: GraphId,
+        producer_node: NodeId,
+        verified_node: NodeId,
+    },
+
+    /// §9.1 第 3 条的消费规则：`CounterexampleFound` 时该轮聚合**不得**取
+    /// `Passed` / `PassedWithUnknown`（§215 的「必须增强验证体系」落在这一条上）。
+    ///
+    /// 由 `record_verification_round` 在写行前施加；**只拒绝那一对组合、不改写聚合值**
+    /// （§9.1 第 4 条：本轮它不是判定反转，唯一的可见形态是 finding 记录 ＋
+    /// `strategy_verdict` 的标注）。载荷两枚（轮次与聚合值）供调用方定位与决策。
+    #[error(
+        "第 {round_id} 轮找到反例（strategy_verdict = counterexample_found），而聚合为 {aggregate}，不得落库（§9.1 第 3 条）",
+        aggregate = aggregate.as_str()
+    )]
+    CounterexampleWithPassingAggregate {
+        round_id: String,
+        aggregate: VerdictAggregate,
+    },
+
+    /// `Tx` 的往返失败（`#[from]` 转出）：建表/写行/写事件/查询的库层错误。
+    ///
+    /// **不吞成上面几枚**：上面各枚是「判定为错」，这一枚是「库层失败」，调用方的
+    /// 处置不同（改动作／改数据），同 P4 把判定错误与 `Persist` 分在两处的理由。
+    /// `evidence_id` 撞主键（§10.2 第 1 条的二次写）也走这一枚——`PersistError`
+    /// 没有独立的冲突变体（同 P4 的 `ContractError::Persist` 的一段说明）。
+    #[error("持久化失败：{0}")]
+    Persist(#[from] PersistError),
 }

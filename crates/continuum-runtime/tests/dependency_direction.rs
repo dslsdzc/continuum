@@ -171,10 +171,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
     // P5a 验证与证据判定（设计 §2.1）。本块是第 8 层，只依赖执行层与其下：
     // continuum-artifact / continuum-graph / continuum-operator（Task 2 加）、
-    // continuum-persist / continuum-events（Task 9 加）。
+    // continuum-events / continuum-persist（Task 9 加）。
     // Task 2 起登记三条：`continuum-artifact`——`Evidence.artifact_refs` 取 `ArtifactId`；
     // `continuum-graph`——`EvidenceProducer::Node` 取 `NodeId`；`continuum-operator`——
-    // 同上的 `BackendId`。数组按字母序。
+    // 同上的 `BackendId`。Task 9 再加两条：`continuum-events`——写 `VerificationFailed`
+    // 取 `Event` / `EventType`；`continuum-persist`——迁移 130 与四个写/读函数经 `Tx`。
+    // 数组按字母序。
     // **不含 continuum-semantics**：`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，
     // **不是**因为成环（见跨计划前置第二节的订正：按 §9.1 的箭头约定，本块依赖语义层沿链、不成环）。
     // **不登记它是无条件的**（设计 §6.1）：本块以值承载 Contract / Requirement 身份、
@@ -183,7 +185,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 理由是以值承载（此前「该 crate 尚不存在」的表述已过时）。
     (
         "continuum-verify",
-        &["continuum-artifact", "continuum-graph", "continuum-operator"],
+        &[
+            "continuum-artifact",
+            "continuum-events",
+            "continuum-graph",
+            "continuum-operator",
+            "continuum-persist",
+        ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。

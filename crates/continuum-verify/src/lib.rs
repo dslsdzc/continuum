@@ -18,16 +18,19 @@
 //! §8.3 的逐项判据与 §8.4 的 [`CompletionInput`] / [`judge_completion`]，含 `undecidable`
 //! 列表的项类型 [`UndecidableItem`]）；Task 8 落 §9 的 Verifier Adversary（§9.1 的两臂
 //! [`AdversaryOutcome`] 与消费规则 [`adversary_permits_passing`]；§9.2 的 mutation 插槽本轮
-//! 不判、无类型落点）；其余类型与判定由后续 task 逐一追加。
+//! 不判、无类型落点）；Task 9 落 §10 的持久化——迁移 130 的五张表
+//! （[`p5a_verify_migrations`]）与四个写/读函数（[`insert_evidence`] /
+//! [`insert_test_validity`] / [`record_verification_round`] / [`artifact_exists`]，
+//! 含 `EventType::VerificationFailed` 的第一个产生点）；其余类型与判定由后续 task 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
 //!
 //! 本 crate 只依赖**执行层与其下**：`continuum-artifact` / `continuum-graph` /
 //! `continuum-operator` 自 Task 2 起登记（`ArtifactId` 出现在 `Evidence.artifact_refs`，
 //! `NodeId` 与 `BackendId` 出现在 `EvidenceProducer::Node`），`continuum-persist` /
-//! `continuum-events` 由 Task 9 登记（迁移 130 与 `VerificationFailed`）。故
+//! `continuum-events` 自 Task 9 起登记（迁移 130 与 `VerificationFailed`）。故
 //! `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 里本 crate
-//! 的条目自 Task 2 起是**这三条**。凡跨层的输入一律以「值」由装配方传入
+//! 的条目自 Task 9 起是**这五条**。凡跨层的输入一律以「值」由装配方传入
 //! （P4 设计 §1.2.3 的规则）：本块需要的 Contract / Requirement 身份由本块以值承载
 //! （[`RequirementId`] 是本块定义的一枚，与 P4 的同名类型是两个类型，见设计 §4.3.1
 //! 的订正段），**不登记指向 `continuum-semantics` 的边**（设计 §6.1）。
@@ -53,6 +56,7 @@ mod error;
 mod evidence;
 mod evidence_type;
 mod input;
+mod persist;
 mod policy;
 mod profile;
 mod selection;
@@ -72,6 +76,10 @@ pub use evidence::{
 };
 pub use evidence_type::EvidenceType;
 pub use input::{InitialVerifierInput, PostBlindVerifierInput};
+pub use persist::{
+    artifact_exists, insert_evidence, insert_test_validity, p5a_verify_migrations,
+    record_verification_round,
+};
 pub use policy::VerificationPolicy;
 pub use profile::{VerificationProfile, VerificationProfileSource, profile_for};
 pub use selection::{

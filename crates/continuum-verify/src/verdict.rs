@@ -8,8 +8,13 @@ use crate::evidence::Claim;
 /// **没有 `blocking: bool` 参数**（在 [`VerifierVerdict::Fail`] 的文档里）：
 /// 规范未给「非阻断失败」的判据，故本轮所有失败都是阻断的。
 ///
-/// **本型不进落库列**（Task 9 落的是聚合 [`VerdictAggregate`] 与独立性判定），
-/// 故**不设** `as_str` / `parse`——没有第二处编码的需要，也不造一个。
+/// **本型不进落库列**（Task 9 落的是聚合 [`VerdictAggregate`] 与独立性判定）。
+/// **不设 `parse`**——没有读回路径，也不造一个。
+///
+/// 〔订正（2026-10-16，Task 9）〕本段初版写「**不设** `as_str` / `parse`——没有第二处
+/// 编码的需要」，其中 `as_str` 半句在 Task 9 落地时**已假**：`VerificationFailed`
+/// 事件的 payload 要写**逐项状态**（§10.3），那需要每一条判定的判别串，编码即
+/// [`VerifierVerdict::as_str`]（与类型同址）。旧说法记此，免得下一轮照它得出错的结论。〕
 #[derive(Debug, Clone, PartialEq)]
 pub enum VerifierVerdict {
     Pass,
@@ -18,6 +23,26 @@ pub enum VerifierVerdict {
     Fail { reason: Claim },
     /// §123：正式表达未知，不逼模型在证据不足时给结论。
     Unknown { reason: Claim },
+}
+
+impl VerifierVerdict {
+    /// 三臂的判别串（小写、多词以 `_` 连接）。
+    ///
+    /// **本函数是该编码唯一的产生点**。match 穷尽且无通配臂：加臂时本函数编译不过，
+    /// 编码不会漏分支。
+    ///
+    /// **不进任何 SQL 列**（落库的是聚合，见类型文档）：它是 `VerificationFailed`
+    /// 事件 payload 里「逐项状态」的编码（§10.3，由 `record_verification_round` 写）。
+    /// **不设 `parse`**：没有读回路径。三枚串名与
+    /// [`CheckVerdict::as_str`](crate::test_validity::CheckVerdict::as_str) 逐型相同，
+    /// 是**各自独立**的编码（两枚类型不同，不共享实现，改一处不牵另一处）。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pass => "pass",
+            Self::Fail { .. } => "fail",
+            Self::Unknown { .. } => "unknown",
+        }
+    }
 }
 
 impl VerifierVerdict {

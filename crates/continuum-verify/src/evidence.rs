@@ -108,6 +108,25 @@ pub enum EvidenceSubject {
     Unattached,
 }
 
+impl EvidenceSubject {
+    /// 两臂的判别串（小写、多词以 `_` 连接）：落 `evidence.subject_kind` 列（Task 9）。
+    ///
+    /// **本函数是该编码唯一的产生点**。match 穷尽且无通配臂：加臂时本函数编译不过，
+    /// 编码不会漏分支。
+    ///
+    /// **不设 `parse`**：本 task 的证据表只写不读（没有 `load_evidence`，消费者未建；
+    /// 计划 `## 遗留` 第三节记「不建读取路径」），读回路径不建则逆函数没有落点——
+    /// 它是随第一个读回消费者落地的东西，不是遗漏。承载 Requirement 载荷的那一列
+    /// （`subject_requirement`）不进本编码：它是 [`RequirementId`] 的串或 `NULL`，
+    /// 由写行处直接取 `as_str`。
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Requirement(_) => "requirement",
+            Self::Unattached => "unattached",
+        }
+    }
+}
+
 /// §258 的 `producer`（设计 §4.3.3：两臂）。
 ///
 /// §263 的隔离判定要能命名「这条证据是谁产的」，否则那条 MUST 没有判据。
