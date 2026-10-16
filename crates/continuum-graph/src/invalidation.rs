@@ -188,4 +188,108 @@ mod tests {
         };
         assert_eq!(states(&optimized), states(&naive), "报错时都不得改状态");
     }
+
+    /// 菱形汇入图：`a → b → d`、`a → c → d`（全 DATA 边）。从 `a` 出发时
+    /// `d` 会经**两条传播路径**各入栈一次——第二次弹出必须被判重拦下，
+    /// 这是「重复入栈」的正面考验（fix round 1 补）。
+    fn diamond_graph() -> AdfirGraph {
+        use continuum_artifact::ArtifactType;
+        use continuum_port::{Direction, Port, PortId};
+        let mut g = AdfirGraph::new(crate::ids::GraphId::new("g-diamond"), ContractIdRef::new("c-dm"));
+        for id in ["a", "b", "c", "d"] {
+            let mut node = crate::node::Node::new(
+                NodeId::new(id),
+                continuum_operator::OperatorId::new("op"),
+                continuum_operator::OperatorVersion::new(1),
+            );
+            node.state = NodeState::Completed;
+            g.add_node(node).unwrap();
+            for (suffix, dir) in [("out", Direction::Output), ("in", Direction::Input)] {
+                g.add_port(
+                    id,
+                    Port::new(
+                        PortId::new(format!("{id}-{suffix}")),
+                        dir,
+                        "p",
+                        ArtifactType::Text,
+                    ),
+                )
+                .unwrap();
+            }
+        }
+        for (from, to) in [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")] {
+            g.connect(
+                &PortId::new(format!("{from}-out")),
+                &PortId::new(format!("{to}-in")),
+                crate::edge::EdgeKind::Data,
+            )
+            .unwrap();
+        }
+        g
+    }
+
+    #[test]
+    fn diamond_fanin_with_duplicate_stack_entries_agrees() {
+        let mut optimized = diamond_graph();
+        let mut naive = diamond_graph();
+        let id = NodeId::new("a");
+        let optimized_hit = propagate_invalidation(&mut optimized, &id).unwrap();
+        let naive_hit = propagated_naively(&mut naive, &id).unwrap();
+        assert_eq!(optimized_hit, naive_hit, "菱形汇入的标记序列应逐点一致");
+        // `d` 被两条路径各入栈一次——判重（无论哪一版）必须让它只被标记一次。
+        let d = NodeId::new("d");
+        assert_eq!(
+            optimized_hit.iter().filter(|n| **n == d).count(),
+            1,
+            "d 经两条传播路径汇入，第二次弹出必须被拦下"
+        );
+        let states = |g: &AdfirGraph| -> Vec<NodeState> {
+            g.nodes().iter().map(|n| n.state).collect()
+        };
+        assert_eq!(states(&optimized), states(&naive), "菱形汇入的图状态应一致");
+    }
+
+    /// 自环：`connect` 会拒环（见 `graph.rs` 的 `would_create_cycle`），但**库中
+    /// 恢复出的图**可以含自环——`load_graph` 只校验 entry/terminal 约束、不检环。
+    /// 这里经 serde 反序列化如法炮制「`a → a` 的 DATA 自环」（fix round 1 补）：
+    /// 处理 `a` 时它把**自身**再次入栈，第二次弹出是重入栈判重的极端位。
+    #[test]
+    fn a_stored_self_loop_does_not_revisit_and_agrees() {
+        let (base, _) = sample_graph();
+        let mut value = serde_json::to_value(&base).unwrap();
+        value["edges"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "from_node": "a",
+                "from_port": "a-out",
+                "to_node": "a",
+                "to_port": "a-in",
+                "kind": "DATA"
+            }));
+        let seed: AdfirGraph = serde_json::from_value(value).unwrap();
+        // 前提断言：自环真的在（防夹具自己写错）。
+        assert!(
+            seed.edges()
+                .iter()
+                .any(|e| e.from_node == NodeId::new("a") && e.to_node == NodeId::new("a")),
+            "夹具应含 a → a 的自环"
+        );
+
+        let mut optimized = seed.clone();
+        let mut naive = seed;
+        let id = NodeId::new("a");
+        let optimized_hit = propagate_invalidation(&mut optimized, &id).unwrap();
+        let naive_hit = propagated_naively(&mut naive, &id).unwrap();
+        assert_eq!(optimized_hit, naive_hit, "含自环的图上两版应逐点一致");
+        assert_eq!(
+            optimized_hit.iter().filter(|n| **n == id).count(),
+            1,
+            "自环把 a 再次入栈，第二次弹出必须被拦下"
+        );
+        let states = |g: &AdfirGraph| -> Vec<NodeState> {
+            g.nodes().iter().map(|n| n.state).collect()
+        };
+        assert_eq!(states(&optimized), states(&naive), "含自环的图状态应一致");
+    }
 }
