@@ -16,7 +16,9 @@
 //! 与两个输入面（[`InitialVerifierInput`] / [`PostBlindVerifierInput`]）；Task 7 落 §8 的
 //! Completion Predicate 判定（§8.1 的十项 [`Conjunct`]、§8.2 的两臂 [`CompletionVerdict`]、
 //! §8.3 的逐项判据与 §8.4 的 [`CompletionInput`] / [`judge_completion`]，含 `undecidable`
-//! 列表的项类型 [`UndecidableItem`]）；其余类型与判定由后续 task 逐一追加。
+//! 列表的项类型 [`UndecidableItem`]）；Task 8 落 §9 的 Verifier Adversary（§9.1 的两臂
+//! [`AdversaryOutcome`] 与消费规则 [`adversary_permits_passing`]；§9.2 的 mutation 插槽本轮
+//! 不判、无类型落点）；其余类型与判定由后续 task 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
 //!
@@ -42,6 +44,7 @@
 //!   字段类型仍是 `serde_json::Value`（设计 §2.3 的裁定：给字段定型会造出执行层与
 //!   跨领域层之间的 2-环）。
 
+mod adversary;
 mod completion;
 mod conjunct;
 mod contract_view;
@@ -57,6 +60,7 @@ mod test_validity;
 mod verdict;
 mod verifier_level;
 
+pub use adversary::{AdversaryOutcome, adversary_permits_passing};
 pub use completion::{CompletionInput, CompletionVerdict, judge_completion};
 pub use conjunct::{Conjunct, UndecidableItem};
 pub use contract_view::{ContractRequirement, ContractView, RequirementClass, RequirementId};
