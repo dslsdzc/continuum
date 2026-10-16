@@ -4,8 +4,9 @@
 //! ADFIR 的图结构里分出来」。
 //!
 //! **Task 1 落骨架**（[`MethodId`] 与 [`MethodError`]），**Task 2 加
-//! [`MethodDomain`]**（§187 的四个目录名，封闭枚举）；`mod` 清单按规划的
-//! 文件结构逐 task 增量追加。
+//! [`MethodDomain`]**（§187 的四个目录名，封闭枚举），**Task 3 加
+//! [`MethodEntry`] 与 [`MethodRegistry`]**（登记／解析／绑定／选取）；
+//! `mod` 清单按规划的文件结构逐 task 增量追加。
 //!
 //! # 依赖面：workspace 内为空集（设计 §3.2／§9）
 //!
@@ -23,9 +24,13 @@
 //! （[`MethodError`] 上派生 `std::error::Error`）。
 
 mod domain;
+mod entry;
 mod error;
 mod id;
+mod registry;
 
 pub use domain::MethodDomain;
+pub use entry::MethodEntry;
 pub use error::MethodError;
 pub use id::MethodId;
+pub use registry::MethodRegistry;
