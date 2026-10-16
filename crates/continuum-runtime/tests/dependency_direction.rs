@@ -189,6 +189,14 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 8 起加上 continuum-method：**普通边**——`src/methods.rs` 的 `bind_media_methods`
     // 是生产入口（收 `&mut MethodRegistry`、逐条调 `bind`；设计 §2.1、§10），
     // 不是「只在用例里出现」——这正是上面订正段预告的口径（method 不是 dev 边）。
+    // Task 9 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的两份
+    // `compile_fail` 与一份 `compile_pass`（设计 §12.4 的结构照片）是本 crate
+    // 唯一的使用点，生产代码对它零调用。**两条 dev 边**（`continuum-graph` 与
+    // `continuum-verify`）的理由是同一个：唯一使用点是结构层与 §6.2 的用例，
+    // 不是生产入口。**层内边**（本 crate 与 verify 同属第 8 层）：本仓对层内边有
+    // 同形处置——`continuum-provider → continuum-capability` 同样是层内边，照样登记
+    // 并在该行注记里标明（设计 §4.1 订正段）；本条目照常登记。首段预告的三条
+    // （graph / method / verify）至此都已追加。
     // 数组按字母序。
     (
         "continuum-media",
@@ -197,6 +205,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-graph",
             "continuum-method",
             "continuum-operator",
+            "continuum-verify",
         ],
     ),
     // P5a 验证与证据判定（设计 §2.1）。本块是第 8 层，只依赖执行层与其下：
