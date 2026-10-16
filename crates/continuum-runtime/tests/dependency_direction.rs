@@ -189,7 +189,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 8 起加上 continuum-method：**普通边**——`src/methods.rs` 的 `bind_media_methods`
     // 是生产入口（收 `&mut MethodRegistry`、逐条调 `bind`；设计 §2.1、§10），
     // 不是「只在用例里出现」——这正是上面订正段预告的口径（method 不是 dev 边）。
-    // Task 9 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的两份
+    // Task 9 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的三份
     // `compile_fail` 与一份 `compile_pass`（设计 §12.4 的结构照片）是本 crate
     // 唯一的使用点，生产代码对它零调用。**两条 dev 边**（`continuum-graph` 与
     // `continuum-verify`）的理由是同一个：唯一使用点是结构层与 §6.2 的用例，

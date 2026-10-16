@@ -19,12 +19,12 @@ thiserror = { workspace = true }
 # `determinism` 真能让那条判据成立。**dev 边**——生产代码对它零调用
 # （设计 §2.1 第 2 行；`cargo tree --edges all` 一视同仁，故在 `ALLOWED` 表里同样登记）。
 continuum-graph = { path = "../continuum-graph" }
-# Task 9 起的使用点：`tests/type_level.rs` 驱动 `tests/compile_fail/` 的两份与
+# Task 9 起的使用点：`tests/type_level.rs` 驱动 `tests/compile_fail/` 的三份与
 # `tests/compile_pass/` 的一份（设计 §12.4 的结构照片）——本 crate 唯一的
 # continuum-verify 使用点。**dev 边**——生产代码对它零调用
 # （设计 §2.1 的边别；`cargo tree --edges all` 一视同仁，故在 `ALLOWED` 表里同样登记）。
 continuum-verify = { path = "../continuum-verify" }
-# Task 9 起的使用点：`tests/type_level.rs` 用 `trybuild::TestCases` 驱动上面三份样例。
+# Task 9 起的使用点：`tests/type_level.rs` 用 `trybuild::TestCases` 驱动上面四份样例。
 # **它不进 `dependency_direction.rs` 的 `ALLOWED`**：那张表列的是**内部** crate
 # 的允许集合，`trybuild` 是外部 crate（同 `continuum-connector` / `continuum-verify` 的用法）。
 trybuild = { workspace = true }
