@@ -173,6 +173,30 @@ impl AdfirGraph {
         self.edges.iter().filter(|e| e.to_node == *node).collect()
     }
 
+    /// **crate 内部**（`pub(crate)`，不是公开面）：`id → nodes 下标`的一次性索引。
+    ///
+    /// 失效传播（`invalidation.rs`）逐节点读写状态，而 `node` / `node_mut` 是
+    /// 线性查找——在大图上每个节点都查一次是 O(V²)。本方法把索引成本一次付清，
+    /// 传播循环里改走 [`AdfirGraph::node_at`] / [`AdfirGraph::node_mut_at`]。
+    /// 不导出到 crate 外：公开面不变。
+    pub(crate) fn node_positions(&self) -> HashMap<NodeId, usize> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id.clone(), i))
+            .collect()
+    }
+
+    /// **crate 内部**：按下标读节点；下标由 [`AdfirGraph::node_positions`] 给出。
+    pub(crate) fn node_at(&self, index: usize) -> &Node {
+        &self.nodes[index]
+    }
+
+    /// **crate 内部**：按下标可变读节点；下标由 [`AdfirGraph::node_positions`] 给出。
+    pub(crate) fn node_mut_at(&mut self, index: usize) -> &mut Node {
+        &mut self.nodes[index]
+    }
+
     /// 建立一条连接。
     ///
     /// 校验顺序：两端端口存在 → 朝向（起点输出、终点输入）→ `artifact_type` 相同
