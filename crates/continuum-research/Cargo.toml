@@ -19,3 +19,11 @@ rust-version.workspace = true
 continuum-artifact = { path = "../continuum-artifact" }
 continuum-method = { path = "../continuum-method" }
 continuum-operator = { path = "../continuum-operator" }
+
+[dev-dependencies]
+# `tests/reuse.rs`（§9.2 第 (k) 条、§6.1 的 §305 照片）是本 crate 唯一的
+# continuum-graph 使用点：用例经 `cache_key` / `can_reuse` 核对本块声明的
+# `determinism` 真能让那条判据成立。**dev 边**——生产代码对它零调用
+# （设计 §2.1 的 `continuum-graph` 行；`cargo tree --edges all` 把 dev 边算进依赖，
+# 故在 `ALLOWED` 表里同样登记——先例：continuum-provider 那一行的 persist）。
+continuum-graph = { path = "../continuum-graph" }

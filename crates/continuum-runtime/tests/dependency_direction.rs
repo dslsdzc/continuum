@@ -222,13 +222,17 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 本 crate 不新建表、不写事件、不碰策略与能力面。
     // Task 3 起加上 continuum-method：**普通边**——`bind_research_methods` 是生产入口
     // （取 `&mut MethodRegistry` 逐条 `bind`，不是用例；设计 §2.1）。
-    // `continuum-graph`（§6.1 的照片）与 `continuum-verify`（§9.4 的 trybuild 样例）
-    // 两条都是 **dev 边**——生产代码对它们零调用，由各自的 task 增量补进来。
-    // 数组按字母序。
+    // Task 5 起加上 continuum-graph：**dev 边**——`tests/reuse.rs`（§9.2 第 (k) 条、
+    // §305 的复用照片）经 `cache_key` / `can_reuse` 核对本块声明的 `determinism`
+    // 真能让那条判据成立；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样
+    // 登记（先例：continuum-provider 那一行的 persist）。
+    // `continuum-verify`（§9.4 的 trybuild 样例）是另一条待补的 **dev 边**——
+    // 生产代码对它零调用，由 Task 6 登记。数组按字母序。
     (
         "continuum-research",
         &[
             "continuum-artifact",
+            "continuum-graph",
             "continuum-method",
             "continuum-operator",
         ],
