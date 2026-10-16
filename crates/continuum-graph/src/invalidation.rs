@@ -249,10 +249,14 @@ mod tests {
         assert_eq!(states(&optimized), states(&naive), "菱形汇入的图状态应一致");
     }
 
-    /// 自环：`connect` 会拒环（见 `graph.rs` 的 `would_create_cycle`），但**库中
-    /// 恢复出的图**可以含自环——`load_graph` 只校验 entry/terminal 约束、不检环。
-    /// 这里经 serde 反序列化如法炮制「`a → a` 的 DATA 自环」（fix round 1 补）：
-    /// 处理 `a` 时它把**自身**再次入栈，第二次弹出是重入栈判重的极端位。
+    /// 自环：`connect` 会拒环（见 `graph.rs` 的 `would_create_cycle`），**库读回
+    /// 路径也同样拒**——`load_graph` 的每条边都经 `connect` 重建，环校验在读回时
+    /// 生效（见 `persist.rs` 的注释），故含 DATA 自环的库数据会被拒绝，
+    /// **读回路径不可能产出自环**。本测试因此用 serde 反序列化**直接构造**（绕过
+    /// `connect` 校验）来注入「`a → a` 的 DATA 自环」——覆盖的是不经写/读路径
+    /// 构造出的 `AdfirGraph` 这一防御面（fix round 1 补）：处理 `a` 时它把
+    /// **自身**再次入栈，第二次弹出是重入栈判重的极端位。测试机制与判别力不因
+    /// 上述事实修正而变。
     #[test]
     fn a_stored_self_loop_does_not_revisit_and_agrees() {
         let (base, _) = sample_graph();
