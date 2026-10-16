@@ -220,9 +220,28 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ),
     // P5f 图像领域算子（设计 §2.1）。本块只**声明**算子与**判定**（区域解析、两个确定性函数），
     // 不实现执行体，故生产代码只用 operator 的算子类型与 artifact 的端口类型。
-    // 其余三条边由需要它们的 task 增量加：graph 与 persist（Task 7，dev 边），
-    // verify（Task 8，dev 边）。
-    ("continuum-image", &["continuum-artifact", "continuum-operator"]),
+    // Task 7 起加上 continuum-graph 与 continuum-persist 两条：**dev 边**——
+    // `tests/reuse.rs`（§3.5 的复用照片、§11.2 的 (o)、(p) 条）经 `cache_key` / `can_reuse`
+    // 核对本块声明的 `determinism` 真能让那条判据成立或按预期不成立；
+    // `tests/lineage.rs`（§6 的谱系照片、§11.2 的 (m)、(n) 条）要起真库、
+    // 经 `Tx` 调 `save_artifact` / `load_artifact`。
+    // **`continuum-persist` 这一项不在设计 §2.1 的边表里，是本计划自定的一处**——
+    // 那一节逐字写着「不登记 continuum-persist：本块零表，不碰 `Tx` / `Migration`」，
+    // 而 §11.2 的 (m)、(n) 两条照片要起真库，**两处只能有一真**；本计划的取舍与理由见
+    // 计划 `## 遗留` 第一节第 1 条（收件人：设计作者 ＋ 协调者）。**边别依据**：
+    // 两条边在生产代码对它们零调用（`src/` 里 `continuum_graph` / `continuum_persist`
+    // 零命中），唯一使用点各是一个用例文件；`cargo tree --edges all` 把 dev 边算进依赖，
+    // 故与普通边一样登记（先例：continuum-provider 那一行的 persist）。数组按字母序。
+    // continuum-verify 一条仍由 Task 8 增量加（dev 边）。
+    (
+        "continuum-image",
+        &[
+            "continuum-artifact",
+            "continuum-graph",
+            "continuum-operator",
+            "continuum-persist",
+        ],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
