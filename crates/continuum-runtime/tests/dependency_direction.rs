@@ -175,6 +175,30 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
     // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
     ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
+    // P5a 验证与证据判定（设计 §2.1）。本块是第 8 层，只依赖执行层与其下：
+    // continuum-artifact / continuum-graph / continuum-operator（Task 2 加）、
+    // continuum-events / continuum-persist（Task 9 加）。
+    // Task 2 起登记三条：`continuum-artifact`——`Evidence.artifact_refs` 取 `ArtifactId`；
+    // `continuum-graph`——`EvidenceProducer::Node` 取 `NodeId`；`continuum-operator`——
+    // 同上的 `BackendId`。Task 9 再加两条：`continuum-events`——写 `VerificationFailed`
+    // 取 `Event` / `EventType`；`continuum-persist`——迁移 130 与四个写/读函数经 `Tx`。
+    // 数组按字母序。
+    // **不含 continuum-semantics**：`语义层 (2) → 执行层 (3) → 跨领域 (8)` 已在链上，
+    // **不是**因为成环（见跨计划前置第二节的订正：按 §9.1 的箭头约定，本块依赖语义层沿链、不成环）。
+    // **不登记它是无条件的**（设计 §6.1）：本块以值承载 Contract / Requirement 身份、
+    // 不 `use` 语义层类型，故无实际用到的边可登记。
+    // 〔订正 2026-10-16〕`continuum-semantics` 已随 P4 合入；结论不变——不得登记该边，
+    // 理由是以值承载（此前「该 crate 尚不存在」的表述已过时）。
+    (
+        "continuum-verify",
+        &[
+            "continuum-artifact",
+            "continuum-events",
+            "continuum-graph",
+            "continuum-operator",
+            "continuum-persist",
+        ],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
@@ -207,6 +231,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `runtime_migrations()` 追加 100／110／120 三行，`recover_cmd::run` 注册
     // `BudgetReservationRecovery`（挂 `MarkLostExecutions`）。上一段「本 task 只把它作
     // dev 边用」说的是 Task 19 当时的状态，自本 task 起 budget 是普通依赖。
+    //
+    // P5a 的 Task 11 起加上 continuum-verify：装配处注册 `p5a_verify_migrations()`
+    // （迁移 130 的验证与证据五表）。本块以**值**承载 Contract / Requirement 身份，
+    // 不 `use` 语义层类型，故本表中 **continuum-verify 自己的条目不含
+    // continuum-semantics**（详注在该条目处）。
     //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条今天对 sandbox 与 events 成立
@@ -262,6 +291,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-sandbox",
             "continuum-secrets",
             "continuum-semantics",
+            "continuum-verify",
             "continuum-workspace",
         ],
     ),

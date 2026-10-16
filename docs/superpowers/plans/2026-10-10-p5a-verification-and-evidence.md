@@ -1317,6 +1317,35 @@ git commit -m "feat(runtime): 装配 P5a 的迁移 130 与依赖边"
 - 第 **2**（与 P5c，**已答 2026-10-10**）、第 **3**（与 P5f / P5e，**两块均已答**）、第 **8**（与 P5d，**已答 2026-10-10**）条**已答，本块照答办**：三枚新臂一次落地（Task 1）、`VisualCheck` / `MetadataCheck` 够用故不加臂。
 - 第 **4**（待与 P3d）、第 **5**（待与 P2）、第 **7**（待与 P5b）、第 **9**（与 P6 与协调者：迁移号段 ＋ 工具结果的两个消费者）、第 **10**（与装配方：`p5a_verify_migrations()` 的名字与返回类型照既有八处的形状——**本计划 Task 11 已照办**）条**仍开**，**本计划不代裁**。
 
+### 六、Task 11 实测复核的修正与口径申报（2026-10-16，Task 11 写入）
+
+**本节落的残余**（逐轮完整证据在 `.superpowers/sdd/2026-10-10-p5a-verification-and-evidence/task-11-report.md` 的 Step 5；**结论落在这里**；13 轮每轮「变异前 sha = 还原后 sha = 现树文件 sha」三点一致，零残留）：
+
+1. **§12.2 预告表的四处实测修正**（原表在上方 :1207-1216；13 轮 = 原表八档 ＋ 本计划补四档，其中第 7 档拆两个落点）：
+   - **第 1 档（`Incomplete` 与 `NotEstablished` 位置互换）**：a、c、e 红 ✓、b、d、f 绿 ✓；另**多红三条同类语料**
+     （`a_test_evidence_marked_invalid_does_not_count`、`evidence_of_another_requirement_does_not_count`、
+     `unattached_evidence_does_not_count`）——「该红」列未列全；「不该红」列里「j、i 恒红」与列名相抵（实测 i、j 恒绿）。
+   - **第 2 档（`Validity` 的 `Valid` / `Invalid` 互换）**：f、g 红 ✓；**「不该红 a、b、c、d」中 b、c、d 实测红**
+     （它们与 f 同经 `counts`，且语料取全 `Pass` 的 `valid_record`——「不该红」列的语料假设与实仓不相称）；
+     另连带红 `five_passes_give_valid` 与持久层的枚举列往返。
+   - **第 7 档（`NotEstablished` ↔ `NotIndependent`）**：两个落点**各红各的**——消费侧（`judge_completion`）只红
+     (s) 第一条（＋ `the_fifth_conjunct_follows_the_aggregate_arm_by_arm` 连带——**这是 Task 7 结转的那条连带红**）；
+     生产侧（`independence_of`）红 Task 6 的四个期望 `NotEstablished` 用例（含 `an_unknown_identity_is_not_established`，
+     也含半同两条与 worker-backend 一条）。「Task 6 的用例也会红（同一处判据）」**只在生产侧落点成立**。
+   - **第 8 档（`AdjudicationRequired` / `Failed` 次序互换）**：p 红 ✓；另**连带红**持久层的
+     `the_event_is_written_only_for_failed_and_adjudication_required`（其 `adjudication_required` 臂语料为 `[Pass, fail]`）
+     ——「其余全部」有一处不符。
+   - 其余八档（第 3、4、5、6 档与本节补的四档）与预告逐条吻合。
+
+2. **变异口径的一次处置（申报）**：变异轮的「workspace 全量」在本机重负载下被 2400s 截断
+   （m1–m6 各轮 EXIT=124；其中 m3/m5/m6 的 `continuum-verify` 目标未跑到——截断轮不可作证据）；
+   接棒处置为**影响闭包全量**：`cargo test -p continuum-verify -p continuum-runtime --no-fail-fast`，
+   13 轮全部跑完。**等价性论证**：全仓唯一依赖 `continuum-verify` 的 crate 是 `continuum-runtime`
+   （实测仅 `crates/continuum-runtime/Cargo.toml:44`——即 Task 11 装配的边），闭包外的目标不可能观察到变异。
+   装配树另有 workspace 全量的直接读数（Task 11 Step 2 的组装门与收尾覆证）。
+
+3. **本节的收件人**：设计作者（第 1 条的四处修正与 §12.2 相抵）＋ 复审者（口径处置）＋ 协调者（是否并进 followups 由协调者做）。
+
 ---
 
 ## 交付给谁

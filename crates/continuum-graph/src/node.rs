@@ -16,7 +16,7 @@ pub struct Node {
     pub capabilities: Vec<String>,
     /// 结构保存，判定属 P4。
     pub execution_policy: Value,
-    /// 结构保存，判定属 P5。
+    /// 结构保存，判定属 P5：读者是 `continuum-verify` 的 `VerificationPolicy::from_value`。
     pub verification_policy: Value,
     pub state: NodeState,
 }

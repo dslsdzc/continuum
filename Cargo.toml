@@ -23,6 +23,7 @@ members = [
     "crates/continuum-semantics",
     "crates/continuum-budget",
     "crates/continuum-method",
+    "crates/continuum-verify",
 ]
 
 [workspace.package]

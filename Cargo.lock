@@ -276,6 +276,7 @@ dependencies = [
  "continuum-sandbox",
  "continuum-secrets",
  "continuum-semantics",
+ "continuum-verify",
  "continuum-workspace",
  "futures-core",
  "serde_json",
@@ -311,6 +312,22 @@ version = "0.1.0"
 dependencies = [
  "continuum-canonical",
  "continuum-persist",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "trybuild",
+]
+
+[[package]]
+name = "continuum-verify"
+version = "0.1.0"
+dependencies = [
+ "continuum-artifact",
+ "continuum-events",
+ "continuum-graph",
+ "continuum-operator",
+ "continuum-persist",
+ "serde",
  "serde_json",
  "tempfile",
  "thiserror",

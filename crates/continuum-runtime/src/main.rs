@@ -1,6 +1,6 @@
 //! Runtime 入口：解析子命令并分派（设计下篇第 4.1 节）。
 //!
-//! 迁移集合为 P0 内置迁移加 P1、P2、P3、P4 各层迁移；恢复钩子由各层注册。
+//! 迁移集合为 P0 内置迁移加 P1、P2、P3、P4、P5a 各层迁移；恢复钩子由各层注册。
 
 use continuum_persist::Migration;
 use continuum_runtime::cli::{self, Command};
@@ -78,7 +78,8 @@ fn main() -> ExitCode {
 
 /// 本驱动全量注册的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy、
 /// effect）+ P3（capability 的 `tool` 表；子项目 D 的 `model_registry` / `model_profile` /
-/// `model_skill_score` 三张表）+ P4（`alias` 表；语义层七表；预算树与账本）。
+/// `model_skill_score` 三张表）+ P4（`alias` 表；语义层七表；预算树与账本）+ P5a
+/// （验证与证据五表）。
 ///
 /// `recover` 与 `task` 共用同一份，两处各写一份清单会让「注册的集合」有两个来源：
 /// `task` 要 `workspace` 表（设计第 4.2 节第 3 步落库），若它那份少一条，症状要到
@@ -100,6 +101,12 @@ fn main() -> ExitCode {
 /// 与账本）：三个 crate 各自交付迁移函数，注册点就是最下面这三行。它们在装配之前只被
 /// 各自的测试库应用过；装配之后 `migrate()` 会按 version 跳过已应用者——**110 的 SQL
 /// 不得再改**（设计 §13.2 第 2 条点名的静默失效）。
+///
+/// **P5a 的一条由 Task 11（装配 task）加上**（130 验证与证据五表：`evidence` /
+/// `evidence_artifact` / `test_validity` / `test_validity_check` / `verification_round`）：
+/// 交付方是 `continuum_verify::p5a_verify_migrations()`，注册点就是最下面那一行。
+/// **130 的 SQL 此后不得再改**（同 110：`migrate()` 按 version 跳过已应用者，改号或
+/// 改 SQL 对已建库都无效）。
 pub(crate) fn runtime_migrations() -> Vec<Migration> {
     let mut migrations = continuum_persist::builtin_migrations();
     migrations.extend(continuum_artifact::p1_artifact_migrations());
@@ -112,6 +119,7 @@ pub(crate) fn runtime_migrations() -> Vec<Migration> {
     migrations.extend(continuum_canonical::p4_canonical_migrations());   // 100：alias
     migrations.extend(continuum_semantics::p4_semantics_migrations());   // 110：七张表
     migrations.extend(continuum_budget::p4_budget_migrations());         // 120：树与账本
+    migrations.extend(continuum_verify::p5a_verify_migrations());        // 130：验证与证据五表
     migrations
 }
 
