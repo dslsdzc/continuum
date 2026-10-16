@@ -267,6 +267,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-research"
+version = "0.1.0"
+dependencies = [
+ "continuum-artifact",
+ "continuum-operator",
+]
+
+[[package]]
 name = "continuum-runtime"
 version = "0.1.0"
 dependencies = [

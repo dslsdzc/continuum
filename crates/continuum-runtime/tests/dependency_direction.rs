@@ -218,6 +218,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P5 跨领域层（设计 §2.1）：研究领域的七枚算子。
+    // 本 crate 不新建表、不写事件、不碰策略与能力面。
+    // `continuum-graph`（§6.1 的照片）与 `continuum-verify`（§9.4 的 trybuild 样例）
+    // 两条都是 **dev 边**——生产代码对它们零调用，由各自的 task 增量补进来。
+    ("continuum-research", &["continuum-artifact", "continuum-operator"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
