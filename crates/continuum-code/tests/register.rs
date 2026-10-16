@@ -77,6 +77,8 @@ fn registering_twice_yields_the_registry_arm_not_a_silent_overwrite() {
 /// 红在名单自身），而两条各有一侧是对方抓不到的——给名单**加**一项（如
 /// `"remote-cluster"`）⇒ 名单条红而本条**绿**（九枚的候选都还在名单里）；
 /// 把某枚 `Deterministic` 算子的候选**改成**名单外的名 ⇒ 本条红而名单条**绿**（名单没变）。
+/// （删 `"builtin"` 的连锁**不止这两条**——注册路径的 (a)(b)(d)(e) 也红，
+/// 见 `the_list_is_exactly_these_five_names` 的注释。）
 #[test]
 fn every_deterministic_operator_has_all_its_candidates_in_the_list() {
     let operators = all_operators();
@@ -106,7 +108,12 @@ fn every_deterministic_operator_has_all_its_candidates_in_the_list() {
 /// `[&str; 4]`** ⇒ 本条红、**(c) 也红**（(c) 遍历九枚里 `determinism ==
 /// Deterministic` 的两枚——第 7、9 行——逐枚判候选是否在名单内，而第 9 行
 /// `code-verify` 的候选就是 `builtin`（设计 §3.2 表的 backend 候选列），
-/// 删掉该项后第 9 行立刻不成），**而 (a) 不红**（它不涉及名单）。
+/// 删掉该项后第 9 行立刻不成）。
+/// **本条与 (c) 的红不经过注册路径**（直接读常量判名单／候选）；**注册路径的四条也红**
+/// ——删掉 `"builtin"` 后**核段先拒 `all_operators()` 的 `code-verify`**：(a) 的
+/// `.expect` 当场 panic、(b) 的第一次注册同样 panic、(d) 里 `operators[8]` 先于违规枚
+/// 被拒而返回的 `operator` 是 `code-verify` 而非 rogue（字段判据红）、(e) 里表外枚
+/// （候选也是 `builtin`）被拒而 `.expect` panic。**两串连锁要分开读。**
 ///
 /// **类型字面量那一半要写进红条件**：`REPRODUCIBLE_BACKENDS` 是 `[&str; 5]`
 /// （本 task Step 3），只删一项而不改类型即**编译不过**，按纪律 1(c) **不算红**。
