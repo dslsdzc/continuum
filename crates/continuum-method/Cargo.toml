@@ -1,0 +1,15 @@
+[package]
+name = "continuum-method"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`error.rs` 的 `MethodError` 派生 `Error`。
+# **它是本 crate 唯一的外部依赖**（本计划内不再增删——Global Constraints
+# 「`Cargo.toml` 只声明本 crate 实际用到的外部依赖：`thiserror`」）。
+# **workspace 内依赖零条**（设计 §9：《工程》§8.3 `docs/02-工程.md:526`
+# 「Execution Method Library ← 无」）。任何 workspace 内的边都会让
+# `crates/continuum-runtime/tests/dependency_direction.rs` 的
+# `("continuum-method", &[])` 空数组断言变红——**空数组是硬断言**（设计 §9）。
+thiserror = { workspace = true }

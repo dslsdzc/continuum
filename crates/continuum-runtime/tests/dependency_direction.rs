@@ -149,6 +149,12 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 设计 §6；收件人见 §10 第 8 条）——**不是漏登记**。
     // **不登记 core**：本设计对它零引用。**不登记 persist / events**：本设计不写库（§4.2）。
     ("continuum-node", &["continuum-artifact"]),
+    // P5b 执行方法库（设计 §9；《工程》§8.3 `docs/02-工程.md:526`「Execution Method Library ← 无」）。
+    // **空数组是硬断言**：任何直接的反向边（含指向 continuum-graph 者）都会让本门变红——
+    // 这正是「realized_by 取文本而非 OperatorRef」那条读法的**编译期照片**（设计 §3.2、§9）。
+    // 该照片只覆盖依赖边，**不覆盖 realized_by 的文本内容**（那在 Vec<String> 里，编译期无从核）。
+    // 本门查的是直接边（--depth 1），故对 continuum-operator 的传递依赖不出现在这张照片里。
+    ("continuum-method", &[]),
     // P4 语义层（设计 §2.1）：Input Canonicalization Frontend 与 Reference Resolver。
     // 本层不登记任何指向执行层／资源层／边界层的边；允许集只含 continuum-persist
     // （alias 表经 Tx）与层内前驱。`continuum-semantics ← continuum-canonical` 是
