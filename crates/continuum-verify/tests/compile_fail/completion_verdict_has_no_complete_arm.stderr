@@ -1,0 +1,5 @@
+error[E0599]: no variant named `Complete` found for enum `CompletionVerdict`
+  --> tests/compile_fail/completion_verdict_has_no_complete_arm.rs:17:24
+   |
+17 |     CompletionVerdict::Complete { failing: vec![] }
+   |                        ^^^^^^^^ variant not found in `CompletionVerdict`

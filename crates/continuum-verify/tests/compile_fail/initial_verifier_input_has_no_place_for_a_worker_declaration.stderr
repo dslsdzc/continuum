@@ -1,0 +1,7 @@
+error[E0560]: struct `InitialVerifierInput` has no field named `worker_declaration`
+  --> tests/compile_fail/initial_verifier_input_has_no_place_for_a_worker_declaration.rs:25:9
+   |
+25 |         worker_declaration: WorkerCompletionDeclaration::from_str("模型宣告：我完成了"),
+   |         ^^^^^^^^^^^^^^^^^^ `InitialVerifierInput` does not have this field
+   |
+   = note: all struct fields are already assigned

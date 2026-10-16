@@ -24,6 +24,7 @@ members = [
     "crates/continuum-budget",
     "crates/continuum-media",
     "crates/continuum-method",
+    "crates/continuum-verify",
 ]
 
 [workspace.package]
