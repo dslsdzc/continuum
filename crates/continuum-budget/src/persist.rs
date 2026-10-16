@@ -203,23 +203,105 @@ pub(crate) fn available_of(
     Ok(available)
 }
 
-/// 该 parent 的**全部子节点**在五维上的分配额之和（`parent` 列等于它的行）。
+/// 该 parent 在**本次分配会用到的那些维**上的子节点分配额之和
+/// （`parent` 列等于它的行；`dims` 里 `None` 的维不查询、在返回数组里留 0 占位
+/// ——那些位置不会被读，见下）。
 ///
-/// **子行该维 `None` 贡献 0**（该维上这个孩子不构成约束）；返回 `[i64; 5]`，
-/// 每维都是从 0 起的和（哪怕一个孩子都没有）。
-pub(crate) fn children_sums(tx: &Tx<'_>, parent: &BudgetOwner) -> Result<[i64; 5], PersistError> {
-    let rows = tx.query(
-        "SELECT money, wall_time, token, gpu_time, network_transfer \
-         FROM budget_node WHERE parent = ?1",
-        &[Value::text(parent.as_key())],
-    )?;
+/// # 为什么收 `dims`、为什么只算它里 `Some` 的维（QA 发现 6 跟进）
+///
+/// `allocate` 的 I2 只对本次 `dims` 里 `Some` 的维判定，于是本函数的结果里
+/// 也只有那些维会被读（见 `allocate` 的判定循环）。早先的实现把每个子行物化成
+/// `Vec<Vec<Value>>`、再在 Rust 端逐行逐维解码累加——孩子数到 10³ 时，连续的
+/// `allocate` 是 O(children²) 次取值（QA 摸底实测 `allocate` 三轮递增 +104%；
+/// 无 fsync 的同事务复测 508→1283→2008 ms/轮，轮间递增即它）。现在按需聚合：
+/// 每个被读的维只在 SQL 里出一条 `COALESCE(SUM(col), 0)`，Rust 端收**一行**、
+/// 只解码被读的维。
+///
+/// # SQL 形状的取舍（实测，非推测）
+///
+/// 在 3000 子行的夹具上逐形状实测（每次 `prepare`，与 `Tx::query` 同路径；
+/// 探针源码与读数归档在 `.tmp/qa-fix/qa_sql_probe.rs` 与
+/// `.tmp/qa-fix/perf-sql-probe.log`——引用以该归档为唯一出处）：五列物化
+/// **810 µs**、五维 `SUM` **709 µs**、单维 `SUM` **304 µs**、单维 `SUM`
+/// **＋逐维 `typeof` 检测** **2448 µs**、单维 `SUM`＋单维 `MAX` **384 µs**。
+/// 于是形状取「每读一维一条 `SUM`＋一条 `MAX`」：`typeof` 检测贵它 6 倍
+/// 且检测力相同（见下），不用。
+///
+/// # 坏列类型的检测（双保险，完备性论证）
+///
+/// 被读的维上出现坏类型（只有绕过写路径改库才可能出现）仍要 fail-closed：
+///
+/// - **`TEXT` / `BLOB`**：SQLite 的类型序把它们排在全部数值之**后**，故
+///   `MAX(col)` 取到的必是两者之一（或更高的 `BLOB`）——`MAX` 的**取值类型**
+///   非 `Int` / `Null` 即报 [`PersistError::ColumnType`]；
+/// - **`REAL`**：`REAL` 与 `INTEGER` 同属数值类、按数值大小比较，`MAX` 可能
+///   取到 `INTEGER` 而漏看较小的 `REAL`——但只要有 `REAL` 参与，`SUM` 的
+///   结果类型就是 `REAL`，[`int_at`] 在取和处报了 `ColumnType { actual: "real" }`。
+///
+/// 两处合起来覆盖全部坏类型；空集（无子行）时 `MAX` 为 `NULL`、`SUM` 经
+/// `COALESCE` 为 0。**申报差异**：（a）检测范围从「全部五列」收窄为
+/// 「本次被读的维」——不被读的维的和本就不参与判定，其坏值不再伴生报错；
+/// （b）多列/多行同时坏时，报的是 `MAX` 命中的那个类型（而非行序里最早的
+/// 那处）——现实的单处坏值两者相同；（c）**i64 溢出**：旧实现的 Rust `+=`
+/// 在 debug 下 panic、release 下回绕（静默错值），新实现的 SQLite `SUM`
+/// 报溢出 `Err`——极端数据才触发，方向 fail-closed。
+///
+/// # 注入面
+///
+/// 列名来自 [`DimensionKind::as_str`]（封闭枚举的常量），不载用户输入——
+/// SQL 文本按读取维**拼接**不引入注入面（本 crate 的其余查询都是常量文本，
+/// 这是唯一一处按需拼接，理由与边界见上）。
+pub(crate) fn children_sums(
+    tx: &Tx<'_>,
+    parent: &BudgetOwner,
+    dims: &Dimensions,
+) -> Result<[i64; 5], PersistError> {
+    let values = dims.to_values();
+    // 本次会被读的维：`(维度下标, 列名)`，按 ALL 的固定序。列名与账本维度名
+    // 同源（`DimensionKind::as_str`），与本表的列名逐字相同（迁移 120）。
+    let read_dims: Vec<(usize, &'static str)> = ALL
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| values[*i].is_some())
+        .map(|(i, kind)| (i, kind.as_str()))
+        .collect();
+    // 一个维都不读时不查库：`allocate` 的判定循环会全部 `continue`，结果无人读。
+    if read_dims.is_empty() {
+        return Ok([0i64; 5]);
+    }
+
+    let mut sql = String::from("SELECT ");
+    for (n, (_, column)) in read_dims.iter().enumerate() {
+        if n > 0 {
+            sql.push_str(", ");
+        }
+        sql.push_str(&format!("COALESCE(SUM({column}), 0), MAX({column})"));
+    }
+    sql.push_str(" FROM budget_node WHERE parent = ?1");
+
+    let rows = tx.query(&sql, &[Value::text(parent.as_key())])?;
+    let row = rows.into_iter().next().expect("聚合查询（无 GROUP BY）恒返回一行");
+
     let mut sums = [0i64; 5];
-    for row in &rows {
-        for (i, sum) in sums.iter_mut().enumerate() {
-            if let Some(v) = opt_int_at(row, i)? {
-                *sum += v;
+    for (n, (index, _)) in read_dims.iter().enumerate() {
+        // `MAX` 的类型检测在前：坏类型的维，其 SUM 结果不可信，不得读取。
+        // （`REAL` 由后一步 `int_at` 的 SUM 结果类型检查兜住，见函数文档。）
+        match row.get(2 * n + 1) {
+            Some(Value::Int(_)) | Some(Value::Null) => {}
+            Some(other) => {
+                return Err(PersistError::ColumnType {
+                    index: *index,
+                    actual: kind_name(other),
+                })
+            }
+            None => {
+                return Err(PersistError::ColumnType {
+                    index: *index,
+                    actual: "missing",
+                })
             }
         }
+        sums[*index] = int_at(&row, 2 * n)?;
     }
     Ok(sums)
 }

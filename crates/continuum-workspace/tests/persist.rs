@@ -41,21 +41,31 @@ fn workspace_record_round_trips() {
     let (_d, db) = db();
 
     // 两个后端各存一条：`backend` 列的两种取值都要能原样取回。
-    for (intent, backend) in [
+    let recs: Vec<WorkspaceRecord> = [
         ("i1", WorkspaceBackend::Worktree),
         ("i2", WorkspaceBackend::Overlay),
-    ] {
-        let rec = record(intent, backend);
-        let tx = db.begin().unwrap();
-        save_workspace(&tx, &rec).unwrap();
-        tx.commit().unwrap();
+    ]
+    .into_iter()
+    .map(|(intent, backend)| record(intent, backend))
+    .collect();
 
-        let tx = db.begin().unwrap();
+    // 两条记录在**同一个事务**里写入：写模式是批事务（见 `continuum-persist`
+    // crate 文档「写入模式：批事务」），夹具照此写。断言语义不变——每条记录
+    // 仍要原样取回，只是「逐条写、逐条读」的轮转改为「批写、批读」。
+    let tx = db.begin().unwrap();
+    for rec in &recs {
+        save_workspace(&tx, rec).unwrap();
+    }
+    tx.commit().unwrap();
+
+    let tx = db.begin().unwrap();
+    for rec in &recs {
         let got = load_workspace(&tx, &rec.intent_id).unwrap();
         assert_eq!(
             got,
             Some(rec.clone()),
-            "Intent {intent} 的记录未原样取回"
+            "Intent {} 的记录未原样取回",
+            rec.intent_id.as_str()
         );
     }
 }
