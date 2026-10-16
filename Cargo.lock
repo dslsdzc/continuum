@@ -174,8 +174,10 @@ dependencies = [
  "continuum-graph",
  "continuum-operator",
  "continuum-persist",
+ "continuum-verify",
  "tempfile",
  "thiserror",
+ "trybuild",
 ]
 
 [[package]]

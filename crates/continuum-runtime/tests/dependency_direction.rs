@@ -232,7 +232,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 两条边在生产代码对它们零调用（`src/` 里 `continuum_graph` / `continuum_persist`
     // 零命中），唯一使用点各是一个用例文件；`cargo tree --edges all` 把 dev 边算进依赖，
     // 故与普通边一样登记（先例：continuum-provider 那一行的 persist）。数组按字母序。
-    // continuum-verify 一条仍由 Task 8 增量加（dev 边）。
+    // Task 8 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的编译失败
+    // 样例（§11.4 的两张照片、四份文件）里，`Evidence` 是该 crate 的类型；**生产代码对它零调用**
+    // （`src/` 里 `continuum_verify` 零命中），唯一使用点是那批样例；`cargo tree --edges all`
+    // 把 dev 边算进依赖，故与普通边一样登记（先例：continuum-provider 那一行的 persist）。
+    // **上一条注记「continuum-verify 一条仍由 Task 8 增量加」至此兑现**：本表是**允许
+    // 集合**的转录，故它此前一直不在数组里，只是在等这个使用点（同 continuum-canonical
+    // 那一段的「将来时 → 兑现」写法）。
     (
         "continuum-image",
         &[
@@ -240,6 +246,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-graph",
             "continuum-operator",
             "continuum-persist",
+            "continuum-verify",
         ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里

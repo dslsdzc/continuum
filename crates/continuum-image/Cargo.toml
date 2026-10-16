@@ -31,4 +31,14 @@ continuum-persist = { path = "../continuum-persist" }
 # 起真库用的临时目录（`tests/lineage.rs`；形状照
 # `crates/continuum-artifact/tests/artifact_store.rs:109-110` 的既有先例）。
 tempfile = { workspace = true }
-# continuum-verify 一条 dev 边由 Task 8 增量加（设计 §2.1；计划 Global Constraints）。
+# Task 8 的使用点：同一份 `tests/type_level.rs` 里，`Evidence` 来自本 crate（§11.4 第 2 条
+# 的照片）。**dev 边**——生产代码对它零调用（`src/` 里 `continuum_verify` 零命中），
+# 唯一使用点是那张编译失败样例；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边
+# 一样在 `ALLOWED` 表里登记（先例：continuum-provider 那一行的 persist；设计 §2.1）。
+continuum-verify = { path = "../continuum-verify" }
+# Task 8 的使用点：`tests/type_level.rs` 用 `trybuild::TestCases::compile_fail` 驱动
+# §11.4 的两张照片（四份「写不出来」的样例：少传 `detector`、少传 `source_dims`、
+# `Evidence` 的字面量与 `default()` 各一路；怎么拆的见 `tests/type_level.rs` 的对账段）。
+# **它不进 `dependency_direction.rs` 的 `ALLOWED`**：那张表列的是**内部** crate 的
+# 允许集合，`trybuild` 是外部 crate（先例：continuum-connector 的同名条目）。
+trybuild = { workspace = true }
