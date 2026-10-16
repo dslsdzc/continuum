@@ -6,6 +6,10 @@ rust-version.workspace = true
 
 [dependencies]
 continuum-artifact = { path = "../continuum-artifact" }
+# §10 的 `bind_media_methods` 收 `&mut MethodRegistry`、逐条调 `bind` 并透出
+# `MethodError`——**这条是普通边**（生产入口在用，不是「只在用例里出现」；
+# 边别口径见设计 §2.1 的三处判法）。
+continuum-method = { path = "../continuum-method" }
 continuum-operator = { path = "../continuum-operator" }
 thiserror = { workspace = true }
 

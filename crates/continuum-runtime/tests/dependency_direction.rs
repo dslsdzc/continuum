@@ -185,12 +185,17 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 7 起加上 continuum-graph：**dev 边**——`tests/reuse.rs`（§6.2 的 (r) 条、
     // §305 的复用照片）经 `cache_key` / `can_reuse` 核对本块声明的 `determinism`
     // 真能让那条判据成立；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样登记
-    // （先例：continuum-provider 那一行的 persist）。数组按字母序。
+    // （先例：continuum-provider 那一行的 persist）。
+    // Task 8 起加上 continuum-method：**普通边**——`src/methods.rs` 的 `bind_media_methods`
+    // 是生产入口（收 `&mut MethodRegistry`、逐条调 `bind`；设计 §2.1、§10），
+    // 不是「只在用例里出现」——这正是上面订正段预告的口径（method 不是 dev 边）。
+    // 数组按字母序。
     (
         "continuum-media",
         &[
             "continuum-artifact",
             "continuum-graph",
+            "continuum-method",
             "continuum-operator",
         ],
     ),

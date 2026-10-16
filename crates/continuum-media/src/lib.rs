@@ -4,15 +4,18 @@
 //! §34 的生成内容单独授权在 [`permission::authorize_generative`] 内落地。
 //! §308 的第一枚 `Checkpointable` 实现（`generate-broll` 与 `render`）在
 //! [`checkpoint`] 内落地——**有实现、有测试、无生产调用点**（调用点属第 3 层的恢复路径）。
+//! §10 的四条 `video/` 方法的 `realized_by` 在 [`methods::bind_media_methods`] 内落地。
 //! 本子项目只登记算子与声明，不建执行路径（设计 §1.2）。
 
 pub mod checkpoint;
 pub mod error;
+pub mod methods;
 pub mod operators;
 pub mod permission;
 
 pub use checkpoint::{GenerateBroll, Progress, Render};
 pub use error::MediaError;
+pub use methods::bind_media_methods;
 pub use operators::{all_operators, register_media_operators};
 pub use permission::{
     GenerativePermission, PermittedGenerativeContent, authorize_generative, required_permission,
