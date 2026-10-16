@@ -34,3 +34,11 @@ continuum-persist = { path = "../continuum-persist" }
 # 测试库（照 P4 对 `contract` 表的做法），临时目录经 `tempfile`。**外部 crate 按需加、
 # 不进 `ALLOWED`**（计划 Global Constraints 的同一条）。
 tempfile = { workspace = true }
+# Task 10 起的使用点：`tests/type_level.rs` 用编译失败样例钉住本块五条「不可表达性」
+# 命题（设计 §12.3 第 1–4 条；其第 4 条在本 crate 拆成两份样例）：`InitialVerifierInput`
+# 装不下 `WorkerCompletionDeclaration`、`PostBlindVerifierInput` 不能先于盲判存在、
+# `CompletionVerdict` 没有「完成」臂、`Evidence { .. }` 与 `Evidence::default()`
+# 两条路都走不通。与 continuum-node 的用法同形（`crates/continuum-node/Cargo.toml`
+# 的 `trybuild` 一段）。**外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——
+# 那张表只断言 workspace 成员之间的边（同上一段）。
+trybuild = { workspace = true }

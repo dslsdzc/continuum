@@ -1,0 +1,15 @@
+error[E0061]: this function takes 2 arguments but 1 argument was supplied
+  --> tests/compile_fail/post_blind_verifier_input_cannot_be_built_without_a_blind_verdict.rs:16:5
+   |
+16 |     PostBlindVerifierInput::new(WorkerCompletionDeclaration::from_str("模型宣告：我完成了"))
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^ ----------------------------------------------------------- argument #1 of type `BlindVerdict` is missing
+   |
+note: associated function defined here
+  --> src/input.rs
+   |
+   |     pub fn new(blind: BlindVerdict, worker_declaration: WorkerCompletionDeclaration) -> Self {
+   |            ^^^
+help: provide the argument
+   |
+16 |     PostBlindVerifierInput::new(/* BlindVerdict */, WorkerCompletionDeclaration::from_str("模型宣告：我完成了"))
+   |                                 +++++++++++++++++++
