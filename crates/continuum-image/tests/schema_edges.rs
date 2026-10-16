@@ -79,7 +79,7 @@ struct EdgeRow {
 
 /// 设计 §3.4 边表（设计 `:288-292`）的语料，**按表行序逐行手写**。
 ///
-/// **第 1 行（`generate-image`）的来源在 §3.4 表里写的是「上游任何一枚出的 `Image`」**
+/// **第 1 行（`generate-image`）的来源在 §3.4 表里写的是「上游任一枚出的 `Image`」**
 /// （设计 `:288`）——语料为它写一条 `generate-image ← generate-image : Image`
 /// （本域至少有一枚算子输出 `Image`，而 `generate-image` 自身即满足），
 /// **这一条与其余各行的强度不同**：其余各行指认了一枚**具体**的上游，这一行只指认
@@ -87,7 +87,7 @@ struct EdgeRow {
 ///
 /// **另有三行的来源是同形的「上游源图（`Image`）」**：设计 §3.4 表给 `local-generative-edit`、
 /// `hard-composite`、`verify-outside-mask` 各列了这一来源（设计 `:290-292`），它与
-/// `generate-image` 那一行的「上游任何一枚出的 `Image`」是**同一个命题**：存在一枚上游其
+/// `generate-image` 那一行的「上游任一枚出的 `Image`」是**同一个命题**：存在一枚上游其
 /// `output_schema` 含 `Image`。**语料不为它们各写一行，理由在此写明**：那三行加上
 /// `generate-image` 那一行是同一个断言的四次出现，逐行抄写会把「任一枚」读成「某四枚具体的
 /// 上游」；**它们的承重与 `generate-image` 那一行相同**（都由
