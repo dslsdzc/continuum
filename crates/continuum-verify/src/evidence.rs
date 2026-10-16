@@ -53,6 +53,15 @@ impl Claim {
     pub fn from_str(s: &str) -> Self {
         Claim(s.to_owned())
     }
+
+    /// 空串 `Claim`（编译期常量）。**只在本 crate 内可见**。
+    ///
+    /// 用途只有一个：本 crate 的枚举名单（`VerifierVerdict::ALL` / `BlindVerdict::ALL`，
+    /// 落在 `src/verdict.rs`）里载荷臂需要一个编译期可得的载荷，而 [`Claim::from_str`]
+    /// 不是 `const fn`（`String::to_owned` 不是 `const`）。**它不是一条构造路径**——
+    /// `Claim` 本来无校验；载荷在名单里不参与「有哪些臂」这件事，逐臂点名由
+    /// `tests/verifier.rs` 把关。
+    pub(crate) const EMPTY: Claim = Claim(String::new());
 }
 
 /// §29 的「Worker reasoning summary / Worker 自己的完成声明」。

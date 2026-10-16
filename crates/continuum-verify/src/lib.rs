@@ -10,7 +10,10 @@
 //! [`VerificationPolicy`]（§5.1 的严格解析）、任务级 [`VerificationProfile`] 与它的
 //! 取得点 [`profile_for`]（§5.2/§5.3）、§262 的五级序 [`VerifierLevel`]；Task 5 落
 //! §6.1–§6.3 的 Requirement Coverage（[`ContractView`] 一侧的四枚类型、[`CoverageVerdict`]
-//! 的两臂、[`counts`] 的五条计数规则与 [`coverage`] 的逐项判定）；其余类型与判定由
+//! 的两臂、[`counts`] 的五条计数规则与 [`coverage`] 的逐项判定）；Task 6 落 §7 的
+//! Verifier 选择与隔离（[`select_verifier`] / [`independence_of`]、§7.5 的
+//! [`VerifierVerdict`] / [`VerdictAggregate`] / [`BlindVerdict`] / [`clamp_by_readability`]）
+//! 与两个输入面（[`InitialVerifierInput`] / [`PostBlindVerifierInput`]）；其余类型与判定由
 //! 后续 task 逐一追加。
 //!
 //! # 依赖边（设计 §2.1）
@@ -42,9 +45,12 @@ mod coverage;
 mod error;
 mod evidence;
 mod evidence_type;
+mod input;
 mod policy;
 mod profile;
+mod selection;
 mod test_validity;
+mod verdict;
 mod verifier_level;
 
 pub use contract_view::{ContractRequirement, ContractView, RequirementClass, RequirementId};
@@ -55,7 +61,13 @@ pub use evidence::{
     EvidenceSubject, WorkerCompletionDeclaration,
 };
 pub use evidence_type::EvidenceType;
+pub use input::{InitialVerifierInput, PostBlindVerifierInput};
 pub use policy::VerificationPolicy;
 pub use profile::{VerificationProfile, VerificationProfileSource, profile_for};
+pub use selection::{
+    AvailableVerifier, IndependenceVerdict, VerifierSelection, WorkerIdentity, independence_of,
+    select_verifier,
+};
 pub use test_validity::{CheckVerdict, TestValidity, TestValidityCheck, Validity};
+pub use verdict::{BlindVerdict, VerdictAggregate, VerifierVerdict, clamp_by_readability};
 pub use verifier_level::VerifierLevel;

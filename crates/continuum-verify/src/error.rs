@@ -1,5 +1,8 @@
 //! 本 crate 的错误类型：`VerifyError`（设计 §2.2 的冻结清单）。变体逐 task 增量加。
 
+use continuum_graph::NodeId;
+
+use crate::evidence::EvidenceId;
 use crate::evidence_type::EvidenceType;
 use crate::test_validity::TestValidityCheck;
 
@@ -51,4 +54,39 @@ pub enum VerifyError {
     /// 的 required 集合为空、覆盖判定无缺项，即「无档案 ⇒ 无要求 ⇒ 不阻断」（fail-open）。
     #[error("缺 VerificationProfile：无档案是错，不是「无要求」（§5.3 第 3 条）")]
     ProfileMissing,
+
+    /// §7.2 第 2 条：`min_verifier_level` 有值时下低于它的候选；**一个不剩即本错**。
+    ///
+    /// **不静默降级**（§7.2 第 4 条）：`A5`/`OPEN-004` 未定义降级路径，替它选一条
+    /// 就是替规范做决定。降级只有两个合法来路（`independent_verifier_required` 显式给了假，
+    /// 或用户经 `Decision` 授权），两条都不在本块。
+    #[error(
+        "没有可用的 verifier 候选：按 §7.2 第 2 条过滤后一个不剩（候选集为空，或全在 min_verifier_level 之下）"
+    )]
+    NoAvailableVerifier,
+
+    /// §7.2 第 3 条 + §7.3：`independent_verifier_required == true` 时下不独立的候选；
+    /// **身份含 `None` 的候选（`NotEstablished`）同样被下**（fail-closed）；**一个不剩即本错**。
+    ///
+    /// 同 [`VerifyError::NoAvailableVerifier`]：不静默降级（§7.2 第 4 条）。
+    #[error(
+        "没有独立的 verifier 候选：按 §7.2 第 3 条过滤（不独立或独立性未确立）后一个不剩"
+    )]
+    NoIndependentVerifier,
+
+    /// §7.4 第 3 条：受验节点自己产的 `Evidence` 进不了初判输入。
+    ///
+    /// **比 §263 的文本更严**（§263 只点名「完整 Worker reasoning」与「Worker 自己的
+    /// 完成声明」，没说受验节点自产的证据要排除）——设计把这一条作为 fail-closed 的
+    /// 收紧记了代价：允许自产证据进来等于让受验者自证，§263 的隔离在同一节点内失效。
+    /// 载荷带证据 id 与受验节点：只报「自产」而不给是哪条、谁产的，调用方无法定位。
+    #[error(
+        "证据 {} 由受验节点 {} 自己产出：受验者不得自证（§7.4 第 3 条）",
+        evidence_id.as_str(),
+        node
+    )]
+    EvidenceFromVerifiedNode {
+        evidence_id: EvidenceId,
+        node: NodeId,
+    },
 }
