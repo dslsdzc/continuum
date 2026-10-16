@@ -1,0 +1,44 @@
+[package]
+name = "continuum-verify"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的使用点：`evidence_type.rs` 的 `EvidenceType` 与 `ArtifactType` 同形的
+# `#[derive(Serialize, Deserialize)]` ＋ `#[serde(rename_all = "snake_case")]`（设计 §4.2）。
+# **落库列不依赖它**：`as_str` / `parse` 是列编码唯一的产生点，派生的 serde 表示
+# 不被用来落库（沿用 `ArtifactType::as_str` 文档里那条口径）。
+serde = { workspace = true }
+# Task 2 起的使用点：`evidence.rs` 的 `EvidenceStrength` / `EvidenceScope` 的载荷是
+# `serde_json::Value`（设计 §4.3.4 逐字给出）。**外部 crate 按需加、不进 `ALLOWED`**
+# （计划 Global Constraints）——那张表只逐对断言 workspace 成员之间的边。
+serde_json = { workspace = true }
+# Task 2 起的使用点：`error.rs` 的 `VerifyError` 派生 `thiserror::Error`。
+thiserror = { workspace = true }
+# Task 2 起登记三条内部边（`crates/continuum-runtime/tests/dependency_direction.rs`
+# 的 `ALLOWED` 条目同步；`cargo tree --edges all` 把 dev 边也算进依赖）：
+# `Evidence.artifact_refs` 取 `ArtifactId`（`continuum-artifact`）；
+# `EvidenceProducer::Node` 取 `NodeId`（`continuum-graph`）与 `BackendId`（`continuum-operator`）。
+# Task 9 加两条：`continuum-events`——`record_verification_round` 写
+# `VerificationFailed` 取 `Event` / `EventType`；`continuum-persist`——迁移 130
+# 与四个写/读函数经 `Tx`。至此本 crate 的 `ALLOWED` 条目是五条（数组按字母序）。
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-events = { path = "../continuum-events" }
+continuum-graph = { path = "../continuum-graph" }
+continuum-operator = { path = "../continuum-operator" }
+continuum-persist = { path = "../continuum-persist" }
+
+[dev-dependencies]
+# Task 9 起：`tests/persist.rs` 用 `Db::open_with(path, p5a_verify_migrations())` 起
+# 测试库（照 P4 对 `contract` 表的做法），临时目录经 `tempfile`。**外部 crate 按需加、
+# 不进 `ALLOWED`**（计划 Global Constraints 的同一条）。
+tempfile = { workspace = true }
+# Task 10 起的使用点：`tests/type_level.rs` 用编译失败样例钉住本块五条「不可表达性」
+# 命题（设计 §12.3 第 1–4 条；其第 4 条在本 crate 拆成两份样例）：`InitialVerifierInput`
+# 装不下 `WorkerCompletionDeclaration`、`PostBlindVerifierInput` 不能先于盲判存在、
+# `CompletionVerdict` 没有「完成」臂、`Evidence { .. }` 与 `Evidence::default()`
+# 两条路都走不通。与 continuum-node 的用法同形（`crates/continuum-node/Cargo.toml`
+# 的 `trybuild` 一段）。**外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——
+# 那张表只断言 workspace 成员之间的边（同上一段）。
+trybuild = { workspace = true }

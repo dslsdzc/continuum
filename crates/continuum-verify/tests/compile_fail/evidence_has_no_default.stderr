@@ -1,0 +1,17 @@
+error[E0599]: no function or associated item named `default` found for struct `Evidence` in the current scope
+  --> tests/compile_fail/evidence_has_no_default.rs:19:15
+   |
+19 |     Evidence::default()
+   |               ^^^^^^^ function or associated item not found in `Evidence`
+   |
+note: if you're trying to build a new `Evidence`, consider using `Evidence::from_tool_result` which returns `Result<Evidence, VerifyError>`
+  --> src/evidence.rs
+   |
+   | /     pub fn from_tool_result(
+   | |         id: EvidenceId,
+   | |         evidence_type: EvidenceType,
+   | |         subject: EvidenceSubject,
+...  |
+   | |         scope: EvidenceScope,
+   | |     ) -> Result<Evidence, VerifyError> {
+   | |______________________________________^
