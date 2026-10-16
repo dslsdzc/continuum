@@ -226,6 +226,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `BudgetReservationRecovery`（挂 `MarkLostExecutions`）。上一段「本 task 只把它作
     // dev 边用」说的是 Task 19 当时的状态，自本 task 起 budget 是普通依赖。
     //
+    // P5a 的 Task 11 起加上 continuum-verify：装配处注册 `p5a_verify_migrations()`
+    // （迁移 130 的验证与证据五表）。本块以**值**承载 Contract / Requirement 身份，
+    // 不 `use` 语义层类型，故本表中 **continuum-verify 自己的条目不含
+    // continuum-semantics**（详注在该条目处）。
+    //
     // 本表是设计第 3 节「依赖方向」的允许集合按**已存在的 crate** 转录，不是按使用点派生，
     // 故它容忍「允许但尚无使用点」的边。这一条今天对 sandbox 与 events 成立
     // （**core 与 provider 已不成立**——下方的订正块记着这两处的使用点）：
@@ -280,6 +285,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-sandbox",
             "continuum-secrets",
             "continuum-semantics",
+            "continuum-verify",
             "continuum-workspace",
         ],
     ),

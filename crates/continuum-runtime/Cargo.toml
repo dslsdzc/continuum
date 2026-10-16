@@ -39,6 +39,9 @@ continuum-secrets = { path = "../continuum-secrets" }
 # P4 的 Task 20 起：`main.rs` 的装配处注册 `p4_semantics_migrations()`
 # （迁移 110 的语义层七张表）。
 continuum-semantics = { path = "../continuum-semantics" }
+# P5a 的 Task 11 起：`main.rs` 的装配处注册 `p5a_verify_migrations()`
+# （迁移 130 的验证与证据五表）。
+continuum-verify = { path = "../continuum-verify" }
 continuum-workspace = { path = "../continuum-workspace" }
 # Task 10 起：`task_cmd` 要构造第 2 级（`ExplicitCurrent`）那条内建规则，而 `Policy` 的
 # `condition` 只能经 `Condition::parse(&serde_json::Value)` 造出——`continuum-policy`
