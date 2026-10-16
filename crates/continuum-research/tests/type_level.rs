@@ -41,17 +41,39 @@
 //! 构造由**宿主**的执行代码直接调它完成，**调用点不在本 crate 里**。故本条是本块在
 //! `continuum-verify` 上的**唯一使用点**，也是那条边为 **dev 边**的理由。
 //!
+//! # 正控制（`tests/ui_pass/evidence_is_reachable.rs`）
+//!
+//! 只取构造点 `Evidence::from_tool_result` 的**函数项**（不构造值、不传八个实参），
+//! 证明这条 dev 边在本 crate 的编译环境里**确实接上了**。**用途只有一个**：把
+//! 「因为依赖没接上而编译失败」与「因为字段私有而编译失败」分开——**没有它，两份
+//! `compile_fail` 样例的红可能是任何一种红**；它也是「用 `TRYBUILD=overwrite` 接受
+//! 一份被偷换的 `.stderr`」那条假绿通道的锁（`.stderr` 若被换成「找不到 crate」的
+//! 版本、样例转绿，正控会先红）。**正控与失败样例同处一次运行**（见下面
+//! `type_level_guarantees_hold`）：分开写成两个用例，会让「正控制没跑而失败样例照红」
+//! 的形态可乘——两半合起来才算钉住（评审 I-1；P5c 同形先例）。
+//!
+//! **判别力实测（评审 I-1 的 fix 轮，一轮；日志 `.tmp/task6-fix1-no-devdep.log`）**：
+//! 临时删掉 `Cargo.toml` 的 `continuum-verify` dev 依赖 ⇒ **三份样例同红**——两份
+//! `compile_fail` 报 `mismatch`（实际输出是 `E0432` 找不到 `continuum_verify`，
+//! 与照片不符）、**正控制报 `[should pass] ... error`**——「依赖没接上」这一因被
+//! 单独点名出来（形态与 P5c 的 `t6-03d` 同款；`3 of 3 tests failed`）。
+//!
 //! # 坐标
 //!
 //! **样例不引用 `continuum_research`**——它们钉的是 P5a 那一层的结构事实，经本 crate
 //! 的测试面（即本文件的 `trybuild` 驱动）拍下来。下面的通配 `*.rs` 自动收走
 //! `tests/compile_fail/` 里的两份样例；缺 `.stderr` 时 `trybuild` 报「wip」并把实际输出
 //! 落进 crate 根的 `wip/` 目录——搬进 `tests/compile_fail/` 才算接受（首跑应看到这一形态）。
+//! `tests/ui_pass/` 侧没有 `.stderr`（应绿样例由 `trybuild` 直接编译通过即可）。
 
 /// 本 crate 里**造不出** `Evidence`：字段私有、无 `Default`（P5a 设计 §4.4 的「唯一产生点」）。
-/// 这是那条结构事实在本块的**使用侧**照片。
+/// 这是那条结构事实在本块的**使用侧**照片。正控制（`tests/ui_pass/`）与它同处一次运行，
+/// 把「依赖没接上」与「结构挡住了」两种红分开（评审 I-1；P5c 同形先例）。
 #[test]
 fn type_level_guarantees_hold() {
     let t = trybuild::TestCases::new();
     t.compile_fail("tests/compile_fail/*.rs");
+    // 正控与失败样例**同处一次运行**：分开写成两个用例，会让「正控制没跑而失败
+    // 样例照红」的形态可乘——两半合起来才算钉住（评审 I-1；P5c 同形先例）。
+    t.pass("tests/ui_pass/*.rs");
 }
