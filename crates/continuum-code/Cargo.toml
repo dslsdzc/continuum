@@ -1,0 +1,18 @@
+[package]
+name = "continuum-code"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# §3.2 的端口类型经它声明（`ArtifactType` 进 `Operator` 的
+# `input_schema` / `output_schema` 两字段）。
+continuum-artifact = { path = "../continuum-artifact" }
+# 算子类型与它的全部伴生类型（`Operator` / `OperatorId` / `OperatorVersion` /
+# `Determinism` / `SideEffectClass` / `BackendId`；`OperatorError` 由
+# `CodeError::Registry` 一臂带出）。**只声明本 task 用得到的**——其余四条边
+# （graph / workspace / verify 三条 dev 边与 method 一条普通边）由需要它们的
+# task 增量加，一次不声明齐（计划 Global Constraints）。
+continuum-operator = { path = "../continuum-operator" }
+# `CodeError` 上派生 `Error`（`#[error(...)]` / `#[from]`），去掉即 `E0433`。
+thiserror = { workspace = true }

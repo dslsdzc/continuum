@@ -199,6 +199,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P5c 代码领域算子（设计 §2.1）。本块只**声明**算子，不实现执行体，
+    // 故生产代码只用 artifact 的端口类型与 operator 的算子类型。
+    // 其余四条边由需要它们的 task 增量加：graph / workspace / verify 三条是 dev 边
+    // （唯一使用点分别是对应用例），method 是普通边。
+    ("continuum-code", &["continuum-artifact", "continuum-operator"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

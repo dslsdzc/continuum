@@ -102,6 +102,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-code"
+version = "0.1.0"
+dependencies = [
+ "continuum-artifact",
+ "continuum-operator",
+ "thiserror",
+]
+
+[[package]]
 name = "continuum-connector"
 version = "0.1.0"
 dependencies = [
