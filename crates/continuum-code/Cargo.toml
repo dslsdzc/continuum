@@ -10,9 +10,16 @@ rust-version.workspace = true
 continuum-artifact = { path = "../continuum-artifact" }
 # 算子类型与它的全部伴生类型（`Operator` / `OperatorId` / `OperatorVersion` /
 # `Determinism` / `SideEffectClass` / `BackendId`；`OperatorError` 由
-# `CodeError::Registry` 一臂带出）。**只声明本 task 用得到的**——其余四条边
-# （graph / workspace / verify 三条 dev 边与 method 一条普通边）由需要它们的
-# task 增量加，一次不声明齐（计划 Global Constraints）。
+# `CodeError::Registry` 一臂带出）。**只声明本 task 用得到的**——其余边由需要
+# 它们的 task 增量加，一次不声明齐（计划 Global Constraints）：graph 已由
+# Task 4 加为 dev 边（见下），余下 workspace / verify 两条 dev 边与 method 一条普通边。
 continuum-operator = { path = "../continuum-operator" }
 # `CodeError` 上派生 `Error`（`#[error(...)]` / `#[from]`），去掉即 `E0433`。
 thiserror = { workspace = true }
+
+[dev-dependencies]
+# Task 4 起的使用点：`tests/reuse.rs` 直接调 `cache_key` / `can_reuse`，核九枚算子的
+# `determinism` 声明真能让 §305 的判据成立或落空（§3.6 的照片，§10.2 第 (o) 条）。
+# **这是 dev 边，生产代码对它零引用**；`cargo tree --edges all` 把 dev 边算进依赖，
+# 故 `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 同步登记。
+continuum-graph = { path = "../continuum-graph" }
