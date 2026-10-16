@@ -204,11 +204,19 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // Task 4 起加上 graph：**dev 边**——`tests/reuse.rs` 直接调 `cache_key` / `can_reuse`，
     // 核九枚算子的 `determinism` 声明（§3.6 的照片，§10.2 第 (o) 条），生产代码对它零引用。
     // `cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样登记（数组按字母序）。
-    // 其余三条边由需要它们的 task 增量加：workspace / verify 两条是 dev 边
-    // （唯一使用点分别是对应用例），method 是普通边。
+    // Task 5 起加上 workspace：**dev 边**——`tests/workspace_backends.rs` 对
+    // `WorkspaceBackend` 做穷尽 `match`（§4.2 的照片，§10.2 第 (p) 条），生产代码对它
+    // 零引用（登记口径同上）。
+    // 其余两条边由需要它们的 task 增量加：verify 一条是 dev 边（唯一使用点是对应用例），
+    // method 是普通边。
     (
         "continuum-code",
-        &["continuum-artifact", "continuum-graph", "continuum-operator"],
+        &[
+            "continuum-artifact",
+            "continuum-graph",
+            "continuum-operator",
+            "continuum-workspace",
+        ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。

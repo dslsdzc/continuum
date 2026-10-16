@@ -108,6 +108,7 @@ dependencies = [
  "continuum-artifact",
  "continuum-graph",
  "continuum-operator",
+ "continuum-workspace",
  "thiserror",
 ]
 
