@@ -318,6 +318,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-verify"
+version = "0.1.0"
+dependencies = [
+ "continuum-artifact",
+ "continuum-events",
+ "continuum-graph",
+ "continuum-operator",
+ "continuum-persist",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "trybuild",
+]
+
+[[package]]
 name = "continuum-workspace"
 version = "0.1.0"
 dependencies = [
