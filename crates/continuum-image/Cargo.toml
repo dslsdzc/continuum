@@ -1,0 +1,13 @@
+[package]
+name = "continuum-image"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 task 只声明本 task 用得到的：`OperatorError` 进 `ImageError::Registry` 的来源臂。
+# continuum-artifact / continuum-graph / continuum-persist / continuum-verify 四条边
+# 由需要它们的 task 增量加（设计 §2.1；计划 Global Constraints）。
+continuum-operator = { path = "../continuum-operator" }
+# `ImageError` 上派生 `Error` 与 `Display`，去掉即 `E0433`。
+thiserror = { workspace = true }

@@ -167,6 +167,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-image"
+version = "0.1.0"
+dependencies = [
+ "continuum-operator",
+ "thiserror",
+]
+
+[[package]]
 name = "continuum-media"
 version = "0.1.0"
 dependencies = [

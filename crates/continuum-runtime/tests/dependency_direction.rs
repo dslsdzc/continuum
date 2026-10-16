@@ -218,6 +218,11 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P5f 图像领域算子（设计 §2.1）。本块只**声明**算子与**判定**（区域解析、两个确定性函数），
+    // 不实现执行体，故生产代码只用 operator 的算子类型与 artifact 的端口类型。
+    // 其余四条边由需要它们的 task 增量加：artifact（Task 2 起，普通边），
+    // graph 与 persist（Task 7，dev 边），verify（Task 8，dev 边）。
+    ("continuum-image", &["continuum-operator"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
