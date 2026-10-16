@@ -5,8 +5,9 @@
 //!
 //! **Task 1 落骨架**（[`MethodId`] 与 [`MethodError`]），**Task 2 加
 //! [`MethodDomain`]**（§187 的四个目录名，封闭枚举），**Task 3 加
-//! [`MethodEntry`] 与 [`MethodRegistry`]**（登记／解析／绑定／选取）；
-//! `mod` 清单按规划的文件结构逐 task 增量追加。
+//! [`MethodEntry`] 与 [`MethodRegistry`]**（登记／解析／绑定／选取），
+//! **Task 4 加 [`MethodRegistry::seeded`] 与 [`UNREALIZED_BY_DESIGN`]**
+//! （四份目录与按设计留空的名册）；`mod` 清单按规划的文件结构逐 task 增量追加。
 //!
 //! # 依赖面：workspace 内为空集（设计 §3.2／§9）
 //!
@@ -23,12 +24,14 @@
 //! `operator` 注册表，文本的核对只能落在消费块。外部依赖只有 `thiserror`
 //! （[`MethodError`] 上派生 `std::error::Error`）。
 
+mod catalog;
 mod domain;
 mod entry;
 mod error;
 mod id;
 mod registry;
 
+pub use catalog::UNREALIZED_BY_DESIGN;
 pub use domain::MethodDomain;
 pub use entry::MethodEntry;
 pub use error::MethodError;
