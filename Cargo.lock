@@ -170,6 +170,7 @@ dependencies = [
 name = "continuum-image"
 version = "0.1.0"
 dependencies = [
+ "continuum-artifact",
  "continuum-operator",
  "thiserror",
 ]
