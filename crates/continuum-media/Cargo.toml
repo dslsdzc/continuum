@@ -1,0 +1,17 @@
+[package]
+name = "continuum-media"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-operator = { path = "../continuum-operator" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+# `tests/reuse.rs`（§6.2 的 (r) 条、§305 的复用照片）是本 crate 唯一的
+# continuum-graph 使用点：用例经 `cache_key` / `can_reuse` 核对本块声明的
+# `determinism` 真能让那条判据成立。**dev 边**——生产代码对它零调用
+# （设计 §2.1 第 2 行；`cargo tree --edges all` 一视同仁，故在 `ALLOWED` 表里同样登记）。
+continuum-graph = { path = "../continuum-graph" }

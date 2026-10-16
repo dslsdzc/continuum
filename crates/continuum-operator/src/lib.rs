@@ -5,6 +5,7 @@ pub mod definition;
 pub mod registry;
 
 pub use definition::{
-    BackendId, Determinism, Operator, OperatorId, OperatorVersion, SideEffectClass,
+    BackendId, CheckpointError, Checkpointable, Determinism, Operator, OperatorId, OperatorVersion,
+    SideEffectClass,
 };
 pub use registry::{OperatorError, OperatorRegistry};
