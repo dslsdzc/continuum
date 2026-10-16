@@ -118,10 +118,15 @@ fn a_non_generative_operator_requires_no_flag() {
 /// `Err(MediaError::NotPermitted { .. })`，**且 `required` 正是 `Broll`**
 /// （不是「返回了那一臂」）。
 ///
+/// 语料取「未声明 `Broll`」的一个**非平凡**形态：声明了别的旗标（`Voice`）、
+/// 唯独缺 `Broll`——若判定把「有任一旗标即已授权」当成放行条件，本条红；
+/// 这正是「单独授权」（§34：每枚生成算子要**自己**那一枚）被抹平的那一侧。
+/// 空集形态由 `the_empty_grant_set_permits_nothing` 逐枚覆盖，两处语料不重复。
+///
 /// 红条件（取反档）：把判定改成「未声明 ⇒ 放行」⇒ 红。
 #[test]
 fn an_ungranted_generative_operator_is_rejected() {
-    let granted = PermittedGenerativeContent::none();
+    let granted = PermittedGenerativeContent::from_permissions(&[GenerativePermission::Voice]);
     let operator = OperatorId::new("generate-broll");
 
     let err = authorize_generative(&operator, &granted)
