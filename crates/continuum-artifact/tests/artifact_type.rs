@@ -20,7 +20,7 @@ use continuum_artifact::ArtifactType;
 /// `impl` 块里紧邻。
 #[test]
 fn every_artifact_type_round_trips_through_its_encoding() {
-    assert_eq!(ArtifactType::ALL.len(), 6, "ArtifactType 的名单与变体数不符");
+    assert_eq!(ArtifactType::ALL.len(), 17, "ArtifactType 的名单与变体数不符");
 
     for ty in ArtifactType::ALL {
         let encoded = ty.as_str();

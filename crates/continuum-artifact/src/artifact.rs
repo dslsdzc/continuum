@@ -18,20 +18,42 @@ pub enum ArtifactType {
     Text,
     Json,
     Blob,
+    Image,
+    Audio,
+    Video,
+    Timeline,
+    Mesh,
+    Scene,
+    Transcript,
+    Report,
+    ShotSet,
+    SubtitleTrack,
+    Render,
 }
 
 impl ArtifactType {
-    /// 全部六型。供全量遍历的用例使用（与 [`PrivacyClass::ALL`] 同形）。
+    /// 全部十七型。供全量遍历的用例使用（与 [`PrivacyClass::ALL`] 同形）。
     ///
     /// 完整性与数目由 `tests/artifact_type.rs` 的
     /// `every_artifact_type_round_trips_through_its_encoding` 把关。
-    pub const ALL: [ArtifactType; 6] = [
+    pub const ALL: [ArtifactType; 17] = [
         ArtifactType::SourceTree,
         ArtifactType::Patch,
         ArtifactType::TestResult,
         ArtifactType::Text,
         ArtifactType::Json,
         ArtifactType::Blob,
+        ArtifactType::Image,
+        ArtifactType::Audio,
+        ArtifactType::Video,
+        ArtifactType::Timeline,
+        ArtifactType::Mesh,
+        ArtifactType::Scene,
+        ArtifactType::Transcript,
+        ArtifactType::Report,
+        ArtifactType::ShotSet,
+        ArtifactType::SubtitleTrack,
+        ArtifactType::Render,
     ];
 
     /// `§239` 各型的字符串名：小写、多词以 `_` 连接。
@@ -52,6 +74,17 @@ impl ArtifactType {
             Self::Text => "text",
             Self::Json => "json",
             Self::Blob => "blob",
+            Self::Image => "image",
+            Self::Audio => "audio",
+            Self::Video => "video",
+            Self::Timeline => "timeline",
+            Self::Mesh => "mesh",
+            Self::Scene => "scene",
+            Self::Transcript => "transcript",
+            Self::Report => "report",
+            Self::ShotSet => "shot_set",
+            Self::SubtitleTrack => "subtitle_track",
+            Self::Render => "render",
         }
     }
 
@@ -73,6 +106,17 @@ impl ArtifactType {
             "text" => Self::Text,
             "json" => Self::Json,
             "blob" => Self::Blob,
+            "image" => Self::Image,
+            "audio" => Self::Audio,
+            "video" => Self::Video,
+            "timeline" => Self::Timeline,
+            "mesh" => Self::Mesh,
+            "scene" => Self::Scene,
+            "transcript" => Self::Transcript,
+            "report" => Self::Report,
+            "shot_set" => Self::ShotSet,
+            "subtitle_track" => Self::SubtitleTrack,
+            "render" => Self::Render,
             _ => return None,
         })
     }

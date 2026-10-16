@@ -175,6 +175,39 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
     // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
     ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
+    // P5e 媒体领域算子（设计 §2.1）。Task 3 起登记当时实际有的两条边；
+    // continuum-graph / continuum-method / continuum-verify 三条分别由需要它们的 task 追加。
+    // **订正（Task 7）**：原注记写「（前两条是 dev 边，理由见各 task）」——照三条的列举
+    // 次序读会得出 method 是 dev 边，而设计 §2.1 的边别是：dev 边只有 `continuum-graph`
+    // 与 `continuum-verify`（生产代码对它们零调用），`continuum-method` 是普通边
+    // （`bind_media_methods` 是生产入口，不是用例）。订正为「（其中 `continuum-graph` 与
+    // `continuum-verify` 是 dev 边，理由见各 task：生产代码对它们零调用）」。
+    // Task 7 起加上 continuum-graph：**dev 边**——`tests/reuse.rs`（§6.2 的 (r) 条、
+    // §305 的复用照片）经 `cache_key` / `can_reuse` 核对本块声明的 `determinism`
+    // 真能让那条判据成立；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样登记
+    // （先例：continuum-provider 那一行的 persist）。
+    // Task 8 起加上 continuum-method：**普通边**——`src/methods.rs` 的 `bind_media_methods`
+    // 是生产入口（收 `&mut MethodRegistry`、逐条调 `bind`；设计 §2.1、§10），
+    // 不是「只在用例里出现」——这正是上面订正段预告的口径（method 不是 dev 边）。
+    // Task 9 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的三份
+    // `compile_fail` 与一份 `compile_pass`（设计 §12.4 的结构照片）是本 crate
+    // 唯一的使用点，生产代码对它零调用。**两条 dev 边**（`continuum-graph` 与
+    // `continuum-verify`）的理由是同一个：唯一使用点是结构层与 §6.2 的用例，
+    // 不是生产入口。**层内边**（本 crate 与 verify 同属第 8 层）：本仓对层内边有
+    // 同形处置——`continuum-provider → continuum-capability` 同样是层内边，照样登记
+    // 并在该行注记里标明（设计 §4.1 订正段）；本条目照常登记。首段预告的三条
+    // （graph / method / verify）至此都已追加。
+    // 数组按字母序。
+    (
+        "continuum-media",
+        &[
+            "continuum-artifact",
+            "continuum-graph",
+            "continuum-method",
+            "continuum-operator",
+            "continuum-verify",
+        ],
+    ),
     // P5a 验证与证据判定（设计 §2.1）。本块是第 8 层，只依赖执行层与其下：
     // continuum-artifact / continuum-graph / continuum-operator（Task 2 加）、
     // continuum-events / continuum-persist（Task 9 加）。
