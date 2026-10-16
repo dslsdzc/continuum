@@ -117,13 +117,16 @@ impl IndependenceVerdict {
 ///
 /// - 能证明「**同一**」——同 `backend`，或 `model` 与 `provider` 均已知且两项都相同
 ///   ⇒ [`IndependenceVerdict::NotIndependent`]（同一条执行路径不可能独立于自己）；
-/// - 能证明「**不同**」——`backend` 已知且不同，且 `model` 与 `provider` 均已知且都不同
+/// - 能证明「**不同**」——`backend` 已知且不同，且 `model` 与 `provider` 均已知且**都不同**
 ///   ⇒ [`IndependenceVerdict::Independent`]；
-/// - **其余**（有任一项未知）⇒ [`IndependenceVerdict::NotEstablished`]。
+/// - **其余**（有任一项未知，或 `model` / `provider` **半同**——一项同、一项不同）
+///   ⇒ [`IndependenceVerdict::NotEstablished`]。
 ///
+/// **半同不判独立**（评审 I-1 收口）：`model` 与 `provider` 只对上一半时，既不足以证
+/// 「同一」（判据二要求两项都同），也不足以证「全都不同」——它是「部分同一」，故判不出。
 /// **`worker.backend` 为 `None` 也算「有任一项未知」**：判据一（同 backend）无从比同，
 /// 「全都不同」也缺这一项，故判不出——与 §7.3 的「任一项为 `None` ⇒ 判不出」同向。
-/// **不说 `Independent` 的那一侧是本块取的 fail-closed 方向**（把「没判过」说成
+/// **不说 `Independent` 的这几侧是本块取的 fail-closed 方向**（把「没判过」说成
 /// 「判为不同」会把 `required` 时该丢的候选留下）。
 pub fn independence_of(
     candidate: &AvailableVerifier,
@@ -149,8 +152,12 @@ pub fn independence_of(
             if candidate_model == worker_model && candidate_provider == worker_provider {
                 return IndependenceVerdict::NotIndependent;
             }
-            // 两项已知且不相同；「全都不同」还差 backend 那一项（判据一未命中且已知）。
-            if worker.backend.is_some() {
+            // 「都不同」才独立：半同（一项同、一项不同）判不出（fail-closed，评审 I-1）；
+            // 「全都不同」还差 backend 那一项（判据一未命中且已知）。
+            if candidate_model != worker_model
+                && candidate_provider != worker_provider
+                && worker.backend.is_some()
+            {
                 return IndependenceVerdict::Independent;
             }
         }

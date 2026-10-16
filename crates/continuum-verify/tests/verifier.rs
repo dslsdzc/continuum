@@ -320,6 +320,72 @@ fn same_model_and_provider_is_not_independent() {
     );
 }
 
+/// 矩阵补全（评审 I-1）：`model` 同、`provider` 不同、`backend` 已知且不同
+/// ⇒ **`NotEstablished`**（半同：一项同、一项不同——不足以证同，也不足以证异）。
+///
+/// 红条件（**放宽档**）：把「都不同」写成「并非都相同」（半同 ⇒ `Independent`）⇒ 本条红；
+/// 这一档若不红，说明判据只拍了「都相同 / 都不同 / 有 `None`」三个象限、半同零覆盖。
+#[test]
+fn a_half_matching_model_is_not_established() {
+    let candidate = named_candidate(
+        VerifierLevel::IndependentModelVerifier,
+        "verifier-backend",
+        "same-model",
+        "verifier-provider",
+    );
+    let worker = named_worker("worker-backend", "same-model", "worker-provider");
+    assert_eq!(
+        independence_of(&candidate, &worker),
+        IndependenceVerdict::NotEstablished,
+        "model 同、provider 不同 ⇒ 判不出（半同不判独立——fail-closed 一侧）"
+    );
+}
+
+/// 同上的另一象限：`model` 不同、`provider` 同、`backend` 已知且不同 ⇒ `NotEstablished`。
+///
+/// 红条件（**放宽档**）：同 `a_half_matching_model_is_not_established`
+/// （两象限各拍一条：只拍一侧的话，另一侧仍可由「并非都相同」漂过）。
+#[test]
+fn a_half_matching_provider_is_not_established() {
+    let candidate = named_candidate(
+        VerifierLevel::IndependentModelVerifier,
+        "verifier-backend",
+        "verifier-model",
+        "same-provider",
+    );
+    let worker = named_worker("worker-backend", "worker-model", "same-provider");
+    assert_eq!(
+        independence_of(&candidate, &worker),
+        IndependenceVerdict::NotEstablished,
+        "model 不同、provider 同 ⇒ 判不出（半同不判独立——fail-closed 一侧）"
+    );
+}
+
+/// 矩阵补全（评审 Minor 4 的建议用例）：`worker.backend = None` ∧ `model` 与 `provider`
+/// 均已知且都不同 ⇒ **`NotEstablished`**（`backend` 未知 ⇒ 「全都不同」缺一项）。
+///
+/// 红条件（**放宽档**）：把「三项都判过」里的 `backend` 已知这一项检查删掉
+/// （未知也放行 `Independent`）⇒ 本条红。
+#[test]
+fn an_unknown_worker_backend_is_not_established() {
+    let candidate = named_candidate(
+        VerifierLevel::IndependentModelVerifier,
+        "verifier-backend",
+        "verifier-model",
+        "verifier-provider",
+    );
+    let worker = WorkerIdentity {
+        model: Some("worker-model".to_owned()),
+        provider: Some("worker-provider".to_owned()),
+        backend: None,
+    };
+    assert_eq!(
+        independence_of(&candidate, &worker),
+        IndependenceVerdict::NotEstablished,
+        "backend 未知 ⇒ 三项没有都判过 ⇒ 判不出（fail-closed 一侧）"
+    );
+}
+
 /// §7.3 判据三（**另一侧**）：任一项为 `None`、且 `independent_verifier_required == false`
 /// ⇒ 候选**保留**且 `selection.independence == NotEstablished`（**不是 `NotIndependent`**）。
 ///
