@@ -226,8 +226,13 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // §305 的复用照片）经 `cache_key` / `can_reuse` 核对本块声明的 `determinism`
     // 真能让那条判据成立；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样
     // 登记（先例：continuum-provider 那一行的 persist）。
-    // `continuum-verify`（§9.4 的 trybuild 样例）是另一条待补的 **dev 边**——
-    // 生产代码对它零调用，由 Task 6 登记。数组按字母序。
+    // Task 6 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的两份
+    // `trybuild` 编译失败样例（§9.4 第 1 条）钉「本 crate 里造不出 `Evidence`」；
+    // 生产代码对它零调用，这两份样例是本块在它上面的**唯一使用点**。`trybuild` 把
+    // [dev-dependencies] 也算进样例的依赖（实测 trybuild-1.0.121/src/run.rs:239），
+    // 故样例能引用 `continuum_verify::Evidence` 而不必把这条边升成普通边——
+    // 这是该 dev 边成立的依据。`cargo tree --edges all` 把 dev 边算进依赖，
+    // 故与普通边一样登记（先例：continuum-provider 那一行的 persist）。数组按字母序。
     (
         "continuum-research",
         &[
@@ -235,6 +240,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-graph",
             "continuum-method",
             "continuum-operator",
+            "continuum-verify",
         ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里

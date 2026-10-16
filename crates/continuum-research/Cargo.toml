@@ -27,3 +27,17 @@ continuum-operator = { path = "../continuum-operator" }
 # （设计 §2.1 的 `continuum-graph` 行；`cargo tree --edges all` 把 dev 边算进依赖，
 # 故在 `ALLOWED` 表里同样登记——先例：continuum-provider 那一行的 persist）。
 continuum-graph = { path = "../continuum-graph" }
+# Task 6 起：`tests/type_level.rs` 的两份 `trybuild` 编译失败样例（设计 §9.4 第 1 条）
+# 钉「本 crate 里造不出 `Evidence`」——P5a 设计 §4.4「唯一产生点」那股结构事实的
+# 使用侧照片。**dev 边**——生产代码对它零调用，这两份样例是本块在 continuum-verify
+# 上的**唯一使用点**（计划 §9.4 第 1 条末）。`trybuild` 把 [dev-dependencies] 也
+# 算进样例的依赖（实测 trybuild-1.0.121/src/run.rs:239：
+# `dependencies.extend(source_manifest.dev_dependencies);`），故样例可以引用
+# `continuum_verify::Evidence` 而不必把这条边升成普通边——这是该 dev 边成立的依据；
+# 同 continuum-graph 一样在 `ALLOWED` 表里登记。
+continuum-verify = { path = "../continuum-verify" }
+# Task 6 起的使用点：`tests/type_level.rs` 用 `trybuild::TestCases::compile_fail`
+# 驱动 `tests/compile_fail/*.rs`（与 P5a / continuum-connector 的用法同形）。
+# **外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表只断言
+# workspace 成员之间的边（同上一段）。
+trybuild = { workspace = true }

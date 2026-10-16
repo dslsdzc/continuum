@@ -274,6 +274,8 @@ dependencies = [
  "continuum-graph",
  "continuum-method",
  "continuum-operator",
+ "continuum-verify",
+ "trybuild",
 ]
 
 [[package]]
