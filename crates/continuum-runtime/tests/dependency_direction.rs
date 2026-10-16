@@ -169,12 +169,24 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // `← continuum-semantics` 是 owner 要 IntentId（§12.2）；`← continuum-persist` 是账本与树经 Tx。
     // **反向没有边**：continuum-semantics 的允许集里没有本 crate（§11.5 的两侧守卫之一）。
     ("continuum-budget", &["continuum-persist", "continuum-semantics"]),
-    // P5e 媒体领域算子（设计 §2.1）。本 task 只登记当时实际有的两条边；
-    // continuum-graph / continuum-method / continuum-verify 三条分别由需要它们的 task 追加
-    // （前两条是 dev 边，理由见各 task：生产代码对它们零调用）。
+    // P5e 媒体领域算子（设计 §2.1）。Task 3 起登记当时实际有的两条边；
+    // continuum-graph / continuum-method / continuum-verify 三条分别由需要它们的 task 追加。
+    // **订正（Task 7）**：原注记写「（前两条是 dev 边，理由见各 task）」——照三条的列举
+    // 次序读会得出 method 是 dev 边，而设计 §2.1 的边别是：dev 边只有 `continuum-graph`
+    // 与 `continuum-verify`（生产代码对它们零调用），`continuum-method` 是普通边
+    // （`bind_media_methods` 是生产入口，不是用例）。订正为「（其中 `continuum-graph` 与
+    // `continuum-verify` 是 dev 边，理由见各 task：生产代码对它们零调用）」。
+    // Task 7 起加上 continuum-graph：**dev 边**——`tests/reuse.rs`（§6.2 的 (r) 条、
+    // §305 的复用照片）经 `cache_key` / `can_reuse` 核对本块声明的 `determinism`
+    // 真能让那条判据成立；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样登记
+    // （先例：continuum-provider 那一行的 persist）。数组按字母序。
     (
         "continuum-media",
-        &["continuum-artifact", "continuum-operator"],
+        &[
+            "continuum-artifact",
+            "continuum-graph",
+            "continuum-operator",
+        ],
     ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
