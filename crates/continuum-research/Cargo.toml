@@ -5,13 +5,17 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-# 本 task 的两条内部边（`crates/continuum-runtime/tests/dependency_direction.rs`
-# 的 `ALLOWED` 条目同步）：`ArtifactType` 是七枚算子两个端口栏
-#（`input_schema` / `output_schema`）的取值类型；`Operator` 与它的五枚伴生类型
-#（`OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` / `BackendId`）
-# 是七枚算子与 `all_operators()` 的全部类型。
-# **只声明本 task 用得到的**（切分 §四第 6 条）：`continuum-method` / `continuum-graph` /
-# `continuum-verify` / `trybuild` 由需要它们的 task 增量加（设计 §2.1 的边表是终态，
+# 本 crate 的内部边（`crates/continuum-runtime/tests/dependency_direction.rs`
+# 的 `ALLOWED` 条目同步）：
+# - `continuum-artifact` / `continuum-operator`（Task 1）：`ArtifactType` 是七枚算子
+#   两个端口栏（`input_schema` / `output_schema`）的取值类型；`Operator` 与它的五枚
+#   伴生类型（`OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` /
+#   `BackendId`）是七枚算子与 `all_operators()` 的全部类型。
+# - `continuum-method`（Task 3，**普通边**）：`bind_research_methods` 取
+#   `&mut MethodRegistry` 并逐条调 `bind`——**是生产入口，不是用例**（设计 §2.1）。
+# **只声明本 task 用得到的**（切分 §四第 6 条）：`continuum-graph` / `continuum-verify` /
+# `trybuild` 由需要它们的 task 增量加（设计 §2.1 的边表是终态，
 # 「只登记实际用到的」是切分 §四第 6 条）。
 continuum-artifact = { path = "../continuum-artifact" }
+continuum-method = { path = "../continuum-method" }
 continuum-operator = { path = "../continuum-operator" }
