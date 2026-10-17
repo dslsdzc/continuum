@@ -59,4 +59,6 @@ pub enum MemoryError {
     SupersedeMergeConflict,
     #[error("摘要去空白后为空")]
     EmptySummary,
+    #[error("纠正来源的 kind 不符：{kind:?}")]
+    WrongCorrectionSourceKind { kind: crate::source::SourceKind },
 }

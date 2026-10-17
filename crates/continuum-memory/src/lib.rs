@@ -6,6 +6,7 @@
 //! 「Memory Source Graph 入度为零」落在同 crate 的模块方向上，不靠第二个 crate。
 
 mod claim;
+mod correction;
 mod error;
 mod persist;
 mod retrieval;
@@ -16,6 +17,7 @@ mod synthesis;
 pub use claim::{
     Confidence, MemoryClaim, MemoryClaimId, MemoryScope, Validity, remove_source,
 };
+pub use correction::{Correction, CorrectionOutcome, CorrectionRecord, correct, load_correction};
 pub use error::MemoryError;
 pub use persist::p6c_memory_migrations;
 pub use retrieval::{MemoryRetrieval, MemoryStore, RetrievalQuery, retrieve_claims};
