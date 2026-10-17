@@ -5,10 +5,12 @@
 //! `correction.rs`／`synthesis.rs` 使用 source＋claim；`retrieval.rs` 只读 claim。
 //! 「Memory Source Graph 入度为零」落在同 crate 的模块方向上，不靠第二个 crate。
 
+mod claim;
 mod error;
 mod persist;
 mod source;
 
+pub use claim::{Confidence, MemoryClaim, MemoryClaimId, MemoryScope, Validity};
 pub use error::MemoryError;
 pub use persist::p6c_memory_migrations;
 pub use source::{

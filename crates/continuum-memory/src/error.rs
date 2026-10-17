@@ -13,4 +13,14 @@ pub enum MemoryError {
     EmptyExternalRef,
     #[error("source_id 已存在")]
     DuplicateSourceId,
+    #[error("statement 去空白后为空")]
+    EmptyStatement,
+    #[error("sources 不能为空")]
+    EmptySourceSet,
+    #[error("scope 集合不能为空")]
+    EmptyScopeSet,
+    #[error("anchored scope 必须给 anchor")]
+    AnchorRequired,
+    #[error("当前 scope 不允许 anchor")]
+    AnchorNotAllowed,
 }
