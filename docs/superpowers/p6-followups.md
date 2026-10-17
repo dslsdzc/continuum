@@ -11,6 +11,17 @@
 | P6C 记忆与学习 | `specs/2026-10-17-p6c-memory-and-learning-design.md` | 1541 | 3 轮复评，全部闭合；fix 4 收 8 条 Minor |
 | P6D Learning 与 Protected Core | `specs/2026-10-17-p6d-runtime-learning-and-protected-core-design.md` | 1382 | 2 轮复评，全部闭合；fix 2 收 6 条 Minor |
 
+## 一·五、实现与合入状态（2026-10-18）
+
+| 块 | 实现 | 终审 | 合入 main |
+|---|---|---|---|
+| P6C `continuum-memory` | 12 任务，全量门 1376 passed / 0 failed / 0 warning | **Approved**（0 Critical / 0 Important；4 Minor，3 条已清） | **`e0adc69`（已推送）** |
+| P6B `continuum-trust` | Task 1–6 已提交（`4201a61`）；差 §9.4 变异与全量门 | 待做 | 待 |
+| P6D 两枚 crate | 8 任务已提交（`31de2b7`） | 待做 | 待（并集门等 A/B/C） |
+| P6A `continuum-context` | 未开工（前置：B/C 的 crate 进 main） | — | — |
+
+P5 全量测试（main `e78eaec`）：**EXIT=0，216 result / 189 Running / 1253 passed / 0 failed / 0 warning**。
+
 ## 二、计划状态
 
 | 计划 | 文件 | 行数 | 任务数 | 评审结论 |
