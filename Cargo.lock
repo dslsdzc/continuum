@@ -199,6 +199,7 @@ name = "continuum-learning"
 version = "0.1.0"
 dependencies = [
  "continuum-protected",
+ "trybuild",
 ]
 
 [[package]]

@@ -6,3 +6,6 @@ rust-version.workspace = true
 
 [dependencies]
 continuum-protected = { path = "../continuum-protected" }
+
+[dev-dependencies]
+trybuild = { workspace = true }
