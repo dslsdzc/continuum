@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::process::Command;
 
@@ -534,4 +535,358 @@ fn core_and_persist_do_not_depend_on_provider() {
             "{pkg} 依赖了 continuum-provider，违反 §346:\n{tree}"
         );
     }
+}
+
+/// P6 的五条期望行（设计 §7.3.2）。
+///
+/// 前三条来自 P6A／P6B／P6C 的设计；若它们定稿时改了自己的边表，先改其设计，再由
+/// P6D 改这张表——一次改动两处，不是两套表。后两条是 P6D 本块设计 §3.2。
+///
+/// **所有权**：改它要同时改被改块的设计与 §7.4 的对表，合并评审核这一处 diff。
+const P6_EXPECTED_ROWS: &[(&str, &[&str])] = &[
+    // P6A（其设计 §2.1，四项）
+    (
+        "continuum-context",
+        &[
+            "continuum-artifact",
+            "continuum-core",
+            "continuum-memory",
+            "continuum-trust",
+        ],
+    ),
+    // P6B（其设计 §2.1，零项）
+    ("continuum-trust", &[]),
+    // P6C（其设计 §3.2，一项）
+    ("continuum-memory", &["continuum-persist"]),
+    // P6D：Protected Core（本设计 §3.2，零项）
+    ("continuum-protected", &[]),
+    // P6D：Runtime Learning（本设计 §3.2，一项）
+    ("continuum-learning", &["continuum-protected"]),
+];
+
+/// `P6_NAMES` 由 `P6_EXPECTED_ROWS` 派生，不写第三张名单：两处名单会分叉，而分叉的
+/// 那一天没有任何断言会红。
+fn p6_names() -> Vec<&'static str> {
+    P6_EXPECTED_ROWS.iter().map(|(pkg, _)| *pkg).collect()
+}
+
+/// 读 P6 前基线（`03e79c7` 的 `ALLOWED`，27 行）。
+///
+/// 格式：一行一枚 crate；`#` 开头为注释；`crate:` 是空允许集，`crate:dep1,dep2`
+/// 是非空。空 subject／空 dep／重复 subject 一律 `panic!`，不许静默跳过。
+fn pre_p6_allowed() -> BTreeMap<&'static str, Vec<&'static str>> {
+    let source = include_str!("fixtures/p6_pre_allowed.txt");
+    let mut rows = BTreeMap::new();
+    for (index, raw) in source.lines().enumerate() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((subject, dependencies)) = line.split_once(':') else {
+            panic!("P6 前基线第 {} 行缺少冒号: {line}", index + 1);
+        };
+        let subject = subject.trim();
+        assert!(
+            !subject.is_empty(),
+            "P6 前基线第 {} 行的 subject 为空",
+            index + 1
+        );
+        let dependencies: Vec<&str> = if dependencies.trim().is_empty() {
+            Vec::new()
+        } else {
+            dependencies.split(',').map(str::trim).collect()
+        };
+        for dependency in &dependencies {
+            assert!(
+                !dependency.is_empty(),
+                "P6 前基线的 {subject} 行有空的依赖项"
+            );
+        }
+        assert!(
+            rows.insert(subject, dependencies).is_none(),
+            "P6 前基线的 subject 重复: {subject}"
+        );
+    }
+    assert_eq!(rows.len(), 27, "P6 前基线必须是 27 行");
+    rows
+}
+
+/// 严格解析 `dependency_direction.rs` 里的 `const ALLOWED`。
+///
+/// 三件事：①只取 `const ALLOWED: … = &[` 到它的 `];`；②先剥掉 `//` 到行尾的注释
+/// （现有表在 `continuum-runtime` 条目的注释里有一处表项字面）；③严格按
+/// `(` `"crate"` `,` `&` `[` 若干 `"dep"` `]` `)` 解析，任何残余字符都 `panic!`。
+fn p6d_parse_allowed_source(source: &str) -> BTreeMap<String, Vec<String>> {
+    const MARKER: &str = "const ALLOWED: &[(&str, &[&str])] = &[";
+    let start = source
+        .find(MARKER)
+        .unwrap_or_else(|| panic!("dependency_direction.rs 里找不到 ALLOWED 表头"));
+    let body_start = start + MARKER.len();
+    let body_end = body_start
+        + source[body_start..]
+            .find("\n];")
+            .unwrap_or_else(|| panic!("ALLOWED 表缺少结尾 `];`"));
+    let body = &source[body_start..body_end];
+
+    let mut stripped = String::new();
+    for line in body.lines() {
+        let line = match line.find("//") {
+            Some(offset) => &line[..offset],
+            None => line,
+        };
+        stripped.push_str(line);
+        stripped.push('\n');
+    }
+
+    let mut parser = AllowedParser {
+        source: &stripped,
+        cursor: 0,
+    };
+    let mut rows = BTreeMap::new();
+    loop {
+        parser.skip_whitespace();
+        if parser.at_end() {
+            break;
+        }
+        let (subject, dependencies) = parser.parse_row();
+        assert!(!subject.is_empty(), "ALLOWED 出现空 subject");
+        for dependency in &dependencies {
+            assert!(!dependency.is_empty(), "ALLOWED 的 {subject} 行有空依赖");
+        }
+        assert!(
+            rows.insert(subject.clone(), dependencies).is_none(),
+            "ALLOWED 的 subject 重复: {subject}"
+        );
+    }
+    rows
+}
+
+/// `ALLOWED` 表项的严格解析器：只认 `(` `"crate"` `,` `&` `[` … `]` `)` `,`。
+struct AllowedParser<'a> {
+    source: &'a str,
+    cursor: usize,
+}
+
+impl AllowedParser<'_> {
+    fn skip_whitespace(&mut self) {
+        while self
+            .source
+            .as_bytes()
+            .get(self.cursor)
+            .is_some_and(u8::is_ascii_whitespace)
+        {
+            self.cursor += 1;
+        }
+    }
+
+    fn at_end(&self) -> bool {
+        self.cursor == self.source.len()
+    }
+
+    fn peek(&self) -> Option<u8> {
+        self.source.as_bytes().get(self.cursor).copied()
+    }
+
+    fn expect(&mut self, expected: u8) {
+        self.skip_whitespace();
+        match self.peek() {
+            Some(actual) if actual == expected => self.cursor += 1,
+            Some(actual) => panic!(
+                "ALLOWED 解析失败：位置 {} 期望 `{}`，实际 `{}`",
+                self.cursor, expected as char, actual as char
+            ),
+            None => panic!(
+                "ALLOWED 解析失败：期望 `{}`，但输入已结束",
+                expected as char
+            ),
+        }
+    }
+
+    fn parse_string(&mut self) -> String {
+        self.expect(b'"');
+        let start = self.cursor;
+        loop {
+            match self.peek() {
+                Some(b'"') => break,
+                Some(b'\\') => panic!("ALLOWED 的字符串里不允许转义"),
+                Some(byte) if byte.is_ascii() => self.cursor += 1,
+                Some(_) => panic!("ALLOWED 的字符串必须是 ASCII"),
+                None => panic!("ALLOWED 的字符串缺少结尾引号"),
+            }
+        }
+        let value = &self.source[start..self.cursor];
+        assert!(!value.is_empty(), "ALLOWED 出现空字符串");
+        self.expect(b'"');
+        value.to_string()
+    }
+
+    fn parse_row(&mut self) -> (String, Vec<String>) {
+        self.expect(b'(');
+        let subject = self.parse_string();
+        self.expect(b',');
+        self.expect(b'&');
+        self.expect(b'[');
+        let mut dependencies = Vec::new();
+        loop {
+            self.skip_whitespace();
+            if self.peek() == Some(b']') {
+                self.cursor += 1;
+                break;
+            }
+            dependencies.push(self.parse_string());
+            self.skip_whitespace();
+            match self.peek() {
+                Some(b',') => self.cursor += 1,
+                Some(b']') => {
+                    self.cursor += 1;
+                    break;
+                }
+                Some(actual) => panic!(
+                    "ALLOWED 解析失败：位置 {} 期望 `,` 或 `]`，实际 `{}`",
+                    self.cursor, actual as char
+                ),
+                None => panic!("ALLOWED 解析失败：依赖列表在 `]` 之前结束"),
+            }
+        }
+        self.skip_whitespace();
+        if self.peek() == Some(b',') {
+            self.cursor += 1;
+        }
+        self.expect(b')');
+        self.expect(b',');
+        (subject, dependencies)
+    }
+}
+
+/// 从解析出的 `ALLOWED` 里取某一行的依赖集合；行缺失即 `panic!`。
+fn allowed_set<'a>(rows: &'a BTreeMap<String, Vec<String>>, subject: &str) -> BTreeSet<&'a str> {
+    rows.get(subject)
+        .unwrap_or_else(|| panic!("ALLOWED 缺少 {subject} 行"))
+        .iter()
+        .map(String::as_str)
+        .collect()
+}
+
+/// P6 合并门：并集复核（设计 §7.3.3 的八条断言）。
+///
+/// **改 `p6_pre_allowed.txt` 是 P6D 的改动，不是 P6 任一执行块的改动；合并评审必须
+/// 单独核这一处 diff。**
+/// **这是 P6 合并门，不是永久门；P7 起按 §7.6 重新基线化或退役，不得在此追加行。**
+///
+/// 验收时点：四块全部落地后的合并树（设计 §7.6）。中间态只算部分树绿：断言 2、6、8
+/// 只覆盖已落地的 P6 crate；P7 新增 crate 时实际到期的是断言 8，断言 1 的 27 行不会红。
+#[test]
+fn p6_union_adds_only_its_own_rows() {
+    let workspace = workspace_crates();
+    let workspace_set: BTreeSet<&str> = workspace.iter().map(String::as_str).collect();
+
+    // 断言 1：fixture 可解析且是 27 行；subjects 无重复。
+    let baseline = pre_p6_allowed();
+    assert_eq!(baseline.len(), 27, "P6 前基线必须是 27 行");
+    let baseline_subjects: BTreeSet<&str> = baseline.keys().copied().collect();
+    assert_eq!(
+        baseline_subjects.len(),
+        baseline.len(),
+        "P6 前基线的 subject 重复"
+    );
+
+    // 断言 2：P6 期望行恰五行；subjects 无重复。
+    assert_eq!(P6_EXPECTED_ROWS.len(), 5, "P6_EXPECTED_ROWS 必须是五行");
+    let names = p6_names();
+    let name_set: BTreeSet<&str> = names.iter().copied().collect();
+    assert_eq!(name_set.len(), names.len(), "P6_EXPECTED_ROWS 的 subject 重复");
+
+    // 断言 3：解析器自检 + 行内元素检查。
+    let current = p6d_parse_allowed_source(include_str!("dependency_direction.rs"));
+    assert_eq!(
+        current.len(),
+        workspace.len(),
+        "ALLOWED 的行数与 workspace 成员数不符（解析器漏行或表过期）"
+    );
+    for (subject, dependencies) in &current {
+        assert!(
+            workspace_set.contains(subject.as_str()),
+            "ALLOWED 的 subject {subject} 不是 workspace 成员"
+        );
+        for dependency in dependencies {
+            assert!(
+                workspace_set.contains(dependency.as_str()),
+                "ALLOWED 的 {subject} 行列了不存在的 crate {dependency}"
+            );
+        }
+    }
+
+    // 断言 4：基线行逐行相等（runtime 行除外；集合相等，不是包含）。
+    for (subject, allowed) in &baseline {
+        if *subject == "continuum-runtime" {
+            continue;
+        }
+        let actual = allowed_set(&current, subject);
+        let expected: BTreeSet<&str> = allowed.iter().copied().collect();
+        assert_eq!(
+            actual, expected,
+            "基线行 {subject} 被改动：P6 只允许 continuum-runtime 行增枚"
+        );
+    }
+
+    // 断言 5：runtime 行只增不减，且增量 ⊆ P6_NAMES。
+    let runtime_baseline = baseline
+        .get("continuum-runtime")
+        .expect("P6 前基线必须有 continuum-runtime 行");
+    let runtime_baseline_set: BTreeSet<&str> = runtime_baseline.iter().copied().collect();
+    let runtime_actual = allowed_set(&current, "continuum-runtime");
+    assert!(
+        runtime_baseline_set.is_subset(&runtime_actual),
+        "continuum-runtime 行删掉了基线依赖"
+    );
+    let runtime_added: BTreeSet<&str> = runtime_actual
+        .difference(&runtime_baseline_set)
+        .copied()
+        .collect();
+    assert!(
+        runtime_added.is_subset(&name_set),
+        "continuum-runtime 行新增了 P6 之外的依赖: {runtime_added:?}"
+    );
+
+    // 断言 6：P6 行逐行相等（只查已落地的 crate；行缺失即红）。
+    for (subject, allowed) in P6_EXPECTED_ROWS {
+        if !workspace_set.contains(subject) {
+            continue;
+        }
+        let actual = allowed_set(&current, subject);
+        let expected: BTreeSet<&str> = allowed.iter().copied().collect();
+        assert_eq!(
+            actual, expected,
+            "P6 行 {subject} 与设计的边表不一致（行缺失或被加宽）"
+        );
+    }
+
+    // 断言 7：既有 crate 不指向 P6 crate。
+    for subject in baseline.keys() {
+        if *subject == "continuum-runtime" {
+            continue;
+        }
+        let actual = allowed_set(&current, subject);
+        let leaked: BTreeSet<&str> = actual.intersection(&name_set).copied().collect();
+        assert!(
+            leaked.is_empty(),
+            "既有 crate {subject} 指向了 P6 crate: {leaked:?}"
+        );
+    }
+
+    // 断言 8：新增 subject 恰是已落地的 P6 crate。
+    let current_subjects: BTreeSet<&str> = current.keys().map(String::as_str).collect();
+    let added_subjects: BTreeSet<&str> = current_subjects
+        .difference(&baseline_subjects)
+        .copied()
+        .collect();
+    let expected_added: BTreeSet<&str> = names
+        .iter()
+        .copied()
+        .filter(|name| workspace_set.contains(name))
+        .collect();
+    assert_eq!(
+        added_subjects, expected_added,
+        "新增 subject 必须恰是已落地的 P6 crate"
+    );
 }
