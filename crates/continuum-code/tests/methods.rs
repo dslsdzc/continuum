@@ -1,6 +1,6 @@
-//! 设计 §7.1 目录条目的四条用例（§10.2 的 k／l／m／n）。
+//! 设计 §7.1 目录条目的用例（§10.2 的 k／l／m／n）＋ (n) 的运行期补件。
 //!
-//! 本文件钉四件事，缺一条即留一侧静默错误：
+//! 本文件钉四类事，缺一条即留一侧静默错误：
 //! - **(k)** 七条 `software/` 的 `realized_by` **逐条等于** §7.1 表——五条非空，
 //!   `TDD` 与 `debugging` **为空**（协调者 2026-10-10 的裁定；写成「非空即过」
 //!   会把那条裁定当场抹掉）；
@@ -10,6 +10,9 @@
 //!   ——§7.1 与 §3.2 两张表之间的逐枚对应；
 //! - **(n)** `bind_code_methods` 的返回类型是 `Result<(), MethodError>`——
 //!   **编译期照片**（照实写成编译期照片，不冒充运行期红；纪律 1(c)）。
+//! - **(n 的运行期补件)** `MethodRegistry::new()` 空表 ⇒ `bind_code_methods` 返回
+//!   `Err(MethodError::NotFound { id })`，且失败点是第一个 `bind` 的 `planning`——
+//!   失败路径**判别哪一种 `Err`**（实现纪律第 6 条）；钉的是 **`?` 传播**。
 //!
 //! (o)（复用）与 (p)（backend 名）不在这里——它们分别由 `tests/reuse.rs` 与
 //! `tests/workspace_backends.rs` 承担；(a)–(e) 在 `tests/register.rs`、(j) 在
@@ -214,4 +217,22 @@ fn bind_returns_the_method_error_type() {
     let mut registry = MethodRegistry::seeded();
     // 下面这一行的类型标注就是照片：类型不符即编译失败。
     let _: Result<(), MethodError> = bind_code_methods(&mut registry);
+}
+
+/// **失败路径要断言是哪一种 `Err`**（实现纪律第 6 条）：`bind_code_methods` 的
+/// `MethodError::NotFound` 失败路径在**运行期可达**——`MethodRegistry::new()` 是空表，
+/// 七个 `bind` 的第一个（`planning`）即返回 `Err(NotFound)`。
+///
+/// 这条钉的是 **`?` 传播**：把首个 `?` 改成 `let _ =`（吞掉错误），错误便从下一行
+/// （`TDD`）浮出，本条读到的 id 就不是 `planning` ⇒ 红。
+/// `(n)` 只拍了返回类型（编译期），本条补的是**运行期**的那一半。
+#[test]
+fn binding_into_an_empty_registry_reports_the_first_missing_id() {
+    let mut registry = MethodRegistry::new();
+    let err = bind_code_methods(&mut registry)
+        .expect_err("空表上 bind 七条 `seeded()` 的 id 必失败（`MethodError::NotFound`）");
+    assert!(
+        matches!(&err, MethodError::NotFound { id } if id.as_str() == "planning"),
+        "首个失败点应是第一个 `bind` 的 id `planning`（fail-fast），实际为 {err:?}"
+    );
 }
