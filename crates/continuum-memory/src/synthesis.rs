@@ -1,7 +1,7 @@
 //! 合成作业的两阶段记录面（设计 §8.1／§8.2）。
 //!
-//! 本 task 只落 `begin_synthesis`／`fail_synthesis` 与作业形状；proposal 与
-//! `apply_synthesis` 在 Task 8。写函数**不 `commit`**：事务由调用方持有。
+//! 本模块落作业形状、`begin_synthesis`／`fail_synthesis` 与 `apply_synthesis`。
+//! 写函数**不 `commit`**：事务由调用方持有。
 
 use std::collections::{HashMap, HashSet};
 

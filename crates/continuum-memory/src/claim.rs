@@ -174,7 +174,6 @@ impl MemoryClaim {
     }
 
     /// 从库行还原：**不校验、不归一**（库里的数据已过写入口）。
-    #[allow(dead_code)] // Task 7 起经 load_claim 使用
     pub(crate) fn rehydrate(
         id: MemoryClaimId,
         scope: MemoryScope,
@@ -271,7 +270,6 @@ pub(crate) fn validate_scope_anchor(
     Ok(())
 }
 
-#[allow(dead_code)] // Task 5 起经 load_claim 使用
 fn require_text(value: &Value, column: &str) -> Result<String, MemoryError> {
     match value {
         Value::Text(s) => Ok(s.clone()),
@@ -281,7 +279,6 @@ fn require_text(value: &Value, column: &str) -> Result<String, MemoryError> {
     }
 }
 
-#[allow(dead_code)] // Task 5 起经 load_claim 使用
 fn require_int(value: &Value, column: &str) -> Result<i64, MemoryError> {
     match value {
         Value::Int(i) => Ok(*i),
