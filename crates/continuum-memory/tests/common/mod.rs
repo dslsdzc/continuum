@@ -49,3 +49,69 @@ pub fn begin_request(
         started_at,
     }
 }
+
+/// 直接 SQL 写一条 claim、它的 source 边与（anchored 时）锚点侧表行。
+///
+/// 只给检索面夹具使用：绕过 `apply_synthesis` 是为了让 Task 7 不依赖 Task 8。
+pub fn seed_claim(
+    tx: &continuum_persist::Tx<'_>,
+    id: &str,
+    scope: continuum_memory::MemoryScope,
+    statement: &str,
+    validity: continuum_memory::Validity,
+    last_confirmed: i64,
+    anchor: Option<&str>,
+    source_ids: &[&str],
+) {
+    for source_id in source_ids {
+        let exists = tx
+            .query(
+                "SELECT 1 FROM memory_source WHERE source_id = ?",
+                &[continuum_persist::Value::text(*source_id)],
+            )
+            .unwrap();
+        if exists.is_empty() {
+            let source = source(
+                source_id,
+                continuum_memory::SourceKind::Files,
+                source_id,
+                1,
+            );
+            continuum_memory::insert_source(tx, &source).unwrap();
+        }
+    }
+    tx.execute(
+        "INSERT INTO memory_claim
+           (claim_id, scope, statement, validity, confidence, last_confirmed)
+         VALUES (?, ?, ?, ?, ?, ?)",
+        &[
+            continuum_persist::Value::text(id),
+            continuum_persist::Value::text(scope.as_str()),
+            continuum_persist::Value::text(statement),
+            continuum_persist::Value::text(validity.as_str()),
+            continuum_persist::Value::text("null"),
+            continuum_persist::Value::Int(last_confirmed),
+        ],
+    )
+    .unwrap();
+    for source_id in source_ids {
+        tx.execute(
+            "INSERT INTO memory_claim_source (claim_id, source_id) VALUES (?, ?)",
+            &[
+                continuum_persist::Value::text(id),
+                continuum_persist::Value::text(*source_id),
+            ],
+        )
+        .unwrap();
+    }
+    if let Some(anchor) = anchor {
+        tx.execute(
+            "INSERT INTO memory_claim_anchor (claim_id, anchor_id) VALUES (?, ?)",
+            &[
+                continuum_persist::Value::text(id),
+                continuum_persist::Value::text(anchor),
+            ],
+        )
+        .unwrap();
+    }
+}

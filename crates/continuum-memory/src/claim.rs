@@ -292,7 +292,6 @@ fn require_int(value: &Value, column: &str) -> Result<i64, MemoryError> {
 }
 
 /// 按 id 读一条 claim；未知 id 返回 `Ok(None)`。`sources[]` 按 id 升序还原。
-#[allow(dead_code)] // Task 7 起由 retrieval 使用
 pub(crate) fn load_claim(
     tx: &Tx<'_>,
     id: &MemoryClaimId,
