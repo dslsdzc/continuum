@@ -62,3 +62,18 @@
 
 - **M1/M2/M3/M9**（记录级）：预告口径（mut5 空集红未列预告）、未跑变异档（两条红条件的兑现位点——归 Task 7 变异轮/已说明）、覆盖补件（(h)/(t) 无「多出」方向照片、`ThreeDGeneration` 无照片）、文本卫生——**建议后续一笔文档精化收口**（收件人：协调者/复审者）。
 - **M8**：`task_cli` 的 20s 看门狗在重负载下偶发超时（P5a/P5e/P5f 均出现过）——**转测试基建侧收件追踪**（建议：加宽看门狗或另档标记）。
+
+## 已合入 main（续 3）
+
+| 块 | 合并点 | 日期 | 摘要 |
+|---|---|---|---|
+| P5d 研究领域算子 | `87e576e` | 2026-10-17 | `continuum-research` 全量 7 任务。终审 Needs fixes（1 Important：`bind_research_methods` 的 `?` 传播无照片——空表可达）→ fix `34d614d` → 复评 All addressed。门 194/1186/0/0。 |
+| P5c 代码领域算子 | `6ef0c80` | 2026-10-17 | `continuum-code` 全量 8 任务。终审 Needs fixes（1 Important：`bind_code_methods` 的 `?` 传播无照片）→ fix `67acabd` → 复评 All addressed。门 185/1164/0/0。 |
+
+## 合并后 main 全量门
+
+- `6ef0c80` 上：**EXIT=0 / 205 result / 1212 passed / 0 failed**（`.tmp/main-gate-final.log`）——六块（QA/P5b/P5a/P5e/P5d/P5c）合并树全绿。
+
+## 剩余
+
+- **P5f 图像领域算子**：T9 收尾复核（变异队列 F 轮）进行中；完成后 → 全分支终审 → 合入 → **P5 六块全部完成**。
