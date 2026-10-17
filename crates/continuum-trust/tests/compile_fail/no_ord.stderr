@@ -1,0 +1,13 @@
+error[E0369]: binary operation `<` cannot be applied to type `ContextTrust`
+ --> tests/compile_fail/no_ord.rs:7:43
+  |
+7 |     let _ = ContextTrust::UserInstruction < ContextTrust::WebUntrusted;
+  |             ----------------------------- ^ -------------------------- ContextTrust
+  |             |
+  |             ContextTrust
+  |
+note: `ContextTrust` does not implement `PartialOrd`
+ --> src/trust.rs
+  |
+  | pub enum ContextTrust {
+  | ^^^^^^^^^^^^^^^^^^^^^ `ContextTrust` is defined in another crate
