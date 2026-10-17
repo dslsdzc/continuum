@@ -1,0 +1,11 @@
+error[E0599]: no variant or associated item named `default` found for enum `ContextTrust` in the current scope
+ --> tests/compile_fail/no_default.rs:5:44
+  |
+5 |     let _ = continuum_trust::ContextTrust::default();
+  |                                            ^^^^^^^ variant or associated item not found in `ContextTrust`
+  |
+note: if you're trying to build a new `ContextTrust`, consider using `ContextTrust::parse` which returns `Option<ContextTrust>`
+ --> src/trust.rs
+  |
+  |     pub fn parse(s: &str) -> Option<Self> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
