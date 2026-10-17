@@ -1,0 +1,15 @@
+error[E0451]: fields `authority_rules`, `capability_rules`, `contract_rules`, `audit_rules` and `effect_rules` of struct `ProtectedCore` are private
+  --> tests/compile_fail/c1_fields_are_private.rs:7:9
+   |
+ 6 |     let _core = ProtectedCore {
+   |                 ------------- in this type
+ 7 |         authority_rules: RuleCommitment::unavailable(),
+   |         ^^^^^^^^^^^^^^^ private field
+ 8 |         capability_rules: RuleCommitment::unavailable(),
+   |         ^^^^^^^^^^^^^^^^ private field
+ 9 |         contract_rules: RuleCommitment::unavailable(),
+   |         ^^^^^^^^^^^^^^ private field
+10 |         audit_rules: RuleCommitment::unavailable(),
+   |         ^^^^^^^^^^^ private field
+11 |         effect_rules: RuleCommitment::unavailable(),
+   |         ^^^^^^^^^^^^ private field

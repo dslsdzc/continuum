@@ -1,0 +1,5 @@
+error[E0616]: field `authority_rules` of struct `ProtectedCore` is private
+ --> tests/compile_fail/c2_no_write_access.rs:5:10
+  |
+5 |     core.authority_rules = RuleCommitment::unavailable();
+  |          ^^^^^^^^^^^^^^^ private field
