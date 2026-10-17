@@ -28,6 +28,7 @@ members = [
     "crates/continuum-research",
     "crates/continuum-code",
     "crates/continuum-image",
+    "crates/continuum-memory",
 ]
 
 [workspace.package]
