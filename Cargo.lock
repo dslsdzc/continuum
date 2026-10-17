@@ -372,6 +372,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-trust"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "continuum-verify"
 version = "0.1.0"
 dependencies = [

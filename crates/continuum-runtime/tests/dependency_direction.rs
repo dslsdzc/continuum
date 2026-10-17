@@ -410,6 +410,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-workspace",
         ],
     ),
+    // P6B 的 §281 上下文信任词汇，不是节点/工具/权威信任域（设计 §8.5）
+    // 空数组是硬断言：本 crate 对 workspace 内零依赖。
+    ("continuum-trust", &[]),
 ];
 
 /// workspace 成员名单，派生自 cargo 自身解析出的 workspace 定义。
