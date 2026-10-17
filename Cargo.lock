@@ -342,6 +342,7 @@ dependencies = [
  "continuum-model-registry",
  "continuum-persist",
  "continuum-policy",
+ "continuum-protected",
  "continuum-provider",
  "continuum-sandbox",
  "continuum-secrets",
