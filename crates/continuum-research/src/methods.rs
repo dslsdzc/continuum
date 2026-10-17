@@ -15,6 +15,8 @@ use continuum_method::{MethodError, MethodId, MethodRegistry};
 /// **本函数不做二次登记**：不 `register` 方法条目（四块不得自造 `MethodEntry`）。
 /// **本函数不吞错**：任一条 `bind` 返回 `Err` 即原样透出 `MethodError`。
 /// 失败直接透出 `MethodError`，本块没有自己的错误类型。
+/// **这条 `?` 传播有照片**（终审 I-1，2026-10-17）：`tests/methods.rs` 的空表用例把
+/// `MethodRegistry::new()` 传进来，断言首个 `NotFound`（`retrieval`）原样返回。
 ///
 /// **`research-question` 与 `research-synthesis` 不在上表里，这不是漏 bind**：
 /// §187 的 `research/` 只有四条，而 §330 有七个步骤——`Synthesis` 在方法库里没有对应名。

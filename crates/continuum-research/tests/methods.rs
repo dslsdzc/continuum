@@ -4,9 +4,10 @@
 //! **不从 `all_operators()` 的 id 推出**——凡从被测清单里取语料的断言都是恒真的
 //! 假照片（设计 §9.2 末「一条预防」的同一条判据已写在 `tests/catalog.rs` 文件头）。
 //!
-//! 三条用例里只有 (f) 钉本块的产物；另两条的射程照实标注在各自的文档注释里：
+//! 四条用例里 (f) 与本轮新增的「空表 `?` 传播」钉本块的产物；另两条的射程照实标注：
 //! (g) 钉的是 **P5b 的 `seeded()`** 在 `research/` 域恰四条、(h) 钉的是 **P5b 的
-//! `bind`** 的错误臂——两条都不是本块的失败路径（实现计划 `## 遗留` 第一节第 3、4 条）。
+//! `bind`** 的错误臂——两条的射程见各自注释（实现计划 `## 遗留` 第一节第 3、4 条）；
+//! 第四条用例（文件末）钉 `bind_research_methods` 的 `?` 传播（终审 I-1）。
 
 use continuum_method::{MethodDomain, MethodError, MethodId, MethodRegistry};
 use continuum_operator::{OperatorId, OperatorRegistry, OperatorVersion};
@@ -134,11 +135,12 @@ fn the_research_domain_selects_exactly_four_entries() {
 /// §9.2 第 (h) 条：对**未 seed 的** `MethodId::new("research-probe")` 调
 /// `MethodRegistry::bind` ⇒ `Err(MethodError::NotFound { id })`，且 `id` 恰是那一个。
 ///
-/// **本条钉的是 P5b 的 `bind` 的错误臂，不是本块的失败路径**（据实；实现计划
-/// `## 遗留` 第一节第 4 条）：`bind_research_methods` 的四个 id 全部已 seed，
-/// 故**它不可能返回 `Err`**——本块对它的失败路径**没有照片**；
-/// 「本块不新增错误类型」这条纪律在本块内的照片只有**签名**（返回类型里写的是
-/// `MethodError`）。`research-probe` 不在 §187 的十八个 id 里 ⇒ 它没有被
+/// **本条钉的是 P5b 的 `bind` 的错误臂**（实现计划 `## 遗留` 第一节第 4 条）。
+/// **`bind_research_methods` 的失败路径另有照片**：它是 `pub fn`、registry 由调用方给，
+/// 传空表（`MethodRegistry::new()`）时四个 id 全未 seed ⇒ 第一条 `bind`（`retrieval`）
+/// 即 `NotFound` 并经 `?` 原样透出（下一条用例；终审 I-1 补，2026-10-17）。
+/// 「本块不新增错误类型」在本块内的照片是**签名**（返回类型里写的是 `MethodError`）＋
+/// 那条 `?` 传播用例。`research-probe` 不在 §187 的十八个 id 里 ⇒ 它没有被
 /// `seeded()` 登记过 ⇒ 对它的 `bind` 走的正是未命中分支。
 ///
 /// 红条件（**取反档**，**跨 crate**）：把 `MethodRegistry::bind` 的未命中分支改成
@@ -153,5 +155,32 @@ fn binding_an_unseeded_method_id_is_not_found() {
         methods.bind(&id, &["research-search"]),
         Err(MethodError::NotFound { id: id.clone() }),
         "对未 seed 的 id 的绑定必须返回 NotFound，且 id 恰是那一个"
+    );
+}
+
+/// 终审 I-1（2026-10-17）：`bind_research_methods` 的 **`?` 传播**照片。
+///
+/// 传**空表** `MethodRegistry::new()` ⇒ 四条 id 全未 seed、`bind` 逐个 `NotFound`；
+/// 函数在**第一条**（`retrieval`）处经 `?` 返回 ⇒ 必须得到
+/// `Err(MethodError::NotFound { id: retrieval })`。
+///
+/// **本条钉的是 `?` 的传播，不是 P5b 的 `bind` 本身**（后者由上一条钉）：
+/// 把 `retrieval` 那次 `bind` 后的 `?` 改成 `let _ =`（吞掉 Err、继续下一条）
+/// ⇒ 返回的 `id` 变成 `evidence-analysis` ⇒ 本条红；四处都吞掉 ⇒ 返回 `Ok(())`
+/// ⇒ 本条也红。**「断到具体 id」正是为了抓第一种**——只断 `Err(_)` 会漏掉它。
+///
+/// **订正留痕**：原注释/计划写「四个 id 全已 seed ⇒ `bind_research_methods`
+/// 不可能返回 `Err`、本块对它的失败路径没有照片」——**这半错了**：registry 由调用方给，
+/// 空表让「已 seed」的前提不成立，函数在本块内**可达 `Err`**（终审 I-1）。
+#[test]
+fn bind_research_methods_on_an_empty_registry_returns_the_first_not_found() {
+    let mut methods = MethodRegistry::new();
+
+    assert_eq!(
+        bind_research_methods(&mut methods),
+        Err(MethodError::NotFound {
+            id: MethodId::new("retrieval")
+        }),
+        "空表时第一条 bind（retrieval）的 NotFound 应经 `?` 原样透出（不是被吞掉后继续）"
     );
 }

@@ -644,10 +644,12 @@ git commit -m "feat(research): register_research_operators 的先核后写"
   `Err(MethodError::NotFound { id })` 且 `id` 恰是那一个。
   红条件（**取反档**）：把 `MethodRegistry::bind` 的未命中分支改成 `Ok(())`（锚点：`crates/continuum-method`
   的 `bind` 实现体）⇒ 本用例红。
-  **并写明本条的作用域（据实，见 `## 遗留` 第一节第 4 条）**：本条**钉的是 P5b 的 `bind` 的错误臂**，
-  **不是本块的失败路径**——`bind_research_methods` 的四个 id 全部已 seed，
-  故**它不可能返回 `Err`**，本块对它**没有失败路径的照片**；「本块不新增错误类型」这条纪律
-  在本块内的照片只有**签名**（返回类型里写的是 `MethodError`）。
+  **并写明本条的作用域（据实，见 `## 遗留` 第一节第 4 条）**：本条**钉的是 P5b 的 `bind` 的错误臂**。
+  **`bind_research_methods` 的失败路径另有照片（终审 I-1 补，2026-10-17）**：registry 由调用方给，
+  传空表（`MethodRegistry::new()`）时四个 id 全未 seed ⇒ 第一条 `bind`（`retrieval`）即 `NotFound`
+  并经 `?` 原样透出——`tests/methods.rs` 的
+  `bind_research_methods_on_an_empty_registry_returns_the_first_not_found` 断到该 id；
+  「本块不新增错误类型」在本块内的照片是**签名**（返回类型里写的是 `MethodError`）＋这条 `?` 传播用例。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1082,15 +1084,21 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
    与 `realized_by` 是否绑过无关）。设计已于 2026-10-10 就地订正为「g 不红」；Task 7 的 m2 实测
    （删 `retrieval` 的 `bind` ⇒ 仅 (f) 红、g 绿）与订正一致——Step 5 (ii) 的
    「不应红 (g)」以实测兑现。**收件人：复审者（订正已闭环，此为留痕）。**
-4. **⚠️ §9.2 第 (h) 条在本块内不可达。**
+4. **⚠️ §9.2 第 (h) 条对「未 seed 的 id」在本块内不可达；但「`bind_research_methods` 不可能返回 `Err`」不成立（终审 I-1，2026-10-17 订正）。**
    该条要求「对未 seed 的 `MethodId` 调 `bind` ⇒ `MethodError::NotFound`」，其说明栏写
    「§7 的反例（错透了 `MethodError`，本块没有自己的错误类型）」。
-   **而 `bind_research_methods` 的四个 id 全部已 seed**，`MethodError` 里 `bind` 只能返回 `NotFound`
-   ⇒ **该函数不可能返回 `Err`**，故「透出 `MethodError`」这件事**在本块内没有可达的失败路径**。
-   照该条直写，用例会去调 `MethodRegistry::bind` —— 那钉的是 **P5b 的** 错误臂（P5b 设计 §10 判据 4 已有一条同形的）。
-   **本计划的取法**：用例照写，但**照实标注它钉的是 P5b 的 `bind`**，并在同一处写明
-   「本块对 `bind_research_methods` 的失败路径**没有照片**」——
-   「本块不新增错误类型」在本块内的照片只有**签名**。**收件人：设计作者 ＋ 复审者。**
+   原记「`bind_research_methods` 的四个 id 全部已 seed ⇒ 该函数不可能返回 `Err`、本块对它的失败路径没有照片」
+   ——**这半错了**：该函数收 `&mut MethodRegistry`（registry 由调用方给），传**空表**
+   `MethodRegistry::new()` 时四个 id 全未 seed ⇒ 第一条 `bind`（`retrieval`）即 `NotFound`、
+   经 `?` 原样透出 ⇒ **函数在本块内可达 `Err`**。不可达的是「对未 seed 的 id 调 `bind`」**那一形状**
+   （本函数只 bind 四个目录 id），不是「函数的失败路径」。终审 I-1 的实质：把第一个 `?` 吞成
+   `let _ =` 时，修复前的全量套件**无任何用例变红**。
+   **本计划的取法（2026-10-17 补）**：用例照写（(h) 仍钉 P5b 的 `bind` 错误臂），
+   **另补** `bind_research_methods_on_an_empty_registry_returns_the_first_not_found`：
+   空表 ⇒ `Err(MethodError::NotFound { id: retrieval })`，**断到具体 id**（第一个 bind）；
+   注释写明它钉的是 `?` 传播——把 `?` 改成 `let _ =` 即红（判别力实测：`left: evidence-analysis`／
+   `right: retrieval`，见 Task 7 报告）。「本块不新增错误类型」在本块内的照片是**签名**
+   ＋这条 `?` 传播用例。**收件人：设计作者 ＋ 复审者（修复留痕：实现者）。**
 5. **⚠️ §9.2 第 (m) 条恒真，它的实际内容是「本 crate 能编译」。**
    该条要求「七枚算子的每一个端口类型都在 `ArtifactType` 里可解析（`ArtifactType::parse(..).is_some()`
    对每个 `as_str`）」，其说明栏写它钉的是「§3.2 的『两枚型中 `Json` 既有、`Report` 由 P5e 的清单收下』这一断言」。
@@ -1174,8 +1182,10 @@ git commit -m "chore(research): P5d 研究领域算子的收尾与复核"
    兑现方是宿主的调用点，而那个调用点不在本块（§9.4 第 1 条末）。**这不是本块的缺口**：
    它是「构造点在宿主侧」的代价，与 §9.4 第 1 条同源；据实记在此处，免得被读成「用例漏写了」。
 
-8. **本块对 `bind_research_methods` 的失败路径没有照片**（第一节第 4 条）：四个 id 全已 seed，
-   该函数不可能返回 `Err`。**收件人：设计作者 ＋ 复审者。**
+8. **（2026-10-17 订正：已有照片）** 原记「本块对 `bind_research_methods` 的失败路径没有照片」——
+   错：registry 由调用方给，空表时该函数可达 `Err`（见第一节第 4 条的终审 I-1 订正）。现有照片：
+   `tests/methods.rs` 的 `bind_research_methods_on_an_empty_registry_returns_the_first_not_found`
+   （空表 ⇒ `NotFound { id: retrieval }`，钉 `?` 传播）。**收件人：复审者（订正留痕）。**
 9. **本块的 `ALLOWED` 五项里两条是 dev 边，而「生产代码零调用」这件事只有间接照片**：
    `tests/type_level.rs` 与 `tests/reuse.rs` 在，而 `src/` 里零 `use`（Task 7 Step 3 的 grep）。
    「零 `use`」是**源码文本层面**的观察，**不是**类型层的禁止。**收件人：复审者。**
