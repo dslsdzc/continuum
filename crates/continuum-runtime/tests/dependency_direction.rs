@@ -257,6 +257,32 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-verify",
         ],
     ),
+    // P5c 代码领域算子（设计 §2.1）。本块只**声明**算子，不实现执行体，
+    // 故生产代码只用 artifact 的端口类型与 operator 的算子类型。
+    // Task 4 起加上 graph：**dev 边**——`tests/reuse.rs` 直接调 `cache_key` / `can_reuse`，
+    // 核九枚算子的 `determinism` 声明（§3.6 的照片，§10.2 第 (o) 条），生产代码对它零引用。
+    // `cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样登记（数组按字母序）。
+    // Task 5 起加上 workspace：**dev 边**——`tests/workspace_backends.rs` 对
+    // `WorkspaceBackend` 做穷尽 `match`（§4.2 的照片，§10.2 第 (p) 条），生产代码对它
+    // 零引用（登记口径同上）。
+    // Task 6 起加上 verify：**dev 边**——`tests/type_level.rs` 的两份编译失败样例与
+    // 一份正控制样例把「`Evidence` 只能经唯一产生点 `Evidence::from_tool_result` 得到」
+    // 拍成**使用侧**的编译期照片（§6.2；P5a 设计 §4.4），生产代码对它零引用
+    // （登记口径同上）。
+    // Task 7 起加上 method：**普通边**——`src/methods.rs` 的签名消费 `MethodRegistry` /
+    // `MethodId` / `MethodError`（§7.1 的 `bind_code_methods`）。至此设计 §2.1 共写文件表
+    // 的六条边到齐（数组按字母序）。
+    (
+        "continuum-code",
+        &[
+            "continuum-artifact",
+            "continuum-graph",
+            "continuum-method",
+            "continuum-operator",
+            "continuum-verify",
+            "continuum-workspace",
+        ],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

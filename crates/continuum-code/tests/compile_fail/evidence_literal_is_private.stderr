@@ -1,0 +1,21 @@
+error[E0451]: fields `id`, `evidence_type`, `subject`, `claim`, `producer`, `artifact_refs`, `strength` and `scope` of struct `Evidence` are private
+  --> tests/compile_fail/evidence_literal_is_private.rs:35:9
+   |
+34 |     let _ = Evidence {
+   |             -------- in this type
+35 |         id: placeholder(),
+   |         ^^ private field
+36 |         evidence_type: placeholder(),
+   |         ^^^^^^^^^^^^^ private field
+37 |         subject: placeholder(),
+   |         ^^^^^^^ private field
+38 |         claim: placeholder(),
+   |         ^^^^^ private field
+39 |         producer: placeholder(),
+   |         ^^^^^^^^ private field
+40 |         artifact_refs: placeholder(),
+   |         ^^^^^^^^^^^^^ private field
+41 |         strength: placeholder(),
+   |         ^^^^^^^^ private field
+42 |         scope: placeholder(),
+   |         ^^^^^ private field
