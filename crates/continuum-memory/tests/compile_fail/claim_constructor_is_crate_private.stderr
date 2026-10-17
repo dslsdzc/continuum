@@ -1,0 +1,16 @@
+error[E0624]: associated function `new` is private
+ --> tests/compile_fail/claim_constructor_is_crate_private.rs:9:26
+  |
+9 |       let _ = MemoryClaim::new(
+  |                            ^^^ private associated function
+  |
+ ::: src/claim.rs
+  |
+  | /     pub(crate) fn new(
+  | |         id: MemoryClaimId,
+  | |         scope: MemoryScope,
+  | |         statement: String,
+... |
+  | |         last_confirmed: i64,
+  | |     ) -> Result<MemoryClaim, MemoryError> {
+  | |_________________________________________- private associated function defined here

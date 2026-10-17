@@ -1,0 +1,11 @@
+error[E0599]: no method named `status` found for reference `&MemoryClaim` in the current scope
+ --> tests/compile_fail/claim_has_no_status_or_anchor_accessor.rs:5:15
+  |
+5 |     let _ = c.status();
+  |               ^^^^^^ method not found in `&MemoryClaim`
+
+error[E0599]: no method named `anchor` found for reference `&MemoryClaim` in the current scope
+ --> tests/compile_fail/claim_has_no_status_or_anchor_accessor.rs:6:15
+  |
+6 |     let _ = c.anchor();
+  |               ^^^^^^ method not found in `&MemoryClaim`

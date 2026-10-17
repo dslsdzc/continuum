@@ -1,0 +1,15 @@
+error[E0451]: fields `id`, `kind`, `external_ref`, `observed_at` and `removed_at` of struct `MemorySource` are private
+  --> tests/compile_fail/memory_source_fields_are_private.rs:7:9
+   |
+ 6 |     let _ = MemorySource {
+   |             ------------ in this type
+ 7 |         id: MemorySourceId::new("s"),
+   |         ^^ private field
+ 8 |         kind: SourceKind::Files,
+   |         ^^^^ private field
+ 9 |         external_ref: String::new(),
+   |         ^^^^^^^^^^^^ private field
+10 |         observed_at: 0,
+   |         ^^^^^^^^^^^ private field
+11 |         removed_at: None,
+   |         ^^^^^^^^^^ private field

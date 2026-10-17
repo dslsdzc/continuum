@@ -1,0 +1,7 @@
+error[E0560]: struct `ProposedClaim` has no field named `last_confirmed`
+  --> tests/compile_fail/proposed_claim_cannot_express_last_confirmed.rs:12:9
+   |
+12 |         last_confirmed: 0,
+   |         ^^^^^^^^^^^^^^ `ProposedClaim` does not have this field
+   |
+   = note: all struct fields are already assigned
