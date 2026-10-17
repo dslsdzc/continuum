@@ -28,6 +28,8 @@ members = [
     "crates/continuum-research",
     "crates/continuum-code",
     "crates/continuum-image",
+    "crates/continuum-protected",
+    "crates/continuum-learning",
 ]
 
 [workspace.package]

@@ -195,6 +195,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-learning"
+version = "0.1.0"
+dependencies = [
+ "continuum-protected",
+]
+
+[[package]]
 name = "continuum-media"
 version = "0.1.0"
 dependencies = [
@@ -280,6 +287,10 @@ dependencies = [
  "serde_json",
  "thiserror",
 ]
+
+[[package]]
+name = "continuum-protected"
+version = "0.1.0"
 
 [[package]]
 name = "continuum-provider"

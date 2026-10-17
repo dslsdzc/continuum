@@ -314,6 +314,15 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-verify",
         ],
     ),
+    // P6D Protected Core（设计 §3.2）。**空数组是硬断言**：ENG-001 方向 (a) 的强制面，
+    // 任何指向 workspace 内别的 crate 的直接边都会让本表逐对断言变红。
+    // workspace 内零依赖；外部依赖只有 sha2 / thiserror，不进本表。
+    ("continuum-protected", &[]),
+    // P6D Runtime Learning（设计 §3.2）。**只有一条 workspace 边**：
+    // 学习侧读 ProtectedCore 的 fingerprint（LearningProposal 的唯一构造点收 &ProtectedCore）。
+    // 不登记 memory / graph / artifact / capability / events / effect / policy / semantics /
+    // context / method / verify / model-registry / trust——逐条理由见设计 §3.2。
+    ("continuum-learning", &["continuum-protected"]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
