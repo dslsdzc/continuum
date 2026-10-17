@@ -1,0 +1,5 @@
+error[E0599]: no variant or associated item named `Session` found for enum `MemoryScope` in the current scope
+ --> tests/compile_fail/memory_scope_has_no_session.rs:4:44
+  |
+4 |     let _ = continuum_memory::MemoryScope::Session;
+  |                                            ^^^^^^^ variant or associated item not found in `MemoryScope`

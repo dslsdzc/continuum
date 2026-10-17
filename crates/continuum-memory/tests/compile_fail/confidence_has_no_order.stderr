@@ -1,0 +1,13 @@
+error[E0369]: binary operation `<` cannot be applied to type `Confidence`
+ --> tests/compile_fail/confidence_has_no_order.rs:6:15
+  |
+6 |     let _ = a < b;
+  |             - ^ - Confidence
+  |             |
+  |             Confidence
+  |
+note: `Confidence` does not implement `PartialOrd`
+ --> src/claim.rs
+  |
+  | pub struct Confidence(serde_json::Value);
+  | ^^^^^^^^^^^^^^^^^^^^^ `Confidence` is defined in another crate

@@ -1,0 +1,7 @@
+error[E0560]: struct `ProposedClaim` has no field named `validity`
+  --> tests/compile_fail/proposed_claim_cannot_express_validity.rs:12:9
+   |
+12 |         validity: Validity::Active,
+   |         ^^^^^^^^ `ProposedClaim` does not have this field
+   |
+   = note: all struct fields are already assigned

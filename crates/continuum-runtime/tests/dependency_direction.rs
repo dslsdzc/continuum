@@ -26,6 +26,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
     ("continuum-core", &[]),
     ("continuum-events", &["continuum-core"]),
     ("continuum-persist", &["continuum-events"]),
+    ("continuum-memory", &["continuum-persist"]),
     // P3 子项目 C 的 Task 3 起加上 capability：`tool.rs` 的 `AuthorizedToolInvocation`
     // 要能命名 `continuum_capability::AuthorizedTool`（§316 请求面换血，层内边，
     // 设计 §4.1 订正段）。
@@ -399,6 +400,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-effect",
             "continuum-events",
             "continuum-graph",
+            "continuum-memory",
             "continuum-model-registry",
             "continuum-persist",
             "continuum-policy",

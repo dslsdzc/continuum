@@ -208,6 +208,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-memory"
+version = "0.1.0"
+dependencies = [
+ "continuum-persist",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "trybuild",
+]
+
+[[package]]
 name = "continuum-method"
 version = "0.1.0"
 dependencies = [
@@ -322,6 +333,7 @@ dependencies = [
  "continuum-effect",
  "continuum-events",
  "continuum-graph",
+ "continuum-memory",
  "continuum-model-registry",
  "continuum-persist",
  "continuum-policy",
