@@ -29,6 +29,8 @@ pub enum MemoryError {
     UnknownSource,
     #[error("source 已被删除")]
     SourceRemoved,
+    #[error("source 已经是删除状态")]
+    SourceAlreadyRemoved,
     #[error("job id 已存在")]
     DuplicateJobId,
     #[error("job 不存在")]

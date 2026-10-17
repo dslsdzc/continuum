@@ -9,7 +9,8 @@ use std::collections::HashSet;
 use continuum_persist::{PersistError, Tx, Value};
 
 use crate::error::MemoryError;
-use crate::source::MemorySourceId;
+use crate::source::{MemorySourceId, load_source};
+use crate::summary::mark_summaries_stale;
 
 /// §284 的五个 scope，逐字。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +359,73 @@ pub(crate) fn claim_anchor(
         None => Ok(None),
         Some(row) => Ok(Some(require_text(&row[0], "anchor_id")?)),
     }
+}
+
+/// 软删除一条 Source：置墓碑，并把**所有**引用它的 `Active` claim 无条件改成
+/// `Invalidated`（终态不动），再把受影响 `(scope, anchor)` 的摘要置 stale。
+///
+/// 返回**本次从 `Active` 改成 `Invalidated`** 的 claim id，按 id 升序。
+/// **不 `commit`**。
+pub fn remove_source(
+    tx: &Tx<'_>,
+    id: &MemorySourceId,
+    occurred_at: i64,
+) -> Result<Vec<MemoryClaimId>, MemoryError> {
+    let Some(source) = load_source(tx, id)? else {
+        return Err(MemoryError::UnknownSource);
+    };
+    if source.removed_at().is_some() {
+        return Err(MemoryError::SourceAlreadyRemoved);
+    }
+
+    let affected = tx.execute(
+        "UPDATE memory_source SET removed_at = ?
+          WHERE source_id = ? AND removed_at IS NULL",
+        &[Value::Int(occurred_at), Value::text(id.as_str())],
+    )?;
+    if affected != 1 {
+        return Err(MemoryError::SourceAlreadyRemoved);
+    }
+
+    let rows = tx.query(
+        "SELECT c.claim_id, c.scope
+           FROM memory_claim_source s
+           JOIN memory_claim c ON c.claim_id = s.claim_id
+          WHERE s.source_id = ? AND c.validity = 'active'
+          ORDER BY c.claim_id ASC",
+        &[Value::text(id.as_str())],
+    )?;
+
+    let mut removed = Vec::new();
+    let mut pairs: Vec<(MemoryScope, Option<String>)> = Vec::new();
+    for row in rows {
+        let claim_id = MemoryClaimId::new(require_text(&row[0], "claim_id")?);
+        let raw_scope = require_text(&row[1], "scope")?;
+        let scope = MemoryScope::parse(&raw_scope).ok_or_else(|| {
+            MemoryError::Persist(PersistError::Database(format!(
+                "memory_claim.scope 表外取值: {raw_scope}"
+            )))
+        })?;
+        let anchor = claim_anchor(tx, &claim_id)?;
+
+        let changed = tx.execute(
+            "UPDATE memory_claim SET validity = 'invalidated'
+              WHERE claim_id = ? AND validity = 'active'",
+            &[Value::text(claim_id.as_str())],
+        )?;
+        if changed == 1 {
+            removed.push(claim_id);
+            let pair = (scope, anchor);
+            if !pairs.contains(&pair) {
+                pairs.push(pair);
+            }
+        }
+    }
+
+    for (scope, anchor) in pairs {
+        mark_summaries_stale(tx, scope, anchor.as_deref())?;
+    }
+    Ok(removed)
 }
 
 #[cfg(test)]

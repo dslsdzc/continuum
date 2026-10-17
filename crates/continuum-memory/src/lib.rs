@@ -13,7 +13,9 @@ mod source;
 mod summary;
 mod synthesis;
 
-pub use claim::{Confidence, MemoryClaim, MemoryClaimId, MemoryScope, Validity};
+pub use claim::{
+    Confidence, MemoryClaim, MemoryClaimId, MemoryScope, Validity, remove_source,
+};
 pub use error::MemoryError;
 pub use persist::p6c_memory_migrations;
 pub use retrieval::{MemoryRetrieval, MemoryStore, RetrievalQuery, retrieve_claims};
