@@ -11,7 +11,7 @@ use std::process::Command;
 
 /// 期望的迁移集合：P0 内建 + P1（artifact、graph）+ P2（workspace、policy、effect）
 /// + P3（capability 的 `tool` 表；子项目 D 的三张模型表）+ P4（`alias` 表；语义层七表；
-/// 预算树与账本）+ P5a（验证与证据五表）。
+/// 预算树与账本）+ P5a（验证与证据五表）+ P6C（记忆八表）。
 ///
 /// `policy` 由 Task 10 加上（第 7 步的集成路径要读它），`effect` 由 Task 11 加上
 /// （第 4 步要写效应记录），`tool` 由 P3 的 Task 4 加上（Task 5 的 `authorize` 要读它），
@@ -22,6 +22,8 @@ use std::process::Command;
 /// 已应用的同号迁移——**110 的 SQL 此后不得再改**（设计 §13.2 第 2 条的静默失效）。
 /// P5a 的一条（130 验证与证据五表）由 P5a 的 Task 11（装配）加上：装配之后 `migrate()`
 /// 会按 version 跳过已应用的同号迁移——**130 的 SQL 此后不得再改**（同 110 的静默失效）。
+/// P6C 的一条（190 记忆八表）由 P6C 的 Task 12（装配）加上：装配之后 `migrate()`
+/// 会按 version 跳过已应用的同号迁移——**190 的 SQL 此后不得再改**（同 110／130）。
 ///
 /// **这是 `main.rs` 装配处的第二份转录**。转录的风险由下面的比对抵掉——
 /// `the_runtime_applies_…` 拿**实际启动后**落在 `schema_migrations` 里的集合与
@@ -45,6 +47,7 @@ fn expected_migrations() -> Vec<Migration> {
     m.extend(continuum_semantics::p4_semantics_migrations());   // 110：七张表
     m.extend(continuum_budget::p4_budget_migrations());         // 120：树与账本
     m.extend(continuum_verify::p5a_verify_migrations());        // 130：验证与证据五表
+    m.extend(continuum_memory::p6c_memory_migrations());        // 190：记忆八表
     m
 }
 

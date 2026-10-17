@@ -107,6 +107,10 @@ fn main() -> ExitCode {
 /// 交付方是 `continuum_verify::p5a_verify_migrations()`，注册点就是最下面那一行。
 /// **130 的 SQL 此后不得再改**（同 110：`migrate()` 按 version 跳过已应用者，改号或
 /// 改 SQL 对已建库都无效）。
+///
+/// **P6C 的一条由 Task 12（装配 task）加上**（190 记忆八表）：交付方是
+/// `continuum_memory` 的迁移函数，注册点就是最下面那一行。
+/// **190 的 SQL 此后不得再改**（同 110／130）。
 pub(crate) fn runtime_migrations() -> Vec<Migration> {
     let mut migrations = continuum_persist::builtin_migrations();
     migrations.extend(continuum_artifact::p1_artifact_migrations());
@@ -120,6 +124,7 @@ pub(crate) fn runtime_migrations() -> Vec<Migration> {
     migrations.extend(continuum_semantics::p4_semantics_migrations());   // 110：七张表
     migrations.extend(continuum_budget::p4_budget_migrations());         // 120：树与账本
     migrations.extend(continuum_verify::p5a_verify_migrations());        // 130：验证与证据五表
+    migrations.extend(continuum_memory::p6c_memory_migrations());        // 190：记忆八表
     migrations
 }
 

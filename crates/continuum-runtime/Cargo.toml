@@ -23,6 +23,9 @@ continuum-core = { path = "../continuum-core" }
 continuum-effect = { path = "../continuum-effect" }
 continuum-events = { path = "../continuum-events" }
 continuum-graph = { path = "../continuum-graph" }
+# P6C 的 Task 12 起：`main.rs` 的装配处注册 `p6c_memory_migrations()`
+# （迁移 190 的记忆八表）。
+continuum-memory = { path = "../continuum-memory" }
 # Task 5（P3 子项目 D）起：`main.rs` 的装配处注册 `p3d_model_migrations()`
 # （三张模型表由用它的那个 task 注册）。
 continuum-model-registry = { path = "../continuum-model-registry" }

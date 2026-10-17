@@ -400,6 +400,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-effect",
             "continuum-events",
             "continuum-graph",
+            "continuum-memory",
             "continuum-model-registry",
             "continuum-persist",
             "continuum-policy",
