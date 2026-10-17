@@ -9,6 +9,7 @@ mod claim;
 mod error;
 mod persist;
 mod source;
+mod summary;
 mod synthesis;
 
 pub use claim::{Confidence, MemoryClaim, MemoryClaimId, MemoryScope, Validity};
@@ -17,6 +18,7 @@ pub use persist::p6c_memory_migrations;
 pub use source::{
     MemorySource, MemorySourceId, SourceKind, insert_source, load_source, load_sources,
 };
+pub use summary::{MemorySummary, MemorySummaryId, load_current_summary, load_summary};
 pub use synthesis::{
     SynthesisJobId, SynthesisRequest, SynthesisStatus, SynthesisTrigger, begin_synthesis,
     fail_synthesis,
