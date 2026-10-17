@@ -9,10 +9,15 @@ mod claim;
 mod error;
 mod persist;
 mod source;
+mod synthesis;
 
 pub use claim::{Confidence, MemoryClaim, MemoryClaimId, MemoryScope, Validity};
 pub use error::MemoryError;
 pub use persist::p6c_memory_migrations;
 pub use source::{
     MemorySource, MemorySourceId, SourceKind, insert_source, load_source, load_sources,
+};
+pub use synthesis::{
+    SynthesisJobId, SynthesisRequest, SynthesisStatus, SynthesisTrigger, begin_synthesis,
+    fail_synthesis,
 };

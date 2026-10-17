@@ -23,4 +23,22 @@ pub enum MemoryError {
     AnchorRequired,
     #[error("当前 scope 不允许 anchor")]
     AnchorNotAllowed,
+    #[error("source 不存在")]
+    UnknownSource,
+    #[error("source 已被删除")]
+    SourceRemoved,
+    #[error("job id 已存在")]
+    DuplicateJobId,
+    #[error("job 不存在")]
+    UnknownJob,
+    #[error("job 不在 Running 状态")]
+    JobNotRunning,
+    #[error("触发携带的 source 不在输入集合")]
+    TriggerSourceOutsideInput,
+    #[error("触发 source 的 kind 不符")]
+    WrongTriggerSourceKind,
+    #[error("触发集合为空")]
+    EmptyTriggerSet,
+    #[error("触发时间晚于作业开始时间")]
+    InvalidTriggerTime,
 }

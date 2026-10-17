@@ -54,7 +54,6 @@ impl MemoryScope {
     }
 
     /// `Project`／`Product`／`Task` 必须带锚点；`Personal`／`Runtime` 不得带。
-    #[allow(dead_code)] // Task 5 起由 synthesis 的 G5 使用
     pub(crate) fn is_anchored(&self) -> bool {
         matches!(
             self,
@@ -255,7 +254,6 @@ impl MemoryClaim {
 ///
 /// 顺序：空 `scopes` ⇒ `EmptyScopeSet`；`anchor` 为 `Some` 时要求 `scopes` 恰好
 /// 一个 anchored scope；`anchor` 为 `None` 时任一 anchored scope ⇒ `AnchorRequired`。
-#[allow(dead_code)] // Task 5 起由 synthesis／summary／retrieval 使用
 pub(crate) fn validate_scope_anchor(
     scopes: &[MemoryScope],
     anchor: Option<&str>,

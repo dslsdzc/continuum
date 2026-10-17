@@ -30,3 +30,22 @@ pub fn source(
     )
     .unwrap()
 }
+
+/// `SynthesisRequest` 夹具。
+pub fn begin_request(
+    job: &str,
+    scope: continuum_memory::MemoryScope,
+    anchor: Option<&str>,
+    trigger: continuum_memory::SynthesisTrigger,
+    sources: Vec<continuum_memory::MemorySourceId>,
+    started_at: i64,
+) -> continuum_memory::SynthesisRequest {
+    continuum_memory::SynthesisRequest {
+        job: continuum_memory::SynthesisJobId::new(job),
+        scope,
+        anchor: anchor.map(str::to_string),
+        trigger,
+        sources,
+        started_at,
+    }
+}
