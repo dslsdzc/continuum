@@ -6,8 +6,10 @@
 //! 本 crate 只定义 `ContextPackage` 两个字段的元素类型与形状（`provenance[]` 与
 //! `trust_labels[]`），不定义 `ContextPackage` 本身，也不建拒绝、不落库。
 
+pub mod label;
 pub mod provenance;
 pub mod trust;
 
+pub use label::label;
 pub use provenance::{ArtifactProducer, ContextProvenance};
 pub use trust::ContextTrust;
