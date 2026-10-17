@@ -138,7 +138,6 @@ pub struct MemoryClaim {
 impl MemoryClaim {
     /// 唯一的生产构造点（`pub(crate)`）。只造 `Active`；`statement` 去首尾空白；
     /// `sources` 非空、去重、按 id 升序规范化。
-    #[allow(dead_code)] // Task 8 起由 apply_synthesis 使用
     pub(crate) fn new(
         id: MemoryClaimId,
         scope: MemoryScope,
@@ -347,7 +346,6 @@ pub(crate) fn load_claim(
 }
 
 /// 读 claim 的锚点；无侧表行 ⇒ `None`。
-#[allow(dead_code)] // Task 8 起由 apply_synthesis 使用
 pub(crate) fn claim_anchor(
     tx: &Tx<'_>,
     id: &MemoryClaimId,

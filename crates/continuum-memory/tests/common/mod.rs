@@ -50,6 +50,47 @@ pub fn begin_request(
     }
 }
 
+/// `SynthesisProposal` 夹具。
+pub fn apply_request(
+    claims: Vec<continuum_memory::ProposedClaim>,
+    summary: Option<&str>,
+) -> continuum_memory::SynthesisProposal {
+    continuum_memory::SynthesisProposal {
+        claims,
+        summary: summary.map(str::to_string),
+    }
+}
+
+/// 开一份 `UserRequested` 作业并立刻 apply；返回 apply 的结果。
+pub fn begin_and_apply(
+    tx: &continuum_persist::Tx<'_>,
+    job: &str,
+    scope: continuum_memory::MemoryScope,
+    anchor: Option<&str>,
+    source_ids: &[&str],
+    proposal: &continuum_memory::SynthesisProposal,
+    occurred_at: i64,
+) -> Result<continuum_memory::SynthesisReport, continuum_memory::MemoryError> {
+    let request = begin_request(
+        job,
+        scope,
+        anchor,
+        continuum_memory::SynthesisTrigger::UserRequested,
+        source_ids
+            .iter()
+            .map(|id| continuum_memory::MemorySourceId::new(*id))
+            .collect(),
+        0,
+    );
+    continuum_memory::begin_synthesis(tx, &request)?;
+    continuum_memory::apply_synthesis(
+        tx,
+        &continuum_memory::SynthesisJobId::new(job),
+        proposal,
+        occurred_at,
+    )
+}
+
 /// 直接 SQL 写一条 claim、它的 source 边与（anchored 时）锚点侧表行。
 ///
 /// 只给检索面夹具使用：绕过 `apply_synthesis` 是为了让 Task 7 不依赖 Task 8。

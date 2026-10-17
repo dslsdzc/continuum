@@ -22,6 +22,6 @@ pub use source::{
 };
 pub use summary::{MemorySummary, MemorySummaryId, load_current_summary, load_summary};
 pub use synthesis::{
-    SynthesisJobId, SynthesisRequest, SynthesisStatus, SynthesisTrigger, begin_synthesis,
-    fail_synthesis,
+    ProposedClaim, SynthesisJobId, SynthesisProposal, SynthesisReport, SynthesisRequest,
+    SynthesisStatus, SynthesisTrigger, apply_synthesis, begin_synthesis, fail_synthesis,
 };

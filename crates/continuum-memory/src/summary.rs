@@ -152,7 +152,6 @@ pub fn load_current_summary(
 /// 写一条 fresh 摘要。**只许 `apply_synthesis` 调**。
 ///
 /// `summary_id = "{job}:{generated_at}"`；正文原样存（空正文由调用方挡在调用前）。
-#[allow(dead_code)] // Task 8 起由 apply_synthesis 使用
 pub(crate) fn write_summary(
     tx: &Tx<'_>,
     job: &SynthesisJobId,
@@ -183,7 +182,6 @@ pub(crate) fn write_summary(
 
 /// 把某 `(scope, anchor)` 下**仍 fresh** 的摘要全部置 stale，返回受影响行数。
 /// 幂等：第二次调用返回 0。
-#[allow(dead_code)] // Task 8 起由 apply_synthesis 使用
 pub(crate) fn mark_summaries_stale(
     tx: &Tx<'_>,
     scope: MemoryScope,

@@ -5,6 +5,8 @@
 
 use continuum_persist::PersistError;
 
+use crate::claim::Validity;
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum MemoryError {
     #[error(transparent)]
@@ -41,4 +43,18 @@ pub enum MemoryError {
     EmptyTriggerSet,
     #[error("触发时间晚于作业开始时间")]
     InvalidTriggerTime,
+    #[error("claim 不存在")]
+    UnknownClaim,
+    #[error("claim 不在 Active 状态：{validity:?}")]
+    ClaimNotActive { validity: Validity },
+    #[error("claim id 已存在")]
+    DuplicateClaimId,
+    #[error("source 不在作业输入集合")]
+    ForeignSource,
+    #[error("claim 的 scope/anchor 与作业不符")]
+    ScopeMismatch,
+    #[error("supersedes 指向本条合并目标")]
+    SupersedeMergeConflict,
+    #[error("摘要去空白后为空")]
+    EmptySummary,
 }
