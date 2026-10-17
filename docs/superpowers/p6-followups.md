@@ -15,7 +15,7 @@
 
 | 块 | 实现 | 终审 | 合入 main |
 |---|---|---|---|
-| P6C `continuum-memory` | 12 任务，全量门 1376 passed / 0 failed / 0 warning | **Approved**（0 Critical / 0 Important；4 Minor，3 条已清） | **`e0adc69`（已推送）** |
+| P6C `continuum-memory` | 12 任务，干净单次全量门 **231 result / 1369 passed / 0 failed / 2 ignored / 0 warning / EXIT 0**（实现者曾报 1376/260，差异＝按 target 重复计数，终审已逐项解释） | **Approved**（0 Critical / 0 Important；4 Minor：`retrieval.rs` 两处仅 `is_ok`、`synthesis.rs` 三处 `expect`、A4/fail 的 `affected==1` 防御、全仓已无 `allow`） | **`e0adc69`（已推送）** |
 | P6B `continuum-trust` | Task 1–6 已提交（`4201a61`）；差 §9.4 变异与全量门 | 待做 | 待 |
 | P6D 两枚 crate | 8 任务已提交（`31de2b7`） | 待做 | 待（并集门等 A/B/C） |
 | P6A `continuum-context` | 未开工（前置：B/C 的 crate 进 main） | — | — |
