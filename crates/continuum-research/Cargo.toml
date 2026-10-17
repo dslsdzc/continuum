@@ -1,0 +1,43 @@
+[package]
+name = "continuum-research"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# 本 crate 的内部边（`crates/continuum-runtime/tests/dependency_direction.rs`
+# 的 `ALLOWED` 条目同步）：
+# - `continuum-artifact` / `continuum-operator`（Task 1）：`ArtifactType` 是七枚算子
+#   两个端口栏（`input_schema` / `output_schema`）的取值类型；`Operator` 与它的五枚
+#   伴生类型（`OperatorId` / `OperatorVersion` / `Determinism` / `SideEffectClass` /
+#   `BackendId`）是七枚算子与 `all_operators()` 的全部类型。
+# - `continuum-method`（Task 3，**普通边**）：`bind_research_methods` 取
+#   `&mut MethodRegistry` 并逐条调 `bind`——**是生产入口，不是用例**（设计 §2.1）。
+# **只声明本 task 用得到的**（切分 §四第 6 条）：`continuum-graph` / `continuum-verify` /
+# `trybuild` 由需要它们的 task 增量加（设计 §2.1 的边表是终态，
+# 「只登记实际用到的」是切分 §四第 6 条）。
+continuum-artifact = { path = "../continuum-artifact" }
+continuum-method = { path = "../continuum-method" }
+continuum-operator = { path = "../continuum-operator" }
+
+[dev-dependencies]
+# `tests/reuse.rs`（§9.2 第 (k) 条、§6.1 的 §305 照片）是本 crate 唯一的
+# continuum-graph 使用点：用例经 `cache_key` / `can_reuse` 核对本块声明的
+# `determinism` 真能让那条判据成立。**dev 边**——生产代码对它零调用
+# （设计 §2.1 的 `continuum-graph` 行；`cargo tree --edges all` 把 dev 边算进依赖，
+# 故在 `ALLOWED` 表里同样登记——先例：continuum-provider 那一行的 persist）。
+continuum-graph = { path = "../continuum-graph" }
+# Task 6 起：`tests/type_level.rs` 的两份 `trybuild` 编译失败样例（设计 §9.4 第 1 条）
+# 钉「本 crate 里造不出 `Evidence`」——P5a 设计 §4.4「唯一产生点」那股结构事实的
+# 使用侧照片。**dev 边**——生产代码对它零调用，这两份样例是本块在 continuum-verify
+# 上的**唯一使用点**（计划 §9.4 第 1 条末）。`trybuild` 把 [dev-dependencies] 也
+# 算进样例的依赖（实测 trybuild-1.0.121/src/run.rs:239：
+# `dependencies.extend(source_manifest.dev_dependencies);`），故样例可以引用
+# `continuum_verify::Evidence` 而不必把这条边升成普通边——这是该 dev 边成立的依据；
+# 同 continuum-graph 一样在 `ALLOWED` 表里登记。
+continuum-verify = { path = "../continuum-verify" }
+# Task 6 起的使用点：`tests/type_level.rs` 用 `trybuild::TestCases::compile_fail`
+# 驱动 `tests/compile_fail/*.rs`（与 P5a / continuum-connector 的用法同形）。
+# **外部 crate，不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表只断言
+# workspace 成员之间的边（同上一段）。
+trybuild = { workspace = true }

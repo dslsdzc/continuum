@@ -232,6 +232,31 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P5 跨领域层（设计 §2.1）：研究领域的七枚算子。
+    // 本 crate 不新建表、不写事件、不碰策略与能力面。
+    // Task 3 起加上 continuum-method：**普通边**——`bind_research_methods` 是生产入口
+    // （取 `&mut MethodRegistry` 逐条 `bind`，不是用例；设计 §2.1）。
+    // Task 5 起加上 continuum-graph：**dev 边**——`tests/reuse.rs`（§9.2 第 (k) 条、
+    // §305 的复用照片）经 `cache_key` / `can_reuse` 核对本块声明的 `determinism`
+    // 真能让那条判据成立；`cargo tree --edges all` 把 dev 边算进依赖，故与普通边一样
+    // 登记（先例：continuum-provider 那一行的 persist）。
+    // Task 6 起加上 continuum-verify：**dev 边**——`tests/type_level.rs` 的两份
+    // `trybuild` 编译失败样例（§9.4 第 1 条）钉「本 crate 里造不出 `Evidence`」；
+    // 生产代码对它零调用，这两份样例是本块在它上面的**唯一使用点**。`trybuild` 把
+    // [dev-dependencies] 也算进样例的依赖（实测 trybuild-1.0.121/src/run.rs:239），
+    // 故样例能引用 `continuum_verify::Evidence` 而不必把这条边升成普通边——
+    // 这是该 dev 边成立的依据。`cargo tree --edges all` 把 dev 边算进依赖，
+    // 故与普通边一样登记（先例：continuum-provider 那一行的 persist）。数组按字母序。
+    (
+        "continuum-research",
+        &[
+            "continuum-artifact",
+            "continuum-graph",
+            "continuum-method",
+            "continuum-operator",
+            "continuum-verify",
+        ],
+    ),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //

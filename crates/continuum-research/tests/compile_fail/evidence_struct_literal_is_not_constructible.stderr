@@ -1,0 +1,21 @@
+error[E0451]: fields `id`, `evidence_type`, `subject`, `claim`, `producer`, `artifact_refs`, `strength` and `scope` of struct `Evidence` are private
+  --> tests/compile_fail/evidence_struct_literal_is_not_constructible.rs:40:9
+   |
+39 |     Evidence {
+   |     -------- in this type
+40 |         id,
+   |         ^^ private field
+41 |         evidence_type,
+   |         ^^^^^^^^^^^^^ private field
+42 |         subject,
+   |         ^^^^^^^ private field
+43 |         claim,
+   |         ^^^^^ private field
+44 |         producer,
+   |         ^^^^^^^^ private field
+45 |         artifact_refs,
+   |         ^^^^^^^^^^^^^ private field
+46 |         strength,
+   |         ^^^^^^^^ private field
+47 |         scope,
+   |         ^^^^^ private field
