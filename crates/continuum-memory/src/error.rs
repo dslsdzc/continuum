@@ -11,4 +11,6 @@ pub enum MemoryError {
     Persist(#[from] PersistError),
     #[error("external_ref 去空白后为空")]
     EmptyExternalRef,
+    #[error("source_id 已存在")]
+    DuplicateSourceId,
 }

@@ -11,4 +11,6 @@ mod source;
 
 pub use error::MemoryError;
 pub use persist::p6c_memory_migrations;
-pub use source::{MemorySource, MemorySourceId, SourceKind};
+pub use source::{
+    MemorySource, MemorySourceId, SourceKind, insert_source, load_source, load_sources,
+};

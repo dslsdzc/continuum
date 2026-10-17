@@ -14,3 +14,19 @@ pub fn new_db() -> (tempfile::TempDir, Db) {
     db.migrate().unwrap();
     (dir, db)
 }
+
+/// `MemorySource` 夹具。
+pub fn source(
+    id: &str,
+    kind: continuum_memory::SourceKind,
+    external_ref: &str,
+    observed_at: i64,
+) -> continuum_memory::MemorySource {
+    continuum_memory::MemorySource::new(
+        continuum_memory::MemorySourceId::new(id),
+        kind,
+        external_ref,
+        observed_at,
+    )
+    .unwrap()
+}
