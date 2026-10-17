@@ -1,0 +1,15 @@
+error[E0061]: this function takes 4 arguments but 3 arguments were supplied
+  --> tests/compile_fail/a_point_region_without_a_detector_does_not_compile.rs:25:13
+   |
+25 |     let _ = resolve_edit_region(&region, &source, (8, 4));
+   |             ^^^^^^^^^^^^^^^^^^^-------------------------- argument #4 of type `&dyn RegionDetector` is missing
+   |
+note: function defined here
+  --> src/resolve.rs
+   |
+   | pub fn resolve_edit_region(
+   |        ^^^^^^^^^^^^^^^^^^^
+help: provide the argument
+   |
+25 |     let _ = resolve_edit_region(&region, &source, (8, 4), /* &dyn RegionDetector */);
+   |                                                         +++++++++++++++++++++++++++
