@@ -22,6 +22,10 @@
 
 P5 全量测试（main `e78eaec`）：**EXIT=0，216 result / 189 Running / 1253 passed / 0 failed / 0 warning**。
 
+B+C+D 合并树全量门（main `e4a1ab2` 后）：**EXIT=0，250 result / 219 Running / 1416 passed / 0 failed / 0 warning**。
+
+跨块修复：P6C 的 `wiring.rs` S2 断言原按「全文出现 2 次」冻结，P6D 的 `P6_EXPECTED_ROWS` 与 P6A 的 `context` 允许边会让它漂移——已改为「只在 `ALLOWED` 段内计数」（`e4a1ab2`），`wiring` 5/5 绿。P6A 接棒时用 `git checkout main -- crates/continuum-memory/tests/wiring.rs` 对齐。
+
 ## 二、计划状态
 
 | 计划 | 文件 | 行数 | 任务数 | 评审结论 |
