@@ -232,9 +232,9 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
    `EVOLVING`／`FAILED`／`CANCELLED` 一律拒绝。
    **`COMPLETED` 单列，不并入终态拒绝**：它对 Product 不是严格终态（P4 只允许 `COMPLETED → EVOLVING`、
    仅 Product，P4 设计 `:885`／`:893`；`intent.rs:222`）。但它也不是可执行任务，P7D 不接；处置是
-   **P7A 在交接前把该 Product Intent 推进到 `EVOLVING`（或按新的 Milestone 重新 lower 出一个 `READY`
-   的 Product Intent）**，P7D 只认 `READY`；`COMPLETED` 本身按「非 `READY`」拒绝。`FAILED`／`CANCELLED`
-   才是终态。
+   **P7A 先把该 Product Intent 推进到 `EVOLVING`，让产品继续演化；交接值是新的 Milestone 重新
+   lower 出的新 `READY` Product Intent**（`EVOLVING` 本身不是交接值），P7D 只认 `READY`；`COMPLETED`
+   本身按「非 `READY`」拒绝。`FAILED`／`CANCELLED` 才是终态。
    `contract_id` 指向 §224 的 `TaskContract`（含 `authority_limit` 与三组 policy）；P7D 只查这两个字段，
    不读合同内容、不解释 policy。**代价照实写**：这是「合同版本引用
    ＋状态」，不是第 5 层的 policy／capability 判定引用；它不能证明合同当前仍存在、policy 未被撤销，也不能
