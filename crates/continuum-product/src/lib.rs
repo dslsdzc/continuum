@@ -5,9 +5,11 @@
 //! C2 裁定**：裁定前本 crate 只交付纯类型与纯判定。
 
 mod error;
+mod predicate;
 mod readiness;
 
 pub use error::{PortError, ProductError};
+pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use readiness::{
     ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
 };
