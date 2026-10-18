@@ -13,3 +13,9 @@ assembly = []
 
 [dev-dependencies]
 # 空
+
+# `tests/assembly.rs` 只在启用 assembly 特性时构建；默认 `cargo test -p continuum-arbiter`
+# 不得编译它（否则 `continuum_arbiter::assembly` 不存在，默认全套测试红）。
+[[test]]
+name = "assembly"
+required-features = ["assembly"]
