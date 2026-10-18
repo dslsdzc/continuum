@@ -222,12 +222,13 @@ IntentScheduler::directive_for -> Result<Option<ResourceDirective>, DirectiveFor
   则在本 trait 增加一个不透明 `ResourceContext` 参数——那是 P7C 落地时的接口变更，不是本设计的缺口；
   本轮不加。P7B 不依赖 P7C，P7C 不依赖 P7B（切分 §三第 5 条）。
 - **P7D 的上游决策面不是 READY-only**：候选状态集是 `READY` 加五个活跃状态
-  （`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）。`Advance` 只给 id，P7D 按候选状态
-  走 §223 的既有迁移或不迁移（§5.1）。`NoIntent` 不表示既有会话不存在；P7D 必须保留既有会话。
+  （`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）；其中 `EVOLVING` 仅在 P7D 确有
+  对应活跃会话时才进入候选。`Advance` 只给 id，P7D 按候选状态走 §223 的既有迁移或不迁移（§5.1）。
+  `NoIntent` 不表示既有会话不存在；P7D 必须保留既有会话。
 
 ## 2.5 本块发明的判据（逐条：规范给到哪、代价、边界、落点、收件人）
 
-**这一节是本块的「发明判据」总账（共 16 条）。** 规范没给、而本设计不得不定的每一处判定，都在下表里有一条；
+**这一节是本块的「发明判据」总账（共 16 条）。** 规范没给、而本设计已识别的自定判定，在下表里各有一条；
 **以下每一条都是「本设计自定」**（不是规范转录），规范给到哪一步见第三列，代价与收件人见第四、七列。
 **本表是本轮已识别的自定判定，不宣称穷尽；未识别的判定在实现轮补表。** 代码块只是示意，正文措辞才是约束。
 
@@ -235,7 +236,7 @@ IntentScheduler::directive_for -> Result<Option<ResourceDirective>, DirectiveFor
 |---|---|---|---|---|---|---|
 | 1 | `IntentDecision` 的 Rust 形状：`Advance { intent, basis }` / `NoIntent { basis }` | §302 只给「现在推进哪个 Intent」；切分 §2.3.2 只给 `Advance(IntentId)`／`NoIntent` 加「不透明依据」 | 消费方按变体 match；加第三臂是破坏性改动 | 不覆盖「同一轮推进多个 Intent」；不覆盖「Advance 之后失败」 | §4.1 | 规范维护者 ＋ P7D |
 | 2 | `DecisionBasis` 是 `String` 载体，不透明 | 切分 §2.3.2 只说「不透明的依据」，**没给形状** | 没有结构化原因；P7D 只能展示，不能按原因分支 | 不覆盖「依据的可审计结构」；不覆盖「依据的持久化」 | §4.1 | P7D ＋ 规范维护者 |
-| 3 | 候选资格：`IntentStatus` 的六个可推进状态——`Ready`／`Running`／`Waiting`／`Suspended`／`Verifying`／`Evolving`；`Advance` 只给 id，P7D 按候选状态分派 | §302 没给候选状态集；§223 只给状态机 | 候选集可同时含新工作与活跃会话；P7D 必须自己区分「启动」与「继续」；`Proposed`／`Specifying`／`Planning`／`Review`／`Completed`／`Failed`／`Cancelled` 不会被选中 | 不覆盖「P7D 如何构造候选集」；不覆盖「状态迁移本身」——P7B 不调用 `transition` | §4.4、§4.5、§5.1 | 规范维护者 ＋ P7D |
+| 3 | 候选资格：`IntentStatus` 的六个可推进状态——`Ready`／`Running`／`Waiting`／`Suspended`／`Verifying`／`Evolving`；`Advance` 只给 id，P7D 按候选状态分派 | §302 没给候选状态集；§223 只给状态机 | 候选集可同时含新工作与活跃会话；P7D 必须自己区分「启动」与「继续」；`Evolving` 仅在 P7D 确有对应活跃会话时才进入候选；`Proposed`／`Specifying`／`Planning`／`Review`／`Completed`／`Failed`／`Cancelled` 不会被选中 | 不覆盖「P7D 如何构造候选集」；不覆盖「状态迁移本身」——P7B 不调用 `transition` | §4.4、§4.5、§5.1 | 规范维护者 ＋ P7D |
 | 4 | 五输入的显式形状：`PrioritySignal` / `Deadline` / `Blocking` / `UserFocus` | §302 只给五个名字；切分 §6.2 第 8 条说四个没有落点 | 调用方要构造四类记录；`PrioritySignal` 与 `Intent.priority` 可能不一致，P7B 不校验 | 不覆盖「信号的存储与读取」；同一 Intent 多条信号的合并见第 15 条 | §4.2 | 规范维护者 ＋ 装配方 |
 | 5 | `BackgroundSuitability` 是 `String` 不透明载体，**整轮单值**，**不定义** `Suitable`／`Unsuitable` | 切分 §2.4 只说「不透明」；§13 只给 `workload_class` 四档与 `resource_pressure` 示例，**投影取值域未给** | 基线策略不能使用它；投影取值域由装配方定义；P7B 无法验证投影是否正确 | 不覆盖「投影值的语义」；不覆盖「装配方把四档原文塞进载体」——那是装配方的契约 | §4.2、§4.3 | P7C ＋ 装配方 ＋ 规范维护者 |
 | 6 | `IntentSelectionPolicy` trait ＋ `BaselineIntentPolicy` 的次序：可推进候选内，用户聚焦 > 最早 deadline > 最大 blocking 度 > 输入序 | §302 没给组合函数／权重；§78 只给因子与「显式 priority 最高语义权重」 | 基线**不读** `priority` 与 `background_suitability`；不同装配方可换策略，排名不可比；P7D 必须复用本策略，不能另写 | 不覆盖「priority 的最高语义权重」——`Priority` 不透明且候选序不能补救；不覆盖「多目标的加权」 | §4.4 | 规范维护者 ＋ 协调者 ＋ P7D |
@@ -470,7 +471,8 @@ Resource Scheduler 落在第 4 层。」
 （**不读** `Intent.priority` 字段）。不改状态机、不调用 `transition`、不写 `intent` 表。候选资格认六个
 可推进状态（`Ready`／`Running`／`Waiting`／`Suspended`／`Verifying`／`Evolving`，§2.5 第 3 条）。
 `Advance` 之后：`Ready`／`Waiting`／`Suspended` 由 P7D 走既有 `→ Running`（`intent.rs:252`／`:260`／`:264`）；
-`Running`／`Verifying`／`Evolving` 已在运行，P7D 继续会话、**不调用** `transition`。`Running` 有
+`Running`／`Verifying` 已在运行，P7D 继续会话、**不调用** `transition`。`Evolving` 不由此自动等同
+「已在运行」：仅当 P7D 确有对应活跃会话时才继续，否则不得进入候选集、也不得调用 `transition`。`Running` 有
 `Running → Running` 自环（`:259`），但继续不需要调用；`Verifying`／`Evolving` 没有自环，继续也不需要迁移；
 `Verifying → Running`／`Evolving → Running` 是返工／回到运行的另一条语义（`:266-269`）。
 P7B 不调用 `transition`（它是 `pub(crate)`），也不做任何迁移。
@@ -485,7 +487,7 @@ P7B 不调用 `transition`（它是 `pub(crate)`），也不做任何迁移。
 /// §302 的「现在推进哪个 Intent」。
 ///
 /// **两臂封闭**：`Advance` 带一个候选的 `IntentId`；`NoIntent` **不带任何 `IntentId`**。
-/// `NoIntent` 不是哨兵 `IntentId`：`IntentId::from_str("")` 在语义层是合法值
+/// `NoIntent` 不是哨兵 `IntentId`：空串在语义层是合法值
 /// （`crates/continuum-semantics/src/ids.rs:49-56`），若用它当「没有 Intent」，
 /// 调用方会把空串当成一枚真 Intent。本设计不提供这条路径。
 ///
@@ -697,7 +699,9 @@ pub trait IntentSelectionPolicy {
 }
 
 /// 候选状态是否可推进：`Ready`（启动）与五个活跃状态（继续／恢复）。
-/// `Running`／`Verifying`／`Evolving` 已在运行，继续它们不需要状态迁移。
+/// `Running`／`Verifying` 已在运行，继续它们不需要状态迁移；`Evolving` 仅在 P7D
+/// 确有对应活跃会话时才继续，且同样不需要迁移。`is_advanceable` 只判状态合法性，
+/// 不检查会话是否存在。
 pub(crate) fn is_advanceable(status: IntentStatus) -> bool {
     matches!(
         status,
@@ -1052,12 +1056,15 @@ P7D 可以直接用 `decide`（不取指令），也可以在需要资源指令�
   - `Ready` → `Ready → Running`（启动，`intent.rs:252`）；
   - `Waiting` → `Waiting → Running`（恢复，`:260`）；
   - `Suspended` → `Suspended → Running`（恢复，`:264`）；
-  - `Running`／`Verifying`／`Evolving` → 已在运行，**不调用** `transition`，继续当前会话。
+  - `Running`／`Verifying` → 已在运行，**不调用** `transition`，继续当前会话；
+  - `Evolving` → 仅当 P7D 确有对应活跃会话时才继续（**不调用** `transition`）；否则不得把该 Intent
+    放进候选集，也不得以 `Advance` 驱动其迁移。
   这些迁移由 P7D 经 `apply_intent_transition`（`crates/continuum-semantics/src/lib.rs:276`）或既有运行时路径执行；
   P7B 不迁移状态；P7D 不得对 `Running`／`Verifying`／`Evolving` 重复走 `Ready → Running`。
-  `PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW` 不在候选集：P7D 若要把它们送入可运行路径，
-  走 §223 的既有前向链（`Proposed → Specifying → Planning → Review → Ready`），不由 `decide` 返回；
-  `COMPLETED`／`FAILED`／`CANCELLED` 是终态，不进入候选。
+  `PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW` 不是 P7B 候选状态；P7D 不得借 `Advance` 或本契约
+  驱动它们的迁移，前向链由 P4／审查流程持有。
+  `COMPLETED` 不由 P7B 直接推进；Product 由 P7A 迁到 `EVOLVING`；`FAILED`／`CANCELLED` 才是终态，
+  不进入候选。
 - **`NoIntent`**：表示**本轮没有新的可推进项**（空候选、无可推进候选，或策略明确选择不推进）。
   它**不表示没有会话**：P7D **必须保留**既有会话与后台任务，不得据此清理、关闭或丢弃它们。
   **不得**用哨兵 `IntentId`，不得把空串当 Intent，不得把 `NoIntent` 映射成某个默认 Intent。
@@ -1174,7 +1181,7 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
 | **J4** | **不解析 `workload_class`／`resource_pressure`**：本块 `src/` 无四档原文；`BackgroundSuitability` 是私有字段的 `String` 载体；无 `continuum-arbiter` 依赖 | §302；§13 `:708-722`；切分 §2.4 | 源码面（`grep`＋`Cargo.toml`）＋运行期（载体逐字节往返） |
 | **J5** | 候选集是 `&[Intent]`；本块无 `continuum-persist` 依赖、无 `load_intent`／`list_children`／`save_intent`／`apply_intent_transition`、无 `intent` 表、无迁移 | §222 `:130-156`；切分 §6.2 第 5 条 | 源码面（签名＋`grep`＋`Cargo.toml`）＋`runtime_migrations()` 无本块行 |
 | **J6** | 空候选 ⇒ `decide` 返回 `Ok(NoIntent)`；`advanced() == None`；`basis` 非空 | §302；切分 §2.3.2 | 运行期 |
-| **J7** | 七个不可推进状态（`PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`COMPLETED`／`FAILED`／`CANCELLED`）在基线策略下 ⇒ `Ok(NoIntent)`；六个可推进状态（`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）各一组正例，假策略返回合法 `Advance` ⇒ `Ok(Advance)` | §223 `:172-205`；§302 | 运行期（逐状态一组） |
+| **J7** | 七个 P7B 非候选状态（`PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`COMPLETED`／`FAILED`／`CANCELLED`）在基线策略下 ⇒ `Ok(NoIntent)`；六个可推进状态（`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）各一组正例，假策略返回合法 `Advance` ⇒ `Ok(Advance)`。六组正例只证 `decide` 的 `is_advanceable` 校验面；基线对活跃状态的选择由 J7-b 补 | §223 `:172-205`；§302 | 运行期（逐状态一组） |
 | **J8** | 策略返回的 id 不在候选集、或候选状态不可推进 ⇒ `Err(InvalidAdvance)`；策略返回 `Err` ⇒ `Err(PolicyFailed)`；合法 `Advance` 原样返回 `Ok(Advance)`；`Ok(NoIntent)` 返回（空 `basis` 被规范化为 `"no_intent"`） | §302；§223；§2.5 第 7 条 | 运行期（假策略五组） |
 | **J9** | 基线确定性：同一输入＋同一策略 ⇒ 同一决策；可推进候选内，用户聚焦 > 最早 deadline > 最大 blocking 度（按 `as_str()` 去重）> 输入序；`priority`／`background_suitability` 不改变基线决策；重复候选与多信号合并按 §2.5 第 15 条 | §302；§78 `:641-651` | 运行期（表驱动＋对照） |
 | **J10** | **三层分离**：三个决策面 `decide`／`runnable_nodes`／`direct` 的返回类型互不相同；不存在一个函数同时返回其中两个或三个；`decide` 的签名不出现 `NodeId`／`ResourceDirective`；`directive_for` 是转交入口，只做决策→端口转交（J10-c） | §301 `:1925-1935`；§77 `:616-631`；切分 §五 P7B 完成判据 | 源码面（公开入口签名：`pub fn` ＋ trait 方法＋`grep`） |
@@ -1190,7 +1197,7 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
 | # | 照片（具体断言或命令） | 形态 | 拍不到的部分 |
 |---|---|---|---|
 | **J1-a** | `src/decision.rs` 的 `IntentDecision` 定义恰两臂；`match` 穷尽解构（无 `_`）通过 | 源码面＋编译期 | 外部代码仍可构造 `Advance`；由 J8 兜住 |
-| **J1-b** | `grep -rn "IntentId::from_str(\"\")" crates/continuum-intent-scheduler/src` 零命中；**这条只覆盖空串哨兵这一种**，`" "`／`"none"`／`"__no_intent__"` 等不在此 grep 的射程 | 源码面 | 枚举形状是主证据；grep 只作辅助 |
+| **J1-b** | `grep -rn "IntentId::from_str(\"\")" crates/continuum-intent-scheduler/src` 零命中（**文档注释除外**）；**这条只覆盖空串哨兵这一种**，`" "`／`"none"`／`"__no_intent__"` 等不在此 grep 的射程 | 源码面 | 枚举形状是主证据；grep 只作辅助 |
 | **J1-c** | 空候选 ＋ `BaselineIntentPolicy`：`decide(...) ⇒ Ok(NoIntent)`；`advanced() == None`；`basis().as_str()` 非空 | 运行期 | —— |
 | **J2** | 在测试里 `let SchedulerInputs { candidates, priority, deadline, blocking, user_focus, background_suitability } = &inputs;`（**无 `..`**）；字段名与 §302 逐字比对 | 源码面＋编译期 | 字段顺序在运行期不可见；靠源码面 |
 | **J3-a** | `grep -rn "intent\.priority\|candidate\.priority\|sort_by.*priority\|cmp.*priority\|Ord for Priority\|PartialOrd.*Priority" crates/continuum-intent-scheduler/src` 零命中 | 源码面 | 注释里可能提到 `priority`；语料限定 `src/` 的非注释行 |
@@ -1202,7 +1209,8 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
 | **J5-a** | `SchedulerInputs.candidates: &'a [Intent]`；`grep -rn "load_intent\|list_children\|save_intent\|apply_intent_transition\|continuum_persist" crates/continuum-intent-scheduler/src` 零命中（**文档注释除外**） | 源码面 | 调用方仍可从库里读出 Intent 再传进来；本块不拦 |
 | **J5-b** | `Cargo.toml` 无 `continuum-persist`；`runtime_migrations()`（`main.rs:114`）无本块行；`expected_migrations()`（`migrations.rs:37`）与 `startup.rs` 计数不变 | 源码面 | —— |
 | **J6** | `candidates = &[]`、其余输入任意，基线策略：`decide(...) ⇒ Ok(NoIntent)`，`basis` 非空 | 运行期 | —— |
-| **J7** | 七个不可推进状态（`PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`COMPLETED`／`FAILED`／`CANCELLED`）各一组，基线策略下 `decide(...) ⇒ Ok(NoIntent)`；六个可推进状态（`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）各一组，假策略返回合法 `Advance` ⇒ `Ok(Advance)` | 运行期 | 只测这十三个状态；新增状态要补 |
+| **J7** | 七个 P7B 非候选状态（`PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`COMPLETED`／`FAILED`／`CANCELLED`）各一组，基线策略下 `decide(...) ⇒ Ok(NoIntent)`；六个可推进状态（`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）各一组，假策略返回合法 `Advance` ⇒ `Ok(Advance)`。六组正例只证 `decide` 的候选校验，不证基线会选中它们 | 运行期 | 只测这十三个状态；新增状态要补；`EVOLVING` 正例只按状态合法性构造，不代表存在活跃会话 |
+| **J7-b** | 基线正例对照：候选集含 `READY`／`RUNNING`／`WAITING` 各一枚，`BaselineIntentPolicy` 按 J9 次序选中预期 id ⇒ `Ok(Advance)`；证明基线不会把活跃状态过滤掉 | 运行期 | 只证基线可选中活跃状态，不证 P7D 的会话存在性；`EVOLVING` 仍受 P7D 的活跃会话条件约束 |
 | **J8-a** | 假策略返回 `Advance { intent: 不在候选集的 id, .. }` ⇒ `Err(IntentDecisionError::InvalidAdvance { .. })` | 运行期 | —— |
 | **J8-b** | 假策略返回 `Advance { intent: COMPLETED 候选的 id, .. }` ⇒ `Err(InvalidAdvance { .. })` | 运行期 | —— |
 | **J8-c** | 假策略返回 `Advance { intent: 任一可推进候选（如 READY）的 id, .. }` ⇒ `decide` 原样返回 `Ok(Advance)` | 运行期 | —— |
@@ -1262,8 +1270,8 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
    候选序**不能**补救（deadline／blocking 会先于输入序决定结果），只能由注入的
    `IntentSelectionPolicy` 或 P4 的可比较取值域兑现（§3.6、§10 第 2 条）。收件人：规范维护者 ＋ P4。
 7. **P7D 对 `Advance` 的状态分派**：P7B 只给 id，不携带「启动 vs 继续」；P7D 是否按候选状态走
-   `Ready → Running`／`Waiting → Running`／`Suspended → Running`，并对 `Running`／`Verifying`／`Evolving`
-   不迁移，在 P7D 的设计／测试里拍。收件人：P7D。
+   `Ready → Running`／`Waiting → Running`／`Suspended → Running`，并对 `Running`／`Verifying` 不迁移、
+   对 `Evolving` 仅在确有对应活跃会话时继续，在 P7D 的设计／测试里拍。收件人：P7D。
 
 ---
 
@@ -1363,7 +1371,8 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
    （`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）。**不再要求先迁到 `READY`**：
    `Waiting → READY`／`Suspended → READY` 在 §223 不存在，`transition` 也是 `pub(crate)`。
    P7D 对 `Advance` 按候选状态分派：`Ready`／`Waiting`／`Suspended` 走既有 `→ Running`，
-   `RUNNING`／`VERIFYING`／`EVOLVING` 不迁移、只继续。**缺的是「Intent Scheduler 的候选状态集」
+   `RUNNING`／`VERIFYING` 不迁移、只继续；`EVOLVING` 仅当 P7D 确有对应活跃会话时才继续，否则不进候选。
+   **缺的是「Intent Scheduler 的候选状态集」
    这一条规范。收件人：规范维护者 ＋ P7D。** 代价：候选集包含活跃会话时，P7D 必须自己按状态分派；
    P7B 不替它选「启动 vs 继续」。
 
@@ -1428,7 +1437,7 @@ P7B 交付的是：
 1. **一个 Intent Scheduler**：`IntentScheduler::decide` 返回
    `Result<IntentDecision, IntentDecisionError>`；`IntentDecision` 保持两臂（含 `NoIntent`），
    `Result` 另有显式错误臂；不解析 `priority`，只从 `&[Intent]` 候选集的六个可推进状态里选
-   （`READY` 与五个活跃状态）。
+   （`READY` 与五个活跃状态；`EVOLVING` 仅在 P7D 确有对应活跃会话时进入候选）。
 2. **一个具名资源端口**：`ResourceDirectivePort` 是 trait；`ResourceDirective` 是四槽不透明载体；
    P7B 不实现端口、不依赖 P7C、不宣称 §304 闭合。
 3. **一个零逻辑 Graph 消费入口**：`graph::runnable_nodes` 是 `select_runnable` 的转调；

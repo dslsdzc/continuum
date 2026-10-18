@@ -149,8 +149,8 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
 
 1. **P7B 的 Intent Scheduler 决策面**：输入是 `&[Intent]` 加 §302 的**显式信号**（不是从 `Intent` 里猜；
    其中 `background suitability` 按 §2.4 的唯一投影收成不透明 `BackgroundSuitability`），输出是
-   `IntentDecision`：`Advance(IntentId)` 或 `NoIntent`，加一份不透明的依据。`NoIntent` 表示没有可推进的
-   Intent，P7D 必须按「无会话／无后台任务」处理，不得用哨兵 `IntentId`。**评分算法、权重、模型提示不冻**。
+   `IntentDecision`：`Advance(IntentId)` 或 `NoIntent`，加一份不透明的依据。`NoIntent` 表示本轮没有
+   新的可推进项；P7D 保留既有会话与后台任务，不得用哨兵 `IntentId`。**评分算法、权重、模型提示不冻**。
    这一页由 P7B 开工第一件事冻结，P7D 对着它写。
 2. **P7C 的仲裁结论面**：对 AI／后台暴露的结论**只有** `resource_pressure` 与 `workload_class` 两项
    （§13 的原话，`docs/spec/01-concepts.md:717-722`）；**§300 的四档优先级另有一张只对装配方
