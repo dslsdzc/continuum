@@ -4,10 +4,12 @@
 //! 本 crate 是长期循环层（第 7 层）的一个库 crate。**迁移 200 与全部落库 API 条件于
 //! C2 裁定**：裁定前本 crate 只交付纯类型与纯判定。
 
+mod baseline;
 mod error;
 mod predicate;
 mod readiness;
 
+pub use baseline::{BaselineRequest, EngineeringBaseline, EngineeringBaselineGenerator};
 pub use error::{PortError, ProductError};
 pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use readiness::{
