@@ -1,0 +1,15 @@
+[package]
+name = "continuum-arbiter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+assembly = []
+
+[dependencies]
+# 空：workspace 内零依赖、外部零依赖
+
+[dev-dependencies]
+# 空

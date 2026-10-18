@@ -325,6 +325,9 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 不登记 memory / graph / artifact / capability / events / effect / policy / semantics /
     // context / method / verify / model-registry / trust——逐条理由见设计 §3.2。
     ("continuum-learning", &["continuum-protected"]),
+    // P7C Resource Arbiter（设计 §2.1）。**空数组是硬断言**：
+    // 任何指向 workspace 内别的 crate 的直接边都会让逐对断言变红。
+    ("continuum-arbiter", &[]),
     // Task 12 起 runtime 直接依赖这几个：artifact 与 graph 用于在启动流程里
     // 注册 P1 迁移，workspace 用于注册 P2 的 workspace 表迁移（Task 4）。
     //
