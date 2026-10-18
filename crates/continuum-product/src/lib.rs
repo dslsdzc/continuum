@@ -10,6 +10,7 @@ mod milestone;
 mod predicate;
 mod product;
 mod readiness;
+mod shippable;
 
 pub use baseline::{BaselineRequest, EngineeringBaseline, EngineeringBaselineGenerator};
 pub use error::{PortError, ProductError};
@@ -18,4 +19,8 @@ pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use product::{Product, establish_baseline};
 pub use readiness::{
     ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
+};
+pub use shippable::{
+    ClauseAssessment, ClauseVerdict, NotShippableReason, ShippableAssessment,
+    ShippableUndetermined, ShippableVerdict, evaluate_shippable,
 };

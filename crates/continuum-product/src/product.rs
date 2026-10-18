@@ -172,3 +172,33 @@ fn status_name(status: IntentStatus) -> &'static str {
         IntentStatus::Evolving => "evolving",
     }
 }
+
+/// 测试专用构造点。**只用于 J6 的 `BaselineUnusable` 防御面**；生产路径不经过它。
+/// Task 17 的 J5 允许清单把这一处列为 `#[cfg(test)]` 例外。
+#[cfg(test)]
+impl Product {
+    pub(crate) fn for_test_with_unusable_baseline(
+        shippable_predicate: ShippablePredicate,
+    ) -> Self {
+        Self {
+            id: ProductIdRef::from_str("p1"),
+            intent_id: IntentId::from_str("intent/root"),
+            baseline: crate::baseline::EngineeringBaseline {
+                product_goal: continuum_canonical::Opaque::from_str(""),
+                target_users: Vec::new(),
+                required_capabilities: Vec::new(),
+                hard_constraints: Vec::new(),
+                architecture: continuum_canonical::Opaque::from_str(""),
+                technology_choices: Vec::new(),
+                minimum_complete_system: Vec::new(),
+                known_unknowns: Vec::new(),
+                engineering_risks: Vec::new(),
+                acceptance_criteria: Vec::new(),
+            },
+            readiness: ProductReadiness::unassessed(),
+            current_milestone: None,
+            milestone_history: Vec::new(),
+            shippable_predicate,
+        }
+    }
+}
