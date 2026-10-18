@@ -9,7 +9,8 @@ use std::sync::Mutex;
 use continuum_product::{
     BaselineRequest, BatchBoundary, EngineeringBaseline, EngineeringBaselineGenerator,
     MilestoneBatchDraft, MilestoneGenerator, MilestoneProposalInput, PortError,
-    ReadinessDimensionName, ShippableClause, ShippableClauseId, ShippablePredicate,
+    ProgressDelta, ProgressPolicy, ProductReadiness, ReadinessDimensionName, ShippableClause,
+    ShippableClauseId, ShippablePredicate,
 };
 use continuum_semantics::{
     ContractId, ContractRef, Intent, IntentId, IntentKind, IntentStatus, Priority, ProductIdRef,
@@ -82,6 +83,43 @@ pub struct FixedMilestoneGenerator {
     batches: Mutex<VecDeque<Result<MilestoneBatchDraft, PortError>>>,
     seen_history_lens: Mutex<Vec<usize>>,
     seen_boundaries: Mutex<Vec<BatchBoundary>>,
+}
+
+/// 读真实 `Documentation` 三元组的策略；不返回常量。
+pub struct DeltaByDimension {
+    pub threshold: u32,
+}
+
+fn documentation_score(readiness: &ProductReadiness) -> Option<i64> {
+    readiness
+        .dimension(ReadinessDimensionName::Documentation)
+        .value()
+        .as_assessed()?
+        .as_str()
+        .parse()
+        .ok()
+}
+
+impl ProgressPolicy for DeltaByDimension {
+    fn delta(
+        &self,
+        previous: &ProductReadiness,
+        current: &ProductReadiness,
+    ) -> ProgressDelta {
+        match (
+            documentation_score(previous),
+            documentation_score(current),
+        ) {
+            (Some(a), Some(b)) if b > a => ProgressDelta::Improved,
+            (Some(a), Some(b)) if b == a => ProgressDelta::NoProgress,
+            (Some(_), Some(_)) => ProgressDelta::Regressed,
+            _ => ProgressDelta::Undetermined,
+        }
+    }
+
+    fn stall_threshold(&self) -> u32 {
+        self.threshold
+    }
 }
 
 impl FixedMilestoneGenerator {

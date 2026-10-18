@@ -10,6 +10,7 @@ mod error;
 mod milestone;
 mod predicate;
 mod product;
+mod progress;
 mod readiness;
 mod shippable;
 
@@ -24,6 +25,10 @@ pub use milestone::{
 };
 pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use product::{Product, establish_baseline};
+pub use progress::{
+    ProgressDelta, ProgressGateVerdict, ProgressPolicy, ProgressRecord,
+    ProgressUndetermined, ReplanDraft, evaluate_progress,
+};
 pub use readiness::{
     ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
 };
