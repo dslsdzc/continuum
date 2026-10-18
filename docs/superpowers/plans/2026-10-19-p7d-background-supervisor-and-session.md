@@ -1021,8 +1021,10 @@ git commit -m "feat(supervisor): decide 转调 P7B 并分派复用/恢复控制�
 - `session_plan_has_four_private_fields_and_six_accessors`（J11／J12 源码面）：读
   `code_only(include_str!("../src/session.rs"))`，在 `pub struct SessionPlan {` 与配对的 `}` 之间
   断言字段恰四行且顺序为 `mode`／`candidates`／`decision`／`background`，且 `background` 行是
-  `background: BackgroundDigest,`；断言 `session.rs` 不含 `SchedulerInputs`（digest 只进
-  `SessionPlan.background`）；断言 `impl SessionPlan {` 恰一处且 `pub fn` 恰六条（`mode`／
+  `background: BackgroundDigest,`（digest 只进 `SessionPlan.background`，不进 `SchedulerInputs`
+  构造——该判据只落在 `plan_manual` 的函数体上，见下一条 `background_does_not_enter_scheduler_inputs`；
+  **本条不禁止整个 `session.rs` 出现 `SchedulerInputs`**：Task 9 的 `plan_auto` 必须消费它）；
+  断言 `impl SessionPlan {` 恰一处且 `pub fn` 恰六条（`mode`／
   `candidates`／`decision`／`selection`／`background`／`basis`）；断言不含
   `impl Default for SessionPlan`／`Deserialize`／`pub mode:`。
 - `background_note_has_exactly_two_private_fields`（J12 源码面）：读 `code_only` 的
@@ -1461,13 +1463,17 @@ git commit -m "feat(supervisor): SynthesisIo 端口与 §171 三个触发转发"
 - `lib_rs_defines_no_types`：`code_only(src/lib.rs)` 不含 `pub struct`／`pub enum`／`pub trait`／
   `impl `（只做 `pub mod` 与 `pub use`）。
 - `allowed_row_has_exactly_five_entries`（J16）：读
-  `code_only(include_str!("../../../crates/continuum-runtime/tests/dependency_direction.rs"))`，用一个小
-  解析器定位 `("continuum-supervisor",`；**跳过 subject 自身的引号串**（从 subject 收尾的 `",` 之后
-  开始），取到配对的 `)` 之间的所有引号串；断言恰五项且按字母序为
+  `code_only(include_str!("../../../crates/continuum-runtime/tests/dependency_direction.rs"))`，先
+  取 `const ALLOWED: &[(&str, &[&str])] = &[` 到其后 `\n];` 之间的表体；在表体内扫描引号串，找到
+  值恰为 `continuum-supervisor` 的 subject，再从该引号串起始位置**向左**找最近的 `(`，从该 `(`
+  向右做括号深度匹配（跨行、允许任意空白）找到配对的 `)`；只在这个括号范围内取引号串，**跳过
+  subject 自身的引号串**，断言恰五项且按字母序为
   `continuum-arbiter`／`continuum-canonical`／`continuum-intent-scheduler`／`continuum-memory`／
-  `continuum-semantics`；另取 `("continuum-runtime",` 到配对 `)` 的括号范围，断言其中不含
-  `continuum-supervisor`（只看该行自己的范围，不做全文查找）。不跳过 subject 会数成六项，这是本条
-  解析口径的写死点。
+  `continuum-semantics`；另用同一套「subject 引号串 → 左侧 `(` → 配对 `)`」定位取
+  `continuum-runtime` 的元组范围，断言其中不含 `continuum-supervisor`（只看该元组自己的范围，不做
+  全文查找）。**不要用 `("continuum-supervisor",` 这种把 `(` 与 subject 绑在同一行的字面定位**：
+  Task 1 的插入是多行 tuple，`(` 与 subject 各占一行、`&[` 与 `]` 也各占一行；解析器必须允许
+  `(` 与 subject 之间跨行／有空白。不跳过 subject 会数成六项，这是本条解析口径的写死点。
 - `zero_persistence_and_no_intent_table`（J17）：`Cargo.toml` 不含 `continuum-persist`；
   `code_only` 的 `src/` 不含 `Migration`／`Tx`／`INSERT`／`UPDATE`／`load_intent`／
   `list_children`／`save_intent`／`apply_intent_transition`／`Event`／`EventType`；
