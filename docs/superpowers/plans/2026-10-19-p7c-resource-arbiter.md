@@ -368,7 +368,7 @@ fn the_exhaustive_match_has_no_fifth_arm() {
 }
 ```
 
-`tests/pressure.rs` 本 task 只写两条：
+`tests/pressure.rs` 本 task 只写三条：
 
 ```rust
 use continuum_arbiter::ResourcePressure;
@@ -2307,7 +2307,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | 把 `WorkloadClass::parse("INTERACTIVE")` 映射到 `Some(InteractiveGame)` | Task 1 的 `interactive_is_not_a_fifth_class` | Task 2／4 的行为用例 |
 | `direct` 在 `Running` 收到 `Suspend` 时直接设 `Suspended` | Task 4 的 `suspend_only_reaches_checkpointing...`、`every_cell...`、`high_pressure...` | Task 2 的压力用例 |
 | `checkpoint_failed` 停在 `Checkpointing` 或报 `Suspended` | Task 4 的 `checkpoint_failure_returns_to_throttled_and_never_suspends` | Task 2／Task 5 的重试用例（若未触发失败路径） |
-| 删掉 `direct` 的截止检查 | Task 5 的 `direct_at_the_deadline_returns_to_throttled`、`zero_timeout_expires_at_the_next_state_entry`、`late_success_is_rejected_after_the_deadline` | Task 4 的成功路径 |
+| 删掉 `direct` 与 `checkpoint_succeeded` 两处截止检查 | Task 5 的 `direct_at_the_deadline_returns_to_throttled`、`zero_timeout_expires_at_the_next_state_entry`、`late_success_is_rejected_after_the_deadline` | Task 4 的成功路径 |
 | `max_checkpoint_attempts == 0` 分支返回 `None`／`Running` | Task 5 的 `zero_attempts_only_throttles` | Task 4 的 16 格（默认 max=3） |
 
 **结果：** 六轮都红在该红的位置、还原后 `sha256sum` 与变异前一致、`git status` 干净。
@@ -2333,7 +2333,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | §2.5 | 切分 §四六条横切约束 | Task 1（ALLOWED／零迁移）＋Task 6（词汇表／源码面）＋Task 8（复核） |
 | §2.6 | 同名异物（`Suspended`／`priority`／`workload_class`／`TaskSource`／`Decision`／`ResourceDirective`／`Budget`） | Task 6 的 `no_same_named_foreign_types`（`contains_token` 词边界）＋Task 3／4 的类型名与测试注释 |
 | §3.1–§3.3 | §300／§13／§14 的规范依据 | Task 2（压力）／Task 1（负载类）／Task 3（优先级）／Task 4／5（挂起） |
-| §3.4 | §7.1–§7.4；判据 3 只覆盖 J1＋J2 | Task 1／Task 4；「遗留」第 4 条 |
+| §3.4 | §7.1–§7.4；判据 3 只覆盖 J1＋J2 | Task 1／Task 4；§8.5（自报判据） |
 | §3.5 | A14／OPEN-012 的暴露面 | Task 3／6；「遗留」第 4 条 |
 | §3.6 | budget／router／placement 边界 | Task 6 的 `no_resource_scheduler_budget_or_persistence_surface` |
 | §3.7 | P7C 不是 Resource Scheduler | Task 6 同上；Global Constraints 末段 |
@@ -2361,7 +2361,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | §6.2 | P7D 控制面 | Task 4（decision／state）＋Task 5（失败出口）；P7D 义务不在本块代码 |
 | §6.3 | 装配方面 | Task 3 |
 | §6.4 | P7B 端口不引入 P7C 类型 | **不在本块代码内**；Type consistency 明写无 `ResourceDirective`／`ResourceContext` |
-| §6.5 | 暴露面强度与限制 | Task 3／6；「遗留」第 3 条 |
+| §6.5 | 暴露面强度与限制 | Task 3／6；「遗留」第 4 条 |
 | §7.1／§7.2 | P7D／装配方的消费清单 | Task 4 的 Interfaces＋「遗留」第 2 条 |
 | §7.3／§7.4／§7.5 | 不参与 product drive／budget／router；不碰 P7A／B／D 内部 | Global Constraints＋Task 6 |
 | §8.1 | J1–J17 | 「二、照片归位」 |
@@ -2371,7 +2371,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | §8.5 | §7.4 判据 3 与自报判据的关系 | Task 8 Step 2／Step 4；Global Constraints |
 | §9 | 明确不做 | Global Constraints 末段；Task 6 源码面 |
 | §10 | 零持久化／不占迁移档 | Task 7 的 manifest；Task 8 Step 3 |
-| §11 | 14 条设计问题 | 「遗留/待协调」列本块直接相关的 8 条（第 1／3／4／6／9／12／13／14 条；第 3／4 条合并在遗留第 2 项）＋1 条 dev 口径；第 2 条在 Global Constraints／J5 具名（收件人规范维护者），第 5／7／8／10／11 条留在设计或本块外消费方 |
+| §11 | 14 条设计问题 | 「遗留/待协调」列本块直接相关的 9 条（第 1／2／3／4／6／9／12／13／14 条；第 2 条见遗留第 9 项，第 3／4 条合并在遗留第 2 项）＋1 条 dev 口径；第 5／7／8／10／11 条留在设计或本块外消费方 |
 | §12 | 实测对账 | 本计划引用其结论，不重述 |
 
 **照片归位（J1–J17）**：照片按设计 §5 的判定分节归位——J12→§5.4、J8→§5.5、J11→§5.6、J2→§5.4、
@@ -2464,16 +2464,16 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
 
 ### 五、比例
 
-- 设计 1535 行；本计划 **2531 行**（`wc -l` 实测）。任务 **8 个**。
+- 设计 1535 行；本计划 **2537 行**（`wc -l` 实测）。任务 **8 个**。
 - 比例约 1.4×设计，与 P6A（1828／1283）／P7B（1752／1451）同量级；文档里没有实现函数体，
   只有签名、测试断言、转移表、4×4 阶梯与源码面规则。测试量大于生产量是刻意的——本块的判据几乎全是
   “形状＋状态边界＋否定面＋源码面”。
 - J1–J17 每条至少有一张照片；**J1(ii) 明确标“待 P7D 合并门”，不是全绿**；J6／J7／J13 的
   `impl` 块扫描覆盖全量 `src/`，不按文件白名单偷懒；J12 的 16 格逐格列出；J11 的 `max=0` 与
   `Resume` 重置各有一条独立用例。
-- 没有把设计 §11 的 14 条全部搬成 task：与本块实现直接相关的第 1／3／4／6／9／12／13／14 条进
-  「遗留」（第 3／4 条合并在第 2 项，第 9 条见第 8 项），外加 1 条本计划的 dev 口径；第 2 条在
-  Global Constraints／J5 具名；第 5／7／8／10／11 条留在设计或本块外消费方（重述就是第二份转录）。
+- 没有把设计 §11 的 14 条全部搬成 task：与本块实现直接相关的第 1／2／3／4／6／9／12／13／14 条进
+  「遗留」（第 2 条见第 9 项，第 3／4 条合并在第 2 项，第 9 条见第 8 项），外加 1 条本计划的
+  dev 口径；第 5／7／8／10／11 条留在设计或本块外消费方（重述就是第二份转录）。
 
 ---
 
@@ -2525,6 +2525,12 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
    消费者看到的 `ResourceSummary`／`direct` 结果。P7C 只消费读数、不验证真实性，也不读 OS；探测器
    来源、频率、失败/过期语义与调用方授权都在装配方，P7D 负责谁有资格持有并调用 arbiter。
    **不要把“零依赖／无 OS”误当成输入可信。收件人：装配方＋P7D。**
+
+9. **§13 输出示例 `INTERACTIVE` 笔误（设计 §11 第 2 条）**：规范 §13 的四档是 `INTERACTIVE_GAME`／
+   `COMPUTE_WORKLOAD`／`COMPILER`／`VIDEO_RENDER`（`docs/spec/01-concepts.md:708-715`）；输出示例
+   `:721` 的 `workload_class = INTERACTIVE` 不在四档里。P7C 按笔误处理：不设第五变体，
+   `parse("INTERACTIVE") == None`（Task 1 的 `interactive_is_not_a_fifth_class`）。
+   **收件人：规范维护者＋P9。**
 
 **不列入本计划的**：`TaskSource`→`WorkloadDeclaration` 的映射（设计 §7.1 明确是 P7D 的设计决定）、
 `throttle` 的量化语义（P7D）、checkpoint 的内容／存储／重启恢复（P7D）、OS 探测器的频率与失败语义
