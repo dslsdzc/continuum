@@ -34,18 +34,19 @@ fn runtime_manifest_depends_on_memory_once() {
 #[test]
 fn allowed_table_has_the_memory_row_and_the_runtime_entry() {
     let text = repo_file("crates/continuum-runtime/tests/dependency_direction.rs");
+    // 只在 `ALLOWED` 表段内数：`P6_EXPECTED_ROWS`（P6D 的对表）与其它 P6 块的
+    // 允许边也引用 `continuum-memory`，全文计数会随块数漂移。
+    let allowed_start = text
+        .find("const ALLOWED")
+        .expect("依赖方向测试应有 ALLOWED 表");
+    let allowed = &text[allowed_start..];
+    let allowed = &allowed[..allowed.find("];").expect("ALLOWED 表应有结尾")];
     assert_eq!(
-        text.matches("(\"continuum-memory\", &[\"continuum-persist\"])")
+        allowed
+            .matches("(\"continuum-memory\", &[\"continuum-persist\"])")
             .count(),
         1,
         "ALLOWED 应恰有一行 (\"continuum-memory\", &[\"continuum-persist\"])（S2）"
-    );
-    // P6A 的 continuum-context 条目把 continuum-memory 列为四条允许边之一，
-    // 故 3 = memory 行 + runtime 条目 + P6A 条目。
-    assert_eq!(
-        text.matches("\"continuum-memory\",").count(),
-        3,
-        "`\"continuum-memory\",` 应恰出现三次：memory 行、runtime 条目与 P6A 条目各一次（S2）"
     );
 
     let start = text
