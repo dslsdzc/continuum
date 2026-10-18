@@ -18,7 +18,10 @@ pub use drive::{
     ContinuousProductDrive, ProductDriveState, ProductPhase, advance_product_phase,
 };
 pub use error::{PortError, ProductError};
-pub use milestone::MilestoneId;
+pub use milestone::{
+    BatchBoundary, Milestone, MilestoneBatchDraft, MilestoneDependency, MilestoneDraft,
+    MilestoneGenerator, MilestoneId, MilestoneProposalInput, MilestoneState, propose_next_batch,
+};
 pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use product::{Product, establish_baseline};
 pub use readiness::{
