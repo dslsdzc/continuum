@@ -5,6 +5,7 @@
 //! C2 裁定**：裁定前本 crate 只交付纯类型与纯判定。
 
 mod baseline;
+mod drive;
 mod error;
 mod milestone;
 mod predicate;
@@ -13,6 +14,9 @@ mod readiness;
 mod shippable;
 
 pub use baseline::{BaselineRequest, EngineeringBaseline, EngineeringBaselineGenerator};
+pub use drive::{
+    ContinuousProductDrive, ProductDriveState, ProductPhase, advance_product_phase,
+};
 pub use error::{PortError, ProductError};
 pub use milestone::MilestoneId;
 pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
