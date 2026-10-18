@@ -1,6 +1,6 @@
-use continuum_semantics::{IntentId, IntentStatus};
+use continuum_semantics::{Intent, IntentId, IntentStatus};
 
-use crate::inputs::SchedulerInputs;
+use crate::inputs::{Blocking, SchedulerInputs, UserFocus};
 
 /// §302 的「现在推进哪个 Intent」。
 ///
@@ -99,6 +99,97 @@ pub(crate) fn is_advanceable(status: IntentStatus) -> bool {
             | IntentStatus::Verifying
             | IntentStatus::Evolving
     )
+}
+
+/// 确定性基线。**它不是规范排名**；它是 P7D 可以直接用的默认策略。
+///
+/// 次序（本设计自定）：可推进候选为空 ⇒ `NoIntent`；`UserFocus::Intent` 命中；
+/// 最早 deadline；最大 blocking 去重度；输入序第一枚。`priority` 与
+/// `background_suitability` **不参与基线**。
+#[derive(Debug, Default, Clone, Copy)]
+pub struct BaselineIntentPolicy;
+
+impl IntentSelectionPolicy for BaselineIntentPolicy {
+    fn choose(&self, inputs: &SchedulerInputs<'_>) -> Result<IntentDecision, DecisionBasis> {
+        let eligible: Vec<&Intent> = inputs
+            .candidates
+            .iter()
+            .filter(|candidate| is_advanceable(candidate.status))
+            .collect();
+        if eligible.is_empty() {
+            return Ok(IntentDecision::NoIntent {
+                basis: DecisionBasis::new("no_advanceable_candidate"),
+            });
+        }
+
+        if let UserFocus::Intent(focus) = &inputs.user_focus {
+            if eligible
+                .iter()
+                .any(|candidate| candidate.id.as_str() == focus.as_str())
+            {
+                return Ok(IntentDecision::Advance {
+                    intent: focus.clone(),
+                    basis: DecisionBasis::new("user_focus"),
+                });
+            }
+        }
+
+        // 每个候选先取自己最早的 deadline；min_by_key 并列取第一个。
+        let deadline_pick = eligible
+            .iter()
+            .filter_map(|candidate| {
+                inputs
+                    .deadline
+                    .iter()
+                    .filter(|deadline| deadline.intent.as_str() == candidate.id.as_str())
+                    .map(|deadline| deadline.at_millis)
+                    .min()
+                    .map(|at| (*candidate, at))
+            })
+            .min_by_key(|(_, at)| *at);
+        if let Some((candidate, _)) = deadline_pick {
+            return Ok(IntentDecision::Advance {
+                intent: candidate.id.clone(),
+                basis: DecisionBasis::new("earliest_deadline"),
+            });
+        }
+
+        // blocking：合并 + 按 as_str 去重 + 严格 > 保留输入序第一个最大值。
+        let mut best: Option<(&Intent, usize)> = None;
+        for candidate in &eligible {
+            let records: Vec<&Blocking> = inputs
+                .blocking
+                .iter()
+                .filter(|blocking| blocking.intent.as_str() == candidate.id.as_str())
+                .collect();
+            if records.is_empty() {
+                continue;
+            }
+            let mut blocked: Vec<&str> = records
+                .iter()
+                .flat_map(|blocking| blocking.blocks.iter().map(|id| id.as_str()))
+                .collect();
+            blocked.sort_unstable();
+            blocked.dedup();
+            let count = blocked.len();
+            match best {
+                Some((_, best_count)) if count <= best_count => {}
+                _ => best = Some((*candidate, count)),
+            }
+        }
+        if let Some((candidate, _)) = best {
+            return Ok(IntentDecision::Advance {
+                intent: candidate.id.clone(),
+                basis: DecisionBasis::new("blocking_degree"),
+            });
+        }
+
+        let candidate = eligible[0];
+        Ok(IntentDecision::Advance {
+            intent: candidate.id.clone(),
+            basis: DecisionBasis::new("candidate_order"),
+        })
+    }
 }
 
 /// Intent Scheduler 的唯一决策入口（§302）。

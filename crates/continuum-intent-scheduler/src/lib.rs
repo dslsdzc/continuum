@@ -5,7 +5,8 @@ pub mod decision;
 pub mod inputs;
 
 pub use decision::{
-    DecisionBasis, IntentDecision, IntentDecisionError, IntentSelectionPolicy, IntentScheduler,
+    BaselineIntentPolicy, DecisionBasis, IntentDecision, IntentDecisionError,
+    IntentSelectionPolicy, IntentScheduler,
 };
 pub use inputs::{
     BackgroundSuitability, Blocking, Deadline, PrioritySignal, SchedulerInputs, UserFocus,
