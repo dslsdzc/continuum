@@ -1,4 +1,6 @@
-use continuum_memory::{MemoryError, MemoryRetrieval};
+use std::collections::HashSet;
+
+use continuum_memory::{MemoryError, MemoryRetrieval, RetrievalQuery};
 
 use crate::{ContextBudget, ContextPackage, ContextRequest, Reference};
 
@@ -10,14 +12,16 @@ use crate::{ContextBudget, ContextPackage, ContextRequest, Reference};
 /// 失败面只有 P6C 的 `MemoryError`，原样透传；本块不定义第二枚错误类型（设计 §5.6）。
 pub fn compile(
     request: ContextRequest,
-    _budget: ContextBudget,
-    _memory: &dyn MemoryRetrieval,
+    budget: ContextBudget,
+    memory: &dyn MemoryRetrieval,
 ) -> Result<ContextPackage, MemoryError> {
     let ContextRequest {
         instructions,
         references,
         artifacts,
-        ..
+        scopes,
+        anchor,
+        memory_query,
     } = request;
 
     let mut instructions_out: Vec<String> = Vec::new();
@@ -58,8 +62,35 @@ pub fn compile(
         trust_labels.push(label_value);
     }
 
-    // memories：记忆分支由 Task 4 接入。
-    let memories = Vec::new();
+    // memories：只在 scopes 非空且 max_memories > 0 时构造查询并调用检索面。
+    // `?` 直接透传 P6C 的 `MemoryError`（设计 §5.3 第 5 条、§5.6）。
+    let mut memories = Vec::new();
+    if !scopes.is_empty() && budget.max_memories > 0 {
+        let query = RetrievalQuery::new(
+            scopes,
+            anchor,
+            memory_query,
+            budget.max_memories,
+            false,
+        )?;
+        let claims = memory.retrieve(&query)?;
+        let mut seen: HashSet<String> = HashSet::new();
+        for claim in claims {
+            if memories.len() >= budget.max_memories {
+                break;
+            }
+            if !seen.insert(claim.id().as_str().to_string()) {
+                continue;
+            }
+            // provenance 必须在移动 claim 之前构造（借 `id()`）。
+            let claim_provenance =
+                continuum_trust::ContextProvenance::memory(claim.id().as_str());
+            let label_value = continuum_trust::label(&claim_provenance);
+            memories.push(claim);
+            provenance.push(claim_provenance);
+            trust_labels.push(label_value);
+        }
+    }
 
     Ok(ContextPackage {
         instructions: instructions_out,

@@ -19,3 +19,6 @@ continuum-trust = { path = "../continuum-trust" }
 [dev-dependencies]
 # `ToolResult.output` 的构造与 J1-c 的反序列化样例（设计 §8.2 J1-c）。
 serde_json = { workspace = true }
+# P6C 的测试构造面（`MemoryClaim::for_test`）：同一条 continuum-memory 边的测试
+# feature，不是第五条边。Task 4 Step 3b 预检通过后加入。
+continuum-memory = { path = "../continuum-memory", features = ["test-support"] }
