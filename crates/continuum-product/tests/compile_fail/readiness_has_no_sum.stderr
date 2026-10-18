@@ -1,0 +1,14 @@
+error[E0599]: `ProductReadiness` is not an iterator
+ --> tests/compile_fail/readiness_has_no_sum.rs:3:23
+  |
+3 |     let _ = readiness.sum();
+  |                       ^^^ `ProductReadiness` is not an iterator
+  |
+ ::: src/readiness.rs
+  |
+  | pub struct ProductReadiness {
+  | --------------------------- doesn't satisfy `ProductReadiness: Iterator`
+  |
+  = note: the following trait bounds were not satisfied:
+          `ProductReadiness: Iterator`
+          which is required by `&mut ProductReadiness: Iterator`

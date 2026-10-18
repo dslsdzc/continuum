@@ -1,0 +1,5 @@
+error[E0599]: no method named `aggregate` found for struct `ProductReadiness` in the current scope
+ --> tests/compile_fail/readiness_has_no_aggregate.rs:3:23
+  |
+3 |     let _ = readiness.aggregate();
+  |                       ^^^^^^^^^ method not found in `ProductReadiness`

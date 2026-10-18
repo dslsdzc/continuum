@@ -1,0 +1,5 @@
+error[E0599]: no method named `score` found for struct `ProductReadiness` in the current scope
+ --> tests/compile_fail/readiness_has_no_score.rs:3:23
+  |
+3 |     let _ = readiness.score();
+  |                       ^^^^^ method not found in `ProductReadiness`

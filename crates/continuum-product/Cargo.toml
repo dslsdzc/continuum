@@ -1,0 +1,19 @@
+[package]
+name = "continuum-product"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+continuum-canonical = { path = "../continuum-canonical" }
+continuum-persist = { path = "../continuum-persist" }
+continuum-semantics = { path = "../continuum-semantics" }
+continuum-verify = { path = "../continuum-verify" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }
+trybuild = { workspace = true }

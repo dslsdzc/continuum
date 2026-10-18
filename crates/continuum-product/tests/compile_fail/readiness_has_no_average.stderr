@@ -1,0 +1,5 @@
+error[E0599]: no method named `average` found for struct `ProductReadiness` in the current scope
+ --> tests/compile_fail/readiness_has_no_average.rs:3:23
+  |
+3 |     let _ = readiness.average();
+  |                       ^^^^^^^ method not found in `ProductReadiness`
