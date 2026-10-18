@@ -50,7 +50,7 @@ Supervisor／Session）各有其设计，本文件不替它们定任何形状。
 | `Milestone→Product Intent` 的 lower | §152；§222 `docs/spec/05-normative.md:132-155`；切分 §三.6 `:213-243` | §4.8 | 确定构造 `Intent`；**只经 `continuum-semantics` 公开面落库**；只交接 `READY` |
 | `Progress Gate`、`progress_delta`、replan 的 `Decision` | §337 `docs/spec/05-normative.md:2583-2597`；§154 `docs/spec/03-product-drive.md:257-309` | §4.5 | 三值判定；申报策略可测；**只出 `Decision`，不执行 replan** |
 | `ShippablePredicate`、`ShippableVerdict`、post-shippable 区分 | §335 `docs/spec/05-normative.md:2535-2547`；§336 `:2551-2580`；§155 `docs/spec/03-product-drive.md:313-373` | §4.6、§4.7 | 三值 fail-closed；`Shippable` 今天**不可达**（§8 第 3 条） |
-| `ContinuousProductDrive` 的落点 | §336；切分 §2.3.1 `:132-133` | §4.7（提案） | **切分偏离，待协调**：切分只给 `Product`／`ProductReadiness`／verdict 三处；本设计提案 (b) 另立 `ProductDriveState`＋`product_drive` 表，须协调者裁定并更新切分 §2.3.1 后才落（§8 第 12 条） |
+| `ContinuousProductDrive` 的落点 | §336；切分 §2.3.1 `:132-133` | §4.7（提案） | **切分偏离，待协调**：切分只给 `Product`／`ProductReadiness`／verdict 三处；本设计提案 (b) 另立 `ProductDriveState`＋`product_drive` 表，须协调者做 C2 裁定并更新切分 §2.3.1 后才落；**C2 裁定前不应用迁移 200**（§8 第 12 条） |
 
 ## 1.2 不建什么（摘要；完整表在 §7）
 
@@ -117,6 +117,13 @@ P7A 的新 crate 会让 P6D 的合并门变红，按切分 §四第 1 条由 **P
 
 **迁移号段**：P7A 确定落库，占 **200**（切分 §四第 2 条 `:265-276`）。**200 的 SQL 一经应用
 不得再改**（同 110／130／190 的纪律）。P7A 不占 201–209。
+
+**C2 裁定（`product_drive` 的落点裁定）是 200 的硬前置**（截至本设计，200 尚未应用）：
+该裁定未作出前，P7A
+**不合并、不应用**迁移 200——不存在「先应用三表版本、之后再补第四张」的路径。裁定后
+200 一次成型：批准提案 (b)（独立 `product_drive` 表）⇒ 四张表；落点选 (a)（既有面）⇒
+三张表且 drive 写点改到既有面。这是「不改已应用的 SQL」的唯一一致解；若协调者坚持
+drive 表另取号，那是切分变更（201 已预留 P7D），必须报协调者；本设计不选这条。
 
 ## 2.2 冻结清单：本块持有的类型与判定
 
@@ -197,12 +204,12 @@ MilestoneGenerator        —— §233／§152 的生成端口（§4.4，trait�
 | 2 | `progress_delta` 的计算 | §337 `:2583-2597` 只给名字；§154 `:257-309` 只给 `previous_product_state`／`current_product_state`／`progress_delta` 与「≈0」 | `ProgressPolicy::delta(&ProductReadiness, &ProductReadiness) -> ProgressDelta`；`ProgressDelta` 四值（Improved／NoProgress／Regressed／Undetermined） | 两个策略可对同一对状态给出不同 delta；P7A 不存数值 | 不覆盖「缓慢进展」；不覆盖「一维进步、另一维退步」的加权 | §4.5 | 规范维护者 ＋ P10 |
 | 3 | `progress_delta` 的阈值与「连续多个」 | §337 只说「连续多个 Milestone」，**没有数字**；A15／OPEN-010 明文未定义 | `ProgressPolicy::stall_threshold() -> u32`；**无默认值**；0 视为无效 ⇒ `Undetermined`；没有策略 ⇒ `Undetermined` | 调用方可以把阈值设成 1 或极大；P7A 不替规范选默认 | 拦不住「有策略但策略永远返回 Improved」；拦不住不做策略申报的调用方 | §4.5 | 规范维护者 ＋ P10 |
 | 4 | Milestone 的**批次边界** | §233 `:470-495` 要求有限视野；§152 `:175-219` 允许并行／汇合；**批次边界未给**（OPEN-015） | `BatchBoundary { max_milestones, max_dependency_depth }`；**显式参数、无默认**；超界**拒绝**（不静默截断） | 合法的长依赖链会被拆成多批；调用方可以申报一个巨大的边界，从而在事实上生成完整未来 | 拦不住「调用方申报 `usize::MAX`」；拦不住「生成器本身返回完整未来」——P7A 只查边界 | §4.4 | 规范维护者 ＋ P10 |
-| 5 | `ContinuousProductDrive` 的形状与落点 | §336 `:2551-2580` 只给开关名与 post-shippable 的可继续项；§155 `:313-373` 只给「必须区分」；切分 §2.3.1 `:132-133` 只给三处落点 | **提案 (b)**：`ContinuousProductDrive { enabled }` ＋ `ProductPhase` ＋ `ProductDriveState`，落在 Product 面的独立状态（`product_drive` 表），**不是 §231 的第八个字段**。**这是切分未授权的第四种落点，作为切分变更报协调者，裁定并更新切分 §2.3.1 前不落库**（§8 第 12 条）；若协调者选 (a)，改为既有面并作废独立表 | `Product` 的聚合跨两张表；P7D 看不到开关（它只按值收 Product Intent，切分 §三.6）；裁定前 200 的第四张表不能写 | 今天的 `Shippable` 不可达（§8 第 3 条），所以 `Shippable`／`PostShippableImprovement` 相位没有生产路径 | §4.7（提案）、§8 第 12 条 | 协调者（裁定）＋ 规范维护者 |
+| 5 | `ContinuousProductDrive` 的形状与落点 | §336 `:2551-2580` 只给开关名与 post-shippable 的可继续项；§155 `:313-373` 只给「必须区分」；切分 §2.3.1 `:132-133` 只给三处落点 | **提案 (b)**：`ContinuousProductDrive { enabled }` ＋ `ProductPhase` ＋ `ProductDriveState`，落在 Product 面的独立状态（`product_drive` 表），**不是 §231 的第八个字段**。**这是切分未授权的第四种落点，作为切分变更报协调者，裁定并更新切分 §2.3.1 前不落库**（§8 第 12 条）；若协调者选 (a)，改为既有面并作废独立表 | `Product` 的聚合跨两张表；P7D 看不到开关（它只按值收 Product Intent，切分 §三.6）；C2 裁定前 200 不得合并/应用；裁定后一次成型（(b) 独立表四张 / (a) 既有面三张） | 今天的 `Shippable` 不可达（§8 第 3 条），所以 `Shippable`／`PostShippableImprovement` 相位没有生产路径 | §4.7（提案）、§8 第 12 条 | 协调者（裁定）＋ 规范维护者 |
 | 6 | `Product` 的字段类型 | §231 `:424-438` 只给七个字段名；`current_milestone`／`milestone_history[]` 的元素类型未给；`baseline` 是否可空未给 | `current_milestone: Option<MilestoneId>`；`milestone_history: Vec<MilestoneId>`（由 `milestone` 表按 `seq` 派生，不另存一列）；`baseline: EngineeringBaseline`（非可空） | 历史只有 id，不是快照；`current_milestone` 单数，不能同时表示并行批次里的多个当前项；没有 Product 行就没有 baseline | 拦不住「Milestone 行被外部删除后历史变短」；拦不住「并行 Milestone 的 current 语义有歧义」 | §4.1 | 规范维护者 ＋ 协调者 |
 | 7 | `ShippablePredicate` 的形状 | §335 `:2535-2547` **只给名字**，一个字段都没给；§155 只给一个自然语言例子 | `required_dimensions[]` ＋ `clauses[]`；子句有稳定 id 与不透明 statement；**空谓词拒绝**；判定不在 P7A 内（`ShippableAssessment` 由调用方给） | 调用方要自己评估子句；P7A 不能保证子句真的被评估过 | 拦不住「调用方把所有子句都报 Satisfied」；拦不住「required dimension 有值但值是主观分」 | §4.6 | 规范维护者 |
-| 8 | `ShippableVerdict` 的三值组合 | §335／§336；切分 §2.3.1 `:127-131`、§四第 4 条 `:286-293`；`CompletionVerdict` **只有两臂**（`crates/continuum-verify/src/completion.rs:24`） | 三值 fail-closed；`NotShippable` 优先于 `Undetermined`：**先查 completion `Blocked` 与 clause `NotSatisfied`，再查 assessment 结构错误（缺／多／重复）与其余不可判项**；`Undetermined` 不是许可；**`Shippable` 今天没有生产者** | 正许可面不可拍；`Shippable` 相位不可达；只能测负臂与不可判臂；结构错误的 assessment 不会遮蔽明确不成立 | 拦不住「外部直接构造 `ShippableVerdict::Shippable`」（它是公开枚举；§8 第 14 条） | §4.6 | P5a ＋ P9（ENG-004） |
+| 8 | `ShippableVerdict` 的三值组合 | §335／§336；切分 §2.3.1 `:127-131`、§四第 4 条 `:286-293`；`CompletionVerdict` **只有两臂**（`crates/continuum-verify/src/completion.rs:24`） | 三值 fail-closed；**`MissingProduct` 是前置（`product == None` 时不看 completion）**；其余 `NotShippable` 优先于 `Undetermined`：**先查 completion `Blocked` 与 clause `NotSatisfied`，再查 assessment 结构错误（缺／多／重复）与其余不可判项**；`Undetermined` 不是许可；**`Shippable` 今天没有生产者** | 正许可面不可拍；`Shippable` 相位不可达；只能测负臂与不可判臂；结构错误的 assessment 不会遮蔽明确不成立 | 拦不住「外部直接构造 `ShippableVerdict::Shippable`」（它是公开枚举；§8 第 14 条） | §4.6 | P5a ＋ P9（ENG-004） |
 | 9 | `EngineeringBaseline` 的字段类型与生成入口 | §150 `:43-114` 只给十字段名与流程；字段类型未给；切分 §三第 5 条把生成判给模型端口 | 十个字段取 `Opaque`／`Vec<Opaque>`；生成经 `EngineeringBaselineGenerator`；`Product` 只能由 `establish_baseline`＋`save_product` 产生；`product_goal` 与 `minimum_complete_system` 为空 ⇒ 基线不可用 | 模型输出只能是不透明文本；P7A 不判工程好坏；空列表的语义（「没有」还是「没填」）分不开 | 拦不住「生成器把十条都填成空串以外的东西」；拦不住「基线其实不成立」 | §4.3 | 规范维护者 |
-| 10 | lower 的 `goal`／`id`／`status`／`completion_predicate` | §152 `:175-219` 只说 Milestone→Intent；§222 `:132-155` 给 `Intent` 字段；**lower 的确定构造规则未给** | `id = intent/{milestone_id}`；`goal = EntityId::from_str(objective)`（**不跑 Canonicalizer**）；`status = PROPOSED`；`parent_intent = Some(product.intent_id)`；`completion_predicate` 取 `exit_conditions` 的确定性编码；`contract_id` 必须由调用方给 | `goal` 不是规范化实体；同一 objective 的两枚 Milestone 会得到同一个 `EntityId`；`completion_predicate` 对 P4／P5a 是不透明串，不能被解析 | 不覆盖「§152 的并行／汇合图」——`Intent` 只有单亲 `parent_intent`，图边留在 `milestone` 表（§8 第 6 条） | §4.8 | P4 ＋ 规范维护者 |
+| 10 | lower 的 `goal`／`id`／`status`／`completion_predicate` | §152 `:175-219` 只说 Milestone→Intent；§222 `:132-155` 给 `Intent` 字段；**lower 的确定构造规则未给** | `id = intent/{milestone_id}`；`goal = EntityId::from_str(objective)`（**不跑 Canonicalizer**）；`status = PROPOSED`；`parent_intent = Some(product.intent_id)`；`completion_predicate` 取 `exit_conditions` 的确定性编码（零条 ⇒ `""`；空元素在 §4.4 被拒，故 `""` 唯一）；`contract_id` 必须由调用方给 | `goal` 不是规范化实体；同一 objective 的两枚 Milestone 会得到同一个 `EntityId`；`completion_predicate` 对 P4／P5a 是不透明串，不能被解析 | 不覆盖「§152 的并行／汇合图」——`Intent` 只有单亲 `parent_intent`，图边留在 `milestone` 表（§8 第 6 条） | §4.8 | P4 ＋ 规范维护者 |
 | 11 | replan 的 `Decision` 内容 | §337 只说「replan」；§154 `:299-305` 给的是**策略选项的例子**（A 重构／B 接受／C 改目标）；§331 只给 `Decision` 四字段 | `ReplanDraft { issue, options, blocking }` 由调用方给；P7A 只决定「是否出」，不决定「有哪些路线」；`Decision.id` 由 P7A 按 product+milestone 派生 | 没有调用方给 draft 时，gate 只能停在 Triggered 而没有 Decision；P7A 不能自己生成 replan 选项 | 拦不住「draft 的选项只是把问题重述一遍」；不执行 replan（消费方是具名缺口） | §4.5 | 协调者 ＋ 第 3 层 Planner ＋ P8 |
 | 12 | Evidence 到 readiness 的映射 | §232／§153 只说「用验证结果重新评估」；P5a 的 `Evidence` **只写不读**（`crates/continuum-verify/src/evidence.rs:117`；切分 §6.2 第 6 条 `:405`） | `record_milestone_progress` 收 `&[Evidence]` 值，**只用它核 `EvidenceId` 的存在性**：遍历 `current.iter()`，对每维调 `ProductReadiness`／`ReadinessDimension` 的只读 getter（`value()`／`evidence()`／`last_verified()`）取出被引用的 id；落库只存 id；不读 `evidence` 表；不判 claim／type／strength | P7A 不证明某条 evidence 支持某一维；九维的 `Assessed` 值仍由调用方给 | 拦不住「调用方给了 id 但值与该证据无关」；拦不住「证据内容是负面的」 | §4.2（getter）、§4.5 | P5a ＋ 规范维护者 |
 | 13 | Milestone 的状态迁移 | §234 `:498-525` 只给七状态，**没有迁移表**；《工程》§7.4 判据 1 只要求生成 | P7A 只存 `state`；`record_milestone_state(expected, to)` 做乐观并发（当前值必须等于 expected），**不判合法对** | 非法迁移可以被写入；P7A 不是 Milestone 状态机 | 拦不住「Proposed→Completed 直接跳」；拦不住「没有执行就改 Completed」 | §4.4 | 规范维护者 ＋ P1／协调者 |
@@ -220,7 +227,7 @@ MilestoneGenerator        —— §233／§152 的生成端口（§4.4，trait�
 | 切分 §四 | 要求（要点） | 本设计的落点 | 可观察判据 |
 |---|---|---|---|
 | **第 1 条**（`:255-264`） | 不新增反向边；四块各自在 `ALLOWED` 加自己一行；既有行不因 P7 增枚，唯一例外是装配方 `continuum-runtime`；P6D 合并门由 P7D 复核 | §2.1 的四项边表；P7A 不加 `continuum-runtime`／provider／model-registry／node；不碰 P6 fixture | `cargo test -p continuum-runtime --test dependency_direction` 在含本 crate 的树上绿；`ALLOWED` 的 `continuum-product` 行恰是四项 |
-| **第 2 条**（`:265-276`） | 迁移 200–209 档；P7A 确定落库占 200；同步三处计数 | §4.9：200 的三张既定表＋（提案 (b) 批准后）`product_drive`；`runtime_migrations()`／`expected_migrations()`／`startup.rs:26`／`:81`／`:94` 同批 | 迁移版本 `[200]`；启动输出 15／13／15；190 的 SQL 一字不改 |
+| **第 2 条**（`:265-276`） | 迁移 200–209 档；P7A 确定落库占 200；同步三处计数 | §4.9：C2 裁定后 200 一次成型——(b) 四张表，(a) 三张表；裁定前不应用；`runtime_migrations()`／`expected_migrations()`／`startup.rs:26`／`:81`／`:94` 同批 | 迁移版本 `[200]`；启动输出 15／13／15；190 的 SQL 一字不改 |
 | **第 3 条**（`:277-285`） | 同一件事两个词汇表：§232 九名优先；§153 不建第二套；不新造 `ProductId`；`Decision` vs `PolicyDecision` | §2.5；§4.1（`id: ProductIdRef`）；§4.2（九名字段）；本 crate 不定义 `Decision`／`PolicyDecision` | 源码面：无 `struct ProductId`、无 `functional_completeness` 字段、无 `enum IntentStatus` |
 | **第 4 条**（`:286-293`） | 只消费 `Evidence`／`CompletionVerdict`；不消费原始工具输出／模型自述／`Claim`；Shippable 三值 fail-closed；`Undetermined` 不是许可 | §4.2 的 `EvidenceId`；§4.5／§4.6；§6.2 | 源码面：无 `ToolResult`／`Claim` 字段；运行期：`Undetermined` 分支不产生 `Shippable`／不产生 Decision |
 | **第 5 条**（`:294-296`） | 依赖边只登记实际用到的；`ALLOWED` 与实际依赖精确一致 | §2.1 四行边表与 `ALLOWED` 四项一一对应；dev 外部依赖不进表 | `dependency_direction` 的两个方向都绿 |
@@ -438,7 +445,7 @@ post-shippable improvement。
 `ShippableVerdict::Shippable` 时进入；`PostShippableImprovement` 只在开关启用且开始一项
 post-shippable 工作时进入；**相位只前进，不回退**（§4.7）。**落点本身是切分偏离：切分
 §2.3.1 只给 `Product`／`ProductReadiness`／verdict 三处，独立表是第四种，须协调者裁定
-（§8 第 12 条）；裁定前 §4.7 是提案，不写迁移 200 的第四张表。**
+（§8 第 12 条）；裁定前 §4.7 是提案，不应用迁移 200；裁定后 200 一次成型（(b) 四表／(a) 三表）。**
 
 ## 3.8 §337 Progress Gate（`docs/spec/05-normative.md:2583-2597`）
 
@@ -532,8 +539,11 @@ pub struct Product {
 **唯一公开构造路径**：`establish_baseline`（异步生成，§4.3）返回一个 `Product`，再由
 `save_product(tx, &product)` 落库。**没有** `Product::new`／`Product::from_parts`／
 `Product { .. }` 的公开入口。crate 私有的唯一构造点是 `Product::from_verified_parts`
-（`establish_baseline` 与 `persist::row_to_product` 都经它，且它逐条校验 §4.1 的不变量）；
-J5 的 `grep "Product {"` 允许清单因此恰是「字段定义＋`from_verified_parts`＋`row_to_product`」。
+（`establish_baseline` 与 `persist::row_to_product` 都经它，且它逐条校验 §4.1 的不变量）。
+J5 因此分两条 grep：① `grep -rn "Product {"` 的允许命中是 `struct Product {` 的字段定义与
+`impl Product {` 的固有实现块（本节的访问器；若拆成多个 impl 则逐块登记）；② 构造点用
+`grep -rn -e "Self {" -e "Product::from_verified_parts"`，允许命中是 `from_verified_parts`
+体内的唯一 `Self {` 与 `establish_baseline`／`row_to_product` 两个调用点。**清单外命中即红。**
 
 **不变量**：
 
@@ -738,10 +748,10 @@ pub async fn establish_baseline(
 ) -> Result<Product, ProductError>;
 
 /// 同步落库：重新 `load_intent` 核对锚 Intent（含 status == READY），再写 `product`
-/// 与 `product_drive` 两张表（同一 `Tx`；不 commit）。已存在同 id ⇒ `ProductExists`。
-/// `product_drive` 的落库以协调者批准提案 (b) 为前提（§4.7、§8 第 12 条）；未批准前
-/// `save_product` 只写 `product`，drive 的写点随落点裁定一起改。批准后 drive 行以
-/// `continuous_product_drive = false`、`phase = PreShippable` 初始化（§4.7 的默认值）。
+/// （以及 C2 裁定后的 drive 落点；同一 `Tx`；不 commit）。已存在同 id ⇒ `ProductExists`。
+/// **C2 裁定前不应用迁移 200，也不存在「只写 product」的三表先行版本**（§2.1、§8 第 12 条）。
+/// 裁定 (b) ⇒ 同 Tx 写 `product_drive`，行以 `continuous_product_drive = false`、
+/// `phase = PreShippable` 初始化；裁定 (a) ⇒ drive 写点改到既有面（§4.7 的默认值不变）。
 pub fn save_product(tx: &Tx<'_>, product: &Product, occurred_at: i64)
     -> Result<(), ProductError>;
 ```
@@ -840,6 +850,9 @@ pub struct MilestoneProposalInput<'a> {
 }
 
 /// 单枚提案：没有 id、没有 product_id、没有 state——这三样由 P7A 赋。
+/// `entry_conditions`／`exit_conditions` 的每个元素必须非空（`Opaque("")` 会让
+/// `completion_predicate` 的空编码失去唯一性，§4.8）；由 `propose_next_batch` 与
+/// `save_milestones` 拒绝（`EmptyMilestoneCondition`）。
 #[derive(Debug, Clone)]
 pub struct MilestoneDraft {
     pub objective: Opaque,
@@ -873,6 +886,7 @@ pub trait MilestoneGenerator {
 
 ```
 /// 校验：批次非空；`len <= boundary.max_milestones()`；每枚 objective 非空；
+/// 每枚的 `entry_conditions`／`exit_conditions` 元素非空（否则 `EmptyMilestoneCondition`）；
 /// `InBatch(i)` 只指向更早的 `i`（无自环、无环）；`Existing(id)` 必须在 `history` 里；
 /// 批内依赖深度 `<= boundary.max_dependency_depth()`；`history` 每枚的 product_id
 /// 必须等于 `product.id`，且按 `seq` 升序（调用方从 `load_milestones` 取）。
@@ -898,6 +912,8 @@ pub async fn propose_next_batch(
 /// `ordinal` 后缀（按最后一个 `/` 取）与该 seq 一致（不一致 ⇒ `MilestoneOrdinalMismatch`）；
 /// 每枚的 product_id 必须等于 product.id、state 必须为 PROPOSED、id 不得已存在
 /// （否则 `MilestoneProductMismatch`／`MilestoneStateMismatch`／`MilestoneIdCollision`）；
+/// 每枚 objective 非空（否则 `EmptyMilestoneObjective`）；
+/// 每枚的 `entry_conditions`／`exit_conditions` 元素非空（否则 `EmptyMilestoneCondition`）；
 /// 写之前检查：该 Product 的每个 COMPLETED Milestone 都已有 `product_progress` 行，
 /// 否则 `MissingProgressForCompleted`（§2.3 第 17 条的评估门）；
 /// 若 product.current_milestone 为 NULL，设为批次第一枚；把 product.updated_at
@@ -1004,8 +1020,9 @@ pub trait ProgressPolicy {
 
 ```
 /// 算法（本设计定，§2.3 第 2、3、14 条）。`history` 按 `recorded_at`／插入序升序
-/// （`load_progress` 的返回序）；最后一条是最近的一条；**不含本次尚未写入的那一条**
-/// （本次由 `previous/current` 与 `policy.delta` 算，step 6 才计入）。
+/// （`load_progress` 的返回序）；最后一条是最近的一条；**必须严格早于本次评估**：
+/// 不含本次由 `previous/current` 与 `policy.delta` 代表的 `record`，也不含任何
+/// 与其 `(product_id, milestone_id)` 相同的记录（step 6 才把本次计入一次）。
 /// 1. policy 为 None ⇒ Undetermined(NoPolicy)。
 /// 2. threshold == 0 ⇒ Undetermined(InvalidThreshold)。
 /// 3. previous/current 全为 Unassessed ⇒ Undetermined(ReadinessUnassessed)。
@@ -1039,6 +1056,8 @@ pub fn evaluate_progress(
 /// 若 `product.current_milestone == Some(milestone.id())`，把游标推进到按 `seq` 的
 /// 第一个非终态 Milestone（没有则置 NULL）——否则游标会停在刚完成的终态上，违反
 /// §4.1 不变量 6；并行批次里即使完成的是最后一枚，也能找到前面的非终态项。
+/// verdict 用**写入前**的历史计算（该 history 不含本次将写入的行）；不得先写库、
+/// 再把 `load_progress` 的全量当作 verdict 的 history——那会把本行重复计入。
 /// 返回记录与 verdict；不 commit。
 pub fn record_milestone_progress(
     tx: &Tx<'_>,
@@ -1065,7 +1084,10 @@ pub struct ReplanDraft {
 /// **不接收 `ProgressGateVerdict`**：verdict 是公开枚举，任何调用方都能伪造
 /// `Triggered{consecutive_no_progress: 99, threshold: 1}`（I8）。本函数用
 /// `record.previous/current_product_state`＋`history`＋`policy` **重新调用
-/// `evaluate_progress`**，只信重算结果：
+/// `evaluate_progress`**，只信重算结果。**`history` 必须排除 `record`**：调用方
+/// 若把 `load_progress` 的全量直接传入，实现必须按 `milestone_id` 去重（`record`
+/// 优先），同一条 NoProgress 只能计一次。阈值 3、实际连续 2 ⇒ `NotTriggered{2,3}`，
+/// 不得因重复计数误触发。
 /// - `Triggered` ⇒ 出 `Decision`，返回 `Some`；
 /// - `NotTriggered`／`Undetermined` ⇒ **零行、零事件**，返回 `Ok(None)`（不是错误，
 ///   也不允许调用方用一个自报的 Triggered 绕过）。
@@ -1172,8 +1194,10 @@ pub enum ShippableUndetermined {
 **判定**：
 
 ```
-/// 顺序（本设计定，§2.3 第 8 条；**「明确不成立」先于「结构错误／不可判」**）：
-/// 1. product 为 None（无 Product）⇒ Undetermined(MissingProduct)。
+/// 顺序（本设计定，§2.3 第 8 条；**`MissingProduct` 是前置；其余「明确不成立」先于
+/// 「结构错误／不可判」**）：
+/// 1. product 为 None（无 Product）⇒ Undetermined(MissingProduct)。**前置：先于所有
+///    其他分支**——无 Product 时没有可判定的对象，即使 completion == Blocked 也不改判。
 /// 2. completion == Blocked ⇒ NotShippable(CompletionBlocked)。
 /// 3. 任一子句 NotSatisfied ⇒ NotShippable(ClauseNotSatisfied)（多枚不满足时按
 ///    predicate.clauses 的顺序取第一枚；assessment 里多出的重复项不能遮蔽这一条；
@@ -1188,9 +1212,10 @@ pub enum ShippableUndetermined {
 /// 8. completion == Undetermined ⇒ Undetermined(CompletionUndetermined)。
 /// 9. 若未来 completion 有正臂，则 Shippable；**今天没有第 9 步的实现**。
 ///
-/// **这就是 C4 的修法**：第 2、3 步先于第 5 步，所以「assessment 缺一条／多一条＋
-/// CompletionVerdict::Blocked／clause NotSatisfied」会得到 `NotShippable`，而不是
-/// `Undetermined`。第 3 步按 predicate.clauses 查 assessment，缺项不会把 NotSatisfied
+/// **这就是 C4 的修法**：第 1 步是 `MissingProduct` 前置，`None + Blocked` 仍返回
+/// `Undetermined(MissingProduct)`（J15 的组合负例 C）；第 2、3 步先于第 5 步，所以
+/// 「assessment 缺一条／多一条＋CompletionVerdict::Blocked／clause NotSatisfied」会得到
+/// `NotShippable`，而不是 `Undetermined`。第 3 步按 predicate.clauses 查 assessment，缺项不会把 NotSatisfied
 /// 藏掉；重复项也不会改变「某一子句明确不满足」这一事实。
 ///
 /// 今天 `CompletionVerdict` 只有 Blocked／Undetermined 两臂（completion.rs:24）。
@@ -1239,7 +1264,7 @@ completion）都能测；但**正向分支没有实现**，所以「正向宣告
 **落点状态**：切分 §2.3.1 `:132-133` 只给 `Product`／`ProductReadiness`／verdict 三处；
 本节把开关与相位放进**独立的 `ProductDriveState`**（`product_drive` 表），是**第四种
 落点**，只能作为**切分变更**处理：协调者先裁定并更新切分 §2.3.1，本节的表与 API 才落库
-（§8 第 12 条）。**裁定前本节是提案，不是已定接口；J17 只覆盖纯相位机，不覆盖落库。**
+（§8 第 12 条）。**裁定前本节是提案，不是已定接口；J17 分两段：J17a 相位机（`advance_product_phase` 纯函数）无条件可拍；J17b 落库（`record_shippable_evaluation`／`begin_post_shippable_work`／`set_continuous_product_drive`）与 drive gate 交接以 C2 裁定并落库为前提，裁定前不拍。**
 
 ```
 /// §336 的用户开关。默认 false；只在 Product 创建后改变。
@@ -1323,8 +1348,8 @@ pub fn set_continuous_product_drive(
 **今天的可达性**：`ShippableVerdict::Shippable` 没有生产者（§4.6），所以
 `record_shippable_evaluation` 永远只能把相位留在 `PreShippable`。`Shippable` 与
 `PostShippableImprovement` 的**类型区分**与**不回退**可拍；**进入 Shippable 的生产路径
-不可拍**（§8 第 3 条）。J17 用一个**合成的** `ShippableVerdict::Shippable` 测相位机，
-并明确标注它不是 `evaluate_shippable` 的产物。
+不可拍**（§8 第 3 条）。J17a 用一个**合成的** `ShippableVerdict::Shippable` 测相位机，
+并明确标注它不是 `evaluate_shippable` 的产物；J17b 的落库／交接段以 C2 裁定为前提。
 
 **限度**：相位是**产品级标签**，P7A 不从 Milestone 的内容判断它是不是 post-shippable；
 调用方必须在第一项 post 工作开始时调 `begin_post_shippable_work`。不调时相位停在
@@ -1365,7 +1390,7 @@ pub fn lower_milestone(
 | `active_plan_id` | `None` | lower 不建 Plan |
 | `graph_id` | `None` | lower 不建 ADFIR |
 | `product_id` | `Some(product.id.clone())` | 切分 §三.6；与 `Product.id` 同一枚 |
-| `completion_predicate` | `exit_conditions` 的确定性编码（按序、换行连接；**空则 `Opaque("")`——唯一的可区分空值**） | §2.3 第 10 条；P4 不解析它。**跨块约定**：P5a 必须把 `""` 映射为 `declared_completion_predicate = None`（§6.2）；`Some("")` 在 P5a 侧算「有内容」，不能直接透传（`completion.rs:70-76`、`:213-214`） |
+| `completion_predicate` | `exit_conditions` 的确定性编码（按序、换行连接；**零条 ⇒ `Opaque("")`**；空元素已在 §4.4 被 `EmptyMilestoneCondition` 拒绝，故 `""` 唯一对应「没有 exit conditions」） | §2.3 第 10 条；P4 不解析它。**跨块约定**：P5a 必须把 `""` 映射为 `declared_completion_predicate = None`（§6.2）；`Some("")` 在 P5a 侧算「有内容」，不能直接透传（`completion.rs:70-76`、`:213-214`） |
 
 **`id` 的确定性**：`intent/{milestone_id}`。`MilestoneId` 本身是
 `milestone/{product_id}/{ordinal}`。两枚 Milestone 不会得到同一个 Intent id；同一枚
@@ -1494,6 +1519,9 @@ pub enum ProductError {
     TerminalMilestone { id: String },
     MilestoneStateMismatch { id: String, expected: String, actual: String },
     EmptyMilestoneObjective,
+    /// `entry_conditions`／`exit_conditions` 的某个元素是空串；`field` 取
+    /// `"entry_conditions"`／`"exit_conditions"`，`index` 是该元素下标。
+    EmptyMilestoneCondition { field: &'static str, index: usize },
     DuplicateProgress { product: String, milestone: String },
     MissingProgressForCompleted { milestone: String },
     InvalidBatchBoundary,
@@ -1528,10 +1556,10 @@ pub enum ProductError {
 同一臂会直接违反 §4.5／§4.6 的 fail-closed 区分。
 
 **迁移 200（`p7a_product_migrations()`，名称 `p7a_product`）**：前三张表
-（`product`／`milestone`／`product_progress`）是已定形状。**第四张 `product_drive` 只在
-协调者批准 §4.7 的提案 (b) 后写入 200**；若裁定 (a)，200 只有三张表，`load_product_drive`
-与 drive 写点一并改到既有面（§8 第 12 条）。**裁定前不得把 `product_drive` 视为 200 的
-既定内容。**
+（`product`／`milestone`／`product_progress`）是已定形状。**C2 裁定是 200 合并/应用的
+硬前置**：裁定前 P7A 不应用 200（没有三表先行版）；裁定后 200 一次成型——批准 §4.7 的
+提案 (b)（独立表）⇒ 四张表（含 `product_drive`）；落点 (a)（既有面）⇒ 三张表，
+`load_product_drive` 与 drive 写点一并改到既有面（§8 第 12 条）。**不存在「先应用三表、后补第四张」的路径。**
 
 ```
 product (
@@ -1566,7 +1594,7 @@ product_progress (
     recorded_at            INTEGER NOT NULL,
     PRIMARY KEY (product_id, milestone_id)
 );
--- 提案 (b)：只有在协调者裁定并更新切分 §2.3.1 后才写入迁移 200（§8 第 12 条）。
+-- 提案 (b)：C2 裁定后与 200 一次写入；裁定前不应用 200，不存在三表先行版（§8 第 12 条）。
 product_drive (
     product_id                TEXT PRIMARY KEY NOT NULL,
     continuous_product_drive  INTEGER NOT NULL,  -- 0/1；其他值读回即 CorruptRow
@@ -1601,8 +1629,11 @@ pub fn load_product(tx: &Tx<'_>, id: &ProductIdRef)
 /// 不应缺失；缺失在交接函数里按 `MissingDriveState` 处理）。
 pub fn load_product_drive(tx: &Tx<'_>, id: &ProductIdRef)
     -> Result<Option<ProductDriveState>, ProductError>;
+/// 复核 objective 非空、`entry_conditions`／`exit_conditions` 的每个元素非空
+/// （与 §4.4 的构造校验同向；违反 ⇒ `CorruptRow`）。
 pub fn load_milestone(tx: &Tx<'_>, id: &MilestoneId)
     -> Result<Option<Milestone>, ProductError>;
+/// 同 `load_milestone`：任一 Milestone 违反 ⇒ `CorruptRow`。
 pub fn load_milestones(tx: &Tx<'_>, product_id: &ProductIdRef)
     -> Result<Vec<Milestone>, ProductError>;   // 按 seq 升序，即 milestone_history
 pub fn load_progress(tx: &Tx<'_>, product_id: &ProductIdRef)
@@ -1621,7 +1652,7 @@ pub fn load_progress(tx: &Tx<'_>, product_id: &ProductIdRef)
 （切分 §6.2 第 5、6 条）。
 
 **迁移注册**：`runtime_migrations()`（`main.rs:114`）、`expected_migrations()`
-（`migrations.rs:37`）、`startup.rs` 的三处计数（`:26`／`:81`／`:94`）同批改。P7A 只占
+（`crates/continuum-runtime/tests/migrations.rs:37`）、`startup.rs` 的三处计数（`:26`／`:81`／`:94`）同批改。P7A 只占
 **200**；191–199 是 P6 档，不挪用；201 留给 P7D 若落库。
 
 ---
@@ -1640,19 +1671,19 @@ pub fn load_progress(tx: &Tx<'_>, product_id: &ProductIdRef)
 | **J4** | `Assessed` ⇒ 非空 value、非空 evidence、`Some(last_verified)`；`Unassessed` ⇒ 空 evidence、`None`；每个 EvidenceId 必须在传入的 `&[Evidence]` 里；只存 id，不读 evidence 表 | §232；切分 §四第 4 条 `:286-293`、§6.2 第 6 条 `:405` | 运行期（正例＋五类负例）＋ 源码面（无 `FROM evidence`） |
 | **J5** | `EngineeringBaseline` 恰十字段，名字与 §150 逐字；`Product` 只能由 `establish_baseline`＋`save_product` 产生；生成失败 ⇒ 零 Product 行；没有公开的 `Product::new`／`Deserialize` | §150 `:43-114`；切分 §三第 5 条 `:200-212` | 源码面＋运行期（假生成器）＋ 编译期（结构体字面量／`Default` 编不过） |
 | **J6** | baseline 缺失或不可用 ⇒ `evaluate_shippable` 返回 `Undetermined`；空 baseline 的库行读回 ⇒ `CorruptRow`；不得用全 `Unassessed` 冒充已评估；`Product.baseline` 非可空 | §231；§232；切分 §2.3.1 `:131-132`；I6 | 运行期（`None`、空 baseline 行、内存 `BaselineUnusable` 三条） |
-| **J7** | `Milestone` 恰七字段、七状态，名字与 §234 逐字；状态列的表外值读回即 `CorruptRow` | §234 `:498-525` | 源码面＋运行期（往返＋表外值） |
-| **J8** | 批次非空、`len <= max_milestones`、批内依赖深度 `<= max_dependency_depth`；超界拒绝且零行写入；生成器输入只含已生成历史；没有「baseline → 全部 Milestone」的入口；COMPLETED Milestone 没有 ProgressRecord 时拒绝新批次；**两个批次各 2 枚时 id 全局唯一（ordinal = history.len()+i，seq 连续）**；**Product 未保存 ⇒ `UnknownProduct`、零行** | §233 `:470-495`；§151 `:118-171`；§152 `:175-219`；切分 §6.1 `:394`；§2.3 第 17 条；I1、I5 | 运行期（假生成器：边界内／超界／缺 progress／两批 id／孤儿 Product）＋ 源码面（无完整列表 API） |
+| **J7** | `Milestone` 恰七字段、七状态，名字与 §234 逐字；状态列的表外值读回即 `CorruptRow`；**空 objective／空 condition 元素读回即 `CorruptRow`** | §234 `:498-525` | 源码面＋运行期（往返＋表外值＋空条件） |
+| **J8** | 批次非空、`len <= max_milestones`、批内依赖深度 `<= max_dependency_depth`；超界拒绝且零行写入；**`entry_conditions`／`exit_conditions` 的空元素 ⇒ `EmptyMilestoneCondition`、零行**；生成器输入只含已生成历史；没有「baseline → 全部 Milestone」的入口；COMPLETED Milestone 没有 ProgressRecord 时拒绝新批次；**两个批次各 2 枚时 id 全局唯一（ordinal = history.len()+i，seq 连续）**；**Product 未保存 ⇒ `UnknownProduct`、零行** | §233 `:470-495`；§151 `:118-171`；§152 `:175-219`；切分 §6.1 `:394`；§2.3 第 17 条；I1、I5 | 运行期（假生成器：边界内／超界／缺 progress／两批 id／孤儿 Product／空条件）＋ 源码面（无完整列表 API） |
 | **J9** | 依赖允许分叉／汇合（一依赖多、多依赖一）；`InBatch(i)` 只指向更早项；自环／环／越界 ⇒ 拒绝；图边留在 milestone 表 | §152 `:175-219` | 运行期（DAG 正例＋环负例） |
 | **J10** | lower 产出合法 `Intent`：`kind = Product`、`product_id = Some`、`parent_intent = 锚`、`status = PROPOSED`、`contract` 有效、`completion_predicate` 取 exit conditions（**空 exit ⇒ `""`**）；跨 Product 的 Milestone ⇒ `MilestoneProductMismatch`；同输入两次 lower 的字段相同；`save_lowered_intent` 不接受 `Intent`（外部传 `READY`／`RUNNING`／`COMPLETED` 的 Intent 编不过） | §152；§222 `:132-155`；切分 §三.6 `:215`；I2、I7、C3 | 运行期（两次调用对照＋跨 Product 负例＋空 exit 映射）＋ 编译期（`trybuild`：`save_lowered_intent(tx, &forged_intent)` 编不过）＋ 源码面（无 `UPDATE intent`） |
 | **J11** | 交接按 `MilestoneId` 只返回 `READY`；其余十二个状态（`PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`COMPLETED`／`FAILED`／`CANCELLED`／`EVOLVING`）一律 `None`；**两个 READY、current 只指向其中一个时，两次按 id 调用都返回 `Some`**；**特别是 `PLANNING→SUSPENDED→RUNNING` 的 Intent（状态是 `RUNNING` 但从未过 `REVIEW`）必须被拒绝**；P7A 不把 PROPOSED 推进到 READY；只对 COMPLETED→EVOLVING 调公开状态机 | §223 `:174-206`；`intent.rs:249`；切分 §三.6 `:226-237`、§八第 5 条 `:483-485`；I3 | 运行期（十二个非 READY 状态＋READY＋两个 READY）＋ 源码面（仅一个 `apply_intent_transition` 调用点） |
 | **J12** | Progress Gate 三值；无策略 ⇒ `Undetermined(NoPolicy)`；阈值 0 ⇒ `InvalidThreshold`；全 `Unassessed` ⇒ `ReadinessUnassessed`；**真实策略（读 `dimension(name).value().as_assessed()` 并解释 `Opaque`）能对同一对 readiness 给出 Improved／NoProgress／Regressed 三种 delta**；没有策略时**绝不** `Triggered` | §337 `:2583-2597`；§154 `:257-309`；切分 §6.1 `:389-394`；C1 | 运行期（真实策略＋无策略，不再用返回常量的假策略） |
 | **J13** | 连续 `NoProgress` 计数与阈值；`Improved`／`Regressed` 打断 run；`Undetermined` 在未达阈值时 ⇒ `HistoryUndetermined`；同一 Milestone 不得有两条记录；未 COMPLETED 的 Milestone 拒绝；**用真实策略生成的 `ProgressRecord` 序列（而非手填 delta）跑通上述计数** | §337；§154；§153 `:223-253`；C1 | 运行期（真实策略序列＋重复／未完成负例） |
-| **J14** | 传入 `record`＋`history`＋`policy` 重算为 `Triggered` ⇒ 恰一张 `Decision`、恰一条 `decision.required`；重算为 `NotTriggered`／`Undetermined` ⇒ 零张、零事件；**伪造 `Triggered`／`NotTriggered`／错误计数不能产生 Decision（签名里没有 verdict 输入）**；P7A 无 replan 执行路径；options 原样来自 draft | §337；§154 `:299-309`；§331 `:2471-2482`；切分 §6.2 第 13 条 `:412`；I8 | 运行期（重算＋行数＋事件数）＋ 源码面（无 Planner／无 Contract/Plan 写） |
-| **J15** | `ShippableVerdict` 三值；无 Product ⇒ `Undetermined`；assessment 缺／多／重复（**且无明确不满足**）⇒ `Undetermined`；子句 NotSatisfied ⇒ `NotShippable`；required dimension 未评 ⇒ `Undetermined`；completion Blocked ⇒ `NotShippable`；completion Undetermined ⇒ `Undetermined`；**组合负例：assessment 缺一条＋completion Blocked ⇒ `NotShippable(CompletionBlocked)`；assessment 多一条＋某 clause NotSatisfied ⇒ `NotShippable(ClauseNotSatisfied)`**；**今天没有 `Shippable` 生产者** | §335 `:2535-2547`；§336；切分 §四第 4 条 `:286-293`、§6.2 第 7 条 `:406`；C4 | 运行期（八个分支＋两条组合负例）＋ 编译期（P5a 加正臂时 `evaluate_shippable` 的 match 会红） |
+| **J14** | 传入 `record`＋`history`＋`policy` 重算为 `Triggered` ⇒ 恰一张 `Decision`、恰一条 `decision.required`；重算为 `NotTriggered`／`Undetermined` ⇒ 零张、零事件；**阈值 3、实际连续 2（`record` 计 1＋`history` 计 1）⇒ `NotTriggered{2,3}`、零张；`history` 重复含 `record` 时按一条计，不得变成 Triggered**；**伪造 `Triggered`／`NotTriggered`／错误计数不能产生 Decision（签名里没有 verdict 输入）**；P7A 无 replan 执行路径；options 原样来自 draft | §337；§154 `:299-309`；§331 `:2471-2482`；切分 §6.2 第 13 条 `:412`；I8 | 运行期（重算＋行数＋事件数）＋ 源码面（无 Planner／无 Contract/Plan 写） |
+| **J15** | `ShippableVerdict` 三值；无 Product ⇒ `Undetermined`；assessment 缺／多／重复（**且无明确不满足**）⇒ `Undetermined`；子句 NotSatisfied ⇒ `NotShippable`；required dimension 未评 ⇒ `Undetermined`；completion Blocked ⇒ `NotShippable`；completion Undetermined ⇒ `Undetermined`；**组合负例：assessment 缺一条＋completion Blocked ⇒ `NotShippable(CompletionBlocked)`；assessment 多一条＋某 clause NotSatisfied ⇒ `NotShippable(ClauseNotSatisfied)`；`None`＋completion Blocked ⇒ `Undetermined(MissingProduct)`**；**今天没有 `Shippable` 生产者** | §335 `:2535-2547`；§336；切分 §四第 4 条 `:286-293`、§6.2 第 7 条 `:406`；C4 | 运行期（八个分支＋三条组合负例）＋ 编译期（P5a 加正臂时 `evaluate_shippable` 的 match 会红） |
 | **J16** | 空谓词／空 clause 集合／重复 dimension／重复 clause id／空 clause id／空 statement 一律拒绝；assessment 缺／多／重复（**且没有明确不满足的 clause／completion**）⇒ `Undetermined(AssessmentMismatch)`；P7A 不评估子句内容 | §335；§155 `:313-373` | 运行期（六类构造负例＋纯结构 assessment 负例） |
-| **J17** | `ContinuousProductDrive` 默认 false；相位只前进；`Shippable` 后 `NotShippable`／`Undetermined` 不回退；`PostShippableImprovement` 不被覆盖；开关关闭 ⇒ `begin_post_shippable_work` 拒绝；**关闭开关后，Post 相位的 READY Product Intent 交接 ⇒ `None`**；`PreShippable` 不能直接进 Post | §336 `:2551-2580`；§155 `:313-373`；§7.4 判据 4 `docs/02-工程.md:466`；I4 | 运行期（合成 `Shippable` 的相位机＋交接 gate 负例）＋ 源码面（唯一 phase 写入点） |
-| **J18** | 迁移 200 在**协调者批准提案 (b) 后**恰四张表（否则三张）；启动计数 15／13／15；`migrations.rs` 集合含 200；190 的 SQL 未改；P7A **不直接写** `intent`／`decision`／`evidence` 表（只经公开函数） | 切分 §四第 2 条 `:265-276`；§4.9；§8 第 12 条 | 源码面（迁移清单／`PRAGMA table_info`）＋ 运行期（真库启动） |
-| **J19** | 依赖恰四项；无 `continuum-runtime`／provider／model-registry／node；本 crate 无 `struct ProductId`／`enum IntentStatus`／`struct Evidence`／`enum CompletionVerdict`／`struct Decision`；无 `continuum-context` | 切分 §四第 1、3、5 条；§2.5 | 源码面（`Cargo.toml`／`ALLOWED`／`cargo tree --depth 1`／`grep`） |
+| **J17** | **J17a（纯相位机）**：相位只前进；`Shippable` 后 `NotShippable`／`Undetermined` 不回退；`PostShippableImprovement` 不被覆盖；`PreShippable` 不能直接进 `PostShippableImprovement`（`advance_product_phase` 从不返回 Post）；**J17b（落库／交接，条件于 C2 裁定）**：`ContinuousProductDrive` 默认 false；开关关闭 ⇒ `begin_post_shippable_work` 拒绝；**关闭开关后，Post 相位的 READY Product Intent 交接 ⇒ `None`**；`PreShippable` 调 `begin_post_shippable_work` ⇒ `NotShippableYet` | §336 `:2551-2580`；§155 `:313-373`；§7.4 判据 4 `docs/02-工程.md:466`；I4 | 运行期（J17a 合成 `Shippable` 的相位机；J17b 在 C2 裁定并落库后拍开关／交接 gate 负例）＋ 源码面（唯一 phase 写点） |
+| **J18** | **C2 裁定是 200 的硬前置**：裁定前不应用 200；裁定后一次成型——批准提案 (b)（独立表）⇒ 恰四张表，落点 (a)（既有面）⇒ 恰三张表；启动计数 15／13／15；`crates/continuum-runtime/tests/migrations.rs:37` 的 `expected_migrations()` 含 200；190 的 SQL 未改；P7A **不直接写** `intent`／`decision`／`evidence` 表（只经公开函数） | 切分 §四第 2 条 `:265-276`；§4.9；§8 第 12 条 | 源码面（迁移清单／`PRAGMA table_info`）＋ 运行期（真库启动） |
+| **J19** | 依赖恰四项（`cargo tree --depth 1` 的根包行不计）；无 `continuum-runtime`／provider／model-registry／node；本 crate 无 `struct ProductId`／`enum IntentStatus`／`struct Evidence`／`enum CompletionVerdict`／`struct Decision`；无 `continuum-context` | 切分 §四第 1、3、5 条；§2.5 | 源码面（`Cargo.toml`／`ALLOWED`／`cargo tree --depth 1`／`grep`） |
 
 ## 5.2 照片清单（每条判据的可测试观测形态）
 
@@ -1662,21 +1693,21 @@ pub fn load_progress(tx: &Tx<'_>, product_id: &ProductIdRef)
 | **J2** | 正例：锚 Intent `kind=Product`、`product_id=Some("p1")`、`status=READY`、`contract_id={id:"c1",version:1}` ⇒ `establish_baseline` 成功、`save_product` 成功；负例：kind=Task／`product_id=None`／`product_id=Some("")`／contract.version=0／status=PROPOSED／status=RUNNING 各一条 ⇒ `Err`、零 `product` 行；再存同 id ⇒ `ProductExists` | 运行期 | 两个不同 Intent 共享同一 `product_id` 时，第二个会被主键拒绝——这是主键，不是新判据 |
 | **J3** | `sed -n` 读出 `ProductReadiness` 的九行字段，逐行与 §232 比对；`dimension(name)` 九枚都能取到，且对每维 `value()`／`evidence()`／`last_verified()` 返回与 `assessed(..)` 入参一致；`ReadinessValue::as_assessed()` 对 `Unassessed` 返回 `None`、对 `Assessed` 返回 `Some`；**同一个 `DeltaByDimension` 策略经这些 getter 读 2→3／3→3／3→2，能分别得到 Improved／NoProgress／Regressed**；`trybuild` 三条：`readiness.score()`／`.average()`／`.sum()` 编不过；`grep -rn -e "fn score" -e "fn average" -e "fn sum" -e "fn aggregate" crates/continuum-product/src` 零命中 | 源码面＋编译期＋运行期 | 调用方可以在自己的策略里聚合（§2.3 第 1 条） |
 | **J4** | 正例：`assessed(Opaque::from_str("0.8"), vec![e1], 100)`＋`evidence=[e1]` ⇒ `record_milestone_progress` 成功、库里 readiness 只含 `"e1"`；负例：空 value／空 evidence／重复 e1／`last_verified=None`／`evidence` 里没有 e2 各一条 ⇒ `Err`、零 progress 行；`grep -rn "FROM evidence" crates/continuum-product/src` 零命中 | 运行期＋源码面 | 证据是否真的支持该维（§2.3 第 12 条） |
-| **J5** | 假生成器返回十字段基线 ⇒ Product 创建；假生成器返回 `Err` ⇒ 零 Product 行；`grep -rn "Product {" crates/continuum-product/src` 的命中逐条登记，**允许清单恰为**：① `struct Product` 的字段定义；② 私有构造器 `Product::from_verified_parts`（`establish_baseline` 的唯一构造点）；③ `row_to_product`；**清单外命中即红**；`trybuild`：外部 `Product::default()`／`Product { .. }` 编不过 | 运行期＋源码面＋编译期 | 生成器输出的工程正确性（模型判断，P7A 不判） |
+| **J5** | 假生成器返回十字段基线 ⇒ Product 创建；假生成器返回 `Err` ⇒ 零 Product 行；`grep -rn "Product {" crates/continuum-product/src \| grep -v '^[^:]*:[0-9]*:[[:space:]]*//'` 的命中逐条登记，**允许清单恰为**：① `struct Product {` 的字段定义；② `impl Product {` 的固有实现块（§4.1 的访问器；拆成多个 impl 时逐块登记）；**清单外命中即红**；构造点另用 `grep -rn -e "Self {" -e "Product::from_verified_parts" crates/continuum-product/src \| grep -v '^[^:]*:[0-9]*:[[:space:]]*//'`：`Product::from_verified_parts` 的命中只允许 `establish_baseline`／`row_to_product` 两个调用点；`Self {` 的命中逐条登记，**属于 `Product` 构造点的恰一处且在 `from_verified_parts` 体内**，其余必须归为「非 `Product` 类型」并登记；出现无法归类的命中即红；`trybuild`：外部 `Product::default()`／`Product { .. }` 编不过 | 运行期＋源码面＋编译期 | 生成器输出的工程正确性（模型判断，P7A 不判） |
 | **J6** | `evaluate_shippable(None, &assessment, &CompletionVerdict::Undetermined{..})` ⇒ `Undetermined(MissingProduct)`；用 `ProductReadiness::unassessed()` 的 Product 调同一函数 ⇒ `Undetermined(RequiredDimensionUnassessed(..))`；**手工插入 `product_goal = ""` 的行 ⇒ `load_product` 返回 `CorruptRow`**；**crate 内 `#[cfg(test)]` 构造一个 baseline 不可用的 `Product` ⇒ `evaluate_shippable` 返回 `Undetermined(BaselineUnusable)`**；断言没有任何分支返回 `Shippable` | 运行期 | 「没有 Product」与「Product 行损坏」的区分（后者 `CorruptRow`） |
-| **J7** | `sed -n` 读出 `struct Milestone` 的七行字段，逐行与 §234 比对；`trybuild` 外部 `Milestone { .. }` 编不过；七个访问器逐枚取到；七状态逐枚往返；插入 `state='bogus'` 后 `load_milestone` ⇒ `CorruptRow`；`dependencies`／`entry_conditions`／`exit_conditions` 原样往返 | 源码面＋运行期＋编译期 | 状态迁移合法性（§2.3 第 13 条） |
-| **J8** | 假生成器返回 3 枚、`BatchBoundary::new(2, 0).unwrap()` ⇒ `BatchTooLarge`、零 `milestone` 行；返回 2 枚、边界 2 ⇒ 两行、`seq` 连续、`current_milestone` 指第一枚；第二次调用的 `input.history.len() == 2`，**再返回 2 枚 ⇒ id 的 ordinal 为 2/3、四枚 id 全局唯一、`seq` 连续 0..3**；把一枚 Milestone 置 COMPLETED 但不写 ProgressRecord 再保存新批次 ⇒ `MissingProgressForCompleted`、零新行；**不调 `save_product` 直接 `save_milestones` ⇒ `UnknownProduct`、零行**；`grep -rn -e "fn all_milestones" -e "fn full_plan" crates/continuum-product/src` 零命中 | 运行期＋源码面 | 调用方申报巨大边界（§2.3 第 4 条） |
+| **J7** | `sed -n` 读出 `struct Milestone` 的七行字段，逐行与 §234 比对；`trybuild` 外部 `Milestone { .. }` 编不过；七个访问器逐枚取到；七状态逐枚往返；插入 `state='bogus'` 后 `load_milestone` ⇒ `CorruptRow`；插入 `exit_conditions='[""]'` 的行后 `load_milestone` ⇒ `CorruptRow`；`dependencies`／`entry_conditions`／`exit_conditions` 原样往返 | 源码面＋运行期＋编译期 | 状态迁移合法性（§2.3 第 13 条） |
+| **J8** | 假生成器返回 3 枚、`BatchBoundary::new(2, 0).unwrap()` ⇒ `BatchTooLarge`、零 `milestone` 行；返回 2 枚、边界 2 ⇒ 两行、`seq` 连续、`current_milestone` 指第一枚；第二次调用的 `input.history.len() == 2`，**再返回 2 枚 ⇒ id 的 ordinal 为 2/3、四枚 id 全局唯一、`seq` 连续 0..3**；把一枚 Milestone 置 COMPLETED 但不写 ProgressRecord 再保存新批次 ⇒ `MissingProgressForCompleted`、零新行；**不调 `save_product` 直接 `save_milestones` ⇒ `UnknownProduct`、零行**；**`exit_conditions: vec![Opaque("")]` 的 draft ⇒ `EmptyMilestoneCondition`、零行；crate 内构造同值的 `Milestone` 传给 `save_milestones` ⇒ 同错、零行**；`grep -rn -e "fn all_milestones" -e "fn full_plan" crates/continuum-product/src` 零命中 | 运行期＋源码面 | 调用方申报巨大边界（§2.3 第 4 条） |
 | **J9** | DAG：M1；M2 依赖 M1；M3 依赖 M1；M4 依赖 M2＋M3（`InBatch(0)`／`InBatch(1)`）⇒ 接受；自环／`InBatch(5)`／`InBatch` 指向更晚项 ⇒ `Err`；`dependencies` 读回含四枚 id | 运行期 | §152 的图到 Intent 的边（§8 第 6 条） |
 | **J10** | 同一 Product＋Milestone＋contract＋priority＋时间戳调两次 `lower_milestone`：`kind`／`status`／`goal.as_str()`／`product_id`／`parent_intent`／`completion_predicate.as_str()` 逐项相等；**跨 Product 的 Milestone ⇒ `MilestoneProductMismatch`**；**空 `exit_conditions` ⇒ `completion_predicate.as_str() == ""`（P5a 侧映射为 `None` 的唯一值）**；`save_lowered_intent` 只收 Product／Milestone／contract／priority／时间戳，第一次写 `intent` 行、第二次不写（行数、version 不变）；**`trybuild`：把一枚 `status=READY`（或 `RUNNING`／`COMPLETED`）的 `Intent` 传给 `save_lowered_intent` 编不过**；`grep -rn -e "UPDATE intent" -e "INSERT INTO intent" crates/continuum-product/src` 零命中 | 运行期＋编译期＋源码面 | `goal` 不是 Canonicalizer 的产物（§2.3 第 10 条） |
 | **J11** | 按 id 构造十三个状态各一枚 Intent：只有 `READY` 的 `product_intent_for_handoff(tx, product, &milestone)` 返回 `Some`，其余十二个 `None`；**两个 READY、`product.current_milestone` 只指向其中一个：两次按 id 调用都返回 `Some`**；**另加一条负例**：`PLANNING → SUSPENDED → RUNNING` 的 Intent（状态是 `RUNNING`，但从未过 `REVIEW`）仍必须 `None`；`COMPLETED` 调 `retire_completed_product_intent` 后 status=`EVOLVING`（再调 `product_intent_for_handoff` ⇒ `None`）；`grep -rn "apply_intent_transition" crates/continuum-product/src \| grep -v '^[^:]*:[0-9]*:[[:space:]]*//' \| grep -v '^[^:]*:[0-9]*:[[:space:]]*use '` 只命中 `retire_completed_product_intent` 一处 | 运行期＋源码面 | 谁把 PROPOSED 推进到 READY（§8 第 10 条） |
 | **J12** | `evaluate_progress(.., None)` ⇒ `Undetermined(NoPolicy)`；阈值 0 的策略 ⇒ `InvalidThreshold`；全 `Unassessed` ⇒ `ReadinessUnassessed`；**真实策略 `DeltaByDimension`：用 `dimension(Documentation).value().as_assessed()` 取 `Opaque`、按调用方自己的整数刻度解释，分别构造 value 2→3／3→3／3→2 的三对 readiness，断言 delta 为 Improved／NoProgress／Regressed**；阈值 3、历史为空、delta=NoProgress ⇒ `NotTriggered{1,3}`；断言这些分支都不产生 `Decision` | 运行期 | 规范级阈值（§2.3 第 3 条） |
 | **J13** | **真实策略序列**：用 `DeltaByDimension` 对三对真实 readiness 生成 `ProgressRecord`（不手填 `progress_delta`）；NoProgress×2（阈值 3）⇒ NotTriggered；第三条 NoProgress ⇒ Triggered{3,3}；中间插一条 Improved ⇒ 计数归零；历史含 Undetermined 且未达阈值 ⇒ HistoryUndetermined；同一 milestone 二次记录 ⇒ `DuplicateProgress`；`state=Active` ⇒ `MilestoneNotCompleted` | 运行期 | 策略本身是否诚实（§2.3 第 2 条） |
-| **J14** | 传入 `record`＋`history`＋`policy` 重算为 Triggered＋draft（2 options）⇒ `decision` 表 1 行、`events` 里 `decision.required` 1 条；重算为 NotTriggered／Undetermined ⇒ 0／0；**把 `history` 里一条 NoProgress 改成 Improved（错误计数）⇒ 0／0**；同一 draft 二次 emit ⇒ 主键 `Err`、仍 1 行；**签名不含 `ProgressGateVerdict`，伪造 `Triggered{99,1}` 无法传入（`trybuild`）**；`grep -rn -e "Planner" -e "replan(" crates/continuum-product/src \| grep -v '^[^:]*:[0-9]*:[[:space:]]*//' \| grep -v '^[^:]*:[0-9]*:[[:space:]]*use '` 零命中 | 运行期＋源码面 | replan 由谁消费（§8 第 5 条） |
-| **J15** | 八个分支逐一：`None`→Undetermined(MissingProduct)；缺 clause→AssessmentMismatch；NotSatisfied→NotShippable；required dim unassessed→Undetermined；clause Undetermined→Undetermined；Completion Blocked→NotShippable；Completion Undetermined→Undetermined；全满足＋两臂都试过 ⇒ 仍不返回 Shippable（因为无第三臂）；**组合负例 A：缺一条 assessment＋CompletionVerdict::Blocked ⇒ NotShippable(CompletionBlocked)**；**组合负例 B：多一条 assessment＋某 clause NotSatisfied ⇒ NotShippable(ClauseNotSatisfied)**；`grep -rn "Shippable" crates/continuum-product/src` 的命中逐条登记（定义／合成测试例外） | 运行期＋源码面 | 正向宣告（§8 第 3 条） |
+| **J14** | 传入 `record`＋`history`＋`policy` 重算为 Triggered＋draft（2 options）⇒ `decision` 表 1 行、`events` 里 `decision.required` 1 条；重算为 NotTriggered／Undetermined ⇒ 0／0；**阈值−1 负例：阈值 3、实际连续 2（`record`＋`history` 各一条 NoProgress）⇒ `NotTriggered{2,3}`、0／0；把 `record` 再重复塞进 `history`（同一 `milestone_id`）仍按 2 计、0／0**；**把 `history` 里一条 NoProgress 改成 Improved（错误计数）⇒ 0／0**；同一 draft 二次 emit ⇒ 主键 `Err`、仍 1 行；**签名不含 `ProgressGateVerdict`，伪造 `Triggered{99,1}` 无法传入（`trybuild`）**；`grep -rn -e "Planner" -e "replan(" crates/continuum-product/src \| grep -v '^[^:]*:[0-9]*:[[:space:]]*//' \| grep -v '^[^:]*:[0-9]*:[[:space:]]*use '` 零命中 | 运行期＋源码面 | replan 由谁消费（§8 第 5 条） |
+| **J15** | 八个分支逐一：`None`→Undetermined(MissingProduct)；缺 clause→AssessmentMismatch；NotSatisfied→NotShippable；required dim unassessed→Undetermined；clause Undetermined→Undetermined；Completion Blocked→NotShippable；Completion Undetermined→Undetermined；全满足＋两臂都试过 ⇒ 仍不返回 Shippable（因为无第三臂）；**组合负例 A：缺一条 assessment＋CompletionVerdict::Blocked ⇒ NotShippable(CompletionBlocked)**；**组合负例 B：多一条 assessment＋某 clause NotSatisfied ⇒ NotShippable(ClauseNotSatisfied)**；**组合负例 C：`None`＋CompletionVerdict::Blocked ⇒ Undetermined(MissingProduct)，不是 NotShippable**；`grep -rn "Shippable" crates/continuum-product/src` 的命中逐条登记（定义／合成测试例外） | 运行期＋源码面 | 正向宣告（§8 第 3 条） |
 | **J16** | `ShippablePredicate::new(vec![], vec![clause])`／`new(vec![Functional], vec![])`／重复 dimension／重复 clause id／空 clause id／空 statement 各一条 ⇒ `Err`；assessment 缺一条／多一条／重复一条（且无 NotSatisfied／Blocked）⇒ `Undetermined(AssessmentMismatch)`；断言 P7A 没有读 clause.statement 的判定分支 | 运行期＋源码面 | 子句内容是否真被评估（§2.3 第 7 条） |
-| **J17** | 合成 `Shippable`：Pre→Shippable；Shippable＋NotShippable ⇒ Shippable；Shippable＋Undetermined ⇒ Shippable；Post＋任何 ⇒ Post；`begin_post_shippable_work` 在 Pre ⇒ `NotShippableYet`、开关 false ⇒ `DriveDisabled`、Shippable＋true ⇒ Post；**Post 相位＋开关 false 时，该 Milestone 的 READY Intent 交接 ⇒ `None`；开关 true 后同一调用 ⇒ `Some`**；`grep -rn "phase =" crates/continuum-product/src` 只统计**非注释代码行**，且只命中 `product_drive` 的写点 | 运行期＋源码面 | 生产路径进入 Shippable（§8 第 3 条） |
-| **J18** | `p7a_product_migrations()` 版本恰 `[200]`、名称 `p7a_product`；**协调者批准提案 (b) 时** `PRAGMA table_info` 四张表列清单（未批准时三张，不得写 `product_drive`）；真库启动输出 `迁移应用 15 项`／`13 项`／`15 项`；`grep -n "190" crates/continuum-persist/src/migrations.rs` **只匹配迁移编号与版本常量，不把注释计入**，且 190 的 SQL 与设计前逐字相同；`grep -rn -e "FROM intent" -e "FROM decision" -e "FROM evidence" crates/continuum-product/src` 只允许 `load_intent` 的公开调用（无 SQL） | 源码面＋运行期 | 200 应用后的未来改动（版本号已锁） |
-| **J19** | `cargo tree -p continuum-product --depth 1 --edges normal` 只含四个 workspace crate（直接边）；`ALLOWED` 行逐项相等；`grep -rn -e "struct ProductId" -e "enum IntentStatus" -e "struct Evidence" -e "enum CompletionVerdict" -e "struct Decision" crates/continuum-product/src` 零命中；`grep -rn "continuum_context" crates/continuum-product` 零命中 | 源码面 | 未来新增依赖（会先让 `dependency_direction` 红） |
+| **J17** | **J17a（纯相位机）**：合成 `Shippable`：Pre→Shippable；Shippable＋NotShippable ⇒ Shippable；Shippable＋Undetermined ⇒ Shippable；Post＋任何 ⇒ Post；Pre＋NotShippable／Undetermined ⇒ Pre；断言 `advance_product_phase` 从不返回 `PostShippableImprovement`。**J17b（仅 C2 裁定并落库后）**：`begin_post_shippable_work` 在 Pre ⇒ `NotShippableYet`、开关 false ⇒ `DriveDisabled`、Shippable＋true ⇒ Post；**Post 相位＋开关 false 时，该 Milestone 的 READY Intent 交接 ⇒ `None`；开关 true 后同一调用 ⇒ `Some`**；`grep -rn "phase = ?" crates/continuum-product/src` 只统计**SQL 写点**（参数占位符），且只命中 `product_drive` 的写点（不把 `let phase =` 之类的局部变量算进来） | 运行期＋源码面 | 生产路径进入 Shippable（§8 第 3 条）；J17b 依赖 C2 裁定 |
+| **J18** | `p7a_product_migrations()` 版本恰 `[200]`、名称 `p7a_product`；**C2 裁定后 200 一次成型**：批准提案 (b)（独立表）⇒ `PRAGMA table_info` 四张表列清单，落点 (a)（既有面）⇒ 三张表（不得出现 `product_drive`）；**裁定前不应用 200（无三表先行版）**；真库启动输出 `迁移应用 15 项`／`13 项`／`15 项`；`crates/continuum-runtime/tests/migrations.rs:37` 的 `expected_migrations()` 含 200；`grep -Hn "190" crates/continuum-memory/src/persist.rs \| grep -v '^[^:]*:[0-9]*:[[:space:]]*//'` **只命中 `:13` 的迁移编号，不把注释计入**，且 `:13` 的 SQL 与设计前逐字相同（`git diff --exit-code c89d839 -- crates/continuum-memory/src/persist.rs` 为空）；`grep -rn -e "FROM intent" -e "FROM decision" -e "FROM evidence" crates/continuum-product/src` 只允许 `load_intent` 的公开调用（无 SQL） | 源码面＋运行期 | 200 应用后的未来改动（版本号已锁） |
+| **J19** | `cargo tree -p continuum-product --depth 1 --edges normal` 输出**根包一行＋四个直接依赖行（共五行）**；断言前先过滤根包行（`grep -v '^continuum-product '`），余下恰为四个 workspace crate（直接边）；`ALLOWED` 行逐项相等；`grep -rn -e "struct ProductId" -e "enum IntentStatus" -e "struct Evidence" -e "enum CompletionVerdict" -e "struct Decision" crates/continuum-product/src` 零命中；`grep -rn "continuum_context" crates/continuum-product` 零命中 | 源码面 | 未来新增依赖（会先让 `dependency_direction` 红） |
 
 ## 5.3 §7.4 四条完成判据的逐条落点
 
@@ -1759,7 +1790,8 @@ pub fn load_progress(tx: &Tx<'_>, product_id: &ProductIdRef)
 - **CompletionVerdict**：`evaluate_shippable` 只读 `Blocked`／`Undetermined`；**不造**
   「完成」正臂；不把 `Undetermined` 当许可。
 - **`completion_predicate` 的跨块映射（I7）**：`lower_milestone` 对空 `exit_conditions`
-  产出 `Opaque("")`——这是唯一可区分的空值。**P5a 装配时必须把 `""` 映射为
+  产出 `Opaque("")`；空元素已在 §4.4 被 `EmptyMilestoneCondition` 拒绝，故 `""` 唯一
+  对应「零条 exit conditions」。**P5a 装配时必须把 `""` 映射为
   `declared_completion_predicate = None`**；不要把 `Some(Value::String(""))` 直接传进去
   （P5a 的 `completion.rs:70-76`／`:213-214` 把 `Some("")` 算「有内容」，会产生一项不可判）。
   映射测试在 P7A 侧钉「空 exit ⇒ `""`」，P5a 侧钉「`""` ⇒ `None`」。
@@ -1889,9 +1921,10 @@ P6D 并集协调项与 1 条切分偏离待协调）。** 每条具名收件人�
 12. **`ContinuousProductDrive` 的落点是切分偏离，待协调**（§4.7；§2.3 第 5 条；§336；
     切分 §2.3.1 `:132-133`）。切分只给 `Product`／`ProductReadiness`／verdict 三处；本设计
     提案 (b) 另立 `ProductDriveState`＋`product_drive` 表，**这是第四种落点，不是本设计
-    可自定的事项**。协调者须先裁定并更新切分 §2.3.1，P7A 才按 §4.7／§4.9 落库；裁定前
-    `product_drive` 不进迁移 200，§4.7 的 API 是提案。若选 (a)：放进 `Product` 须先解
-    §231 七字段冻结；放进 `ProductReadiness`／verdict 面则独立表与独立读面作废。
+    可自定的事项**。协调者须先做 C2 裁定并更新切分 §2.3.1；**C2 裁定是迁移 200 合并/应用的
+    硬前置**：裁定前 P7A 不应用 200（没有三表先行版），§4.7 的 API 是提案；裁定后 200
+    一次成型（批准提案 (b)（独立表）⇒ 四张表；落点 (a)（既有面）⇒ 三张表）。若选 (a)：
+    放进 `Product` 须先解 §231 七字段冻结；放进 `ProductReadiness`／verdict 面则独立表与独立读面作废。
     **缺的是「开关存在哪里、post-shippable 是状态还是标签、开关关闭后已开始的 post 工作
     怎样收尾、每一项工作怎样归类」这一条规范，以及切分落点的裁定。**
     **收件人：协调者（裁定并改切分）＋ 规范维护者。**
