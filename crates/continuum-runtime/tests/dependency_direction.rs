@@ -58,6 +58,17 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-persist",
         ],
     ),
+    // P7B Intent Scheduler（设计 §2.1）。两条普通边 + 一条 dev 边：
+    // graph（select_runnable / SchedulerConfig）、semantics（Intent / IntentId / Priority）、
+    // canonical（仅 tests/ 构造 Intent 夹具）。**不碰 runtime 的 ALLOWED 行**。
+    (
+        "continuum-intent-scheduler",
+        &[
+            "continuum-canonical",
+            "continuum-graph",
+            "continuum-semantics",
+        ],
+    ),
     // P2 边界层：Workspace 抽象与只读强制。events 与 persist 由设计第 4 节要求——
     // Gate 的审计记录与 Task Workspace 的元数据都要落库。
     // 不含 continuum-core：本 crate 至今没有用到它，而本表与 Cargo.toml 必须精确一致。
@@ -880,6 +891,9 @@ fn p6_union_adds_only_its_own_rows() {
     }
 
     // 断言 8：新增 subject 恰是已落地的 P6 crate。
+    // P7 起各实现块会继续在 ALLOWED 追加自己的行，P6 守卫不能把它们误判成
+    // 「P6 夹带」。这里维护一份显式的后续块名单；合并时按块各自追加。
+    const POST_P6_SUBJECTS: &[&str] = &["continuum-intent-scheduler"];
     let current_subjects: BTreeSet<&str> = current.keys().map(String::as_str).collect();
     let added_subjects: BTreeSet<&str> = current_subjects
         .difference(&baseline_subjects)
@@ -888,6 +902,7 @@ fn p6_union_adds_only_its_own_rows() {
     let expected_added: BTreeSet<&str> = names
         .iter()
         .copied()
+        .chain(POST_P6_SUBJECTS.iter().copied())
         .filter(|name| workspace_set.contains(name))
         .collect();
     assert_eq!(
