@@ -54,12 +54,12 @@ P6D 合并门的原约定：P6D 设计 §7.3.5（`docs/superpowers/specs/2026-10
 |---|---|---|---|
 | `TaskSource` 恰四值：`authorized Intent`／`policy`／`maintenance schedule`／`product drive` | §299 `:1894-1903`；切分 §2.3.1 第 2 条 | §4.2 | 闭集四变体；无第五变体；无 `parse` |
 | `AuthorizedTask`：唯一任务输入面；含 `source` 与授权证据；构造器私有 | 切分 §2.3.1 第 2 条 `:134-139`；§五 P7D 完成判据 1 | §4.3 | 四个具名构造器；裸 `TaskSource` 不能构造 |
-| `product drive` 的授权证据：`kind == Product`＋`contract_id`＋`status == READY` | 切分 §三第 6 条 `:213-237`；§五 P7D 完成判据 1 | §4.3、§5.2 | 十三态表；`PLANNING→SUSPENDED→RUNNING` 负例 |
+| `product drive` 的授权证据：`kind == Product`＋`contract_id`＋`status == READY` | 切分 §三第 6 条 `:213-237`；§五 P7D 完成判据 1 | §4.3、§5.2 | 十三态表；直接构造的 `RUNNING` 负例（状态机依据见 §3.7） |
 | Background Supervisor：`next_tasks` 与 `decide` | §299；《工程》§7.3 `:453` | §4.4 | `next_tasks` 不排序；`decide` 只转调 P7B |
 | Session Orchestrator：Manual／Auto，共用 `SessionPlan` | §11 `:576-620`；《工程》§7.1 `:430`、§7.3 `:454` | §4.5、§4.6 | 同一 `SessionPlan` 类型；Manual 不选、Auto 选 |
 | 后台新结果的摘要面 | 切分 §2.3.1 第 3 条 `:142`；§11 `:606`；§156 `:395-404` | §4.5 | `BackgroundDigest`；不承载 `Evidence` |
-| §171 的触发点（不持阈值） | §171 `:931-938`；切分 §6.2 第 10 条 | §4.8 | 三个转发函数；无频率／重试／阈值 |
-| 消费 P7C 的资源结论与挂起状态 | P7C §7.1 `:1182-1201`；切分 §2.3.2 第 2 条 | §4.7 | `admit` 返回 `ResourceDecision`；`checkpoint` 两阶段 |
+| §171 的触发点（不持阈值） | §171 `:931-938`；切分 §6.2 第 10 条 | §4.8 | `SynthesisIo` 端口＋三个转发；无频率／重试／阈值 |
+| 消费 P7C 的资源结论与挂起状态 | P7C §7.1 `:1182-1201`；切分 §2.3.2 第 2 条 | §4.7 | P7D 持每任务 `SuspensionState` 内存表；`admit` 返回 `ResourceDecision`；`checkpoint` 三出口 |
 | §156 的「后台继续低风险 Milestone」 | §156 `:383-393`；切分 §三第 6 条 `:216-218` | §5.1、§4.4 | 只按值收 `READY` Product Intent；**不判「低风险」**（§10 第 8 条） |
 | P6D 合并门：rebaseline 或退役 | 切分 §四第 1 条 `:253-264`；P6D 设计 §7.3.5 | §5.7、§9.2 | **选 rebaseline**；31 行 fixture＋四个 P7 行 |
 
@@ -110,8 +110,9 @@ P6D 合并门的原约定：P6D 设计 §7.3.5（`docs/superpowers/specs/2026-10
 
 **为什么没有 `continuum-persist`**：本块零表（§9），且 §171 的触发点做成
 `SynthesisIo` 端口（§4.8）——事务句柄留在装配方，P7D 不命名 `Tx<'_>`。这与切分 §三 P7D 行的
-条件边「仅当会话／后台作业落库」一致。**代价与替代**：若协调者要求 P7D 字面直调
-`begin_synthesis(tx, ...)`，则必须新增 `continuum-persist` 边（切分未预登记），见 §10 第 4 条。
+条件边「仅当会话／后台作业落库」一致。**评审已裁定选端口**（2026-10-19）：切分 §2.3.1 第 4 条
+已同步为「P7D 定义调用面，装配方持 `Tx`；何时调用归 P10／调用方」；本设计不再把它记作偏差
+（§10 第 4 条、§11 第 7 条）。
 
 **不登记**的边，逐条给理由（零使用的边即假边）：
 
@@ -128,9 +129,11 @@ P6D 合并门的原约定：P6D 设计 §7.3.5（`docs/superpowers/specs/2026-10
   是 P7B 的入口；P7D 不调用 `select_runnable`。
 - **不登记 `continuum-events`**：零事件。
 
-**dev 边：一条**（`continuum-canonical`，仅 `tests/`）。测试用本 crate、四个普通依赖与这一条 dev 边；
-假 `IntentSelectionPolicy`、假 `SynthesisIo`、假 `CheckpointPort` 由本 crate 的 `tests/` 自己写。
-`trybuild` 是外部 dev 依赖，不进 `ALLOWED`（同 P6A §2.1 的口径）。
+**dev 边：一条**（`continuum-canonical`，仅 `tests/`）。测试用本 crate、四个普通依赖、这一条
+dev 边与 `trybuild`；假 `IntentSelectionPolicy`、假 `SynthesisIo`、假 `CheckpointPort` 由本 crate
+的 `tests/` 自己写。`trybuild` 与 `serde_json` 是外部 dev 依赖，不进 `ALLOWED`（同 P6A §2.1 的
+口径）；`serde_json` 只用于 J11 的 `Deserialize` 负例（§7.2），在
+`crates/continuum-supervisor/Cargo.toml` 的 `[dev-dependencies]` 声明。
 
 **共写文件**：
 
@@ -138,7 +141,7 @@ P6D 合并门的原约定：P6D 设计 §7.3.5（`docs/superpowers/specs/2026-10
 |---|---|---|
 | `Cargo.toml` 的 `[workspace] members`（`:3`） | 加一行 `crates/continuum-supervisor` | 本块只加自己这一行 |
 | `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED`（`:26`） | 加 `("continuum-supervisor", &["continuum-arbiter", "continuum-canonical", "continuum-intent-scheduler", "continuum-memory", "continuum-semantics"])`——**五项**（四普通＋一 dev），与上表逐行对应；数组按字母序 | 新 crate 会先让 `every_crate_depends_only_on_its_allowed_set`（`:494`）变红再被补齐，这是刻意的 |
-| `crates/continuum-runtime/tests/dependency_direction.rs` 的 P6D 合并门（`:551`、`:574`、`:582`、`:615`、`:784`、`:790`、`:799`） | **rebaseline**：`p6_pre_allowed.txt` → `p7_pre_allowed.txt`；`P6_EXPECTED_ROWS` → `P7_EXPECTED_ROWS`（四行）；两个 `27` → `31`；断言 2 的 `5` → `4`；测试改名 | 这是 P7D 独占的改动（切分 §一 1.3 `:72`）；不得在 P6 fixture 上追加行 |
+| `crates/continuum-runtime/tests/dependency_direction.rs` 的 P6D 合并门（`:551`、`:574`、`:582`、`:615`、`:784`、`:790`、`:799`） | **rebaseline**：`p6_pre_allowed.txt` → `p7_pre_allowed.txt`；`P6_EXPECTED_ROWS` → `P7_EXPECTED_ROWS`（四行）；两个 `27` → `31`；断言 2 的 `5` → `4`；测试改名 | 这是 P7D 独占的改动（切分 §一 1.2／1.3 `:55`／`:72` 已把 P6D 合并门在 P7 起转给 P7D；P6D §7.3.5 `:1069` 的「协调者」是收件人，不是执行者）；不得在 P6 fixture 上追加行 |
 | `crates/continuum-runtime/tests/fixtures/p6_pre_allowed.txt` | **删除**；新 fixture `p7_pre_allowed.txt` 31 行 | 旧 fixture 不作为第二套基线留下 |
 | `Cargo.lock` | 随新 crate 增枚 | 提交时按显式路径带上（同 P6A §2.1） |
 
@@ -158,14 +161,14 @@ AuthorizedTask            —— 唯一任务输入面；字段私有、四个�
 PolicyGrantRef            —— policy 来源的不透明授权引用（§4.3）
 MaintenanceOccurrenceRef  —— maintenance schedule 来源的不透明引用（§4.3）
 SupervisorDecision        —— Task／ContinueSession／NoIntent（§4.4）
+ContinueDisposition       —— Continue／Resume；ContinueSession 的控制值（§4.4）
 SupervisorError           —— 决策、授权、资源、checkpoint、记忆的失败面（§4.9）
 SessionMode               —— Manual／Auto（§4.5）
 SessionCandidate          —— ContinueSession／Task／BackgroundFinding／NewConversation（§4.5）
-SessionSelection          —— Task／ContinueSession（§4.5）
 BackgroundNote            —— 一条后台结果摘要（§4.5）
 BackgroundDigest          —— completed＋findings 的摘要面（§4.5）
-SessionPlan               —— 两模式共用的会话计划（§4.5）
-BackgroundSupervisor      —— next_tasks／decide／admit／checkpoint（§4.4、§4.7）
+SessionPlan               —— 两模式共用的会话计划；`decision` 持 `SupervisorDecision`（§4.5）
+BackgroundSupervisor      —— next_tasks／decide／admit／checkpoint；持每任务挂起状态（§4.4、§4.7）
 SessionOrchestrator       —— plan_manual／plan_auto（§4.6）
 CheckpointPort            —— 执行 checkpoint 的端口；实现方是装配方／执行器（§4.7）
 CheckpointError           —— checkpoint 端口错误；不透明（§4.7）
@@ -180,15 +183,25 @@ BackgroundSupervisor::next_tasks -> Vec<&AuthorizedTask>       （只过滤，�
 BackgroundSupervisor::decide     -> Result<SupervisorDecision, SupervisorError>（转调 P7B）
 SessionOrchestrator::plan_manual -> SessionPlan                 （Manual：只展示）
 SessionOrchestrator::plan_auto   -> Result<SessionPlan, SupervisorError>（Auto：用 P7B 选择）
+SessionOrchestrator::supervisor_mut -> &mut BackgroundSupervisor（装配方共用同一实例，C1）
+SessionOrchestrator::supervisor     -> &BackgroundSupervisor（只读）
 ```
 
-**控制面**（两个端口，不是决策面）：
+**控制面**（端口＋P7C 状态机；不是决策面）：
 
 ```
 BackgroundSupervisor::admit     -> Result<ResourceDecision, SupervisorError>（转调 P7C）
-BackgroundSupervisor::checkpoint -> Result<SuspensionPhase, SupervisorError>（调 CheckpointPort＋P7C）
+BackgroundSupervisor::checkpoint -> Result<SuspensionPhase, SupervisorError>（端口＋P7C 成功／失败）
+BackgroundSupervisor::checkpoint_timed_out -> Result<(), SupervisorError>（定时器出口；总是错误）
+BackgroundSupervisor::checkpoint_deadline  -> Option<u64>（给调用方安排定时器）
+BackgroundSupervisor::suspension_phase     -> Option<SuspensionPhase>（只读；无状态时 None）
+BackgroundSupervisor::release              -> bool（任务终止时丢状态）
 SynthesisTriggerPoint::{begin,apply,fail} -> Result<..., SupervisorError>（调 SynthesisIo）
 ```
+
+`admit`／`checkpoint`／`checkpoint_timed_out`／`release` 取 `&mut self`，因为每任务
+`SuspensionState` 在 `BackgroundSupervisor` 的内存表里（§4.4、§5.5）；`next_tasks`／`decide`
+与两个只读访问器取 `&self`。
 
 **模块落点**（源码面判据的语料按这张表）：
 
@@ -196,8 +209,8 @@ SynthesisTriggerPoint::{begin,apply,fail} -> Result<..., SupervisorError>（调 
 |---|---|
 | `src/lib.rs` | 只做 `pub mod` 与 `pub use`，不定义类型 |
 | `src/task.rs` | `TaskSource`／`TaskError`／`AuthorizedTask`／`PolicyGrantRef`／`MaintenanceOccurrenceRef` |
-| `src/supervisor.rs` | `BackgroundSupervisor`／`SupervisorDecision`／`next_tasks`／`decide`／`admit`／`checkpoint` |
-| `src/session.rs` | `SessionMode`／`SessionCandidate`／`SessionSelection`／`BackgroundNote`／`BackgroundDigest`／`SessionPlan`／`SessionOrchestrator` |
+| `src/supervisor.rs` | `BackgroundSupervisor`／`SupervisorDecision`／`ContinueDisposition`／`next_tasks`／`decide`／`admit`／`checkpoint`／`checkpoint_timed_out`／`checkpoint_deadline`／`suspension_phase`／`release` |
+| `src/session.rs` | `SessionMode`／`SessionCandidate`／`BackgroundNote`／`BackgroundDigest`／`SessionPlan`／`SessionOrchestrator` |
 | `src/resource.rs` | `CheckpointPort`／`CheckpointError`；`WorkloadDeclaration` 映射（私有） |
 | `src/trigger.rs` | `SynthesisIo`／`SynthesisTriggerPoint` |
 | `src/error.rs` | `SupervisorError` |
@@ -210,8 +223,9 @@ SynthesisTriggerPoint::{begin,apply,fail} -> Result<..., SupervisorError>（调 
 `MemoryError`（P6C 的）、`Decision`（§331 的）、`Evidence`／`CompletionVerdict`（P5a 的）、
 `Product`／`Milestone`／`ProductReadiness`（P7A 的）。
 
-**本块不持有的判定**：Intent 排序与候选状态过滤（P7B）；资源压力、负载类别、四档优先级、挂起相位
-（P7C）；Product 的 readiness／shippable／progress（P7A）；Intent 状态迁移（P4）；记忆合成的语义
+**本块不持有的判定**：Intent 排序与候选状态过滤（P7B）；资源压力、负载类别、四档优先级、
+相位转移规则（P7C）——P7D 只持有每任务 `SuspensionState` 的值并按 P7C 的方法推进，不重写转移表；
+Product 的 readiness／shippable／progress（P7A）；Intent 状态迁移（P4）；记忆合成的语义
 （P6C）；§171 的阈值／频率／重试（P10）；执行与 UI（P1／P8）。
 
 ## 2.3 本块的层间位置
@@ -235,28 +249,36 @@ SynthesisTriggerPoint::{begin,apply,fail} -> Result<..., SupervisorError>（调 
 
 ## 2.4 本设计自定的判定（逐条：规范给到哪、代价、边界、落点、收件人）
 
-**这一节是本块的「发明判据」总账（共 17 条）。** 规范没给、而本设计必须落成实质行为的判定，
-都在下表里有一条；**没进这张表的判定，本块一处也没有定**。代码块只是示意，正文措辞才是约束。
+**这一节是本块的「发明判据」总账（共 24 条；其中 #8／#15／#17 是切分／规范已给的复述，自定 21 条）。**
+凡会改变跨块可观察行为的自定判定都在下表里有一条；纯机械转发、访问器与错误包装不在表内，也不得与
+本表冲突。代码块只是示意，正文措辞才是约束。
 
-| # | 本设计自定的判定 | 规范给到哪一步为止 | 代价 | 边界（拦不住什么） | 落点 | 收件人 |
+| # | 判定（**自定**／**复述**） | 规范给到哪一步为止 | 代价 | 边界（拦不住什么） | 落点 | 收件人 |
 |---|---|---|---|---|---|---|
 | 1 | `TaskSource` 四值的**判定规则**：`AuthorizedIntent`＝非 Product 的 `READY` Intent＋有效 contract；`ProductDrive`＝`kind == Product` 且 `product_id` 非空的 `READY` Intent＋有效 contract；`Policy`＝非空 `PolicyGrantRef`；`MaintenanceSchedule`＝非空 `MaintenanceOccurrenceRef` | §299 `:1894-1901` 只给四个名字；**没有说四类如何区分、证据是什么** | 两个 Intent 来源靠 `kind` 区分；Product 不能走 `AuthorizedIntent`；policy／维护来源不携带 Intent | 不覆盖「policy 与 maintenance 的授权真实性」；不覆盖「同一任务同时属于两类」；不覆盖「模型建议」——没有第五类 | §4.2、§4.3、§5.1 | 规范维护者（§299）＋协调者＋第 5 层 |
 | 2 | `AuthorizedTask` 的**私有字段与四个构造器**；裸 `TaskSource` 不能构造 | 切分 §2.3.1 第 2 条 `:138` 要求「构造器私有」；**形状未给** | 调用方必须按来源选构造器；没有通用 `new`；新增来源要加构造器 | 不覆盖「调用方伪造 `Intent` 值」——`Intent` 字段是 `pub`；构造器只校验字段 | §4.3 | 规范维护者＋P7A |
 | 3 | **`product drive` 证据**：`kind == Product`、`product_id` 非空、`contract.id` 非空、`contract.version >= 1`、`status == READY`；其余十二态拒绝 | 切分 §三第 6 条 `:226-237` 已给规则（选项 a）；**代码形状未给** | 不读合同内容、不验证合同存在、不防生产方自报状态 | 不覆盖「合同已撤销」；不覆盖「policy 判定」；不覆盖「合同版本过期」 | §4.3、§5.2 | 协调者＋第 5 层＋P7A |
-| 4 | **`AuthorizedIntent` 也要求 `READY`**，且 `kind != Product` | §299 只说「authorized Intent」；§223 `:172-205` 只给状态机 | 非 Product 的 `RUNNING` Intent 不能作为新后台任务；已运行会话走 `ContinueSession` | 不覆盖「已有运行会话的继续」——那不是新任务；不覆盖「Intent 已授权但未 READY」 | §4.3、§5.2 | 规范维护者＋P7B |
+| 4 | **`AuthorizedTask` 的 `READY` 口径**：`authorized_intent` 也要求 `READY` 且 `kind != Product`；`product_drive` 要求 `READY` 且 `kind == Product`；**`READY` 约束只适用于这两条携带 `Intent` 的路**；`policy`／`maintenance` 没有 Intent，以非空引用为证据 | §299 只说「authorized Intent」；§223 `:172-205` 只给状态机；切分 §五判据 1 的「只收 READY」未区分来源 | 非 Product 的 `RUNNING` Intent 不能作为新后台任务；已运行会话走 `ContinueSession`；policy／maintenance 不受 READY 约束 | 不覆盖「已有运行会话的继续」——那不是新任务；不覆盖「Intent 已授权但未 READY」；不覆盖 policy／maintenance 的真实性（见第 5 条） | §4.3、§5.2 | 规范维护者＋P7B＋第 5 层 |
 | 5 | **`PolicyGrantRef` / `MaintenanceOccurrenceRef` 的形状**：分别是 `issuer＋grant_id` 与 `schedule_id＋occurrence_id` 的不透明非空串 | 切分 §2.3.1 第 2 条 `:137-139` 说「其余来源的 policy／capability 引用由 P7D 设计与第 5 层写」，**未给形状** | P7D 不能验证 grant 的真实性、有效期、是否被撤销；只能校验非空 | 不覆盖「伪造 grant」；不覆盖「grant 与任务内容不匹配」；不覆盖「policy 语义」 | §4.3、§5.1 | 第 5 层＋协调者＋规范维护者 |
-| 6 | **`SessionPlan` 的形状**：`mode`／`candidates`／`selection`／`background`／`basis` 五个字段，两模式共用 | §11 `:576-620` 只给流程与例子；**没有字段、没有类型** | 消费方按固定五字段读；新增字段是破坏性改动；`candidates` 的固定段序是本设计定的 | 不覆盖「UI 的实际呈现」；不覆盖「用户选择后的状态」 | §4.5 | 规范维护者＋前端＋P8 |
+| 6 | **`SessionPlan` 的形状**：`mode`／`candidates`／`decision`／`background` 四个字段，两模式共用；`selection()`／`basis()` 是从 `decision` 派生的只读投影，不另存 | §11 `:576-620` 只给流程与例子；**没有字段、没有类型** | 消费方按固定四字段读；新增字段是破坏性改动；`candidates` 的固定段序是本设计定的 | 不覆盖「UI 的实际呈现」；不覆盖「用户选择后的状态」 | §4.5 | 规范维护者＋前端＋P8 |
 | 7 | **Manual 的候选段序**：existing sessions（输入序）→ tasks（输入序）→ findings（输入序）→ `NewConversation`；段内不排序 | §11 `:582-593` 只给四个示例；**没有顺序规则** | 固定段序可能不是 UI 想要的；用户可能期望「新对话」在最前 | 不覆盖「按用户偏好重排」；不覆盖「跨段优先级」 | §4.6、§5.4 | 前端＋规范维护者 |
-| 8 | **Auto 的选择只来自 P7B**：`Supervisor::decide` 调 `IntentScheduler::decide`；`Advance` 映射到 `Task` 或 `ContinueSession`；`NoIntent` 映射到无选择；`Err` fail-closed | §11 `:595-620` 只说「选择当前最值得继续的任务」；切分 §五 P7D 完成判据 2 要求复用 P7B | P7D 不能对 P7B 的结果再加权；P7B 策略的失败直接变成 `SupervisorError` | 不覆盖「P7B 策略本身错误」；不覆盖「后台结果不是 Intent」——见第 9 条 | §4.4、§5.3 | P7B＋协调者 |
+| 8 | **复述**：**Auto 的选择只来自 P7B**：`Supervisor::decide` 调 `IntentScheduler::decide`；`Advance` 映射到 `Task` 或 `ContinueSession`；`NoIntent` 映射到无选择；`Err` fail-closed | §11 `:595-620` 只说「选择当前最值得继续的任务」；切分 §五 P7D 完成判据 2 要求复用 P7B | P7D 不能对 P7B 的结果再加权；P7B 策略的失败直接变成 `SupervisorError` | 不覆盖「P7B 策略本身错误」；不覆盖「后台结果不是 Intent」——见第 9 条 | §4.4、§5.3 | P7B＋协调者 |
 | 9 | **后台新结果不参与排名**：`BackgroundDigest` 只展示；P7D 不把 finding 转成 Intent、不把它塞进 `SchedulerInputs` | §11 `:604-608` 要求 Auto「分析后台新结果」；**P7B 的 §302 五输入没有「后台结果」这一项** | Auto 只能显示 findings，不能因 finding 改变选择；若要让 finding 影响选择，装配方须把它投影成 `user_focus` 或生成 Intent | 不覆盖「finding 应优先」；不覆盖「finding 与 Intent 的对应」 | §4.5、§5.4、§10 第 7 条 | 规范维护者＋P7B＋P7D |
 | 10 | **`TaskSource` → `WorkloadDeclaration` 的映射**：`MaintenanceSchedule` ⇒ `maintenance=true`；其余 ⇒ 三个布尔全 false | P7C §7.1 `:1203-1218` 只给建议；**P7D 的映射未冻** | 所有 P7D 任务落 `BackgroundRuntime`；`ForegroundRuntime`／`UserWorkload` 两档在 P7D 路径上不可达 | 不覆盖「用户正在等待的后台任务」；不覆盖「前台会话的任务」——那不在 P7D | §4.7、§5.5 | P7C＋规范维护者 |
-| 11 | **checkpoint 的端口**：P7D 调 `CheckpointPort`，成功→`checkpoint_succeeded`，失败→`checkpoint_failed`，超时→`checkpoint_timed_out` | §14 `:730-744` 与切分 §2.3.2 第 2 条 `:159-165` 只给相位与失败回退；**checkpoint 的内容／执行者未给** | 端口实现必须知道任务的可恢复状态；P7D 不保存 checkpoint 内容 | 不覆盖「checkpoint 数据是否完整」；不覆盖「重启恢复」 | §4.7、§5.5 | P7C＋装配方＋P1 |
-| 12 | **§171 触发点做成 `SynthesisIo` 端口**：P7D 只拥有调用序列，事务句柄在装配方 | 切分 §2.3.1 第 4 条 `:144-146` 说「直接依赖 `continuum-memory`，调 `begin/apply/fail`」；**`begin_synthesis` 需要 `&Tx<'_>`，P7D 不依赖 `continuum-persist`** | 字面上不是 P7D 直接调 P6C 的自由函数；多一个端口实现；P6C 的错误经端口返回 | 不覆盖「端口实现是否真的调了 P6C」——那是装配方的契约 | §4.8、§10 第 4 条 | 协调者＋P6C＋装配方 |
+| 11 | **checkpoint 的三出口与定时器控制面**：端口 Ok → `checkpoint_succeeded`；端口 Err → `checkpoint_failed`；定时器 → `checkpoint_timed_out`；P7D 暴露 `checkpoint_deadline` 给调用方安排超时；晚到成功被 `checkpoint_succeeded` 拒绝 | §14 `:730-744` 与切分 §2.3.2 第 2 条 `:159-165` 只给相位与失败回退；**checkpoint 的内容／执行者／P7D 定时器面未给** | 端口实现必须知道任务的可恢复状态；P7D 不保存 checkpoint 内容；调用方必须按截止轮询（P7D 不建线程） | 不覆盖「checkpoint 数据是否完整」；不覆盖「重启恢复」；不覆盖「调用方完全不轮询」 | §4.7、§5.5 | P7C＋装配方＋P1 |
+| 12 | **§171 触发点做成 `SynthesisIo` 端口**：P7D 定义调用面与三个转发，装配方持 `Tx`；评审已裁定（§10 第 4 条） | 切分 §2.3.1 第 4 条原写「直接依赖 `continuum-memory`，调 `begin/apply/fail`」；**`begin_synthesis` 需要 `&Tx<'_>`，P7D 不依赖 `continuum-persist`**；切分已按本裁定同步 | 多一个端口实现；P6C 的错误经端口返回；字面上不是 P7D 直接调自由函数 | 不覆盖「端口实现是否真的调了 P6C」——那是装配方的契约 | §4.8、§10 第 4 条 | 协调者＋P6C＋装配方 |
 | 13 | **零持久化**：`SessionPlan`／`AuthorizedTask`／`BackgroundDigest` 都是值；不建表、不占 201 | §11／§156 没有持久化要求；切分 §四第 2 条 `:273` 说「P7D 若落库才占 201」 | 重启后会话计划与后台摘要不恢复；装配方要自己保存后台结果 | 不覆盖「昨晚完成」的跨重启展示（§156 `:395-404`） | §9、§10 第 10 条 | 协调者＋装配方 |
 | 14 | **「低风险 Milestone」不由 P7D 判**：P7D 收所有 `READY` Product Intent | §156 `:392` 只说「继续完成低风险 Milestone」；**没有风险字段／判据** | P7D 可能把非低风险 Milestone 纳入后台；风险判断在 P7A／Product Drive | 不覆盖「风险模型」；不覆盖「Milestone 的副作用」 | §5.1、§10 第 8 条 | P7A＋规范维护者 |
-| 15 | **P6D 合并门选 rebaseline**：`p7_pre_allowed.txt` 31 行、`P7_EXPECTED_ROWS` 四行、两个 `27` → `31`、断言 2 的 `5` → `4` | 切分 §四第 1 条 `:259-264` 给两条路；P6D §7.3.5 给生命周期 | 多一个 fixture 与一次五处同改；下一个子项目还会到期 | 不覆盖「故意同时改基线」——同 P6D 的自保护边界 | §5.7、§9.2 | 协调者＋P6D |
-| 16 | **`SessionPlan` 的 `selection` 不保证资源准入**：Auto 可以先选中一个随后被 `Suspend` 的任务 | §11 只说「选择」；P7C 的动作在 `direct` 时才知道 | 用户可能看到「已选中」但任务被挂起；UI 要展示资源状态 | 不覆盖「选择时的资源预检」；不覆盖「挂起后的重选」 | §5.5、§10 第 9 条 | P7C＋前端 |
-| 17 | **§171 的触发策略不由 P7D 定义**：P7D 只给触发点；四个时机的判定、空闲阈值、频率、重试归 P10 | §171 `:931-938` 只给四个时机的名字；切分 §6.2 第 10 条把阈值／频率／重试判给 P10 | Dreaming 交付后仍没有自动触发器；调用方必须自己决定何时调 `begin` | 不覆盖「何时触发」；不覆盖「重试与恢复」 | §5.6、§10 第 17 条 | P10＋协调者 |
+| 15 | **复述**：**P6D 合并门选 rebaseline**：`p7_pre_allowed.txt` 31 行、`P7_EXPECTED_ROWS` 四行、两个 `27` → `31`、断言 2 的 `5` → `4` | 切分 §四第 1 条 `:259-264` 给两条路；P6D §7.3.5 给生命周期 | 多一个 fixture 与一次五处同改；下一个子项目还会到期 | 不覆盖「故意同时改基线」——同 P6D 的自保护边界 | §5.7、§9.2 | 协调者＋P6D |
+| 16 | **`SessionPlan` 的选择不保证资源准入**：Auto 可以先选中一个随后被 `Suspend` 的任务 | §11 只说「选择」；P7C 的动作在 `direct` 时才知道 | 用户可能看到「已选中」但任务被挂起；UI 要展示资源状态 | 不覆盖「选择时的资源预检」；不覆盖「挂起后的重选」 | §5.5、§10 第 9 条 | P7C＋前端 |
+| 17 | **复述**：**§171 的触发策略不由 P7D 定义**：P7D 只给触发面；四个时机的判定、空闲阈值、频率、重试归 P10 | §171 `:931-938` 只给四个时机的名字；切分 §6.2 第 10 条把阈值／频率／重试判给 P10 | Dreaming 交付后仍没有自动触发器；调用方必须自己决定何时调 `begin` | 不覆盖「何时触发」；不覆盖「重试与恢复」 | §5.6、§10 第 17 条 | P10＋协调者 |
+| 18 | **`SuspensionState` 由 P7D 按任务持有**：内存表 `states: HashMap<TaskKey, SuspensionState>`；键对 Intent 任务是 `IntentId::as_str()` 的 `String`（`IntentId` 没有 `Hash`／`Eq`），policy／maintenance 用不透明引用；零持久化 | P7C §4.8 `:680`／`:714` 只说「P7D 持有」；**表的形状、生命周期、跨重启行为未给** | 重启后全部相位丢失；表随任务数增长；任务终止时装配方必须调 `release` | 不覆盖「跨重启恢复」；不覆盖「多进程共享状态」；不覆盖「伪造同一引用」 | §4.4、§5.5、§9.1 | P7C＋协调者＋装配方 |
+| 19 | **`next_tasks` 的过滤口径**：Intent 任务以 `candidates` 的**当前** `status == READY` 为准（按 `as_str()` 找 id），不看 `AuthorizedTask.intent().status` 的构造快照；不在候选集即丢弃；policy／maintenance 无条件保留；保持 `tasks` 输入序 | §299 只给来源；§11 只给候选示例；**没有说快照与候选冲突时取谁** | 构造时 READY、后来变为非 READY 的任务不再展示；调用方必须给当前候选集 | 不覆盖「候选集本身过期」；不覆盖「重复 id 选哪一枚」——调用方契约违反 | §4.4、§5.4 | P7B＋前端 |
+| 20 | **`decide` 的状态分派与恢复控制值**：`Ready` ⇒ `Task`；`Waiting`／`Suspended` ⇒ `ContinueSession { disposition: Resume }`，**不要求 `existing_sessions`**；`Running`／`Verifying`／`Evolving` ⇒ `ContinueSession { disposition: Continue }`，要求既有会话；其他 ⇒ `UnsupportedAdvance`（防御） | P7B §5.1 给了启动／恢复／已在运行的分支；**P7D 侧的控制值、无会话时怎么办未给** | 新增 `ContinueDisposition`；`NoActiveSession` 只对 `Continue` 分支；装配方必须按控制值执行恢复 | 不覆盖「恢复失败」；不覆盖「会话句柄的建立」 | §4.4、§5.3 | P7B＋装配方 |
+| 21 | **候选与摘要的形状**：`SessionCandidate` 四臂；`BackgroundNote { label, at_millis: i64 }`；`BackgroundDigest { completed, findings }` 保持输入序；`BackgroundDigest::default()` 是空摘要（允许的 `Default`；计划本体 `SessionPlan` 不实现 `Default`） | §11 只给候选示例；§156 只给展示语义；**没有字段** | 字段固定；`at_millis` 与会话时间同口径（`i64`），与资源时钟 `u64` 不混用 | 不覆盖「UI 呈现」；不覆盖「跨重启展示」 | §4.5 | 前端＋P8＋规范维护者 |
+| 22 | **`SupervisorDecision`／`SessionPlan`／`SupervisorError` 的形状与单一表示**：`SessionPlan.decision: Option<SupervisorDecision>` 是唯一选择表示；`selection()` 只投影 Task／Continue；`basis()` 委托；**没有 `SessionSelection`**；`SupervisorError` 十臂 | §11 只说「选择」与「Session Plan」；**没有类型** | 消费方要匹配 `SupervisorDecision`；`NoIntent` 也占一个 `decision` 值；错误臂是冻结面 | 不覆盖「UI 自己的展示模型」；不覆盖「错误文案」 | §4.4、§4.5、§4.9 | 前端＋规范维护者 |
+| 23 | **`plan_manual` 不调 `decide`、`plan_auto` 不恢复会话**：Manual 只 `next_tasks`＋拼接；Auto 只产出计划；§11 的「然后直接恢复」由装配方按 `ContinueDisposition` 执行 | §11 说 Auto「然后直接恢复」；切分判据 2 只说选择复用 P7B，**没说谁执行恢复** | 计划与执行分离；调用方必须消费 `ContinueDisposition` | 不覆盖「恢复失败」；不覆盖「会话生命周期」 | §4.6、§5.4 | 装配方＋P8 |
+| 24 | **checkpoint 的定时器出口**：`checkpoint_deadline` 暴露 P7C 的截止；`checkpoint_timed_out` 是独立控制面；端口在定时器之后返回也只落到已定义的 `NotCheckpointing`／`Checkpoint` 臂，不把状态写回 `Suspended` | P7C §5.6 给相位与错误，**没有给 P7D 的定时器 API** | 调用方要按 `checkpoint_deadline` 轮询；P7D 不建线程 | 不覆盖「调用方完全不轮询」 | §4.7、§5.5 | P7C＋装配方 |
 
 ## 2.5 切分 §四 六条横切约束的逐条落实
 
@@ -278,6 +300,7 @@ SynthesisTriggerPoint::{begin,apply,fail} -> Result<..., SupervisorError>（调 
 | §79 的四档交互优先级 | 解释面 | `docs/spec/02-positioning.md:655-669` | 不建第二套 `Priority`；P7D 不读 |
 | `AuthorizedTask` | P7D 的唯一任务输入面 | 本设计 §4.3 | 不是 `Intent` 的别名；不是 `SynthesisTrigger`；不是 `WorkloadDeclaration` |
 | `SessionPlan` | §11 的会话计划 | 本设计 §4.5 | 不是 §228 的 `Plan`（P4 的 Plan 数据模型），也不是 P7B 的 `IntentDecision` |
+| `SessionSelection`（**已删**） | 评审前设计里的第二套选择表示 | 本设计 §4.5 | **不建**：`SessionPlan.decision` 直接持 `SupervisorDecision`；`selection()` 只是只读投影，不存第二份值 |
 | `Decision` | §331 的决策单／策略的 `Allow/Deny/RequireApproval` | `crates/continuum-semantics/src/decision.rs:39-44`、`:80` | P7D 不写 `decision.required`；`SupervisorDecision` 不是 §331 |
 | `Suspended` | `NodeState::Suspended`／§14 的协作式挂起态／`IntentStatus::Suspended` | `crates/continuum-graph/src/node.rs:63`、`docs/spec/01-concepts.md:741`、`crates/continuum-semantics/src/intent.rs:77` | P7D 只消费 P7C 的 `SuspensionPhase`；不建挂起状态机、不复用 `NodeState` |
 | `priority` | `Intent.priority`（不透明）／§302 输入／§78 七因子／§300 四档 | `crates/continuum-semantics/src/intent.rs:300`、`docs/spec/05-normative.md:1950`、`docs/spec/02-positioning.md:635-651`、`:1907-1921` | P7D 不解析；P7B 的 `PrioritySignal` 是 P7B 的；P7D 只把 `Intent` 交给 P7B |
@@ -498,8 +521,10 @@ READY → RUNNING`；运行后六态；Product Intent 的 `EVOLVING`。代码在
 `REVIEW → READY` 一条入边（`:879`；`intent.rs:249`），故「已过审查」由状态本身可证明。
 运行态不能证明：`PLANNING → SUSPENDED`（`:878`；`intent.rs:247`）与
 `SUSPENDED → RUNNING`（`:883`；`intent.rs:264`）可绕过 `REVIEW`；把 `RUNNING`／`WAITING`／
-`SUSPENDED`／`VERIFYING`／`EVOLVING` 任一当证据都会接受一条从未过审的 Intent。J3 的负例
-`PLANNING → SUSPENDED → RUNNING` 就是这条的照片。
+`SUSPENDED`／`VERIFYING`／`EVOLVING` 任一当证据都会接受一条从未过审的 Intent。
+**J3 的 `RUNNING` 负例直接构造 `Intent { status: Running, .. }`**（`Intent` 字段是 `pub`）：
+它只证明「`RUNNING` 被拒绝」；「`RUNNING` 可绕过 `REVIEW`」由上面的 P4 迁移表证明，不由运行期
+照片走一遍 `apply_intent_transition` 证明（P7D 没有 `continuum-persist` 边，§4.1）。
 
 **`COMPLETED` 单列**：它不是严格终态（P4 只允许 `COMPLETED → EVOLVING`、仅 Product，P4 设计
 `:885`／`:893`；`intent.rs:222`），但也不是可执行任务；P7D 不接，P7A 先把 Product Intent 推进到
@@ -549,6 +574,10 @@ P7D 不在本块做这个转换（§2.1、§3.8、§5.4）。
 的 `5` 改成 `4`；fixture 换成 `p7_pre_allowed.txt`；旧 fixture 删除；测试改名
 `p7_union_adds_only_its_own_rows`。**不在 P6 fixture 上追加行**。
 
+**所有权**：切分 §一 1.2（`:55`）与 §一 1.3（`:72`）已把 P6D 合并门在 P7 起转给 P7D；P6D
+§7.3.5（`:1069`）的「所有者：P6D（本轮）→ 协调者（P7 起）」里，「协调者」是**收件人**，不是
+执行者。本设计按切分执行；合并评审时由协调者确认这一执行者（§10 第 5 条）。
+
 ---
 
 # 4. 类型与接口
@@ -560,8 +589,8 @@ P7D 不在本块做这个转换（§2.1、§3.8、§5.4）。
 
 见 §2.2 的表。**测试位置**：全部放 `crates/continuum-supervisor/tests/`，不放 `src/` 的
 `#[cfg(test)]`；这样「源码面判据」的语料（`src/`）里没有测试构造（同 P6A §8.2 的纪律）。测试只用
-`std`＋本 crate＋四个普通依赖＋`trybuild`（外部 dev）；假 `IntentSelectionPolicy`／`SynthesisIo`／
-`CheckpointPort` 由 `tests/` 自己写。
+`std`＋本 crate＋四个普通依赖＋`trybuild`＋`serde_json`（仅 J11 的 `Deserialize` 负例；两者都是
+外部 dev 依赖）；假 `IntentSelectionPolicy`／`SynthesisIo`／`CheckpointPort` 由 `tests/` 自己写。
 
 ## 4.2 `TaskSource`
 
@@ -671,6 +700,10 @@ pub enum TaskError {
     EmptyPolicyGrant,
     EmptyMaintenanceRef,
 }
+
+// `SupervisorError::source()` 要返回 `TaskError`，故它必须实现 `Display`／`Error`（M5）。
+impl std::fmt::Display for TaskError { /* 逐臂：拒绝原因，不含敏感内容 */ }
+impl std::error::Error for TaskError {}
 ```
 
 **四个构造器的校验规则**（逐条；J3／J4／J5）：
@@ -682,12 +715,14 @@ pub enum TaskError {
 | `policy` | — | — | — | `issuer`／`grant_id` 非空 |
 | `maintenance` | — | — | — | `schedule_id`／`occurrence_id` 非空 |
 
-**对切分措辞的读法**：切分／任务材料里的「`AuthorizedTask` 只收 `READY` Product Intent」本设计读作
-**`product drive` 这一路**的规则（切分 §2.3.1 第 2 条明写「本文只冻结 `product drive` 这一路」，
-`:134-139`）；`authorized Intent` 是 §299 的另一类，同样是 `READY`＋有效 contract，但不是 Product。
-若协调者要求 `AuthorizedTask` **全局**只允许 Product Intent，则 `authorized_intent` 构造器删除，
-`TaskSource::AuthorizedIntent` 只能由第 5 层的 grant 表达；这是 §10 第 1 条的裁定点，不是本设计
-在正文里能自行收窄的。
+**`READY` 的口径（写死）**：`READY` 约束**只适用于携带 `Intent` 的两路**——`authorized_intent` 与
+`product_drive`；`policy`／`maintenance` 不携带 Intent，也没有状态概念，以非空引用为证据。
+切分／任务材料里的「`AuthorizedTask` 只收 `READY`」按这个口径读（切分 §2.3.1 第 2 条明写
+「本文只冻结 `product drive` 这一路」，`:134-139`）。
+
+**`authorized_intent` 保留（写死）**：§299 把 `authorized Intent` 列为独立来源；本设计**不**把它
+收窄成 Product-only。若未来要求 `AuthorizedTask` 全局只允许 Product Intent，那会删除 §299 的一类
+来源，必须另开设计并重开 §299 的读法；不在本设计内留成裁定点（§10 第 1 条）。
 
 **为什么 `AuthorizedTask` 持有整枚 `Intent`**：P7D 需要把 Intent 交给 P7B 的 `decide`（候选集是
 `&[Intent]`）、需要 `id`／`status`／`contract_id` 做授权与分派、需要 `product_id` 做 `product drive`
@@ -707,17 +742,49 @@ Intent 存储（切分 §6.2 第 5 条禁止）。代价：`Intent` 的 `goal`�
 ## 4.4 `BackgroundSupervisor`、`next_tasks` 与 `decide`
 
 ```rust
-/// 后台治理入口。**无状态**（不持任务表、不持资源状态）；所有输入按值／按引用传入。
-#[derive(Debug, Default, Clone, Copy)]
-pub struct BackgroundSupervisor;
+/// 后台治理入口。**持有每任务的 `SuspensionState` 内存表**（C1）。
+/// 不建任务内容表：`AuthorizedTask` 不存；表只存相位／尝试数／截止。
+/// 任务终止时由装配方调 `release`；P7D 不推断终止。
+#[derive(Debug, Default)]
+pub struct BackgroundSupervisor {
+    states: HashMap<TaskKey, SuspensionState>,
+}
+
+/// 状态表的私有键。**不是公开身份类型**，不出现在公开 API。
+/// `IntentId` 没有 `Hash`／`Eq`（`ids.rs:41`；P7B §4.2 也禁止 `HashSet<IntentId>`），
+/// 故 Intent 任务用 `as_str()` 的 `String`；policy／maintenance 用其不透明引用。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum TaskKey {
+    Intent(String),
+    Policy { issuer: String, grant_id: String },
+    Maintenance { schedule_id: String, occurrence_id: String },
+}
+
+impl TaskKey {
+    fn for_task(task: &AuthorizedTask) -> Self { /* 按 source 与 accessor 机械派生；见 §5.5 */ }
+}
+
+/// `ContinueSession` 的控制值。**不是** P7C 的 `ResourceAction`，也不是相位。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContinueDisposition {
+    /// `Running`／`Verifying`／`Evolving`：会话已在运行，交给执行器继续。
+    Continue,
+    /// `Waiting`／`Suspended`：P7B 的「恢复」分支；**不要求**既有会话。
+    Resume,
+}
 
 /// `decide` 的结果：只三臂。
 #[derive(Debug, Clone)]
 pub enum SupervisorDecision {
     /// P7B 选中了一枚 READY Intent，且它有对应的 `AuthorizedTask`。
     Task { task: AuthorizedTask, decision: IntentDecision },
-    /// P7B 选中了一枚活跃 Intent，且它有既有会话；**不迁移状态**。
-    ContinueSession { intent: IntentId, decision: IntentDecision },
+    /// P7B 选中了一枚活跃 Intent；**不迁移状态**。
+    /// `disposition` 区分「继续」（要求既有会话）与「恢复」（不要求）。
+    ContinueSession {
+        intent: IntentId,
+        disposition: ContinueDisposition,
+        decision: IntentDecision,
+    },
     /// P7B 明确 `NoIntent`；**既有会话与后台任务必须保留**。
     NoIntent { decision: IntentDecision },
 }
@@ -726,11 +793,14 @@ impl SupervisorDecision {
     pub fn intent_decision(&self) -> &IntentDecision;
     pub fn selected_intent(&self) -> Option<&IntentId>;
     pub fn basis(&self) -> &DecisionBasis;
+    pub fn continue_disposition(&self) -> Option<ContinueDisposition>;
 }
 
 impl BackgroundSupervisor {
     /// 本轮可运行的任务集合。**只过滤，不排序**：保持 `tasks` 的输入序。
-    /// - 有 Intent 的任务：只保留其 Intent 在 `candidates` 中且 `status == READY` 的；
+    /// - 有 Intent 的任务：只保留「`candidates` 中存在同 id 的候选，且**该候选的当前**
+    ///   `status == READY`」的；`task.intent().status` 是构造快照，**不用于过滤**（#19）；
+    /// - 候选集中同 id 出现多次时取第一条；重复是调用方契约违反（P7B §4.2 同口径）；
     /// - policy／maintenance 任务：无条件保留（它们不参与 P7B 的 Intent 选择）；
     /// - 不检查资源（资源在 `admit` 里）。
     pub fn next_tasks<'a>(
@@ -744,8 +814,10 @@ impl BackgroundSupervisor {
     ///
     /// 映射（J9）：
     /// - `Advance` 到 `READY`：找对应 `AuthorizedTask`；找不到 ⇒ `Err(UnauthorizedAdvance)`；
-    /// - `Advance` 到 `RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`：
-    ///   在 `existing_sessions` 中找 id；找不到 ⇒ `Err(NoActiveSession)`；
+    /// - `Advance` 到 `WAITING`／`SUSPENDED`：`ContinueSession { disposition: Resume }`；
+    ///   **不要求** `existing_sessions`（P7B §5.1 的「恢复」分支）；
+    /// - `Advance` 到 `RUNNING`／`VERIFYING`／`EVOLVING`：要求 `existing_sessions` 有该 id；
+    ///   无 ⇒ `Err(NoActiveSession)`；`disposition` 为 `Continue`；
     /// - `NoIntent` ⇒ `SupervisorDecision::NoIntent`；
     /// - `Err(IntentDecisionError)` ⇒ `Err(SupervisorError::Decision)`，**不折成 NoIntent**。
     pub fn decide(
@@ -758,14 +830,29 @@ impl BackgroundSupervisor {
 }
 ```
 
+**为什么不是字面的 `HashMap<IntentId, SuspensionState>`**：`IntentId` 没有 `Hash`／`Eq`
+（`ids.rs:41`；P7B §4.2 禁止 `HashSet<IntentId>`），加派生会改 P4 的冻结面；且
+policy／maintenance 任务没有 `IntentId`，却同样需要 P7C 的每任务状态。故用私有 `TaskKey`：
+对 Intent 任务它的值就是 `IntentId::as_str()` 的字符串，对另外两路是它们的不透明引用；
+**公开面仍是 `SuspensionState`，不新增身份类型**。
+
 **`next_tasks` 不是排名**：它按 `tasks` 的输入序返回引用；`Vec` 的顺序就是调用方给的顺序。它不读
-`SchedulerInputs`、不调 `decide`、不比较 `priority`／`deadline`／`blocking`。Manual 模式用它做候选
-展示；Auto 模式用 `decide` 做选择。**两处都不产生第二套顺序**（J7／J8）。
+`SchedulerInputs`、不调 `decide`、不比较 `priority`／`deadline`／`blocking`。Manual 与 Auto 都用它
+做候选面（§5.4）；Auto 的选择用 `decide`。**三处都不产生第二套顺序**（J7／J8）。
+
+**`next_tasks` 用当前候选状态，不用快照**（#19）：`AuthorizedTask` 的 `intent.status` 在构造时是
+`READY`；P4 之后可能推进它。过滤以 `candidates` 里的同 id 候选为准，避免 Manual 展示已经不可推进
+的旧任务。代价：调用方必须把当前候选集传进来；只给 `tasks` 不能完成过滤。
 
 **`decide` 的状态分派不是排名**：它只按候选的 `IntentStatus` 决定「这是新任务还是既有会话」；
 不比较两枚候选。P7B 的 `Advance` 已经给出唯一 id；P7D 只做身份查找与错误处理。**P7D 不调用
 `apply_intent_transition`**：迁移由装配方／执行器按既有运行时路径做（P7B §5.1 的「或既有运行时
 路径」；§11 第 5 条）。J7 的源码面会钉住本 crate 没有 `apply_intent_transition`。
+
+**`ContinueDisposition` 的语义（写死）**：`Waiting`／`Suspended` 走 `Resume`，**不要求**
+`existing_sessions`——P7B §5.1 明确这两态是「恢复」，没有会话也要恢复；`Running`／`Verifying`／
+`Evolving` 走 `Continue`，要求既有会话，否则 `NoActiveSession`。装配方按 `Resume` 执行
+`WAITING/SUSPENDED → RUNNING`，按 `Continue` 把会话交给执行器继续。P7D 自己不做迁移（#20）。
 
 **`NoIntent` 的语义**：表示**本轮没有新的可推进项**；P7D 必须保留既有会话与后台任务，不得据此
 清理、关闭或丢弃它们（P7B §5.3 `:1103-1122`）。`SupervisorDecision::NoIntent` 不携带哨兵
@@ -796,13 +883,10 @@ pub enum SessionCandidate {
     NewConversation,
 }
 
-#[derive(Debug, Clone)]
-pub enum SessionSelection {
-    Task { intent: IntentId, source: TaskSource },
-    ContinueSession { intent: IntentId },
-}
-
 /// 一条后台结果摘要。**不透明文本**；不是 `Evidence`、不是 `Claim`。
+/// `at_millis` 是**会话时间**：`i64` 毫秒，与 `Intent.created_at`／`updated_at` 同口径；
+/// 资源时钟 `now_millis` 是 `u64` 单调毫秒（P7C）。两者不混用；`BackgroundNote` 从不进
+/// `admit`／`checkpoint`。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackgroundNote {
     label: String,
@@ -830,33 +914,43 @@ impl BackgroundDigest {
 }
 
 /// 两模式共用的会话计划。**字段私有；唯一构造点是 `plan_manual`／`plan_auto`。**
+/// `decision` 是选择的**唯一**表示（C2）：`SupervisorDecision` 的三臂原样存放；
+/// `selection()` 只把 Task／Continue 投影出来，`basis()` 委托给 `decision`。
 #[derive(Debug, Clone)]
 pub struct SessionPlan {
     mode: SessionMode,
     candidates: Vec<SessionCandidate>,
-    selection: Option<SessionSelection>,
+    decision: Option<SupervisorDecision>,
     background: BackgroundDigest,
-    basis: Option<DecisionBasis>,
 }
 
 impl SessionPlan {
     pub fn mode(&self) -> SessionMode;
     pub fn candidates(&self) -> &[SessionCandidate];
-    pub fn selection(&self) -> Option<&SessionSelection>;
+    /// Auto：P7B 的完整结论（含 `NoIntent` 的 basis）；Manual：`None`。
+    pub fn decision(&self) -> Option<&SupervisorDecision>;
+    /// 只读投影：Manual／`NoIntent` ⇒ `None`；`Task`／`ContinueSession` ⇒ `Some`。
+    pub fn selection(&self) -> Option<&SupervisorDecision>;
     pub fn background(&self) -> &BackgroundDigest;
+    /// 委托 `decision().map(SupervisorDecision::basis)`；Manual 恒 `None`。
     pub fn basis(&self) -> Option<&DecisionBasis>;
 }
 ```
 
-**五个字段的理由**：
+**四个字段的理由**：
 
 | 字段 | 作用 | 规范状态 |
 |---|---|---|
 | `mode` | 区分 Manual／Auto；两模式共用同一形状 | §11 两模式；字段名本设计自定 |
 | `candidates` | Manual 的候选展示；Auto 的分析面 | §11 `:584-591`；形状本设计自定 |
-| `selection` | Auto 的选择；Manual 恒 `None` | §11 `:608-620`；形状本设计自定 |
+| `decision` | Auto 的完整选择结论；Manual 恒 `None`。`selection()`／`basis()` 是它的只读投影，不另存 | §11 `:608-620`；P7B §4.1 `:500`；形状本设计自定 |
 | `background` | 「昨晚完成／发现」的摘要 | §11 `:606`；§156 `:395-404`；形状本设计自定 |
-| `basis` | P7B 的 `DecisionBasis`；Manual 恒 `None` | P7B §4.1 `:507`；本设计只承载 |
+
+**`selection()` 与 `basis()` 不是第二个存储点**：`SessionPlan` 只有 `decision` 一个字段承载选择；
+`selection()` 的返回类型就是 `Option<&SupervisorDecision>`（评审 C2 选项①的「只读视图」），不是
+第二个 `SessionSelection`；它对 `NoIntent` 返回 `None`（保持「无选择」的旧语义），`decision()` 仍
+返回 `Some(NoIntent)` 以便读 basis；`basis()` 直接委托。**删除了评审前的 `SessionSelection` 类型**
+（C2；§2.6）。
 
 **不实现 `Default`／`Deserialize`**：`SessionPlan` 的字段私有，唯一构造点是 §4.6 的两个函数；反序列化
 会开第二个构造点。`BackgroundDigest` 可以 `Default`（空摘要），因为它不是计划本体。
@@ -872,8 +966,9 @@ impl SessionPlan {
 ## 4.6 `SessionOrchestrator`
 
 ```rust
-/// §11 的 Session Orchestrator。**无状态**；每次 Session Activation 调一次 `plan_*`。
-#[derive(Debug, Clone, Copy, Default)]
+/// §11 的 Session Orchestrator。**持一个 `BackgroundSupervisor`**（因此也持每任务挂起状态）；
+/// 每次 Session Activation 调一次 `plan_*`。
+#[derive(Debug, Default)]
 pub struct SessionOrchestrator {
     supervisor: BackgroundSupervisor,
 }
@@ -881,17 +976,24 @@ pub struct SessionOrchestrator {
 impl SessionOrchestrator {
     pub fn new(supervisor: BackgroundSupervisor) -> Self;
 
-    /// Manual：只生成候选；`selection` **恒 `None`**；不调 P7B。
-    /// 候选段序：existing_sessions（输入序）→ tasks（输入序）→ findings（输入序）→ NewConversation。
+    /// 装配方用同一枚 supervisor 调 `admit`／`checkpoint`／`checkpoint_timed_out`／`release`；
+    /// **不要另建第二个 `BackgroundSupervisor`**，否则资源状态表会分叉（C1）。
+    pub fn supervisor(&self) -> &BackgroundSupervisor;
+    pub fn supervisor_mut(&mut self) -> &mut BackgroundSupervisor;
+
+    /// Manual：只生成候选；`decision` **恒 `None`**；不调 P7B。
+    /// 先 `next_tasks(candidates, tasks)` 过滤（#19），再按段序：
+    /// existing_sessions（输入序）→ 可见 tasks（输入序）→ findings（输入序）→ NewConversation。
     pub fn plan_manual(
         &self,
+        candidates: &[Intent],
         tasks: &[AuthorizedTask],
         existing_sessions: &[IntentId],
         background: BackgroundDigest,
     ) -> SessionPlan;
 
-    /// Auto：调 `BackgroundSupervisor::decide`；`selection` 来自 P7B 的 `Advance`，
-    /// `NoIntent` ⇒ `selection = None` 且保留既有会话；`Err` ⇒ fail-closed。
+    /// Auto：调 `BackgroundSupervisor::decide`；`decision` 来自 P7B 的 `Advance`／`NoIntent`，
+    /// `NoIntent` ⇒ `selection()` 为 `None` 且保留既有会话；`Err` ⇒ fail-closed。
     pub fn plan_auto(
         &self,
         inputs: &SchedulerInputs<'_>,
@@ -903,20 +1005,27 @@ impl SessionOrchestrator {
 }
 ```
 
-**Manual 不选**：`plan_manual` 不调 `decide`、不读 `SchedulerInputs`、不读 `ResourceArbiter`；它只把
-调用方给的候选按固定段序装进 `SessionPlan`，`selection = None`。用户的选择发生在 P7D 之外（UI／
-调用方），P7D 不把「用户选了哪个」编码成第二个决策面。J10 钉住 `plan_manual` 的源码面没有
-`IntentScheduler::decide`。
+**同一个 supervisor 实例（C1 的装配约束）**：`SessionOrchestrator` 持有 `BackgroundSupervisor`；
+装配方通过 `supervisor_mut()` 调 `admit`／`checkpoint`／`checkpoint_timed_out`／`release`，再通过
+`plan_manual`／`plan_auto` 读同一张状态表。**不要**在装配方另建一枚 `BackgroundSupervisor`：两枚
+各有自己的 `states`，资源相位会分叉。`SessionOrchestrator` 不复制状态，也不把 `SuspensionState`
+交给调用方。
 
-**Auto 的选择**：`plan_auto` 先调 `supervisor.decide(...)`，再构造与 Manual 相同的候选列表；若
-`SupervisorDecision::Task` ⇒ `selection = Some(SessionSelection::Task { .. })`；若
-`SupervisorDecision::ContinueSession` ⇒ `Some(SessionSelection::ContinueSession { .. })`；若
-`NoIntent` ⇒ `None`，`basis = Some(NoIntent.basis)`。**`SessionPlan` 的两模式形状完全相同**，只有
-`mode`／`selection`／`basis` 不同（J10）。**`plan_auto` 不恢复会话**：§11 `:620` 的「然后直接恢复」
-由装配方／执行器按 `SessionSelection` 执行；P7D 只产出计划，不执行、不迁移状态。
+**Manual 不选**：`plan_manual` 不调 `decide`、不读 `SchedulerInputs`、不读 `ResourceArbiter`；它先用
+`self.supervisor.next_tasks(candidates, tasks)` 过滤，再把结果按固定段序装进 `SessionPlan`，
+`decision = None`。用户的选择发生在 P7D 之外（UI／调用方），P7D 不把「用户选了哪个」编码成第二个
+决策面。J10 钉住 `plan_manual` 的源码面没有 `IntentScheduler::decide`。
+
+**Auto 的选择**：`plan_auto` 先调 `supervisor.decide(...)`，再用
+`self.supervisor.next_tasks(inputs.candidates, tasks)` 构造与 Manual 相同的候选列表；
+`decision = Some(decision)` 原样存放 `SupervisorDecision`（Task／ContinueSession／NoIntent 三臂），
+**不再翻译成第二个 `SessionSelection`**。`selection()` 对 `NoIntent` 返回 `None`，`basis()` 委托给
+`decision`。**`SessionPlan` 的两模式形状完全相同**，只有 `mode`／`decision` 不同（J10）。
+**`plan_auto` 不恢复会话**：§11 `:620` 的「然后直接恢复」由装配方／执行器按
+`SupervisorDecision::ContinueSession.disposition` 执行；P7D 只产出计划，不执行、不迁移状态。
 
 **Auto 不读后台结果做排名**：`plan_auto` 把 `background` 原样放进 `SessionPlan`，不把
-`BackgroundNote` 塞进 `SchedulerInputs`，也不因 finding 改变 `selection`。若要让 finding 影响选择，
+`BackgroundNote` 塞进 `SchedulerInputs`，也不因 finding 改变 `decision`。若要让 finding 影响选择，
 调用方可以在构造 `SchedulerInputs.user_focus` 时表达（`UserFocus::Intent`／`Area`，P7B §4.2 `:617`），
 但那是调用方的输入，不是 P7D 的排名（§10 第 7 条）。
 
@@ -925,28 +1034,50 @@ impl SessionOrchestrator {
 ```rust
 impl BackgroundSupervisor {
     /// 把一枚任务交给 P7C 的 `ResourceArbiter::direct`（P7C §4.11 `:827`）。
+    /// 每任务状态在 `self.states` 里：首次调用插入 `SuspensionState::new()`，之后复用同一枚。
     /// **返回 P7C 的结论原样**；P7D 不解释动作、不把 `None` 当 `Run`。
     /// 调用方负责周期调用 `ResourceArbiter::observe`；P7D 不读 OS、不读 `ResourceObservation`。
     pub fn admit(
-        &self,
+        &mut self,
         task: &AuthorizedTask,
-        state: &mut SuspensionState,
         arbiter: &ResourceArbiter,
         now_millis: u64,
     ) -> Result<ResourceDecision, SupervisorError>;
 
-    /// 执行一次 checkpoint 并推进 P7C 的相位：
-    /// - 端口成功 ⇒ `checkpoint_succeeded`；成功 ⇒ `Suspended`；
-    /// - 端口失败 ⇒ `checkpoint_failed`；相位回 `Throttled`，返回 `Checkpoint { .. }`；
-    /// - 超时／错相位 ⇒ `SupervisorError::Resource(SuspensionError)`。
+    /// 执行一次 checkpoint 并推进 P7C 的相位（三个出口，写死）：
+    /// 1. 端口 `Ok` 且在截止前 ⇒ `checkpoint_succeeded` ⇒ `Ok(Suspended)`；
+    /// 2. 端口 `Ok` 但已过截止 ⇒ `checkpoint_succeeded` 返回 `CheckpointTimedOut`，
+    ///    相位回 `Throttled` ⇒ `Err(Resource(CheckpointTimedOut))`；**晚到成功不报 `Suspended`**；
+    /// 3. 端口 `Err` ⇒ `checkpoint_failed`，相位回 `Throttled` ⇒
+    ///    `Err(Checkpoint { error: 端口错误, phase: Throttled })`。
+    /// 调用前无状态 ⇒ `Err(NoSuspensionState)`；有状态但相位不是 `Checkpointing` ⇒
+    /// `Err(Resource(NotCheckpointing { phase }))`，**不调端口**。
     /// **不得停在 `Checkpointing`，不得在失败时报 `Suspended`**（P7C §5.6）。
     pub fn checkpoint(
-        &self,
+        &mut self,
         task: &AuthorizedTask,
-        state: &mut SuspensionState,
         port: &dyn CheckpointPort,
         now_millis: u64,
     ) -> Result<SuspensionPhase, SupervisorError>;
+
+    /// 定时器出口：调 P7C 的 `checkpoint_timed_out`；相位回 `Throttled`。
+    /// **没有 `Ok` 路径**：无状态 ⇒ `NoSuspensionState`；错相位 ⇒
+    /// `Resource(NotCheckpointing)`；其余 ⇒ `Resource(CheckpointTimedOut)`。
+    /// 调用方用 `checkpoint_deadline` 安排何时调它。
+    pub fn checkpoint_timed_out(
+        &mut self,
+        task: &AuthorizedTask,
+        now_millis: u64,
+    ) -> Result<(), SupervisorError>;
+
+    /// P7C 的 `checkpoint_deadline_millis()`；无状态或不在 `Checkpointing` ⇒ `None`。
+    pub fn checkpoint_deadline(&self, task: &AuthorizedTask) -> Option<u64>;
+
+    /// 只读当前相位；无状态 ⇒ `None`。
+    pub fn suspension_phase(&self, task: &AuthorizedTask) -> Option<SuspensionPhase>;
+
+    /// 任务终止时丢弃它的状态；返回此前是否存在。P7D 不推断终止，由装配方调。
+    pub fn release(&mut self, task: &AuthorizedTask) -> bool;
 }
 
 /// checkpoint 的执行端口。**P7D 不实现它**；装配方／执行器按任务的真实状态实现。
@@ -961,6 +1092,10 @@ impl CheckpointError {
     pub fn new(message: impl Into<String>) -> Self;
     pub fn message(&self) -> &str;
 }
+
+// `SupervisorError::source()` 要返回 `CheckpointError`，故它必须实现 `Display`／`Error`（M5）。
+impl std::fmt::Display for CheckpointError { /* 输出 message；不裁剪 */ }
+impl std::error::Error for CheckpointError {}
 ```
 
 **`TaskSource` → `WorkloadDeclaration` 的唯一映射**（私有函数；J13）：
@@ -990,9 +1125,30 @@ fn declaration_for(task: &AuthorizedTask) -> WorkloadDeclaration {
 - `Some(Run)`／`Some(Resume)` ⇒ 继续／恢复；
 - `None` ⇒ **不动作**，不是 `Run`（P7C §4.7 `:655-656`）。
 
-**`checkpoint` 的两阶段**：P7C 的 `direct` 只把相位推进到 `Checkpointing`；P7D 的 `checkpoint` 才调
-端口、回报成功／失败。成功路径唯一；失败路径必须回到 `Throttled`。P7D 不保存 checkpoint 内容，
-不实现重启恢复（§10 第 9 条）。
+**`checkpoint` 的三个出口（写死）**：P7C 的 `direct` 只把相位推进到 `Checkpointing`；P7D 的
+`checkpoint` 才调端口并回报结果：
+
+1. **端口 Ok + 截止前**：`state.checkpoint_succeeded(now)` ⇒ `Ok(Suspended)`；这是唯一进入
+   `Suspended` 的路径。
+2. **端口 Ok + 截止后（晚到成功）**：`checkpoint_succeeded` 返回 `Err(CheckpointTimedOut)`，
+   相位已回 `Throttled`；P7D 返回 `Err(SupervisorError::Resource(CheckpointTimedOut))`，
+   **不报 `Suspended`**。
+3. **端口 Err**：`state.checkpoint_failed(now)` 返回 `CheckpointFailed`，相位回 `Throttled`；
+   P7D 返回 `Err(SupervisorError::Checkpoint { error: 端口错误, phase: Throttled })`。
+4. **定时器**：调用方按 `checkpoint_deadline()` 到期调 `checkpoint_timed_out()`；相位回
+   `Throttled`，返回 `Err(Resource(CheckpointTimedOut))`。P7D 不建线程，定时器由装配方驱动。
+
+**错相位与晚到事件**：`checkpoint` 在调用端口前先看 `suspension_phase(task)`；不是
+`Checkpointing` ⇒ `Err(Resource(NotCheckpointing { phase }))`，**端口不被调用**。若定时器已先把
+相位推到 `Throttled`，随后才返回的端口结果不会再写回 `Suspended`，只会落上面的 `NotCheckpointing`
+臂。**P7D 不保存 checkpoint 内容**，不实现重启恢复（§10 第 9 条）。
+
+**状态表的所有权与生命周期（C1）**：`BackgroundSupervisor` 持 `states: HashMap<TaskKey,
+SuspensionState>`；每个任务一枚，不共享、不复制。`TaskKey` 是私有键：Intent 任务用
+`IntentId::as_str()`（`IntentId` 没有 `Hash`／`Eq`），policy／maintenance 用其不透明引用的字段。
+表是**内存表**，不是数据库表：重启后相位全部丢失（§10 第 9 条的已知缺口）。任务终止时装配方调
+`release(task)`；P7D 不推断终止，也不做 TTL／淘汰。`admit` 首次见任务时插入
+`SuspensionState::new()`；同一任务后续 `admit`／`checkpoint` 复用同一枚。
 
 ## 4.8 §171 触发点：`SynthesisIo` 与 `SynthesisTriggerPoint`
 
@@ -1050,15 +1206,14 @@ impl SynthesisTriggerPoint {
 **不**构造 `SynthesisRequest`（调用方给）、**不**生成 `SynthesisProposal`（P6C 的 proposal 由模型／人
 产生）、**不**决定何时调用（调用方／P10）、**不**重试、**不**取时钟（`occurred_at` 由调用方给）。
 
-**为什么是端口而不是字面直调**：`begin_synthesis` 的签名是
+**为什么是端口（评审已裁定）**：`begin_synthesis` 的签名是
 `begin_synthesis(tx: &Tx<'_>, request: &SynthesisRequest)`（`crates/continuum-memory/src/synthesis.rs:108`），
 要字面直调就必须命名 `continuum_persist::Tx<'_>`，从而新增 `continuum-persist` 边；切分 §三 P7D 行
-只允许该边「仅当会话／后台作业落库」（`:193`）。本设计选端口，**让事务句柄留在装配方**；P7D 仍直接
-依赖 `continuum-memory` 的类型（`SynthesisRequest`／`SynthesisJobId`／`SynthesisProposal`／
-`SynthesisReport`／`MemoryError`），且三个方法的**调用序列**归 P7D。这是本设计对切分 §2.3.1 第 4 条
-「直接调」的一处**具名偏差**，代价与收件人见 §10 第 4 条。若协调者要求字面直调，改法是：加
-`continuum-persist` 边、把 `SynthesisIo` 换成接收 `&Tx<'_>` 的三个自由函数；不改
-`SynthesisTriggerPoint` 的语义。
+只允许该边「仅当会话／后台作业落库」（`:193`）。**评审裁定（2026-10-19）选端口**：P7D 定义调用面，
+事务句柄留在装配方；P7D 仍直接依赖 `continuum-memory` 的类型（`SynthesisRequest`／`SynthesisJobId`／
+`SynthesisProposal`／`SynthesisReport`／`MemoryError`）。切分 §2.3.1 第 4 条已同步为「P7D 定义调用面，
+装配方持 `Tx`；何时调用归 P10／调用方」（§11 第 7 条）。**本设计不再把端口称作偏差**；若未来改选字面
+直调，才需要加 `continuum-persist` 边并把 `SynthesisIo` 换成接收 `&Tx<'_>` 的三个自由函数。
 
 **`SynthesisTrigger` 不重定义**：P7D 不出现
 `enum SynthesisTrigger`、不提供 `parse`、不新增第五个时机。四个时机由 P6C 冻结
@@ -1074,6 +1229,7 @@ pub enum SupervisorError {
     UnauthorizedAdvance { intent: IntentId },
     NoActiveSession { intent: IntentId },
     UnsupportedAdvance { intent: IntentId },
+    NoSuspensionState { source: TaskSource },
     Resource(SuspensionError),
     Checkpoint { error: CheckpointError, phase: SuspensionPhase },
     Memory(MemoryError),
@@ -1084,15 +1240,22 @@ pub enum SupervisorError {
 - **`Task`**：`AuthorizedTask` 的拒绝（§4.3）。
 - **`Decision`**：P7B 的 `PolicyFailed`／`InvalidAdvance`；P7D **不折成 NoIntent**。
 - **`UnauthorizedAdvance`**：P7B 选中 READY Intent，但没有对应 `AuthorizedTask`。
-- **`NoActiveSession`**：P7B 选中活跃 Intent，但没有既有会话。
-- **`UnsupportedAdvance`**：P7B 返回了 P7D 不认识的候选状态（防御臂；P7B 已校验六态，理论上不可达）。
+- **`NoActiveSession`**：P7B 选中 `Continue` 分支的活跃 Intent，但 `existing_sessions` 没有它；
+  `Waiting`／`Suspended` 的 `Resume` 分支不会落这里（§5.3）。
+- **`UnsupportedAdvance`**：P7B 返回了 P7D 不认识的候选状态。**防御臂，理论上不可达**：P7B 的
+  `is_advanceable` 已把 `Advance` 限制在六个可推进状态；J9 不为它拍运行期照片（M9）。
+- **`NoSuspensionState`**：在 `admit` 之前调 `checkpoint`／`checkpoint_timed_out`（或状态被
+  `release` 后仍调用）。**调用方契约违反**；防御臂，不写回任何相位。
 - **`Resource`**：P7C `direct`／`checkpoint_*` 的 `SuspensionError`。
 - **`Checkpoint`**：端口失败；相位已经回 `Throttled`（P7C §5.6）。
 - **`Memory`**：`SynthesisIo` 透传的 `MemoryError`。
-- **`InvalidBackgroundNote`**：`BackgroundNote::new` 的空标签。
+- **`InvalidBackgroundNote`**：`BackgroundNote::new` 的空标签；**只有这一条触发路径**（J12 的
+  空标签负例）。
 
 `Display`／`Error` 手写（`std` only）；`source()` 对 `Task`／`Decision`／`Resource`／`Memory`／
-`Checkpoint` 返回内层错误。**不派生 `Clone`**：`MemoryError` 不是 `Clone`（`src/error.rs:8`）。
+`Checkpoint` 返回内层错误（`TaskError`／`CheckpointError` 的 `Display`／`Error` 见 §4.3／§4.7；
+其余内层类型已实现）；`NoSuspensionState` 等无内层错误的臂返回 `None`。**不派生 `Clone`**：
+`MemoryError` 不是 `Clone`（`src/error.rs:8`）。
 
 ## 4.10 可见性、构造点与不变量
 
@@ -1107,10 +1270,15 @@ pub enum SupervisorError {
   1. `AuthorizedTask.source()` 与 `evidence` 变体匹配：`Intent` 只对应 `AuthorizedIntent`／
      `ProductDrive`；`Policy` 只对应 `Policy`；`Maintenance` 只对应 `MaintenanceSchedule`。
   2. 有 Intent 的 `AuthorizedTask` 的 `intent.status == Ready`。
-  3. `SessionPlan.mode == Manual` ⇒ `selection.is_none()`；`mode == Auto` 才可能有选择。
+  3. `SessionPlan.mode == Manual` ⇒ `decision.is_none()`（因而 `selection()`／`basis()` 都是 `None`）；
+     `mode == Auto` 才有 `decision`；`selection()` 对 `NoIntent` 返回 `None`，但 `decision()` 仍有值。
   4. `SessionPlan` 的 `candidates` 不排序；段序固定。
   5. `BackgroundDigest` 的每个 note 的 `label` 非空。
-- **不实现**：`Serialize`／`Deserialize`；没有 `serde` 依赖；没有 `tokio`／执行器依赖。
+  6. `BackgroundSupervisor` 的 `states` 每个键对应一枚 `SuspensionState`；`suspension_phase(task) ==
+     None` ⇔ 没有该键；`checkpoint_deadline(task).is_some()` ⇒ 该任务的相位是 `Checkpointing`。
+- **不实现**：`Serialize`／`Deserialize`；**生产依赖**没有 `serde`；没有 `tokio`／执行器依赖。
+  `serde_json` 只是 `[dev-dependencies]` 的负例工具（J11），不进生产面。`SuspensionState` 的相位是
+  P7C 的内存值，P7D 不序列化它（§9.1）。
 
 ---
 
@@ -1155,9 +1323,9 @@ pub enum SupervisorError {
 4. 通过 ⇒ `AuthorizedTask { source: AuthorizedIntent, evidence: Intent(intent) }`。
 
 **顺序的意义**：先判 `kind`／`product_id`，再判 `status`，最后判 contract。这样
-`PLANNING→SUSPENDED→RUNNING` 的 Product Intent（`status == Running`）在 `product_drive` 上稳定落
-`NotReady`，不会因为 contract 缺失而先落 `InvalidContract`——负例的可观察臂是固定的（J3）。**顺序是
-本设计自定**（§2.4 第 3 条），规范只给三个条件的合取。
+`status == Running` 的 Product Intent（直接构造，代表 `PLANNING→SUSPENDED→RUNNING` 的状态结果）在
+`product_drive` 上稳定落 `NotReady`，不会因为 contract 缺失而先落 `InvalidContract`——负例的可观察臂
+是固定的（J3）。**顺序是本设计自定**（§2.4 第 3 条），规范只给三个条件的合取。
 
 **`COMPLETED` / `EVOLVING`**：`NotReady`。**`FAILED` / `CANCELLED`**：`NotReady`。**`PROPOSED` /
 `SPECIFYING` / `PLANNING` / `REVIEW`**：`NotReady`。只有 `READY` 通过。
@@ -1174,8 +1342,10 @@ pub enum SupervisorError {
    - 在 `inputs.candidates` 中按 `id.as_str()` 找到候选（P7B 保证存在且可推进）；
    - `status == Ready`：在 `tasks` 中按 `task.intent().id.as_str()` 找**第一个**匹配的
      `AuthorizedTask`；无 ⇒ `Err(UnauthorizedAdvance { intent })`；
-   - `status` 是 `Running`／`Waiting`／`Suspended`／`Verifying`／`Evolving`：在
-     `existing_sessions` 中按 `as_str()` 找；无 ⇒ `Err(NoActiveSession { intent })`；
+   - `status` 是 `Waiting`／`Suspended`：`ContinueSession { disposition: Resume }`；
+     **不查** `existing_sessions`（P7B §5.1 的恢复分支）；
+   - `status` 是 `Running`／`Verifying`／`Evolving`：在 `existing_sessions` 中按 `as_str()` 找；
+     无 ⇒ `Err(NoActiveSession { intent })`；`disposition` 为 `Continue`；
    - 其他状态 ⇒ `Err(UnsupportedAdvance { intent })`（防御臂）。
 5. 返回 `Task`／`ContinueSession`。
 
@@ -1185,77 +1355,95 @@ P7D 不定义选哪一枚（P7B §4.2 `:640-644` 对重复候选有同样的口�
 
 **`AuthorizedTask` 是构造时的快照**：它的 `intent.status` 在构造时是 `READY`；之后 P4 可能把它推进到
 别的状态。`decide` 的分派以 `SchedulerInputs.candidates` 的**当前**状态为准，不以
-`AuthorizedTask.intent.status` 重新判候选；若当前状态不是 `READY`，`Advance` 走 `ContinueSession`
-分支（并要求既有会话）。`AuthorizedTask` 不再被重新校验，也不因状态变化失效；它是「这枚 Intent
-在构造时有过授权证据」的记录。
+`AuthorizedTask.intent.status` 重新判候选；若当前状态是 `Waiting`／`Suspended`，`Advance` 走
+`ContinueSession { Resume }`；若是 `Running`／`Verifying`／`Evolving`，走 `ContinueSession { Continue }`
+并要求既有会话。`AuthorizedTask` 不再被重新校验，也不因状态变化失效；它是「这枚 Intent 在构造时
+有过授权证据」的记录。
 
 **`Advance` 到 `READY` 但无任务**：这是「策略选了没有授权证据的 Intent」。**不**把 `Advance` 当
 `NoIntent`；**不**为它构造一个 `AuthorizedTask`；**不**放弃既有会话。返回 `Err`，调用方保留现状
 （fail-closed）。
 
-**`Advance` 到活跃状态但无会话**：P7B 的候选集应只包含 P7D 确有会话的 `Evolving`（P7B §2.4
-`:224-227`）；`Running`／`Verifying` 也可能有既有会话。若无，P7D 不能凭空恢复，返回
-`NoActiveSession`。这是本设计自定（§2.4 第 8 条）。
+**`Advance` 到 `Continue` 分支但无会话**：P7B 的候选集应只包含 P7D 确有会话的 `Evolving`（P7B §2.4
+`:224-227`）；`Running`／`Verifying` 也可能有既有会话。若无，P7D 不能凭空继续，返回
+`NoActiveSession`。`Waiting`／`Suspended` 的 `Resume` 分支**不**落这里。这是本设计自定
+（§2.4 第 20 条）。
 
 ## 5.4 SessionPlan 的组成
 
 **Manual**（`plan_manual`）：
 
-1. `existing_sessions` 按输入序 ⇒ `SessionCandidate::ContinueSession { intent }`。
-2. `tasks` 按输入序 ⇒ `SessionCandidate::Task(task.clone())`。
-3. `background.findings()` 按输入序 ⇒ `SessionCandidate::BackgroundFinding(note.clone())`。
-4. 末尾追加 `SessionCandidate::NewConversation`。
-5. `selection = None`；`basis = None`；`background` 原样放入。
+1. `let visible = self.supervisor.next_tasks(candidates, tasks);`（#19 的过滤；保持 `tasks` 输入序）。
+2. `existing_sessions` 按输入序 ⇒ `SessionCandidate::ContinueSession { intent }`。
+3. `visible` 按输入序 ⇒ `SessionCandidate::Task(task.clone())`。
+4. `background.findings()` 按输入序 ⇒ `SessionCandidate::BackgroundFinding(note.clone())`。
+5. 末尾追加 `SessionCandidate::NewConversation`。
+6. `decision = None`（因而 `selection()`／`basis()` 都是 `None`）；`background` 原样放入。
 
 **Auto**（`plan_auto`）：
 
 1. 调 `supervisor.decide(...)`；`Err` ⇒ 返回 `Err`（不生成计划）。
-2. 用与 Manual 相同的四步构造 `candidates`（段序相同）。
-3. `SupervisorDecision::Task { task, .. }` ⇒ `selection = Some(Task { intent: task.intent().id,
-   source: task.source() })`；`basis = Some(decision.basis().clone())`。
-4. `SupervisorDecision::ContinueSession { intent, .. }` ⇒ `selection = Some(ContinueSession { intent })`；
-   `basis = Some(decision.basis().clone())`。
-5. `SupervisorDecision::NoIntent { decision }` ⇒ `selection = None`；`basis = Some(decision.basis().clone())`。
-6. `background` 原样放入；`basis` 只在 Auto 有值。
+2. `let visible = self.supervisor.next_tasks(inputs.candidates, tasks);`，再用与 Manual 相同的
+   四步构造 `candidates`（existing → visible → findings → NewConversation，段序相同）。
+3. `decision = Some(decision)`：`SupervisorDecision::Task`／`ContinueSession`／`NoIntent` **原样**
+   存入；不再翻译成 `SessionSelection`，也不再单独存 `basis`。
+4. `SupervisorDecision::NoIntent { decision }` ⇒ `selection()` 为 `None`，但 `decision()` 仍是
+   `Some(NoIntent)`、`basis()` 仍有 P7B 的 basis；**既有会话与 `background` 原样保留**（I3）。
+5. `background` 原样放入；`basis()` 只在 Auto 有值（委托 `decision()`）。
 
 **固定段序不是排名**：段与段之间的顺序是 UI 的固定分区（继续／新任务／发现／新对话），不是
 「哪个更值得」的比较；段内保持调用方输入序。P7D 不 sort、不 min／max、不按 `priority` 排。
-**Manual 的 `selection` 恒 `None`**：用户选择在 P7D 之外；P7D 不把用户选择编码成第二个决策面。
-**Auto 的 `selection` 只来自 P7B**：P7D 不读 `background` 来改选择。
+**Manual 的 `decision` 恒 `None`**：用户选择在 P7D 之外；P7D 不把用户选择编码成第二个决策面。
+**Auto 的 `decision` 只来自 P7B**：P7D 不读 `background` 来改选择。
 
-**`SessionPlan` 的 `basis`**：Manual 为 `None`；Auto 为 P7B 的 `DecisionBasis` 的克隆。`DecisionBasis`
-是不透明 `String`（P7B §4.1 `:507`）；P7D 可以展示，但**不得按内容分支**（P7B §5.1 `:1073-1074`）。
+**`SessionPlan` 的 `basis()`**：Manual 为 `None`；Auto 委托 `decision().map(SupervisorDecision::basis)`，
+即 P7B 的 `DecisionBasis`。`DecisionBasis` 是不透明 `String`（P7B §4.1 `:507`）；P7D 可以展示，
+但**不得按内容分支**（P7B §5.1 `:1073-1074`）。`NoIntent` 也保留 basis（I3）。
 
 ## 5.5 资源与 checkpoint
 
 **`admit`**：
 
-1. `declaration_for(task)` 按 §4.7 的唯一映射填三个布尔。
-2. `arbiter.direct(declaration, state, now_millis)`。
-3. `Ok(decision)` 原样返回；`Err(e)` ⇒ `SupervisorError::Resource(e)`。
-4. P7D **不**把 `action == None` 解释为 `Run`；调用方必须按 `None` 不动作。
-5. P7D **不**读 `decision.summary()` 做决策；summary 只是 P7C 的 AI／后台暴露面，P7D 可以把
+1. `let key = TaskKey::for_task(task)`；`self.states.entry(key).or_insert_with(SuspensionState::new)`。
+2. `declaration_for(task)` 按 §4.7 的唯一映射填三个布尔。
+3. `arbiter.direct(declaration, &mut state, now_millis)`。
+4. `Ok(decision)` 原样返回；`Err(e)` ⇒ `SupervisorError::Resource(e)`。
+5. P7D **不**把 `action == None` 解释为 `Run`；调用方必须按 `None` 不动作。
+6. P7D **不**读 `decision.summary()` 做决策；summary 只是 P7C 的 AI／后台暴露面，P7D 可以把
    `resource_pressure`／`workload_class` 展示给用户，但不得据此重新排名。
 
-**`checkpoint`**：
+**`checkpoint`**（三出口；I4）：
 
-1. 调 `port.checkpoint(task)`。
-2. `Ok(())` ⇒ `state.checkpoint_succeeded(now_millis)`；成功 ⇒ `Suspended`；`Err(CheckpointTimedOut)`
-   ⇒ `SupervisorError::Resource`（相位已由 P7C 回 `Throttled`）。
-3. `Err(port_error)` ⇒ `state.checkpoint_failed(now_millis)`；若返回 `CheckpointFailed` ⇒
-   `SupervisorError::Checkpoint { error: port_error, phase: state.phase() }`；若返回
-   `NotCheckpointing { phase }` ⇒ `SupervisorError::Resource(NotCheckpointing { phase })`。
-4. **不得停在 `Checkpointing`**：端口失败与超时都必须回到 `Throttled`（P7C §5.6）。
-5. P7D **不**在失败时重试；重试策略归 P7C 的 `attempts`／P10（§10 第 9 条）。P7D 只做一次
+1. 取状态：没有该任务的键 ⇒ `Err(NoSuspensionState { source })`（调用方没先 `admit`，或已
+   `release`）。
+2. 相位不是 `Checkpointing` ⇒ `Err(Resource(NotCheckpointing { phase }))`；**不调端口**。
+3. `port.checkpoint(task)`：
+   - `Ok(())` ⇒ `state.checkpoint_succeeded(now_millis)`：
+     - `Ok(phase)` ⇒ `Ok(phase)`（唯一进入 `Suspended` 的路径）；
+     - `Err(CheckpointTimedOut)` ⇒ `Err(Resource(CheckpointTimedOut))`（**晚到成功**；相位已回
+       `Throttled`，不报 `Suspended`）；
+     - `Err(NotCheckpointing { phase })` ⇒ `Err(Resource(NotCheckpointing { phase }))`（防御）。
+   - `Err(port_error)` ⇒ `state.checkpoint_failed(now_millis)`：返回 `CheckpointFailed` 时相位已回
+     `Throttled`，P7D 返回 `Err(Checkpoint { error: port_error, phase: Throttled })`；
+     若返回 `NotCheckpointing { phase }` ⇒ `Err(Resource(NotCheckpointing { phase }))`（防御）。
+4. **定时器出口**：调用方按 `checkpoint_deadline(task)` 到期调 `checkpoint_timed_out(task, now)`；
+   `state.checkpoint_timed_out(now)` 把相位回 `Throttled`，P7D 返回
+   `Err(Resource(CheckpointTimedOut))`（无状态／错相位分别落 `NoSuspensionState`／
+   `Resource(NotCheckpointing)`）。**P7D 不建线程**；定时器由装配方驱动。
+5. **不得停在 `Checkpointing`**：端口失败与超时都必须回到 `Throttled`（P7C §5.6）。
+6. P7D **不**在失败时重试；重试策略归 P7C 的 `attempts`／P10（§10 第 9 条）。P7D 只做一次
    checkpoint 调用；若调用方要重试，由它再次调 `admit` 得到新的 `Suspend`。
 
-**P7D 不拥有资源状态**：`SuspensionState` 由调用方按任务持有并传入；P7D 不建任务表、不保存相位
-（P7C §4.8 `:680-683` 明写「P7C 不集中管理任务表；P7D 持有」——本设计把「持有」落在调用方，
-P7D 只做控制逻辑；若协调者要求 P7D 自己持表，见 §10 第 9 条）。
+**P7D 持有资源状态（C1，写死）**：`SuspensionState` 由 `BackgroundSupervisor` 按任务持有并传入
+`ResourceArbiter::direct`（与 P7C §4.8 `:680`／`:714` 的「P7D 持有」一致），键是私有的
+`TaskKey`：Intent 任务用 `IntentId::as_str()`（`IntentId` 没有 `Hash`／`Eq`），policy／maintenance
+用其不透明引用。**这是内存表，不是数据库表**：零迁移、零持久化；重启后相位丢失（§10 第 9 条的
+已知缺口）。表不存任务内容、不存 checkpoint 数据；任务终止时装配方调 `release`。P7D 不共享
+两枚任务的状态，也不把状态交给调用方按 `&mut` 传回。
 
 ## 5.6 §171 触发的边界
 
-**P7D 只提供**：
+**P7D 定义调用面**（评审已裁定；切分 §2.3.1 第 4 条已同步）：
 
 1. `SynthesisTriggerPoint::begin_synthesis`：把调用方给的 `SynthesisRequest` 原样转给 `SynthesisIo`。
 2. `SynthesisTriggerPoint::apply_synthesis`：把调用方给的 `SynthesisProposal` 原样转给 `SynthesisIo`。
@@ -1278,7 +1466,9 @@ P7D 的 J14 只证明「触发点存在且不越界」，不证明「何时触�
 
 ## 5.7 P6D 合并门的 rebaseline 步骤（唯一路径）
 
-**选 rebaseline，不退役。** 理由：
+**选 rebaseline，不退役。** 所有权：切分 §一 1.2（`:55`）与 §一 1.3（`:72`）已把 P6D 合并门在
+P7 起转给 P7D；P6D §7.3.5（`:1069`）的「协调者」是收件人，不是执行者。P7D 执行本节的五处同改，
+合并评审时由协调者确认执行者（§10 第 5 条）。理由：
 
 1. P6D 的并集门保护的是「既有 crate 的行不被顺手改宽」；退役会丢掉这层历史快照。
 2. `every_crate_depends_only_on_its_allowed_set` 只做「表 ↔ 实际依赖」的逐对相等，抓不到「两边
@@ -1317,12 +1507,12 @@ P7D 的 J14 只证明「触发点存在且不越界」，不证明「何时触�
 | 块 | 接缝 | P7D 给出 | P7D 不依赖 | 状态 |
 |---|---|---|---|---|
 | **P7B** | Auto 的「最值得继续」调 `IntentScheduler::decide`；`Advance` 按候选状态分派；`NoIntent` 保留既有会话 | §4.4 的 `decide`；§5.3 的映射 | 不依赖 P7D 的反向边 | P7B §4.1／§5.1 已冻；本设计对着写 |
-| **P7C** | `admit` 调 `ResourceArbiter::direct`；`checkpoint` 调 `SuspensionState` 的成功／失败／超时；`TaskSource` → `WorkloadDeclaration` 三布尔 | §4.7；§5.5 | 不读 `PriorityTier`／`AssemblyView`／`ResourceObservation` | P7C §7.1 `:1182-1201` 已给义务；本设计对着写 |
+| **P7C** | `admit` 调 `ResourceArbiter::direct`（状态取自 P7D 的每任务内存表）；`checkpoint` 走成功／失败／定时器三出口；`TaskSource` → `WorkloadDeclaration` 三布尔 | §4.7；§5.5 | 不读 `PriorityTier`／`AssemblyView`／`ResourceObservation` | P7C §7.1 `:1182-1201` 已给义务；「P7D 持有 `SuspensionState`」已落实（C1） |
 | **P7A** | `product drive` 按值收 `READY` Product Intent；只交值或 id；P7D 不读 Product 记录 | `AuthorizedTask::product_drive(intent)`；§5.2 | 不登记 `continuum-product` 边 | P7A §4.8 `:1435-1454`；按值交接 |
-| **P6C** | `SynthesisIo` 的实现转调 `begin_synthesis`／`apply_synthesis`／`fail_synthesis`；`SynthesisTrigger` 不重定义 | §4.8；§5.6 | 不依赖 `continuum-persist`（事务在实现方） | P6C §8.6 `:1101-1109`；本设计选端口（§10 第 4 条） |
+| **P6C** | `SynthesisIo` 的实现转调 `begin_synthesis`／`apply_synthesis`／`fail_synthesis`；`SynthesisTrigger` 不重定义 | §4.8；§5.6 | 不依赖 `continuum-persist`（事务在实现方） | P6C §8.6 `:1101-1109`；评审裁定端口，切分 §2.3.1 第 4 条已同步（§10 第 4 条） |
 | **P4** | `Intent`／`IntentStatus`／`ContractRef` 只读；候选集 `&[Intent]`；不直读 `intent` 表、不调 `apply_intent_transition` | §4.3、§4.4 | 不写 `intent` 表 | 切分 §6.2 第 5 条；J5／J19 |
-| **P6D** | 合并门 rebaseline：31 行 fixture、四行 P7 期望、两个 `27` → `31`、断言 2 `5` → `4` | §5.7、§9.2 | 不在 P6 fixture 追加行 | P6D §7.3.5；切分 §四第 1 条 |
-| **装配方 `continuum-runtime`** | 实现 `SynthesisIo`／`CheckpointPort`；周期调 `ResourceArbiter::observe`；执行 `ready → running` 的既有迁移；提供候选 `&[Intent]` | §4.7、§4.8；§5.3 | 不依赖 `continuum-runtime` | 实现不在 P7D；本轮不登记 runtime 边 |
+| **P6D** | 合并门 rebaseline：31 行 fixture、四行 P7 期望、两个 `27` → `31`、断言 2 `5` → `4` | §5.7、§9.2 | 不在 P6 fixture 追加行 | P6D §7.3.5；切分 §一 1.2／1.3 已把执行者转给 P7D，P6D 的「协调者」是收件人（§10 第 5 条） |
+| **装配方 `continuum-runtime`** | 实现 `SynthesisIo`／`CheckpointPort`；周期调 `ResourceArbiter::observe`；经 `SessionOrchestrator::supervisor_mut()` 共用同一枚 `BackgroundSupervisor`；按 `checkpoint_deadline` 驱动超时；任务终止时调 `release`；执行 `ready → running`／`waiting／suspended → running` 的迁移；提供候选 `&[Intent]` | §4.6、§4.7、§4.8；§5.3 | 不依赖 `continuum-runtime` | 实现不在 P7D；本轮不登记 runtime 边 |
 
 **P7B 的接缝细节**：P7D 不实现 `IntentSelectionPolicy`；它接受调用方给的 `&dyn IntentSelectionPolicy`
 （可以是 P7B 的 `BaselineIntentPolicy`，也可以是装配方注入的策略）。**P7D 自己实现一个新的
@@ -1331,7 +1521,8 @@ P7D 的 J14 只证明「触发点存在且不越界」，不证明「何时触�
 
 **P7C 的接缝细节**：P7D 不读 `PriorityTier`／`AssemblyView`；`WorkloadDeclaration` 只带三个布尔，
 不带 §300 的档名。`admit` 返回 `ResourceDecision` 原样；P7D 不把 `action == None` 当 `Run`。
-`checkpoint` 的两阶段与失败回退按 P7C §5.5／§5.6；P7D 不建第二套 `Suspended` 状态机。
+**P7D 按任务持有 `SuspensionState`（内存表，C1）**；`checkpoint` 的三出口与失败回退按 P7C
+§5.5／§5.6；P7D 不建第二套 `Suspended` 状态机，也不把状态交回调用方。
 
 **P7A 的接缝细节**：P7A 的 `product_intent_for_handoff` 只返回 `READY`；P7D 只收这个值。P7A 的
 drive gate（`PostShippableImprovement`＋`ContinuousProductDrive` 关闭 ⇒ `None`）在 P7A 内；P7D 看不到
@@ -1343,8 +1534,9 @@ drive gate（`PostShippableImprovement`＋`ContinuousProductDrive` 关闭 ⇒ `N
 七步算法、不读 `memory_synthesis_job` 表。`SynthesisTrigger` 的四个时机由 P6C 冻结；P7D 不新增
 第五个、不 `parse`、不把它与 `TaskSource` 合并。
 
-**P6D 的接缝细节**：P7D 是合并门的唯一所有者（切分 §一 1.3 `:72`）；P7A／B／C 不在 P6 fixture
-追加行。P7C 的 J1(ii) 依赖 P7D 先完成 rebaseline（P7C §8.4 第 10 条）；P7D 的 J15 是最终树的照片。
+**P6D 的接缝细节**：P7D 是合并门的执行者（切分 §一 1.2／1.3 已转给 P7D；P6D §7.3.5 的「协调者」
+是收件人）；P7A／B／C 不在 P6 fixture 追加行。P7C 的 J1(ii) 依赖 P7D 先完成 rebaseline
+（P7C §8.4 第 10 条）；P7D 的 J15 是最终树的照片。
 
 ---
 
@@ -1352,27 +1544,27 @@ drive gate（`PostShippableImprovement`＋`ContinuousProductDrive` 关闭 ⇒ `N
 
 ## 7.1 判据表（每条挂规范节）
 
-**切分 §五 P7D 的三条完成判据对应**：判据 1（任务来源闭集＋`AuthorizedTask` 只收 `READY`）由
-**J1＋J2＋J3** 覆盖；判据 2（会话选择不另造排名）由 **J7＋J10** 覆盖；判据 3（§171 只提供触发点）由
-**J14** 覆盖。其余 J4–J6、J8–J9、J11–J13、J15–J22 是本设计自报的补充判据；**§7.4 没有 P7D 的
-判据**，本设计不修改 §7.4（J20）。
+**切分 §五 P7D 的三条完成判据对应**：判据 1（任务来源闭集＋`AuthorizedTask` 的 Intent 两路只收
+`READY`）由 **J1＋J2＋J3** 覆盖；判据 2（会话选择不另造排名）由 **J7＋J10** 覆盖；判据 3（§171 只提供
+触发点）由 **J14** 覆盖。其余 J4–J6、J8–J9、J11–J13、J15–J22 是本设计自报的补充判据；**§7.4 没有
+P7D 的判据**，本设计不修改 §7.4（J20）。
 
 | # | 判据 | 规范节 | 观测形态 |
 |---|---|---|---|
-| **J1** | `TaskSource` 恰四值；无第五类、无 `ModelSuggested`、无 `parse`／`FromStr`；`as_str` 四字面量逐字 | §299 `:1894-1901`；切分 §五 P7D 完成判据 1 | 源码面（枚举定义＋`grep`）＋编译期（穷尽 `match`） |
+| **J1** | `TaskSource` 恰四值；无第五类、无 `ModelSuggested`、无 `parse`／`FromStr`；`as_str` 四字面量逐字 | §299 `:1894-1901`；切分 §五 P7D 完成判据 1 | 源码面（枚举定义＋`grep`）＋编译期（穷尽 `match`）＋运行期（四个 `as_str` 断言） |
 | **J2** | **裸 `TaskSource` 不能构造 `AuthorizedTask`**：字段私有；没有 `new(source, evidence)`；四个构造器是唯一入口 | 切分 §2.3.1 第 2 条 `:138` | 编译期（`trybuild`：结构体字面量／`AuthorizedTask::new` 编不过）＋源码面 |
-| **J3** | **`product drive` 只收 `READY`**：十三态表逐状态；`PLANNING→SUSPENDED→RUNNING`（`status == RUNNING`，从未过 `REVIEW`）必须 `Err(NotReady)`；`COMPLETED`／`EVOLVING` 也拒绝 | §223 `:172-205`；切分 §三第 6 条 `:226-237`；§八第 5 条 `:483-485` | 运行期（十三组）＋源码面（构造器的 `status == Ready`） |
+| **J3** | **`product drive` 只收 `READY`**：十三态表逐状态；直接构造的 `RUNNING` Intent（字段 `pub`；等价于 `PLANNING→SUSPENDED→RUNNING` 的状态结果）必须 `Err(NotReady)`；`COMPLETED`／`EVOLVING` 也拒绝。**照片只证 `RUNNING` 被拒绝；「可绕过 `REVIEW`」由 §3.7 的 P4 迁移表证明** | §223 `:172-205`；切分 §三第 6 条 `:226-237`；§八第 5 条 `:483-485` | 运行期（十三组）＋源码面（构造器的 `status == Ready`） |
 | **J4** | `authorized Intent` 只收非 Product 的 `READY` Intent；Product 走 `product_drive` | §299；§223；切分 §2.3.1 第 2 条 | 运行期（`WrongKind`）＋源码面 |
 | **J5** | `contract.id` 非空且 `version >= 1`；`product_id` 非空；错误臂分别可观察 | §222 `:148`；§224；切分 §三第 6 条 `:229-230` | 运行期（四类负例） |
-| **J6** | `policy`／`maintenance` 只收非空引用；没有 Intent；来源匹配由构造器类型保证 | §299；切分 §2.3.1 第 2 条 | 运行期（空串负例）＋编译期（不能把 `PolicyGrantRef` 传给 `maintenance`） |
+| **J6** | `policy`／`maintenance` 只收非空引用；没有 Intent；来源匹配由构造器类型保证 | §299；切分 §2.3.1 第 2 条 | 运行期（空串负例）＋编译期（`trybuild`：不能把 `PolicyGrantRef` 传给 `maintenance`，反之亦然） |
 | **J7** | **不另写排名**：`src/` 无 `impl IntentSelectionPolicy`；无 `sort`／`sort_by`／`min`／`max`／`cmp`／`partial_cmp`／`BinaryHeap`；`decide` 只调 `IntentScheduler::decide` 一次 | 切分 §五 P7D 完成判据 2；P7B §5.1 `:1079-1081` | 源码面（`grep` 非注释行）＋运行期（假策略选第二枚，P7D 返回第二枚） |
-| **J8** | `next_tasks` 保持 `tasks` 输入序；只过滤 READY；policy／maintenance 无条件保留；不读 `SchedulerInputs` | §299；§11 Manual 候选 | 运行期（顺序断言）＋源码面（无 sort） |
-| **J9** | `decide` 映射：`Advance`＋READY＋有任务 ⇒ `Task`；`Advance`＋活跃＋有会话 ⇒ `ContinueSession`；`NoIntent` ⇒ `NoIntent`；`Err` ⇒ `Err`；`Advance`＋READY＋无任务 ⇒ `UnauthorizedAdvance`；`NoIntent` 保留既有会话 | P7B §4.1 `:500`、§5.1 `:1052-1081`；§302 | 运行期（六组假策略） |
-| **J10** | **两模式共用 `SessionPlan`**：同一类型、五个字段／访问器；Manual 的 `selection` 恒 `None` 且不调 `decide`；Auto 的 `selection` 来自 P7B；`plan_manual` 源码面不出现 `IntentScheduler::decide` | §11 `:576-620`；切分 §五 P7D 完成判据 2 | 运行期（两模式同一类型）＋源码面（`plan_manual` 函数体） |
-| **J11** | `SessionPlan` 字段私有；无 `Default`／`Deserialize`；唯一构造点是 `plan_manual`／`plan_auto`；`candidates` 段序固定且段内不排序 | §11；§2.4 第 6、7 条 | 编译期（`trybuild` 结构体字面量）＋源码面 |
-| **J12** | **后台摘要不是 `Evidence`**：`BackgroundNote` 只有 `label`／`at_millis`；`src/` 无 `Evidence`／`CompletionVerdict`／`continuum_verify`；`BackgroundDigest` 不参与排名 | §89 `:939-945`；切分 §四第 4 条 | 源码面＋运行期（digest 原样进 plan） |
-| **J13** | **资源消费**：`admit` 调 `ResourceArbiter::direct`；`declaration_for` 的映射逐项；`action == None` 原样返回；`src/` 无 `impl CheckpointPort`（端口实现不在本块）；`src/` 无 `PriorityTier`／`AssemblyView`／`ResourceObservation`；不启用 `assembly` | P7C §4.10 `:759`、§4.11 `:827`、§7.1 `:1182-1201`；§300 | 源码面＋运行期（四档动作对照） |
-| **J14** | **§171 只提供触发点**：`SynthesisTriggerPoint` 三个方法各转发一次；`src/` 无 `impl SynthesisIo`（实现不在本块）；`src/` 无 `Duration`／`Instant`／`SystemTime::now`／`retry`／`interval`／`sleep`／`idle` 判定；`SynthesisTrigger` 不重定义；无阈值 | §171 `:931-938`；切分 §五 P7D 完成判据 3、§6.2 第 10 条 | 源码面＋运行期（假 `SynthesisIo` 计数） |
+| **J8** | `next_tasks` 保持 `tasks` 输入序；只保留「候选当前 READY」的 Intent 任务（不用快照）；policy／maintenance 无条件保留；不读 `SchedulerInputs` | §299；§11 Manual 候选；§2.4 #19 | 运行期（顺序＋快照冲突断言）＋源码面（无 sort） |
+| **J9** | `decide` 映射：`Advance`＋READY＋有任务 ⇒ `Task`；`Advance`＋RUNNING／VERIFYING／EVOLVING＋有会话 ⇒ `ContinueSession { Continue }`；`Waiting`／`Suspended`（无会话也） ⇒ `ContinueSession { Resume }`；`Advance`＋Continue 分支无会话 ⇒ `NoActiveSession`；`Advance`＋READY＋无任务 ⇒ `UnauthorizedAdvance`；`NoIntent` ⇒ `NoIntent` 且保留既有会话；策略 `Err` ⇒ `Err` | P7B §4.1 `:500`、§5.1 `:1052-1081`；§302；§2.4 #20 | 运行期（八组假策略；`UnsupportedAdvance` 防御臂不拍） |
+| **J10** | **两模式共用 `SessionPlan`**：同一类型、四个字段／六个访问器；Manual 的 `decision` 恒 `None` 且不调 `decide`；Auto 的 `decision` 来自 P7B（含 `NoIntent`）；`NoIntent` 时既有会话仍在 candidates、background 不变；`plan_manual` 源码面不出现 `IntentScheduler::decide`，且确实调 `next_tasks` | §11 `:576-620`；切分 §五 P7D 完成判据 2 | 运行期（两模式同一类型＋NoIntent 保留＋Manual 过滤）＋源码面（`plan_manual` 函数体） |
+| **J11** | `SessionPlan` 字段私有（四字段）；无 `Default`／`Deserialize`；唯一构造点是 `plan_manual`／`plan_auto`；`candidates` 段序固定且段内不排序 | §11；§2.4 第 6、7 条 | 编译期（`trybuild` 结构体字面量；`serde_json` 负例）＋源码面 |
+| **J12** | **后台摘要不是 `Evidence`**：`BackgroundNote` 只有 `label`／`at_millis`；`BackgroundNote::new("", _)` ⇒ `Err(InvalidBackgroundNote)`；`src/` 无 `Evidence`／`CompletionVerdict`／`continuum_verify`；`BackgroundDigest` 不参与排名 | §89 `:939-945`；切分 §四第 4 条 | 源码面＋运行期（digest 原样进 plan＋空标签负例） |
+| **J13** | **资源消费与状态持有**：`admit` 调 `ResourceArbiter::direct` 且复用同一任务的状态；`declaration_for` 的映射逐项；`action == None` 原样返回；`checkpoint` 三出口（成功／晚到成功／端口失败）＋定时器出口；`release` 丢状态；`src/` 无 `impl CheckpointPort`（端口实现不在本块）；`src/` 无 `PriorityTier`／`AssemblyView`／`ResourceObservation`；不启用 `assembly` | P7C §4.10 `:759`、§4.11 `:827`、§5.6、§7.1 `:1182-1201`；§300；§2.4 #18／#24 | 源码面＋运行期（四档动作对照＋三出口＋状态复用／释放） |
+| **J14** | **§171 只提供触发点**：`SynthesisTriggerPoint` 三个方法各转发一次；`src/` 无 `impl SynthesisIo`（实现不在本块）；`src/` 无 `Duration`／`Instant`／`SystemTime::now`／`retry`／`interval`／`sleep`／`idle` 判定；`SynthesisTrigger` 不重定义；无阈值 | §171 `:931-938`；切分 §五 P7D 完成判据 3、§6.2 第 10 条；§10 第 4 条 | 源码面＋运行期（假 `SynthesisIo` 计数） |
 | **J15** | **P6D 合并门 rebaseline**：`p7_pre_allowed.txt` 31 行；`P7_EXPECTED_ROWS` 四行；解析器与断言 1 的 `27` → `31`；断言 2 的 `5` → `4`；测试改名；旧 P6 fixture 删除；最终树 `cargo test -p continuum-runtime --test dependency_direction` 绿 | 切分 §四第 1 条 `:259-264`；P6D §7.3.5 | 运行期（依赖门）＋源码面（fixture／常量／两个 `27`） |
 | **J16** | `ALLOWED` 的 `continuum-supervisor` 行恰五项（`arbiter`／`canonical`／`intent-scheduler`／`memory`／`semantics`）；既有行不因本块增枚；`cargo test -p continuum-runtime --test dependency_direction` 绿 | 切分 §四第 1、5 条 | 运行期（依赖门）＋源码面（`ALLOWED` 行） |
 | **J17** | **零表、零事件**：`Cargo.toml` 无 `continuum-persist`；`src/` 无 `Migration`／`Tx`／`INSERT`／`UPDATE`／`load_intent`／`list_children`／`apply_intent_transition`／`Event`／`EventType`；`runtime_migrations()`／`expected_migrations()`／`startup.rs` 三处不变；不占 201 | 切分 §四第 2 条 `:265-276` | 源码面＋运行期（runtime 三处无本 crate） |
@@ -1389,24 +1581,28 @@ P7D 的判据**；本设计不修改 §7.4，也不把 J 编号冒充成 §7.4 �
 
 | # | 照片（具体断言或命令） | 形态 | 拍不到的部分 |
 |---|---|---|---|
-| **J1-a** | `src/task.rs` 的 `TaskSource` 定义恰四变体；`match` 穷尽（无 `_`）编译通过；`grep -rn "ModelSuggested\|TaskSource::Model\|UserRequested\|SystemIdle" crates/continuum-supervisor/src` 零命中（非注释） | 源码面＋编译期 | 外部代码仍可构造 `TaskSource` 标签；由 J2 兜住 |
+| **J1-a** | `src/task.rs` 的 `TaskSource` 定义恰四变体；`match` 穷尽（无 `_`）编译通过；四个 `as_str()` 分别等于 `"authorized_intent"`／`"policy"`／`"maintenance_schedule"`／`"product_drive"`；`grep -rn "ModelSuggested\|TaskSource::Model\|UserRequested\|SystemIdle" crates/continuum-supervisor/src` 零命中（非注释） | 源码面＋编译期＋运行期 | 外部代码仍可构造 `TaskSource` 标签；由 J2 兜住 |
 | **J1-b** | `grep -rn "impl FromStr for TaskSource\|fn parse.*TaskSource" crates/continuum-supervisor/src` 零命中 | 源码面 | 字符串仍可出现在 `PolicyGrantRef` 里；那不是来源 |
 | **J2** | `trybuild` 两个 `compile_fail`：①`AuthorizedTask { source: TaskSource::Policy, evidence: ... }` ⇒ E0451（字段私有）；②`AuthorizedTask::new(TaskSource::Policy, ...)` ⇒ E0599（无此函数） | 编译期 | 内部模块仍可构造；本 crate 只有四个构造器 |
-| **J3** | 十三态表：`product_drive` 对 `PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`COMPLETED`／`EVOLVING`／`FAILED`／`CANCELLED` 各一枚 Intent；只有 `READY` ⇒ `Ok`，其余 ⇒ `Err(NotReady)`。**另加**：构造 `PLANNING`，按 §223 走 `PLANNING→SUSPENDED→RUNNING`，得到 `status == RUNNING` 的 Intent；`product_drive` ⇒ `Err(NotReady { status: Running })` | 运行期 | 谁把 `PROPOSED` 推进到 `READY`（P4 审查流程，不在本块；§3.7） |
+| **J3** | 十三态表：`product_drive` 对 `PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`COMPLETED`／`EVOLVING`／`FAILED`／`CANCELLED` 各一枚 Intent；只有 `READY` ⇒ `Ok`，其余 ⇒ `Err(NotReady)`。**另加**：直接构造 `Intent { status: Running, .. }`（`Intent` 字段是 `pub`；不经 `apply_intent_transition`，也不新增 `continuum-persist` dev 边）；`product_drive` ⇒ `Err(NotReady { status: Running })`。**该照片只证明 RUNNING 被拒绝**；「RUNNING 可绕过 REVIEW」由 §3.7 的 P4 迁移表证明 | 运行期 | 谁把 `PROPOSED` 推进到 `READY`（P4 审查流程，不在本块；§3.7）；「从未过 REVIEW」的路径不由本照片走一遍 |
 | **J4** | `product_drive` 对 `IntentKind::Task` ⇒ `Err(WrongKind)`；`authorized_intent` 对 `IntentKind::Product` ⇒ `Err(WrongKind)`；`authorized_intent` 对 `Task`＋`READY`＋有效 contract ⇒ `Ok` | 运行期 | — |
 | **J5** | `product_drive` 对 `contract.id == ""` ⇒ `Err(InvalidContract)`；`version == 0` ⇒ `Err(InvalidContract)`；`product_id == None`／`Some("")` ⇒ `Err(MissingProductId)`；`authorized_intent` 的同两类 contract 负例 | 运行期 | 合同是否真实存在（P7D 不读合同） |
-| **J6** | `PolicyGrantRef::new("", "g")`／`new("i", "")` ⇒ `Err(EmptyPolicyGrant)`；`MaintenanceOccurrenceRef::new("", "o")`／`new("s", "")` ⇒ `Err(EmptyMaintenanceRef)`；`policy(grant).source() == Policy`；`maintenance(schedule).source() == MaintenanceSchedule`；`policy(...).intent() == None` | 运行期 | grant 的真实性（第 5 层） |
+| **J6** | `PolicyGrantRef::new("", "g")`／`new("i", "")` ⇒ `Err(EmptyPolicyGrant)`；`MaintenanceOccurrenceRef::new("", "o")`／`new("s", "")` ⇒ `Err(EmptyMaintenanceRef)`；`policy(grant).source() == Policy`；`maintenance(schedule).source() == MaintenanceSchedule`；`policy(...).intent() == None`；`trybuild` 两个 `compile_fail`：`AuthorizedTask::maintenance(policy_grant)`／`AuthorizedTask::policy(maintenance_ref)` ⇒ E0308（来源类型不匹配） | 运行期＋编译期 | grant 的真实性（第 5 层） |
 | **J7-a** | `grep -rn "impl IntentSelectionPolicy\|fn choose\|enum IntentDecision\|struct IntentScheduler\|struct SchedulerInputs" crates/continuum-supervisor/src` 零命中（非注释） | 源码面 | 测试里的假策略不算生产实现 |
 | **J7-b** | `grep -rn "\.sort\|\.sort_by\|\.min\|\.max\|cmp(\|partial_cmp\|BinaryHeap\|BTreeSet" crates/continuum-supervisor/src` 零命中（非注释） | 源码面 | 注释里可能提到；限定非注释行 |
 | **J7-c** | 假策略 `choose` 返回候选集**第二枚**的 `Advance`；`decide` 返回的 `selected_intent()` 是第二枚（按 `as_str()`），不是第一枚 | 运行期 | 只证明 P7D 不重排；P7B 策略本身仍可能错 |
-| **J8** | `tasks = [t1, t2, t3]`（t1／t2／t3 的 Intent 状态分别为 `READY`／`PLANNING`／`READY`），`candidates` 含 t1／t3；`next_tasks` ⇒ `[t1, t3]`（按 `tasks` 输入序，不按候选序）；policy／maintenance 任务无条件保留 | 运行期 | 调用方仍可自己排序 |
-| **J9** | 六组假策略：①`Advance(READY, 有任务)` ⇒ `Task`；②`Advance(RUNNING, 有会话)` ⇒ `ContinueSession`；③`Advance(RUNNING, 无会话)` ⇒ `NoActiveSession`；④`Advance(READY, 无任务)` ⇒ `UnauthorizedAdvance`；⑤`NoIntent` ⇒ `NoIntent` 且 `selected_intent() == None`；⑥策略 `Err` ⇒ `SupervisorError::Decision`，不是 `NoIntent` | 运行期 | P7B 策略内部错误（P7B 负责） |
-| **J10-a** | `plan_manual` 与 `plan_auto` 都返回 `SessionPlan`；`mode()` 分别为 `Manual`／`Auto`；Manual 的 `selection() == None`；Auto 的 `selection()` 与假策略的 `Advance` 一致 | 运行期 | — |
-| **J10-b** | 读 `src/session.rs` 的 `plan_manual` 函数体：不出现 `IntentScheduler::decide`／`decide(`／`SchedulerInputs`；只做四个候选段的拼接与 `SessionPlan` 构造 | 源码面 | 调用方仍可自己调 `decide`；那是 Auto |
-| **J11** | `trybuild`：`SessionPlan { mode: ..., candidates: ..., ... }` ⇒ E0451；`SessionPlan::default()` ⇒ E0599（无 `Default`）；`serde_json::from_str::<SessionPlan>` ⇒ E0277（无 `Deserialize`）；读 `src/session.rs` 的字段声明与 `impl`，访问器恰五个 | 编译期＋源码面 | — |
-| **J12** | `BackgroundNote` 的字段恰 `label`／`at_millis`；`grep -rn "Evidence\|CompletionVerdict\|continuum_verify" crates/continuum-supervisor/src` 零命中（非注释）；`BackgroundDigest` 只进 `SessionPlan.background`，不进 `SchedulerInputs` | 源码面＋运行期 | 调用方仍可把 finding 转成 Intent；那是 P5a／装配方 |
-| **J13-a** | `declaration_for` 四来源表：`MaintenanceSchedule` ⇒ `{false,false,true}`；其余 ⇒ `{false,false,false}`；`admit` 对 `Critical` 压力下的 `BackgroundRuntime` ⇒ `ResourceDecision.action == Some(Suspend)`、`phase == Checkpointing`；`High` 下 `BackgroundRuntime` ⇒ `Some(Throttle)`、`Throttled`；`Low` 下 `BackgroundRuntime` ⇒ `None`、`Running`；`UserWorkload` 不出现（P7D 不产生该声明） | 运行期 | 实际降速多少（执行器；§10 第 9 条） |
+| **J8** | `tasks = [t1, t2, t3, t4]`（四枚的**构造快照**都是 `READY`；`AuthorizedTask` 的构造器只收 READY），`candidates` 含 t1／t3／t4，其中 t4 的**当前**状态是 `PLANNING`，t2 不在候选集；`next_tasks` ⇒ `[t1, t3]`（按 `tasks` 输入序，不按候选序；t4 证明用当前候选状态而非快照；t2 证明不在候选集的丢弃）；policy／maintenance 任务无条件保留 | 运行期 | 调用方仍可自己排序 |
+| **J9** | 八组假策略：①`Advance(READY, 有任务)` ⇒ `Task`；②`Advance(RUNNING, 有会话)` ⇒ `ContinueSession { Continue }`；③`Advance(RUNNING, 无会话)` ⇒ `NoActiveSession`；④`Advance(READY, 无任务)` ⇒ `UnauthorizedAdvance`；⑤`NoIntent` ⇒ `NoIntent` 且 `selected_intent() == None`、`basis()` 非空；⑥策略 `Err` ⇒ `SupervisorError::Decision`，不是 `NoIntent`；⑦`Advance(WAITING, 无会话)` ⇒ `ContinueSession { Resume }`；⑧`Advance(SUSPENDED, 无会话)` ⇒ `ContinueSession { Resume }`。`UnsupportedAdvance` 是防御臂，不拍（§4.9） | 运行期 | P7B 策略内部错误（P7B 负责） |
+| **J10-a** | `plan_manual` 与 `plan_auto` 都返回 `SessionPlan`；`mode()` 分别为 `Manual`／`Auto`；Manual 的 `decision() == None`／`selection() == None`／`basis() == None`；Auto 的 `decision()` 与假策略的 `Advance` 一致，`selection()` 与 `ContinueDisposition` 可从 `decision()` 读出 | 运行期 | — |
+| **J10-b** | 读 `src/session.rs` 的 `plan_manual` 函数体：不出现 `IntentScheduler::decide`／`decide(`／`SchedulerInputs`；出现一次 `next_tasks`；只做候选段拼接与 `SessionPlan` 构造 | 源码面 | 调用方仍可自己调 `decide`；那是 Auto |
+| **J10-c** | Manual 过滤照片：`tasks` 含一枚当前候选为 `PLANNING` 的任务（构造快照 READY）与一枚不在候选集的任务；`plan_manual(candidates, tasks, …)` 的 `candidates()` 不含这两枚，只含候选当前 READY 的任务 | 运行期 | 调用方仍可自己构造 `SessionPlan`？不能；字段私有（J11） |
+| **J10-d** | **`NoIntent` 保留照片**：`existing_sessions = [id]`、`background` 含一条 completed＋一条 finding；假策略返回 `NoIntent { basis: "none" }`；`plan_auto` ⇒ `decision()` 是 `Some(NoIntent)`、`selection() == None`、`basis().as_str() == "none"`、`candidates()` 仍含 `ContinueSession { id }`、`background()` 与输入逐项相等 | 运行期 | P7B 的 basis 语义（P7B 负责） |
+| **J11** | `trybuild`：`SessionPlan { mode: ..., candidates: ..., decision: ..., background: ... }` 缺字段 ⇒ E0063 / 字段私有 ⇒ E0451；`SessionPlan::default()` ⇒ E0599（无 `Default`）；`serde_json::from_str::<SessionPlan>` ⇒ E0277（无 `Deserialize`；`serde_json` 在 crate 的 `[dev-dependencies]`，不进 `ALLOWED`）；读 `src/session.rs` 的字段声明与 `impl`：字段恰四个、访问器恰六个（`mode`／`candidates`／`decision`／`selection`／`background`／`basis`） | 编译期＋源码面 | — |
+| **J12** | `BackgroundNote` 的字段恰 `label`／`at_millis`；`BackgroundNote::new("", 0)` ⇒ `Err(InvalidBackgroundNote)`；`grep -rn "Evidence\|CompletionVerdict\|continuum_verify" crates/continuum-supervisor/src` 零命中（非注释）；`BackgroundDigest` 只进 `SessionPlan.background`，不进 `SchedulerInputs` | 源码面＋运行期 | 调用方仍可把 finding 转成 Intent；那是 P5a／装配方 |
+| **J13-a** | `declaration_for` 四来源表：`MaintenanceSchedule` ⇒ `{false,false,true}`；其余 ⇒ `{false,false,false}`；`supervisor.admit(task, &arbiter, now)` 对 `Critical` 压力下的 `BackgroundRuntime` ⇒ `ResourceDecision.action == Some(Suspend)`、`phase == Checkpointing`、`suspension_phase(task) == Some(Checkpointing)`；`High` 下 `BackgroundRuntime` ⇒ `Some(Throttle)`、`Throttled`；`Low` 下 `BackgroundRuntime` ⇒ `None`、`Running`；`UserWorkload` 不出现（P7D 不产生该声明） | 运行期 | 实际降速多少（执行器；§10 第 9 条） |
 | **J13-b** | `grep -rn "impl CheckpointPort\|enum ResourceAction\|struct ResourceDecision\|struct SuspensionState\|struct ResourceArbiter" crates/continuum-supervisor/src` 零命中（假实现在 `tests/`）；`grep -rn "PriorityTier\|AssemblyView\|ResourceObservation\|assembly" crates/continuum-supervisor/src crates/continuum-supervisor/Cargo.toml` 零命中（`src/` 非注释）；`Cargo.toml` 的 `continuum-arbiter` 无 `features = ["assembly"]` | 源码面 | 同一构建图统一启用特性时仍可命名；P9 的规范级强制 |
+| **J13-c** | **三出口＋定时器**：①新任务 `admit`（Critical）后 `checkpoint_deadline(task) == Some(now + 60_000)`；`checkpoint(task, port_ok, now+1_000)` ⇒ `Ok(Suspended)`、`suspension_phase == Suspended`、deadline `None`。②新任务 `admit` 后在 `now+60_000` 调 `checkpoint(port_ok)`（**晚到成功**）⇒ `Err(Resource(CheckpointTimedOut))`、相位 `Throttled`，**不是 `Suspended`**。③新任务 `admit` 后 `checkpoint(port_err)` ⇒ `Err(Checkpoint { error, phase: Throttled })`、相位 `Throttled`。④新任务 `admit` 后 `checkpoint_timed_out(task, now+60_000)` ⇒ `Err(Resource(CheckpointTimedOut))`、相位 `Throttled`。⑤未 `admit` 就 `checkpoint` ⇒ `Err(NoSuspensionState)`；已 `Suspended` 再 `checkpoint` ⇒ `Err(Resource(NotCheckpointing { phase: Suspended }))` 且端口计数不增 | 运行期 | 调用方完全不轮询时相位不会自动推进（P7C 的库边界） |
+| **J13-d** | **状态表复用／释放**：同一任务连续两次 `admit`（第一次已 `Suspend`）第二次 ⇒ `action == None`、相位仍 `Checkpointing`（证明复用同一枚状态，未重置）；`release(task)` ⇒ `true`，`suspension_phase(task) == None`；再次 `admit` ⇒ 新状态从 `Running` 出发（Critical 下再次 `Suspend`）。源码面：`src/supervisor.rs` 有 `states: HashMap<TaskKey, SuspensionState>`；`checkpoint_timed_out` 调 P7C 的同名方法；没有把 `SuspensionState` 作为公开参数 | 运行期＋源码面 | 跨重启恢复（§10 第 9 条） |
 | **J14** | 假 `SynthesisIo` 用 `Cell<usize>` 计数：`begin_synthesis` 恰 1；`apply_synthesis` 恰 1；`fail_synthesis` 恰 1；`src/trigger.rs` 的三个函数体各只有一次转发调用；`grep -rn "impl SynthesisIo" crates/continuum-supervisor/src` 零命中；`grep -rn "Duration\|Instant\|SystemTime::now\|thread::sleep\|retry\|interval\|idle\|threshold" crates/continuum-supervisor/src` 零命中（非注释） | 运行期＋源码面 | 何时调用（P10） |
 | **J15** | 见 §9.2：`wc -l p7_pre_allowed.txt` 数据 31 行；`grep -n "P6_EXPECTED_ROWS\|p6_names\|p6_union\|p6_pre_allowed" dependency_direction.rs` 零命中；`grep -n "rows.len(), 31\|baseline.len(), 31\|P7_EXPECTED_ROWS.len(), 4"` 各一处；`cargo test -p continuum-runtime --test dependency_direction` 绿 | 运行期＋源码面 | 故意同时改 fixture 与测试仍可过；P6D §7.3.5 的自保护边界 |
 | **J16** | `cargo test -p continuum-runtime --test dependency_direction` 绿；`ALLOWED` 的 `continuum-supervisor` 行恰五项；既有行不出现本 crate 名（除 runtime 行若装配方加） | 运行期 | 传递依赖不在逐对断言里 |
@@ -1423,15 +1619,20 @@ P7D 的判据**；本设计不修改 §7.4，也不把 J 编号冒充成 §7.4 �
 |---|---|---|
 | 给 `TaskSource` 加第五变体 `ModelSuggested` | J1（枚举形状）、J18（若接模型） | J3–J6（构造器行为不变） |
 | 给 `AuthorizedTask` 加 `pub fn new(source, evidence)` | J2（`trybuild` 不再失败；源码面多一个入口） | J3–J6（字段校验仍可过） |
-| `product_drive` 接受 `RUNNING` Intent | J3（`PLANNING→SUSPENDED→RUNNING` 组） | J4（kind 仍对） |
+| `product_drive` 接受 `RUNNING` Intent | J3（直接构造的 `RUNNING` 组） | J4（kind 仍对） |
 | `product_drive` 不校验 `product_id` | J5（`None`／空串组）、J22 | J3／J4 |
 | `authorized_intent` 接受 Product | J4（`WrongKind` 不出现） | J3（Product 仍 READY） |
 | 在 `decide` 里按 `priority` 排候选 | J7（源码面 sort／cmp）、J7-c（假策略选择被覆盖） | J9（状态映射仍对） |
-| 在 `plan_manual` 里调 `decide` 并设 `selection` | J10（Manual 不选） | J11（形状仍对） |
-| 在 `plan_auto` 里把 finding 当选择 | J10（selection 不来自 P7B）、J12 | J8（next_tasks 不变） |
+| 在 `plan_manual` 里调 `decide` 并设 `decision` | J10（Manual 不选） | J11（形状仍对） |
+| `next_tasks` 用 `task.intent().status` 快照而不是候选当前状态 | J8（t4 组）、J10-c（Manual 过滤） | J9（选择映射不变） |
+| 在 `plan_auto` 里把 finding 当选择 | J10（`decision` 不来自 P7B）、J12 | J8（next_tasks 不变） |
+| `NoIntent` 分支清空 `candidates`／`background` | J9（⑤）、J10-d（NoIntent 保留） | J11（形状仍对） |
+| 把 `SessionSelection`／独立 `basis` 再加回 `SessionPlan` | J10（单一表示）、J11（字段数） | J9（`decide` 不变） |
 | `BackgroundNote` 加 `Evidence` 字段 | J12（不是 Evidence） | J11（计划形状不变） |
 | `admit` 把 `action == None` 当 `Run` | J13（`None` 不动作） | J5–J6（任务构造不变） |
-| `checkpoint` 失败后报 `Suspended` | J13／J14 的 checkpoint 断言 | J3–J6 |
+| 把 `SuspensionState` 留给调用方（`admit`／`checkpoint` 收 `&mut`） | J13-d（源码面／状态复用） | J5–J6 |
+| `checkpoint` 失败后报 `Suspended` | J13-c（端口失败／晚到成功） | J3–J6 |
+| 超时走 `checkpoint_failed` 而不是 `checkpoint_timed_out` | J13-c（定时器出口） | J3–J6 |
 | 在 `SynthesisTriggerPoint` 里加空闲阈值／重试 | J14（无阈值／无重试） | J1（来源不变） |
 | 给 P7D 加 `continuum-persist` 并建表 | J17（零表）、J16（`ALLOWED` 行不符） | J3–J6（任务构造仍可跑） |
 | 不 rebaseline，直接在 P6 fixture 追加 P7 行 | J15（31 行／断言 1／断言 8） | J16（若 `ALLOWED` 行对，逐对门仍绿） |
@@ -1457,8 +1658,9 @@ P7D 的判据**；本设计不修改 §7.4，也不把 J 编号冒充成 §7.4 �
    规范维护者。**
 8. **Auto 的「分析后台新结果」**：P7D 只展示 findings，不因 finding 改变选择；P7B 的 §302 五输入
    没有后台结果项。**收件人：规范维护者＋P7B。**
-9. **P7D 是否应该持有 `SuspensionState` 表**：本设计把状态留给调用方；P7C §4.8 说「P7D 持有」。
-   若协调者读作「P7D 必须持表」，则要新增内存表或 201 表。**收件人：P7C＋协调者。**
+9. **P7D 的 `SuspensionState` 内存表跨重启丢失**：本设计按 C1 选 (A)，P7D 持每任务内存表；
+   重启后相位全部丢失，P7D 不落表、不占 201。恢复策略（重建 `Running` 或从持久化快照恢复）在
+   装配方；P7D 不实现。**收件人：装配方＋P1＋协调者。**
 10. **P6D 合并门的自保护**：P7D 的 rebaseline 仍是「两个文件＋评审 diff」，挡不住故意同时改；
     这不是防篡改。**收件人：协调者＋合并评审。**
 
@@ -1483,7 +1685,7 @@ P7D 的判据**；本设计不修改 §7.4，也不把 J 编号冒充成 §7.4 �
 | `Evidence`／`CompletionVerdict` 的第二枚 | P5a；P7D 的 `BackgroundNote` 不是 Evidence；J12 |
 | `SynthesisTrigger` 的第二个枚举 | P6C；P7D 不重定义；J14 |
 | `TaskId`／`SessionId` 的第三套身份 | P4／P6C；P7D 用 `IntentId`／`PolicyGrantRef`／`MaintenanceOccurrenceRef`；不另造 |
-| 表、迁移、事件、审计 | P7D 零表（§9）；不占 201 |
+| 表、迁移、事件、审计 | P7D **零数据库表**（`SuspensionState` 只是内存映射，不是表）；不占 201 |
 | `kill`／终止进程／`NodeState` 迁移 | §14；P7C 的协作式挂起；P7D 不建 |
 | `ResourceDirective`／§304 四问 | P7B 的端口；P7D 不回答；J21 |
 | 「§7.4 已覆盖 P7D」的宣称 | §7.4 没有 P7D；本设计自报 J1–J3 等；J20 |
@@ -1497,11 +1699,13 @@ P7D 的判据**；本设计不修改 §7.4，也不把 J 编号冒充成 §7.4 �
 本块**零表**。理由：
 
 1. `SessionPlan` 是**一次 Session Activation 的计划值**，§11 没有要求持久化；它是 UI 的输入。
-2. `AuthorizedTask` 是**本轮任务输入**，由调用方构造；P7D 不拥有任务表。
+2. `AuthorizedTask` 是**本轮任务输入**，由调用方构造；P7D 不拥有任务内容表，只持每任务
+   `SuspensionState` 的内存映射（§9.1 第 5 条）。
 3. `BackgroundDigest` 是**摘要值**；「昨晚完成」的存储属于执行器／装配方，不是 P7D 的表。
 4. §171 的作业记录表属于 P6C（`memory_synthesis_job`／`memory_synthesis_input`，迁移 190）；
    P7D 只调 P6C 的函数，不建表。
-5. `SuspensionState` 是 P7C 的内存状态；P7D 不复制、不持久化。
+5. `SuspensionState` 是 P7C 的内存状态；P7D 按 C1 在 `BackgroundSupervisor` 里持
+   `HashMap<TaskKey, SuspensionState>` 的内存表，但**不复制到数据库、不持久化**；重启丢失。
 
 **不占迁移号段**：P7 的 `200–209` 档由 P7A 占 `200`；P7D **不占 201**（若将来要落会话／后台表，
 再在同一档顺取 201，并同步三处 runtime 计数）。本设计不改
@@ -1522,7 +1726,7 @@ continuum-events:continuum-core
 continuum-runtime:continuum-artifact,continuum-budget,...,continuum-workspace
 ```
 
-**`P7_EXPECTED_ROWS`**（四行；按字母序；与各块设计边表逐行对应）：
+**`P7_EXPECTED_ROWS`**（四行；按 P7A→P7B→P7C→P7D 顺序；与各块设计边表逐行对应）：
 
 ```rust
 const P7_EXPECTED_ROWS: &[(&str, &[&str])] = &[
@@ -1601,9 +1805,9 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
    Intent 不能走 `AuthorizedIntent`；若规范认为四类可重叠，本设计的 `WrongKind` 会过严。
 
 2. **`SessionPlan` 的形状没有规范**。§11 只给流程与例子（`:576-620`），没有字段、没有候选顺序、
-   没有「selection」的语义。本设计定五字段与固定段序（§4.5、§4.6）。**缺的是「SessionPlan 的字段与
-   两模式差异」这一条规范。收件人：规范维护者＋前端＋P8。** 代价：UI 要按固定五字段读；新增字段是
-   破坏性改动；`candidates` 的段序可能不是 UI 想要的。
+   没有「选择」的语义。本设计定四字段与固定段序（§4.5、§4.6），选择只由 `decision` 一个字段承载。
+   **缺的是「SessionPlan 的字段与两模式差异」这一条规范。收件人：规范维护者＋前端＋P8。** 代价：
+   UI 要按固定四字段读；新增字段是破坏性改动；`candidates` 的段序可能不是 UI 想要的。
 
 3. **`AuthorizedTask` 的授权证据只到「合同版本引用＋状态」**。切分 §三第 6 条选选项 (a)
    （`:226-243`）：`contract_id`＋`status`；P7D 不读合同内容、不验证合同存在、不防生产方自报。
@@ -1611,18 +1815,19 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
    协调者＋第 5 层＋P7A。** 代价：`Intent` 字段是 `pub`，调用方可以伪造 `READY`；P7D 只能按字段
    校验，不能证明审查流程。
 
-4. **§171 的「直接调」与「不新增 persist 边」相抵**。`begin_synthesis` 需要 `&Tx<'_>`
-   （`synthesis.rs:108`）；要字面直调就必须依赖 `continuum-persist`，而切分 §三 P7D 行只允许该边
-   「仅当会话／后台作业落库」（`:193`）。本设计选 `SynthesisIo` 端口（§4.8），P7D 仍直接依赖
-   `continuum-memory` 的类型，但事务句柄留在装配方。**缺的是「触发点是否允许端口化」这一条裁定。
-   收件人：协调者＋P6C＋装配方。** 代价：字面上不是 P7D 直接调 P6C 的自由函数；多一个端口实现；
-   若协调者要求字面直调，改法是加 `continuum-persist` 边并换成 `&Tx<'_>` 的三个自由函数。
+4. **§171 的端口化（已裁定）**。`begin_synthesis` 需要 `&Tx<'_>`（`synthesis.rs:108`）；要字面直调
+   就必须依赖 `continuum-persist`，而切分 §三 P7D 行只允许该边「仅当会话／后台作业落库」
+   （`:193`）。**评审裁定（2026-10-19）选 `SynthesisIo` 端口**：P7D 定义调用面，P7D 仍直接依赖
+   `continuum-memory` 的类型，事务句柄留在装配方；切分 §2.3.1 第 4 条已同步为「P7D 定义调用面，
+   装配方持 `Tx`；何时调用归 P10／调用方」。**遗留的不是裁定，而是端口实现的契约**（不得绕过
+   P6C 的 G0–G6）。收件人：P6C＋装配方。代价：多一个端口实现；字面上不是 P7D 直接调自由函数。
 
-5. **`P6D` 合并门 rebaseline vs 退役**。本设计选 rebaseline（§5.7、§9.2）：31 行 fixture、四行 P7
-   期望、两个 `27` → `31`、断言 2 `5` → `4`。**缺的是「P7D 是否允许改 P6D 的基线」这一条裁定；
-   切分 §一 1.3 已把所有权给 P7D，但 P6D 的原文说所有者是「P6D（本轮）→ 协调者（P7 起）」
-   （P6D §7.3.5 `:1069`）。收件人：协调者＋P6D。** 代价：rebaseline 是五处同改，漏一处会先红；
-   退役会丢掉历史快照。
+5. **P6D 合并门的所有权措辞（已裁定，待确认执行者）**。本设计选 rebaseline（§5.7、§9.2）：31 行
+   fixture、四行 P7 期望、两个 `27` → `31`、断言 2 `5` → `4`。切分 §一 1.2／1.3（`:55`／`:72`）
+   已把 P6D 合并门在 P7 起转给 P7D；P6D §7.3.5（`:1069`）的「所有者：P6D（本轮）→ 协调者（P7 起）」
+   里，「协调者」是**收件人**，不是执行者。**缺的不是「是否允许改」，而是协调者在合并评审时确认
+   P7D 是执行者。收件人：协调者＋P6D。** 代价：rebaseline 是五处同改，漏一处会先红；退役会丢掉
+   历史快照。
 
 6. **§7.4 的四条判据不覆盖 P7D**。四条分别落在 P7A（判据 1、2、4）与 P7C（判据 3）；P7D 没有规范
    判据（切分 §七第 12 条）。本设计自报 J1–J3（切分 §五要求）与 J4–J22（补充），**不修改 §7.4**。
@@ -1641,11 +1846,13 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
    `READY` Product Intent。**缺的是「低风险」的定义与字段。收件人：P7A＋规范维护者。** 代价：
    P7D 可能把非低风险 Milestone 纳入后台；若风险判断在 P7A，P7D 不需要改。
 
-9. **`SuspensionState` 的持有者与 `throttle` 的量化**。P7C §4.8 `:680-683` 说「P7D 持有」
-   `SuspensionState`；本设计把它留给调用方（`admit`／`checkpoint` 按 `&mut` 传入），P7D 不建任务表。
-   P7C 的 `Throttle` 也不给量化；P7D 不给。**缺的是「P7D 是否必须持每任务状态表」与「throttle 的
-   量化执行」两条。收件人：P7C＋协调者＋执行器。** 代价：若 P7D 必须持表，要加内存表或 201 表；
-   若 throttle 要量化，要新增执行端口。
+9. **`SuspensionState` 的持有（已选 A）与 `throttle` 的量化**。P7C §4.8 `:680`／`:714` 说「P7D
+   持有」`SuspensionState`；本设计选 **(A) P7D 真的持有**：`BackgroundSupervisor` 里
+   `HashMap<TaskKey, SuspensionState>` 内存表，零数据库表；对 Intent 任务等价于
+   `HashMap<IntentId, SuspensionState>`（`IntentId` 没有 `Hash`／`Eq`，键用 `as_str()` 字符串）。
+   重启丢失列为已知缺口（§7.4 第 9 条）。P7C 的 `Throttle` 仍不给量化；P7D 不给。**遗留的是
+   「throttle 的量化执行」一条。收件人：执行器＋P7C。** 代价：若 throttle 要量化，要新增执行端口；
+   P7D 不替执行器定速率。
 
 10. **后台结果的跨重启持久化**。§156 `:395-404` 要求用户重开时看到「昨晚完成／当前」；本设计零表
     （§9），`BackgroundDigest` 是调用方给的值。**缺的是「后台结果存哪里」这一步。收件人：协调者＋
@@ -1668,7 +1875,7 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
     **缺的是「项目名→Intent」的映射。收件人：前端＋P8。** 代价：P7D 不解释项目名；若调用方给不出
     `IntentId`，Manual 候选只能显示空白。
 
-14. **`SessionPlan` 的 `selection` 不保证资源准入**。Auto 可能选中一个随后被 P7C `Suspend` 的任务；
+14. **`SessionPlan` 的选择不保证资源准入**。Auto 可能选中一个随后被 P7C `Suspend` 的任务；
     P7D 不把资源预检放进 `decide`（P7B 的决策面不含资源）。**缺的是「选择时是否要看资源」这一步。
     收件人：P7C＋前端＋协调者。** 代价：用户可能看到「已选中」但任务被挂起；UI 需要展示 P7C 的状态。
 
@@ -1685,7 +1892,7 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
     Manual／基线」这一步。收件人：P7B＋P8＋协调者。** 代价：Auto 在模型失败时没有计划；用户可以
     切 Manual，但 P7D 不自动切。
 
-17. **§171 的触发策略／阈值归 P10，P7D 只交触发点**。§171 只给「session 结束后／系统空闲时／
+17. **§171 的触发策略／阈值归 P10，P7D 只交触发面**。§171 只给「session 结束后／系统空闲时／
     大量项目状态改变以后／用户主动要求时」四个时机（`:931-938`），没有给空闲时长、数量阈值、检查
     频率、重试与恢复。本设计只提供 `SynthesisTriggerPoint` 的三个转发（§4.8），**不决定何时调用**。
     **缺的是「四个时机的判定策略、频率、重试」这一条；收件人：P10＋协调者。** 代价：P7D 交付后，
@@ -1694,7 +1901,7 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
 
 ---
 
-# 11. 实测与口径订正（只记，不改）
+# 11. 实测与口径订正（含 2026-10-19 的切分同步）
 
 以下行号／口径在本工作树实测；与切分文档或别家设计的旧行号不一致处，按本文件为准。
 
@@ -1705,8 +1912,8 @@ rebaseline，并明确这是**唯一路径**，不提供第二套「P7D 一律�
 | 3 | 切分 §七第 11 条说 P7 先红的是断言 5 与断言 8 | 实测断言 5 在 `:837-854`、断言 8 在 `:882-895`；断言 1 只解析 fixture，初始树不会红 | 本文件按实测引；rebaseline 后仍改断言 1 |
 | 4 | 切分 §一 1.3 说 P7D 顺取 201 | 本设计零表，**不占 201**；若将来落库再取 | 本文件 §9.1 |
 | 5 | P7B 设计 §5.1 说 P7D 可经 `apply_intent_transition` 执行迁移 | 本设计不调用它：P7D 不写 `intent` 表；迁移由装配方／执行器按既有运行时路径做 | §4.4；若协调者要求 P7D 迁移，另立端口 |
-| 6 | P7C 设计 §4.8 说「P7D 持有 `SuspensionState`」 | 本设计把状态留给调用方，按 `&mut` 传入；P7D 不建任务表 | §5.5、§10 第 9 条 |
-| 7 | 切分 §2.3.1 第 4 条说 P7D「直接调」`begin/apply/fail` | `begin_synthesis` 需要 `&Tx<'_>`；本设计用 `SynthesisIo` 端口，事务在装配方 | §4.8、§10 第 4 条 |
+| 6 | P7C 设计 §4.8 说「P7D 持有 `SuspensionState`」 | **已按 C1 选 (A) 落实**：P7D 持 `HashMap<TaskKey, SuspensionState>` 内存表；零数据库表，重启丢失是已知缺口 | §4.4、§5.5、§10 第 9 条 |
+| 7 | 切分 §2.3.1 第 4 条原说 P7D「直接调」`begin/apply/fail` | `begin_synthesis` 需要 `&Tx<'_>`；**评审裁定端口**，切分第 4 条已同步为「P7D 定义调用面，装配方持 `Tx`；何时调用归 P10／调用方」 | §4.8、§10 第 4 条 |
 | 8 | 任务材料把 §11 记在 `docs/spec/05-normative.md` | §11 在 `docs/spec/01-concepts.md:576-620`；`05-normative.md` 的 §299 在 `:1892-1903` | 本文件按实际文件引 |
 | 9 | P6D 设计 §7.3.5 说 P7 新增 crate 会让断言 1 与断言 8 二选一必红 | 断言 1 只解析 fixture，不随新增 crate 红；先红的是断言 5／8；但 rebaseline 后两个 `27` 仍要改 | §3.9、§5.7 |
 | 10 | 切分 §五 P7D 行说「不持产品状态」 | 本设计不登记 `continuum-product`、不读 Product 记录；`product drive` 只按值收 Intent | §2.1、§6 |

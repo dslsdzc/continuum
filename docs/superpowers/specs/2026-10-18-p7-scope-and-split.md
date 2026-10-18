@@ -50,7 +50,7 @@ Scheduler 是本文判定的 **Critical**（§五 P7B、§七第 5、6 条）；
 | Resource Arbiter：资源压力、负载类别、四档优先级、协作式挂起、最小暴露面 | **P7C** | §300 §13 §14；《工程》§7.1（`:429`）、§7.2（`:441`）、§7.3（`:452`）、§7.4 判据 3（`:465`） |
 | Background Supervisor：§299 的四类任务来源与后台任务治理 | **P7D** | §299 §12；《工程》§7.1（`:428`）、§7.2（`:443`）、§7.3（`:453`） |
 | Session Orchestrator：Manual／Auto 两种模式与 Session Plan | **P7D** | §11；《工程》§7.1（`:430`）、§7.3（`:454`） |
-| §171 Dreaming 的**触发点**（不持阈值；直接依赖 `continuum-memory` 调 P6C） | **P7D** | §171；P6C 的 `begin_synthesis`／`fail_synthesis`／`apply_synthesis`（`crates/continuum-memory/src/synthesis.rs:108`／`:217`／`:306`） |
+| §171 Dreaming 的**触发点**（不持阈值；定义 `SynthesisIo` 端口，装配方持 `Tx`） | **P7D** | §171；P6C 的 `begin_synthesis`／`fail_synthesis`／`apply_synthesis`（`crates/continuum-memory/src/synthesis.rs:108`／`:217`／`:306`） |
 | Product 的身份：与 `Intent.product_id` 同一枚 `ProductIdRef`，不另造 `ProductId` | **P7A** 消费，**不新建** | §231；`crates/continuum-semantics/src/intent.rs:372`、`:464` |
 | P6D 合并门的重新基线化或退役 | **P7D**（协调者收） | P6D 设计 §7.3.5；`crates/continuum-runtime/tests/dependency_direction.rs:784` |
 
@@ -141,9 +141,11 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
    （`crates/continuum-memory/src/synthesis.rs:64`）与它不是同一枚举，见 §2.4。
 3. **P7D 的 Session 面**：`SessionPlan` 与「后台新结果」的摘要面；Manual／Auto 两模式共用同一份形状。
    **模型提示、候选排序不冻**——Auto 的「最值得继续」必须调 P7B 的决策面，不得另写一套排名。
-4. **P7D 的 §171 触发面**：P7D 直接依赖 `continuum-memory`，调 `begin_synthesis`／`apply_synthesis`／
-   `fail_synthesis`；`SynthesisTrigger` 的四个时机由 P6C 冻结，P7D 只决定「何时调」，不改类型、不持阈值。
-   这是第 6 层 → 第 7 层的既有方向，`ALLOWED` 登记 `continuum-memory` 这一行。
+4. **P7D 的 §171 触发面**：P7D 直接依赖 `continuum-memory` 的类型，**定义 `SynthesisIo` 调用面**
+   （`begin_synthesis`／`apply_synthesis`／`fail_synthesis` 三个转发）；事务句柄 `Tx` 由装配方持有。
+   `SynthesisTrigger` 的四个时机由 P6C 冻结，**何时调用归 P10／调用方**；P7D 不改类型、不持阈值。
+   这是第 6 层 → 第 7 层的既有方向，`ALLOWED` 登记 `continuum-memory` 这一行。此条已按 P7D 设计评审
+   （2026-10-19）的端口裁定同步。
 
 #### 2.3.2 真正跨块的冻结点（两页，消费方对着写）
 
@@ -372,7 +374,8 @@ P7D 的设计必须自报至少三条：
    `status` 必须为 `READY`，缺失或来源不匹配时拒绝任务；
 2. **会话选择不另造排名**：Auto 模式的「最值得继续」调 P7B 的 Intent Scheduler 决策面（含 `NoIntent`），
    Manual 模式只做候选展示；两模式共用同一份 `SessionPlan`；
-3. **触发不越界**：§171 直接调 P6C（`continuum-memory` 是确定边），P7D 不持阈值、不改 `SynthesisTrigger` 类型。
+3. **触发不越界**：§171 的调用面由 P7D 定义（`SynthesisIo` 端口，装配方持 `Tx`；`continuum-memory`
+   类型是确定边），P7D 不持阈值、不改 `SynthesisTrigger` 类型、不决定何时调用（归 P10／调用方）。
 
 **§299 的 `product drive` 来源在 P7D 里读作「`status == READY`（证据按 §三第 6 条判定）的 Product Intent」**（`Intent.kind = Product`，
 `crates/continuum-semantics/src/intent.rs:40`）。它的生产者是 **P7A**：§152 的 Milestone→Intent lower 确定产出
@@ -406,7 +409,7 @@ P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交
 | 7 | **`CompletionVerdict` 没有「完成」正臂**：只有 `Blocked`／`Undetermined`（`completion.rs:24`），第 2 项恒不可判（`:113-116`）；A1／OPEN-001 仍开 | P5a ＋ P9（ENG-004） | P7A 的 `ShippableVerdict` 用**三值 fail-closed**：`Shippable` 只在 Predicate＋readiness 成立且 Completion ∉ {`Blocked`,`Undetermined`} 时给出；Completion 的 `Undetermined` 一律落 `Undetermined`／`NotShippable`，不得当许可；判据 4 只测三态互不覆盖 |
 | 8 | **§302 的五个输入里只有 `priority` 在 `Intent` 上，且它是不透明值**；`deadline`／`blocking`／`user focus`／`background suitability` 无落点 | 规范维护者 ＋ 协调者 | P7B 把五个信号做成**显式输入**；不解析 `Intent.priority`，不改 `intent` 表加列 |
 | 9 | **§7.4 的判据不覆盖 P7B／P7D**（四条分别落在 A／A／C／A） | 协调者 ＋ 两块设计者 | P7B／P7D 在各自设计里自报判据（§五各自的完成判据段） |
-| 10 | **§171 的阈值不属于 P7**：P6C 把「空闲时长、状态改变数量、检查频率、重试与恢复」判给 P7（`docs/superpowers/p6-followups.md:59`）；主树 `p8-p10-scope.md:95` 已把「阈值／频率／重试／触发策略」判给 P10、把触发点判给 P7D，`:105` 的前置是「P7 的调度框架」 | P10 ＋ 协调者 | **触发策略／阈值／频率／重试（P10）与触发点／调用面（P7D）分开**：P7D 直接依赖 `continuum-memory` 提供触发点，不持阈值；两处口径以本条为准 |
+| 10 | **§171 的阈值不属于 P7**：P6C 把「空闲时长、状态改变数量、检查频率、重试与恢复」判给 P7（`docs/superpowers/p6-followups.md:59`）；主树 `p8-p10-scope.md:95` 已把「阈值／频率／重试／触发策略」判给 P10、把触发点判给 P7D，`:105` 的前置是「P7 的调度框架」 | P10 ＋ 协调者 | **触发策略／阈值／频率／重试（P10）与触发面（P7D）分开**：P7D 直接依赖 `continuum-memory` 的类型、定义 `SynthesisIo` 调用面（装配方持 `Tx`），不持阈值、不决定何时调用；两处口径以本条为准 |
 | 11 | **P6A 的 `continuum-context` 今天不在 workspace**：`p6-followups.md:21` 与主树 `p8-p10-scope.md:32` 都已写「实现中」（`:32` 并注明不得把期望行当成实际状态）；实测 crate 不存在（`ls crates` 零命中，`dependency_direction.rs:554` 只是期望行） | 协调者 ＋ P8 | P7 不依赖它；P8 的前置要按实际状态复核，不得把期望行当成实际存在 |
 | 12 | **第 4 层没有完整的 Resource Scheduler**：只有模型路由（`crates/continuum-model-registry/src/router.rs:199`／`:405`，`rank` `:523`）与节点放置（`crates/continuum-node/src/placement.rs:362`，`src/` 零生产调用方）；缺「工具选择」「并行度决策」与 `place` 的装配点；`ExecutionProfile.compute_node` 仍是裸 `Option<String>`（`:357-358`） | **P3／第 4 层持有方 ＋ 协调者** | P7B 只冻结**具名 `ResourceDirectivePort`**（P7B 定义、装配方实现、内部转调 `rank`／`place`／工具路径），不重造第 4 层；**P7 结束时 §304 仍不完整**，不在 P7 验收里宣称三层调度已闭合 |
 | 13 | **replan 的消费方无实现**：第 3 层 Planner 接口（《工程》§3.1 `:158`）在代码里无实现；P4 明确不建规划；现行 P8 范围没有「消费 Decision 并 replan」项 | **第 3 层持有方 ＋ 协调者（P8 范围）** | P7A 只出 `Decision` 并落 `decision.required`；replan 由第 3 层 Planner 消费，或在 P8 新增范围项。P7A 不执行 replan，§7.4 判据 2 在 P7 内只有「出 Decision」这半闭合 |
@@ -424,7 +427,8 @@ P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交
   P6A 状态在主树 `:32` 已写「实现中」，但 crate 仍不存在（§6.2 第 11 条），P8 的前置要按实测复核，与 P7 无关。
   唯一待协调的是 6.4 第 5 条：replan 消费方是否作为 P8 的新范围项。
 - **P7 的调度是 §171 Dreaming 的触发点**：P10 依赖 P7 的调度框架，P7 不反向依赖 P10。
-  `SynthesisTrigger` 的四个时机由 P6C 冻结（`synthesis.rs:64`），P7D 只决定「何时调」，不改类型。
+  `SynthesisTrigger` 的四个时机由 P6C 冻结（`synthesis.rs:64`），P7D 定义 `SynthesisIo` 调用面
+  （装配方持 `Tx`）；何时调用归 P10／调用方，P7D 不改类型。
 
 ### 6.4 主树已落实与唯一待协调
 
