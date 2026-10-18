@@ -129,7 +129,7 @@ Product Intent，`save_lowered_intent` 是唯一写路径。handoff 按 `Milesto
 | # | 要试着推翻的断言 | 归属 task 与用例 |
 |---|---|---|
 | 1 | **completion `Blocked` 被 assessment mismatch 盖成 `Undetermined`**：assessment 缺一条／多一条，同时 completion 是 `Blocked`，调用方期望 `NotShippable(CompletionBlocked)` | **Task 5** `completion_blocked_wins_over_a_mismatched_assessment`（J15 组合负例 A）＋ `a_not_satisfied_clause_wins_over_an_extra_assessment`（组合负例 B） |
-| 2 | **history 重复计数误触发**：`record` 同时出现在 `history` 里，阈值 3、实际连续 2，却数成 3 并写 Decision | **Task 13** `a_record_repeated_in_history_is_counted_once`（J14；断言 `Ok(None)`、0 行、0 事件） |
+| 2 | **history 重复计数误触发**：`record` 同时出现在 `history` 里，阈值 3、实际连续 2，却数成 3 并写 Decision | **Task 13** `a_record_repeated_in_history_is_counted_once`（J14；去重后 history 不含 `record`，断言 `Ok(None)`、0 行、0 事件） |
 | 3 | **跨 Product 的 lower**：拿 A 的 Milestone 给 B lower，产出 `product_id` 与 `parent_intent` 混搭的 Intent | **Task 14** `a_milestone_from_another_product_is_rejected`（J10；`MilestoneProductMismatch`，零 intent 行） |
 | 4 | **空 baseline 默认通过**：`product_goal` 或 `minimum_complete_system` 为空时，`evaluate_shippable` 走到 `Shippable` 或 `NotShippable`，而不是 `Undetermined(BaselineUnusable)` | **Task 5** `an_unusable_baseline_is_undetermined`（J6，crate 内防御面）＋ **Task 10** `load_product_rejects_an_empty_baseline_row`（J6，库行读回 `CorruptRow`） |
 | 5 | **`READY` 绕过 lower**：调用方直接构造一枚 `READY` 的 Intent，`save_lowered_intent` 收下它并覆盖 lower 的 `PROPOSED`；或 handoff 把 `RUNNING` 当 `READY` | **Task 14** `save_lowered_intent_does_not_accept_an_intent`（trybuild，J10）＋ **Task 15** `a_running_intent_that_never_passed_review_is_not_handed_off`（J11） |
@@ -415,8 +415,11 @@ trybuild = { workspace = true }
 `ProductError` 不派生 `PartialEq`；`PortError` 派生 `Debug, Clone, PartialEq`，有
 `new(message: impl Into<String>)` 与 `message(&self) -> &str`。
 `From<PersistError>`／`From<IntentError>`／`From<DecisionError>`／`From<PortError>` 各一条。
-`Persist`／`Intent`／`Decision` 用 `#[from]`；`Port(PortError)` 用 `#[error("端口错误: {0:?}")]`
-（不要求 `PortError` 实现 `std::error::Error`，设计只给了 `message()`）。**没有
+`Persist`／`Intent`／`Decision` 用 `#[from]`；`Port(PortError)` **不用 `#[from]`**（保留
+`#[error("端口错误: {0:?}")]`，不要求 `PortError` 实现 `std::error::Error`，设计只给了
+`message()`），在 `error.rs` **手写**
+`impl From<PortError> for ProductError { fn from(e: PortError) -> Self { Self::Port(e) } }`
+——`#[from]` 不会替这一臂生成 `From`，不手写就没有「各一条」。**没有
 `ProductError::Invalid`。**
 
 **动作 3c：** `src/readiness.rs` 逐字照设计 §4.2 的五个类型与方法：
@@ -477,8 +480,11 @@ git commit -m "feat(product): crate 骨架、ProductError 与 ProductReadiness �
 - `duplicate_dimensions_are_rejected`：`vec![Functional, Functional]` ⇒
   `DuplicateDimension { dimension: "functional" }`。
 - `duplicate_clause_ids_are_rejected`：两条同 id 的子句 ⇒ `DuplicateClause { id }`。
-- `an_empty_clause_id_or_statement_is_rejected`：`ShippableClauseId::from_str("")` ⇒
-  `EmptyClauseId`；`Opaque::from_str("")` 的 statement ⇒ `EmptyClauseStatement { id }`。
+- `an_empty_clause_id_or_statement_is_rejected`：
+  `ShippableClause::new(ShippableClauseId::from_str(""), Opaque::from_str("statement"))` ⇒
+  `EmptyClauseId`；`ShippableClause::new(valid_id, Opaque::from_str(""))` ⇒
+  `EmptyClauseStatement { id }`。**`ShippableClauseId::from_str("")` 本身返回 `Self`**（空校验
+  在 `ShippableClause::new`），不得断言 `from_str("")` 失败。
 - `accessors_return_the_constructed_lists_in_order`：构造两维三子句，断言
   `required_dimensions()` 与 `clauses()` 逐项同序；`ShippableClause::id()`／`statement()` 同值。
 
@@ -692,6 +698,7 @@ git commit -m "feat(product): Product 七字段与 establish_baseline 的唯一�
 
 **Files:**
 - Modify: `crates/continuum-product/src/shippable.rs`（新建）
+- Modify: `crates/continuum-product/src/product.rs`（`#[cfg(test)]` 的测试构造）
 - Create: `crates/continuum-product/tests/shippable.rs`
 - Modify: `crates/continuum-product/src/lib.rs`
 
@@ -703,9 +710,11 @@ git commit -m "feat(product): Product 七字段与 establish_baseline 的唯一�
   `pub fn evaluate_shippable(product: Option<&Product>, assessment: &ShippableAssessment,
   completion: &CompletionVerdict) -> ShippableVerdict`
 - Test-only: `#[cfg(test)] pub(crate) fn Product::for_test_with_unusable_baseline(..) -> Product`
-  （只用于 J6 的 `BaselineUnusable` 防御面；生产路径不经过它）
+  **定义在 `src/product.rs`**（`Product` 字段私有，`shippable.rs` 是兄弟模块，不能自己写
+  `Product { .. }`）；只用于 J6 的 `BaselineUnusable` 防御面，生产路径不经过它。
+  Task 17 的 J5 允许清单必须把这一处列为 `#[cfg(test)]` 例外。
 
-- [ ] **Step 1: 写 `tests/shippable.rs` 的十一条用例**
+- [ ] **Step 1: 写 `tests/shippable.rs` 的十二条用例**
 
 - `no_product_is_undetermined_even_when_completion_is_blocked`：
   `evaluate_shippable(None, &assessment, &CompletionVerdict::Blocked { failing: vec![] })`
@@ -717,6 +726,9 @@ git commit -m "feat(product): Product 七字段与 establish_baseline 的唯一�
 - `a_missing_clause_assessment_is_undetermined`：缺一条且没有明确不满足 ⇒
   `Undetermined { reason: AssessmentMismatch }`。
 - `a_duplicate_clause_assessment_is_undetermined`：同一 id 两条 ⇒ `AssessmentMismatch`。
+- `an_extra_clause_assessment_is_undetermined`：assessment 比 `predicate.clauses()` 多一条，
+  每条都是 `Satisfied`、completion 为 `Undetermined`（**没有 `NotSatisfied` 也没有
+  `Blocked`**）⇒ `Undetermined { reason: AssessmentMismatch }`（J16 的「多」纯结构照片）。
 - `a_not_satisfied_clause_is_not_shippable`：单个 `NotSatisfied` ⇒ `ClauseNotSatisfied`。
 - `an_unassessed_required_dimension_is_undetermined`：`ProductReadiness::unassessed()` 的
   Product ⇒ `RequiredDimensionUnassessed(Functional)`。
@@ -730,9 +742,10 @@ git commit -m "feat(product): Product 七字段与 establish_baseline 的唯一�
   `statement` 文本（id 不变），同一个 assessment 的 verdict 相同；**P7A 不解析 statement**。
 
 **另在 `src/shippable.rs` 写唯一一处 crate 内 `#[cfg(test)] mod tests`**（设计 J6 明写
-「crate 内构造」）：用 `Product::from_verified_parts` 之外的测试构造（`#[cfg(test)]` 的
-`Product::for_test_with_unusable_baseline`）造一个内存 Product，断言
-`evaluate_shippable(Some(&p), ..)` ⇒ `Undetermined(BaselineUnusable)`。
+「crate 内构造」）：调 `src/product.rs` 里 `#[cfg(test)]` 的
+`Product::for_test_with_unusable_baseline` 造一个内存 Product，断言
+`evaluate_shippable(Some(&p), ..)` ⇒ `Undetermined(BaselineUnusable)`。构造点本身写在
+`src/product.rs`，`shippable.rs` 只调用；Task 17 的单构造点扫描按 `#[cfg(test)]` 例外放行。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -761,7 +774,13 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-product --test shippable
 `ShippableAssessment`／`ClauseAssessment` 字段 `pub`；`ClauseVerdict` 三值；所有枚举派生
 `Debug, Clone, PartialEq`（`ShippableVerdict` 不要求 `Eq`）。
 
-**结果：** 十一条用例＋crate 内一条全绿；`grep -n "Shippable," src/shippable.rs` 只命中枚举定义。
+**测试构造放在 `src/product.rs`**：加 `#[cfg(test)] impl Product` 与
+`pub(crate) fn for_test_with_unusable_baseline(..) -> Product`，体内用 `Self { .. }` 直接
+拼一个 baseline 不可用的值（`Product` 字段私有，兄弟模块 `shippable.rs` 写不出字面量）。
+它在测试构建中才存在，不调用 `from_verified_parts`；Task 17 的 J5 扫描把它登记为允许的
+`#[cfg(test)]` 例外。
+
+**结果：** 十二条用例＋crate 内一条全绿；`grep -n "Shippable," src/shippable.rs` 只命中枚举定义。
 
 - [ ] **Step 4: 运行本 task 的测试**
 
@@ -800,7 +819,8 @@ git commit -m "feat(product): ShippableVerdict 三值 fail-closed 与 evaluate_s
 - `pre_shippable_advances_only_on_shippable`：`Pre + Shippable ⇒ Shippable`；
   `Pre + NotShippable`／`Undetermined ⇒ Pre`。
 - `shippable_is_not_overwritten_by_not_shippable_or_undetermined`：
-  `Shippable + NotShippable ⇒ Shippable`；`Shippable + Undetermined ⇒ Shippable`。
+  `Shippable + Shippable ⇒ Shippable`；`Shippable + NotShippable ⇒ Shippable`；
+  `Shippable + Undetermined ⇒ Shippable`（三条都拍，匹配臂的第二臂也有照片）。
 - `post_shippable_is_never_overwritten`：`Post + 任何 verdict ⇒ Post`（三臂逐一）。
 - `pre_shippable_never_jumps_to_post`：`advance_product_phase(Pre, 任何 verdict)` 从不返回 Post。
 - `the_drive_defaults_to_disabled`：`ContinuousProductDrive::default().enabled == false`；
@@ -868,6 +888,9 @@ git commit -m "feat(product): ContinuousProductDrive 三相位只前进的纯相
   `MilestoneGenerator`）与
   `pub async fn propose_next_batch(product: &Product, history: &[Milestone],
   boundary: BatchBoundary, generator: &dyn MilestoneGenerator) -> Result<Vec<Milestone>, ProductError>`
+  ——**`history` 必须由调用方按 `seq` 升序传入（`load_milestones` 的返回序）；本函数
+  不校验顺序，也不为错序新增错误臂**（见 Step 3 第 3 条；这是调用方前置，不是本函数的
+  判定项）。
 - Crate-private constructor: `pub(crate) Milestone::from_verified_parts(id, product_id, objective,
   dependencies, entry_conditions, exit_conditions, state) -> Result<Self, ProductError>`——
   只给 `propose_next_batch` 与 `persist::load_milestone(s)` 用；**不是公开入口**
@@ -929,7 +952,11 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-product milestone::tests
 1. `milestones.is_empty()` ⇒ `EmptyBatch`；
 2. `len > max_milestones` ⇒ `BatchTooLarge`；
 3. `history` 每枚 `product_id().as_str() == product.id().as_str()`，否则
-   `MilestoneProductMismatch { milestone, product }`；
+   `MilestoneProductMismatch { milestone, product }`。**`history` 的 `seq` 升序是调用方
+   前置，本函数不校验**：调用方必须传 `load_milestones` 的返回序；错序不在
+   `propose_next_batch` 新增错误臂（`ProductError` 形状照设计 §4.9 冻结），ordinal 仍按
+   `history.len() + i` 派生。**本计划不为错序做兜底断言**；它是接口前置，不是本函数的
+   判定项；
 4. 每枚 objective 非空 ⇒ 否则 `EmptyMilestoneObjective`；
 5. 每枚 `entry_conditions`／`exit_conditions` 元素非空 ⇒ 否则 `EmptyMilestoneCondition`；
 6. 依赖：`Existing(id)` 必须在 `history` 里（否则 `UnknownMilestone`）；`InBatch(i)` 必须
@@ -1212,8 +1239,12 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency
 
 ```bash
 git add crates/continuum-product/src/persist.rs crates/continuum-product/src/lib.rs crates/continuum-product/tests/migration.rs crates/continuum-runtime/Cargo.toml crates/continuum-runtime/src/main.rs crates/continuum-runtime/tests/migrations.rs crates/continuum-runtime/tests/startup.rs crates/continuum-runtime/tests/dependency_direction.rs Cargo.lock
-git commit -m "feat(product): 迁移 200 产品循环表（C2 裁定后一次成型）"
+git commit -m "feat(product): 迁移 200 产品循环表（C2 裁定后一次成型）" \
+  -m "C2 裁定：<裁定文本摘要>；裁定提交：<commit-sha>；切分 §2.3.1 更新：<commit-sha>"
 ```
+
+**两个 `-m` 是 Step 1 的落点**：第一个是标题，第二个必须写裁定文本与两个提交号；
+缺第二个 `-m` 即本 task 未完成（不得把裁定写进代码注释代替提交信息）。
 
 ---
 
@@ -1226,17 +1257,26 @@ git commit -m "feat(product): 迁移 200 产品循环表（C2 裁定后一次成
 
 **Interfaces:**
 - Consumes: Task 9 的表；Task 4 的 `Product`／`establish_baseline`；
-  `continuum_semantics::{load_intent, IntentStatus}`；Task 6 的 `ProductDriveState`（仅 (b)）
+  `continuum_semantics::{load_intent, IntentError, IntentStatus}`；Task 6 的
+  `ProductDriveState`（仅 (b)）；Task 1 的 `InvalidContract`／`IntentNotProduct`／
+  `MissingProductId`／`AnchorIntentNotReady`
 - Produces:
   - `pub fn save_product(tx: &Tx<'_>, product: &Product, occurred_at: i64) -> Result<(), ProductError>`
   - `pub fn load_product(tx: &Tx<'_>, id: &ProductIdRef) -> Result<Option<Product>, ProductError>`
   - `pub fn load_product_drive(tx: &Tx<'_>, id: &ProductIdRef)
     -> Result<Option<ProductDriveState>, ProductError>`（仅 C2=(b)；C2=(a) 由 C2 面替代）
 
-- [ ] **Step 1: 写 `tests/persist_product.rs` 的十一条用例**
+- [ ] **Step 1: 写 `tests/persist_product.rs` 的十四条用例**
 
 - `save_product_reloads_the_anchor_and_requires_ready`：先 `save_intent` 一枚 `Ready` 锚；
   `save_product` 成功；把锚改成 `Proposed` 后另存一个 Product ⇒ `AnchorIntentNotReady`。
+- `save_product_rejects_a_missing_anchor_intent`：锚 Intent 从未 `save_intent`
+  （`establish_baseline` 用的是内存锚）⇒ `ProductError::Intent(IntentError::UnknownIntent { .. })`，
+  **不是** `AnchorIntentNotReady`；`product` 表零行。区分「锚不存在」与「存在但未 READY」。
+- `save_product_rejects_an_anchor_whose_contract_became_invalid`：`Ready` 锚（contract 有效）
+  `save_intent` 后用 `establish_baseline` 造出 Product；在 `save_product` 之前把同一锚的
+  `contract_id.version` 改成 `0`（再 `save_intent`，它不校验 contract）⇒ `save_product`
+  ⇒ `InvalidContract { intent }`，`product` 表零行（J2 写路径不变量 3 的重查照片）。
 - `a_generator_error_leaves_zero_product_rows`：`establish_baseline` 用返回 `Err` 的假生成器
   ⇒ `Err`，`product` 表零行（J5 的「生成失败 ⇒ 零 Product 行」）。
 - `save_product_writes_the_drive_row_disabled_in_pre_shippable`（仅 (b)）：保存后
@@ -1251,6 +1291,10 @@ git commit -m "feat(product): 迁移 200 产品循环表（C2 裁定后一次成
 - `load_product_rejects_a_predicate_with_a_duplicate_dimension`：手工写重复维度 ⇒ `CorruptRow`。
 - `load_product_rejects_an_assessed_dimension_without_evidence`：手工写
   `{"value":"0.8","evidence":[],"last_verified":100}` ⇒ `CorruptRow`。
+- `load_product_rejects_an_assessed_dimension_without_last_verified`：手工写
+  `{"value":"0.8","evidence":["e1"],"last_verified":null}` ⇒ `CorruptRow`（J4 的
+  `Some(last_verified)` 不变量；`assessed` 的签名收 `i64`，运行期构造不出这一行，只能在
+  库行读回面拍）。
 - `load_product_rejects_a_current_milestone_from_another_product`：写一个别的 Product 的
   Milestone id 到 `current_milestone` ⇒ `CorruptRow`。
 - `load_product_rejects_a_current_milestone_in_a_terminal_state`：终态 id 作 current ⇒
@@ -1266,11 +1310,16 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-product --test persist_pr
 
 - [ ] **Step 3: 实现 `persist.rs` 的 Product 面与内部编解码**
 
-`save_product`：`load_intent(tx, product.intent_id())`；不存在或 `status != Ready` ⇒
-`AnchorIntentNotReady`；`kind != Product` ⇒ `IntentNotProduct`；`product_id` 与
-`product.id().as_str()` 不一致 ⇒ `MissingProductId`。然后 `INSERT INTO product`；
-已存在 ⇒ `ProductExists`（主键冲突映射）。C2=(b) 时同 Tx 写 `product_drive`
-（`0`／`pre_shippable`／`occurred_at`）。**不 commit。**
+`save_product`：**在同一 `Tx` 里重新 `load_intent(tx, product.intent_id())` 并重查 §4.1
+的 1–4 四条写路径不变量**（锚 Intent 可能在 `establish_baseline` 之后被改动）：
+1. `load_intent` 返回 `None` ⇒ `ProductError::Intent(IntentError::UnknownIntent { id })`
+   （**与「存在但非 READY」区分**；不把不存在混成 `AnchorIntentNotReady`）；
+2. `kind != Product` ⇒ `IntentNotProduct`；
+3. `product_id` 缺失或与 `product.id().as_str()` 不一致 ⇒ `MissingProductId`；
+4. `contract_id.id` 为空**或 `version < 1`** ⇒ `InvalidContract { intent }`；
+5. `status != Ready` ⇒ `AnchorIntentNotReady`。
+然后 `INSERT INTO product`；已存在 ⇒ `ProductExists`（主键冲突映射）。C2=(b) 时同 Tx 写
+`product_drive`（`0`／`pre_shippable`／`occurred_at`）。**不 commit。**
 
 `load_product`：读 `product` 行；解码 `baseline`／`readiness`／`shippable_predicate`；
 查 `milestone` 按 `seq` 得 `milestone_history`；再查 `current_milestone` 的存在性与状态；
@@ -1283,11 +1332,13 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-product --test persist_pr
 **内部 JSON 编码（本计划自定，设计 §4.9 允许内部实现）**：
 - baseline：十个键逐字；
 - readiness：九个键，每项 `{"value": null|"串", "evidence": ["e1"], "last_verified": null|100}`；
+  `Assessed` 配 `last_verified: null`、空 evidence 或空 value 均 ⇒ `CorruptRow`；
 - predicate：`{"required_dimensions":["functional"], "clauses":[{"id":"c1","statement":"..."}]}`；
 - 未知键、缺失键、表外枚举值 ⇒ `CorruptRow`，**不取默认值**。
 
-**结果：** 十一条绿（其中 drive 初始化那条只在 (b) 写；C2=(a) 时该条不写）；
-`load_product` 对四种坏行都返回 `CorruptRow`。
+**结果：** 十四条绿（其中 drive 初始化那条只在 (b) 写；C2=(a) 时该条不写）；
+`load_product` 对六种坏行都返回 `CorruptRow`（空 baseline／重复维度／Assessed 空 evidence／
+Assessed 空 `last_verified`／跨 Product 的 current／终态 current）。
 
 - [ ] **Step 4: 运行本 task 的测试**
 
@@ -1329,7 +1380,7 @@ git commit -m "feat(product): Product 落库与读回，坏行 fail-closed"
 - Test-only: `#[cfg(test)] pub(crate) fn Milestone::for_test(..) -> Milestone`
   （只给 crate 内 J8 的「伪造 Milestone」两条）
 
-- [ ] **Step 1: 写 `tests/persist_milestone.rs` 的十二条用例与 crate 内两条**
+- [ ] **Step 1: 写 `tests/persist_milestone.rs` 的十四条用例与 crate 内两条**
 
 - `save_milestones_writes_contiguous_seq_starting_at_zero`：首批 2 枚，`seq` 为 0／1，
   `current_milestone` 指第一枚。
@@ -1337,6 +1388,9 @@ git commit -m "feat(product): Product 落库与读回，坏行 fail-closed"
   `seq` 0..3。
 - `save_milestones_rejects_an_unsaved_product_without_writing`：不 `save_product` 直接保存 ⇒
   `UnknownProduct`，`milestone` 零行。
+- `save_milestones_rejects_duplicate_ids_within_a_batch`：同一批两枚同 `MilestoneId` ⇒
+  `MilestoneIdCollision { id }`，`milestone` 零行（**不是第二次 INSERT 的底层
+  `PersistError`**）。
 - `save_milestones_rejects_a_completed_milestone_without_progress`：把一枚置 `Completed`
   但不写 progress，再存新批次 ⇒ `MissingProgressForCompleted`，零新行。
 - `load_milestone_round_trips_all_seven_fields`：objective／dependencies／entry／exit／state
@@ -1351,6 +1405,8 @@ git commit -m "feat(product): Product 落库与读回，坏行 fail-closed"
   `MilestoneStateMismatch { expected, actual }`，行不变。
 - `completing_the_current_milestone_advances_the_cursor`：完成 current ⇒ 游标推进到按
   `seq` 的第一枚非终态；没有非终态 ⇒ `NULL`。
+- `set_current_milestone_rejects_an_unknown_product`：`product_id` 没有 `product` 行 ⇒
+  `UnknownProduct { id }`，**不得 UPDATE 0 行后返回 `Ok`**。
 - `set_current_milestone_rejects_a_terminal_or_foreign_milestone`：终态 ⇒ `TerminalMilestone`；
   别的 Product 的 id ⇒ `MilestoneProductMismatch`。
 - `dependencies_round_trip_in_order`：M4 依赖 M2＋M3，读回两项同序。
@@ -1363,7 +1419,8 @@ git commit -m "feat(product): Product 落库与读回，坏行 fail-closed"
 - `save_milestones_rejects_a_forged_ordinal`：`Milestone::for_test` 的 id 为
   `milestone/p/99`、state `Proposed`，保存到空 Product ⇒ `MilestoneOrdinalMismatch`，零行。
 
-**结果：** 两条用例名可列出；`Milestone::for_test` 只在 `#[cfg(test)]` 下存在。
+**结果：** 十四条 integration 与两条 crate 内用例名可列出；`Milestone::for_test` 只在
+`#[cfg(test)]` 下存在。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1378,7 +1435,9 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product persist::tests
 
 `save_milestones`：开头 `load_product(tx, product.id())`，`None` ⇒ `UnknownProduct`（零行）。
 逐枚校验：product id 相等、state `Proposed`、objective 非空、条件元素非空、id 未存在、
-ordinal 后缀等于写入 `seq`。`seq` 从 `COALESCE(MAX(seq), -1) + 1` 起（首批 0；与设计 J8
+ordinal 后缀等于写入 `seq`。**批内查重先于任何 INSERT**：用一个集合收集本批
+`MilestoneId`，重复 ⇒ `MilestoneIdCollision { id }`（与「库中已存在」同一臂），保证零行；
+不把批内重复留给第二次 INSERT 的主键冲突。`seq` 从 `COALESCE(MAX(seq), -1) + 1` 起（首批 0；与设计 J8
 的「两批 seq 0..3」及 `ordinal = history.len()+i` 对齐。设计 §4.4 正文的「MAX(seq)+1」与
 J8 的这一行有张力，本计划按 J8 的 0 起，见遗留第一节第 9 条）。写前查评估门：
 ```sql
@@ -1388,7 +1447,8 @@ LEFT JOIN product_progress p
 WHERE m.product_id = ?1 AND m.state = 'completed' AND p.milestone_id IS NULL
 LIMIT 1
 ```
-有行 ⇒ `MissingProgressForCompleted { milestone }`。逐行 `INSERT`；若
+有行 ⇒ `MissingProgressForCompleted { milestone }`。**以上校验（含批内查重与评估门）全部
+在第一条 `INSERT` 之前完成；任何 `Err` 都保证 `milestone` 零新行**。逐行 `INSERT`；若
 `product.current_milestone` 为 `NULL`，设为批次第一枚；`UPDATE product SET updated_at = ?`。
 
 `load_milestone`／`load_milestones`：解码 state／objective／dependencies／conditions；
@@ -1398,8 +1458,11 @@ LIMIT 1
 `UPDATE milestone SET state, updated_at`；若 `to` 是终态且该 id 是 current，查按 `seq`
 第一枚非终态（`state NOT IN ('completed','failed','superseded')`）并写 current，没有写 `NULL`。
 
-`set_current_milestone`：`Some` 时读 Milestone；不存在 ⇒ `UnknownMilestone`；跨 Product ⇒
-`MilestoneProductMismatch`；终态 ⇒ `TerminalMilestone`；写 current 与 `product.updated_at`。
+`set_current_milestone`：**先 `load_product(tx, product_id)`；`None` ⇒ `UnknownProduct { id }`**
+（否则 `Some` 指向已删／未存的 Product 会 UPDATE 0 行后返回 `Ok`）。再处理 `Some`：读
+Milestone；不存在 ⇒ `UnknownMilestone`；跨 Product ⇒ `MilestoneProductMismatch`；终态 ⇒
+`TerminalMilestone`；写 current 与 `product.updated_at`。`None` 只把 current 置 `NULL`，
+仍要求 Product 行存在。
 
 `src/milestone.rs` 加 `#[cfg(test)] pub(crate) fn for_test(id, product_id, objective,
 dependencies, entry_conditions, exit_conditions, state) -> Milestone`，**只在测试构建可见**；
@@ -1408,7 +1471,8 @@ dependencies, entry_conditions, exit_conditions, state) -> Milestone`，**只在
 `src/persist.rs` 的 `#[cfg(test)] mod tests` 用 `for_test` 写上面两条；测试库与
 integration test 同形（P0＋200＋语义迁移）。
 
-**结果：** 十二条 integration＋两条 crate 内全绿；两批 `seq` 0..3、id 全局唯一。
+**结果：** 十四条 integration＋两条 crate 内全绿；两批 `seq` 0..3、id 全局唯一；批内重复
+id 与未知 Product 都零行拒绝。
 
 - [ ] **Step 4: 运行本 task 的测试**
 
@@ -1432,9 +1496,10 @@ git commit -m "feat(product): Milestone 落库、乐观并发状态更新与游�
 
 **Files:**
 - Modify: `crates/continuum-product/src/persist.rs`
+- Modify: `crates/continuum-product/src/readiness.rs`（`#[cfg(test)]` 的 `ReadinessDimension::for_test`）
 - Modify: `crates/continuum-product/src/lib.rs`（re-export `record_milestone_progress`／`load_progress`）
 - Create: `crates/continuum-product/tests/persist_progress.rs`
-- Modify: `crates/continuum-product/tests/support/mod.rs`（Evidence 夹具）
+- Modify: `crates/continuum-product/tests/support/mod.rs`（Evidence 夹具＋readiness 种子）
 
 **Interfaces:**
 - Consumes: Task 8 的 `evaluate_progress`／`ProgressRecord`／`ProgressPolicy`；Task 10 的
@@ -1445,8 +1510,12 @@ git commit -m "feat(product): Milestone 落库、乐观并发状态更新与游�
     occurred_at: i64) -> Result<(ProgressRecord, ProgressGateVerdict), ProductError>`
   - `pub fn load_progress(tx: &Tx<'_>, product_id: &ProductIdRef)
     -> Result<Vec<ProgressRecord>, ProductError>`（按 `recorded_at`／插入序升序）
+- Test-only: `#[cfg(test)] pub(crate) fn ReadinessDimension::for_test(value: ReadinessValue,
+  evidence: Vec<EvidenceId>, last_verified: Option<i64>) -> ReadinessDimension`
+  （定义在 `src/readiness.rs`；只给 crate 内 J4 的「Assessed 但 evidence 空」重验，
+  不做校验，生产路径不经过它）
 
-- [ ] **Step 1: 写 `tests/persist_progress.rs` 的九条用例**
+- [ ] **Step 1: 写 `tests/persist_progress.rs` 的九条用例与 crate 内一条**
 
 - `record_milestone_progress_requires_a_completed_milestone_of_the_product`：`Active` ⇒
   `MilestoneNotCompleted`；跨 Product ⇒ `MilestoneProductMismatch`。
@@ -1454,30 +1523,61 @@ git commit -m "feat(product): Milestone 落库、乐观并发状态更新与游�
   同一 `(product, milestone)` 二次 ⇒ `DuplicateProgress`。
 - `record_milestone_progress_requires_every_referenced_evidence_id`：readiness 引用 `e2`、
   传入 `&[e1]` ⇒ `EvidenceNotSupplied { id: "e2" }`，零 progress 行。
-- `record_milestone_progress_rejects_assessed_without_evidence`：`Assessed` 但 evidence 空 ⇒
-  `ReadinessValueWithoutEvidence { dimension: "documentation" }`（真实维度名）。
-- `a_record_updates_readiness_and_returns_the_pre_write_verdict`：历史空、当前 NoProgress、
-  阈值 3 ⇒ `NotTriggered { 1, 3 }`；写后 `load_product` 的 readiness 等于 current。
+- `a_record_updates_readiness_and_returns_the_pre_write_verdict`：先用
+  `support::seed_readiness(&tx, product_id, "2")` 把 Documentation 种到 2（其余八维
+  `Unassessed`）；历史空、当前 Documentation 仍 2（NoProgress）、阈值 3 ⇒
+  `NotTriggered { 1, 3 }`；写后 `load_product` 的 readiness 等于 current。
 - `the_stored_readiness_only_contains_evidence_ids`：原始 `product.readiness` JSON 里只有
   `"e1"`，没有 `Evidence` 的 claim／type／strength。
 - `completing_the_current_milestone_advances_the_cursor`：current 完成并记录 progress 后，
   current 推进到下一枚非终态。
 - `load_progress_returns_records_in_recorded_at_order`：三条不同 `recorded_at` ⇒ 升序。
-- `the_verdict_does_not_count_the_row_being_written`：阈值 3、已有两条 NoProgress、当前
-  NoProgress ⇒ `Triggered { 3, 3 }`；`load_progress` 此时恰三条；再把全量当 history 传入
-  Task 13 的 emit，仍不得重复计数（Task 13 的照片）。
+- `a_real_policy_progress_sequence_counts_to_the_threshold`（J13）：`seed_readiness`
+  种 Documentation=2；用假生成器 `propose_next_batch` 三枚并 `save_milestones`，逐枚
+  `Proposed → Completed`；三条 `ProgressRecord` **全部由真实 `DeltaByDimension`（阈值 3，
+  读 Documentation 的整数刻度）经 `record_milestone_progress` 写入，不手填
+  `progress_delta`**；每条前都 `load_product` 取同一 `Tx` 的当前快照、current 都是
+  `Documentation=2`、evidence `e1`。verdict 依次
+  `NotTriggered { 1, 3 }`／`NotTriggered { 2, 3 }`／`Triggered { 3, 3 }`（第三条的 verdict
+  在写入前算出，证明本行不计入自己的 history）；`load_progress` 恰三行，且三行的
+  `progress_delta` 都读回 `NoProgress`（证明库里的 delta 来自策略）。
+- `an_improved_record_in_a_real_sequence_resets_the_run`（J13）：同一真实策略，
+  Documentation 刻度序列 2→2→3→3（四条记录、每枚 Milestone 独立，每条前 `load_product`
+  取当前快照）⇒ delta 依次
+  `NoProgress`／`NoProgress`／`Improved`／`NoProgress`，verdict 依次
+  `NotTriggered { 1, 3 }`／`NotTriggered { 2, 3 }`／`NotTriggered { 0, 3 }`／
+  `NotTriggered { 1, 3 }`；`load_progress` 读回的四条 delta 与上述逐项相等。
+
+**crate 内一条**（`src/persist.rs` 的 `#[cfg(test)] mod tests`；`ReadinessDimension` 字段
+私有且 `#[cfg(test)]` 构造在 integration target 不可见）：
+- `record_milestone_progress_rejects_assessed_without_evidence`：用
+  `ReadinessDimension::for_test(ReadinessValue::Assessed(Opaque::from_str("0.8")), vec![],
+  Some(100))` 经 `ProductReadiness::unassessed().with_dimension(Documentation, d)` 造
+  current；先 `save_intent` 一枚 `Ready` 锚，Product 用 `Product::from_verified_parts` 造并
+  `save_product`，Milestone 用 `Milestone::for_test`（Proposed）保存后
+  `record_milestone_state` 置 `Completed`、再 `load_milestone` 取快照。调
+  `record_milestone_progress` ⇒
+  `ReadinessValueWithoutEvidence { dimension: "documentation" }`（真实维度名），零 progress
+  行、`product.readiness` 未改。**这是 defense-in-depth**：公开 `assessed` 已在 Task 1
+  拒绝空 evidence；`record_milestone_progress` 的重验路径仍需照片。
 
 Evidence 夹具：`Evidence::from_tool_result`，`EvidenceProducer::Human`、
 `EvidenceSubject::Unattached`、`EvidenceType::Test`、`Claim::from_str("...")`、
 `EvidenceStrength::from_value(json!(1))`、`EvidenceScope::from_value(json!({}))`。
+`support::seed_readiness(tx, product_id, value)` 只写 `product.readiness` 的内部 JSON
+（九键中的 Documentation 为 `Assessed(value)`，其余 `Unassessed`），**不写
+`product_progress`**；所有 delta 仍由策略计算。**seed 之后必须 `load_product` 取当前快照**
+再调 `record_milestone_progress`（`&Product` 必须是同一 `Tx` 的当前快照）。
 
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product --test persist_progress
+TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product persist::tests
 ```
 
-**结果：** `E0432`。**不算红。**
+**结果：** `E0432`（`record_milestone_progress`／`ReadinessDimension::for_test` 尚未定义）。
+**不算红。**
 
 - [ ] **Step 3: 实现 progress 落库**
 
@@ -1492,18 +1592,28 @@ Completed`；`SELECT 1 FROM product_progress ...` 无行。
 `previous = product.readiness().clone()`；`history = load_progress(tx, product.id())?`
 （**写前**）；`verdict = evaluate_progress(&previous, &current, &history, policy)`；
 `progress_delta = policy.map(|p| p.delta(&previous, &current)).unwrap_or(Undetermined)`。
+**`progress_delta` 一律来自 `policy.delta(previous, current)`**（不是调用方的入参、不是
+`evaluate_progress` 的 verdict）；`load_progress` 读回值必须与写入值逐项相等。
 同 Tx 写 `product_progress`；`UPDATE product SET readiness = ?, updated_at = ?`；若 current
 等于 `product.current_milestone()`，按 Task 11 的同一规则推进游标。返回 `(record, verdict)`。
 
 `load_progress`：按 `ORDER BY recorded_at, rowid`；解码两个 readiness 与 delta；表外 delta ⇒
 `CorruptRow`。
 
-**结果：** 九条绿；`grep -n "FROM evidence" src/` 零命中。
+`src/readiness.rs` 末尾加
+`#[cfg(test)] pub(crate) fn for_test(value: ReadinessValue, evidence: Vec<EvidenceId>,
+last_verified: Option<i64>) -> ReadinessDimension`，**不做校验、只在测试构建可见**；生产
+构造仍只有 `assessed`／`unassessed`。`src/persist.rs` 的 `#[cfg(test)] mod tests` 用它与
+`Milestone::for_test` 写上面那条空 evidence 的重验测试。
+
+**结果：** 九条 integration＋一条 crate 内绿；`grep -n "FROM evidence" src/` 零命中；
+真实策略序列与库内 delta 对得上。
 
 - [ ] **Step 4: 运行本 task 的测试**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product --test persist_progress
+TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product persist::tests
 ```
 
 **结果：** 本 task 的测试目标全绿；没有 assertion 失败。
@@ -1511,7 +1621,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product --test persist_pr
 - [ ] **Step 5: 提交**
 
 ```bash
-git add crates/continuum-product/src/persist.rs crates/continuum-product/src/lib.rs crates/continuum-product/tests/persist_progress.rs crates/continuum-product/tests/support/mod.rs
+git add crates/continuum-product/src/persist.rs crates/continuum-product/src/readiness.rs crates/continuum-product/src/lib.rs crates/continuum-product/tests/persist_progress.rs crates/continuum-product/tests/support/mod.rs
 git commit -m "feat(product): Milestone 进度记录、证据 id 核对与写前判定"
 ```
 
@@ -1539,9 +1649,10 @@ git commit -m "feat(product): Milestone 进度记录、证据 id 核对与写前
   options／issue／blocking 原样。
 - `a_not_triggered_recomputation_writes_nothing`：重算 `NotTriggered` ⇒ `Ok(None)`、0 行、0 事件。
 - `an_undetermined_recomputation_writes_nothing`：`policy=None` ⇒ `Ok(None)`、0／0。
-- `a_record_repeated_in_history_is_counted_once`（Review Focus 2）：阈值 3、`record` 计 1、
-  `history` 再含同一条 NoProgress（同 `milestone_id`）⇒ 实际连续 2，断言 `Ok(None)`、0／0；
-  **不得变成 `Triggered`**。
+- `a_record_repeated_in_history_is_counted_once`（Review Focus 2）：阈值 3、
+  `history = [另一枚 Milestone 的 NoProgress, record 的副本]`（副本同
+  `record.milestone_id`）；去重后 history 只剩另一枚的 NoProgress，`record` 计 1 ⇒ 实际
+  连续 2，断言 `Ok(None)`、0／0；**不得变成 `Triggered`**。
 - `an_incorrect_history_count_cannot_trigger`：把 history 里一条 NoProgress 改成 Improved
   （错误计数）⇒ 0／0。
 - `a_second_emit_hits_the_decision_primary_key`：同一 draft 二次 ⇒ `Err(ProductError::Decision(..))`，
@@ -1565,8 +1676,12 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product --test decision
 
 前置：`record.product_id.as_str() == product.id().as_str()`；`record.milestone_id` 属于本
 Product（`load_milestone`）；`draft.issue` 非空、`draft.options` 非空。
-**重算**：构造去重后的 history——先去掉所有 `milestone_id == record.milestone_id` 的行，
-再把 `record` 放回最近端；其余重复 `milestone_id` 保留最后一条。调
+**重算**：构造去重后的 history——**只做两件事**：①去掉所有
+`milestone_id == record.milestone_id` 的行；②其余重复 `milestone_id` 只保留最后一条（按输入
+顺序）。**不把 `record` 放回 history**：`record` 只作为
+`previous_product_state`／`current_product_state` 参数传入，`evaluate_progress` 第 6 步从
+`count = 1` 起算本次记录；放回会让同一条 NoProgress 计两次（阈值 3、实际连续 2 会误报
+`Triggered { 3, 3 }`）。然后调
 `evaluate_progress(&record.previous_product_state, &record.current_product_state, &deduped, policy)`。
 - `Triggered` ⇒ 构造 `Decision { id: DecisionId::from_str(&format!("decision/{}/replan/{}",
   product.id().as_str(), record.milestone_id.as_str())), intent_id: product.intent_id().clone(),
@@ -1600,7 +1715,7 @@ git commit -m "feat(product): Progress Gate 只出 replan Decision，不执行 r
 ### Task 14: `lower_milestone` 与 `save_lowered_intent`
 
 **Files:**
-- Create: `crates/continuum-product/src/lower.rs`
+- Create: `crates/continuum-product/src/lower.rs`（含 crate 内 `#[cfg(test)] mod tests`）
 - Create: `crates/continuum-product/tests/lower.rs`
 - Create: `crates/continuum-product/tests/compile_fail/save_lowered_intent_does_not_accept_an_intent.rs`（＋ `.stderr`）
 - Modify: `crates/continuum-product/src/handoff.rs`（新建，本 task 只放 `save_lowered_intent`）
@@ -1617,7 +1732,7 @@ git commit -m "feat(product): Progress Gate 只出 replan Decision，不执行 r
     contract: ContractRef, priority: Priority, created_at: i64, updated_at: i64)
     -> Result<Intent, ProductError>`
 
-- [ ] **Step 1: 写 `tests/lower.rs` 的十条用例**
+- [ ] **Step 1: 写 `tests/lower.rs` 的十条用例与 `src/lower.rs` 的 crate 内一条**
 
 - `lower_milestone_builds_a_product_intent_in_proposed`：逐字段断言 `id`／`version=1`／
   `kind=Product`／`goal.as_str()==objective`／`status=Proposed`／`parent_intent=Some(锚)`／
@@ -1628,8 +1743,10 @@ git commit -m "feat(product): Progress Gate 只出 replan Decision，不执行 r
 - `exit_conditions_are_joined_in_order`：`["a","b"]` ⇒ `"a\nb"`。
 - `a_milestone_from_another_product_is_rejected`（Review Focus 3）：
   `MilestoneProductMismatch { milestone, product }`，零 intent 行。
-- `an_empty_objective_or_invalid_contract_is_rejected`：空 objective ⇒
-  `EmptyMilestoneObjective`；contract.version=0 ⇒ `InvalidContract`。
+- `an_invalid_contract_is_rejected`：contract.version=0 或空 id ⇒ `InvalidContract`。
+  **空 objective 不在 integration target 拍**：`Milestone` 字段私有、`propose_next_batch`
+  与 `load_milestone` 都拒绝空 objective，`tests/lower.rs` 构造不出一枚空 objective 的
+  `Milestone`。改由下面的 crate 内用例用 `Milestone::for_test` 拍。
 - `save_lowered_intent_writes_once_and_does_not_overwrite_a_ready_intent`：第一次写
   `intent` 行＋`intent.created`；把该行改成 `READY` 后再调，返回现有值，**status 仍 READY**，
   version 不变。
@@ -1639,10 +1756,18 @@ git commit -m "feat(product): Progress Gate 只出 replan Decision，不执行 r
 - `lower_does_not_write_intent_tables_directly`：源码面 `grep -n -e "UPDATE intent" -e
   "INSERT INTO intent" src/` 零命中。
 
+**crate 内一条**（`src/lower.rs` 的 `#[cfg(test)] mod tests`；`Milestone` 字段私有，
+`Milestone::for_test` 只在 crate 内可见）：
+- `lower_milestone_rejects_an_empty_objective`：用 `Milestone::for_test` 造一枚
+  `product_id` 与 Product 相同、`objective = Opaque::from_str("")` 的 Milestone，Product 用
+  `Product::from_verified_parts` 造 ⇒ `EmptyMilestoneObjective`。**不调 `propose_next_batch`
+  或 `load_milestone`**（它们会先拒绝空 objective，拍不到 `lower_milestone` 自己的防御臂）。
+
 - [ ] **Step 2: 运行，确认失败**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product --test lower
+TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product lower::tests
 ```
 
 **结果：** `E0432`。**不算红。**
@@ -1672,18 +1797,24 @@ Intent {
 ```
 **不跑 Canonicalizer。**
 
+`src/lower.rs` 末尾加 `#[cfg(test)] mod tests`，用 `Milestone::for_test` 与
+`Product::from_verified_parts` 写上面的空 objective 用例；**它不改变生产可见性**，也不新增
+构造入口。
+
 `save_lowered_intent`：**不接受 `Intent` 参数**；内部重新调 `lower_milestone`。同 id 已存在时
 按 `kind`／`goal.as_str`／`product_id.as_str`／`parent_intent.as_str`／`contract.id.as_str`＋
 `version`／`completion_predicate.as_str` 六项比较：全同 ⇒ 返回现有值（保留 status）；任一不同
 ⇒ `IntentIdCollision`。不存在 ⇒ `save_intent(tx, &intent)?`（写 `intent.created`）。
 **不直接写 intent 表。**
 
-**结果：** 十条绿；trybuild 样例把一枚 `READY` Intent 传给 `save_lowered_intent` 编不过。
+**结果：** 十条 integration＋一条 crate 内绿；trybuild 样例把一枚 `READY` Intent 传给
+`save_lowered_intent` 编不过。
 
 - [ ] **Step 4: 运行本 task 的测试**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product --test lower
+TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-product lower::tests
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-product --test type_level
 ```
 
@@ -1866,15 +1997,20 @@ git commit -m "feat(product): ProductDrive 落库、post-shippable 进入与交�
 - Consumes: 全部前序 task 的公开面
 - Produces: 无新公开 API；只交付源码面照片与全量复核
 
-- [ ] **Step 1: 写 `tests/source_surface.rs` 的十二条用例（C2=(b) 另加一条）**
+- [ ] **Step 1: 写 `tests/source_surface.rs` 的十三条用例（C2=(b) 另加一条）**
 
 - `there_is_no_second_product_id_intent_status_evidence_completion_or_decision`：遍历
   `src/` 全部文件，断言 `struct ProductId`／`enum IntentStatus`／`struct Evidence`／
   `enum CompletionVerdict`／`struct Decision` 零命中。
 - `the_product_has_a_single_private_construction_point`：扫 `src/` 并**排除注释行**，
-  `Product {` 的允许命中恰为 `struct Product {` 字段定义与 `impl Product {`；
-  `Product::from_verified_parts` 的调用点恰 `establish_baseline`／`row_to_product` 两处；
-  `from_verified_parts` 体内的 `Self {` 恰一处。清单外命中即红（J5）。
+  `Product {` 的允许命中逐条登记为：① `struct Product {` 字段定义；② 生产 `impl Product {`
+  的访问器块；③ **`src/product.rs` 的 `#[cfg(test)] impl Product {` 测试构造块**（J6 的
+  `for_test_with_unusable_baseline`）。`Product::from_verified_parts` 的调用点恰
+  `establish_baseline`／`row_to_product` 两处（测试构造不调用它）；`Self {` 中属于
+  `Product` 构造点的恰两处：`from_verified_parts` 体内一处、`#[cfg(test)]
+  for_test_with_unusable_baseline` 体内一处；其余 `Self {` 必须逐条登记为「非 `Product`
+  类型」，不能归入 `Product` 构造点。**`#[cfg(test)]` 的第三构造点是设计 J6 明文允许的
+  例外，必须列在清单里，不能算作生产构造点**。清单外命中即红（J5）。
 - `there_is_no_direct_sql_against_intent_decision_or_evidence`：`FROM intent`／
   `FROM decision`／`FROM evidence` 零命中（`load_intent` 等公开调用不算 SQL）。
 - `there_are_no_planner_replan_contract_or_plan_writes`：`Planner`／`replan(`／
@@ -1884,6 +2020,9 @@ git commit -m "feat(product): ProductDrive 落库、post-shippable 进入与交�
   `fn aggregate` 零命中。
 - `the_only_intent_transition_call_is_retire`：`apply_intent_transition` 只命中
   `handoff.rs` 的 `retire_completed_product_intent`（排除 `use`）。
+- `there_is_no_direct_event_append`：遍历 `src/` 全部 `.rs` 并**排除注释行**，
+  `append_event` 零命中；事件只能由 `save_intent`／`create_decision`／
+  `apply_intent_transition` 间接写（Global Constraints 的「零事件」面）。
 - `the_crate_has_exactly_the_four_allowed_workspace_dependencies`：`cargo tree -p
   continuum-product --depth 1 --edges normal --prefix none`，过滤 `continuum-` 行、去掉根包，
   集合恰为 `continuum-canonical`／`continuum-persist`／`continuum-semantics`／
@@ -1925,19 +2064,22 @@ crate 让 P6D 合并门变红，由 P7D 重新基线化或退役；P7A **不碰*
 `P6_EXPECTED_ROWS`。若出现**第二个**失败测试，停在原地，按该测试所属的 task 回查，不得
 把 P6D 的已知红当作遮挡。
 
-- [ ] **Step 4: 变异抽查（设计 §5.4 的前六行）**
+- [ ] **Step 4: 变异抽查（设计 §5.4 的 20 行中抽 6 行）**
 
+**抽样说明：** 设计 §5.4 的表共 **20 行**；本计划只抽 **#1／#2／#3／#5／#7／#11** 六行
+（30%），覆盖 J1／J3／J4／J8／J10／J15 六个判据。**未抽查的 14 行（#4／#6／#8／#9／#10／
+#12–#20）不是本块的执行门**，也不构成本计划对设计 §5.4 的完整覆盖；完整表以设计为准。
 每次只改一处，跑指定测试，确认变红，再用 `git checkout -- <file>` 还原；前后各跑
 `sha256sum`。**不提交变异。**
 
-| # | 变异 | 该红的用例 |
+| 设计 §5.4 行 | 变异 | 该红的用例 |
 |---|---|---|
-| 1 | `Product` 加第八个字段 | Task 4 `the_product_fields_are_verbatim_in_order` |
-| 2 | `ProductReadiness` 加 `score()` | Task 1 `the_nine_dimensions_…` 的源码面＋`readiness_has_no_score` |
-| 3 | `assessed` 接受空 evidence | Task 1 `assessed_rejects_empty_or_duplicate_evidence` |
-| 4 | 批次超界静默截断 | Task 7 `propose_next_batch_rejects_a_batch_larger_than_the_boundary` |
-| 5 | lower 把 `status` 写成 `READY` | Task 14 `lower_milestone_builds_a_product_intent_in_proposed` |
-| 6 | `evaluate_shippable` 把 assessment mismatch 放到 `Blocked` 之前 | Task 5 `completion_blocked_wins_over_a_mismatched_assessment` |
+| #1 | `Product` 加第八个字段 | Task 4 `the_product_fields_are_verbatim_in_order` |
+| #2 | `ProductReadiness` 加 `score()` | Task 1 `the_nine_dimensions_…` 的源码面＋`readiness_has_no_score` |
+| #3 | `assessed` 接受空 evidence | Task 1 `assessed_rejects_empty_or_duplicate_evidence` |
+| #5 | 批次超界静默截断 | Task 7 `propose_next_batch_rejects_a_batch_larger_than_the_boundary` |
+| #7 | lower 把 `status` 写成 `READY` | Task 14 `lower_milestone_builds_a_product_intent_in_proposed` |
+| #11 | `evaluate_shippable` 把 assessment mismatch 放到 `Blocked` 之前 | Task 5 `completion_blocked_wins_over_a_mismatched_assessment` |
 
 **结果：** 六次都按表变红；还原后 `git status` 干净。若某次不变红，补该 task 的用例，
 **不在 Task 17 里改生产代码**。
@@ -1976,7 +2118,7 @@ git commit -m "test(product): J19 依赖面、源码面与全量复核"
 | §4.9 错误与持久化 | Task 1／9–16 | 一个 `ProductError`、迁移 200、读 API、事务纪律 |
 | §5.1–§5.2 J1–J19 | 见下「J 照片归位」 | 每条至少一条用例；条件项已标 |
 | §5.3 §7.4 判据 1／2／4 | Task 7／13／6／16 | 判据 1：J8／J9；判据 2：J14（只出 Decision）；判据 4：J15／J17 |
-| §5.4 变异预告 | Task 17 Step 4 | 抽查六行；完整表留在设计 |
+| §5.4 变异预告 | Task 17 Step 4 | 从 20 行抽 #1／#2／#3／#5／#7／#11 六行（30%）；未抽查 14 行明确不覆盖，完整表留在设计 |
 | §5.5 拍不出照片 | 遗留第 2／3／7／8 条＋Global Constraints 的 A15／OPEN-015 | 正向 Shippable、replan 执行、READY 审查、证据内容、规范级阈值／批次边界 |
 | §6.1 与 P7D | Task 15＋跨计划前置五 | 按值交接、只 READY、drive gate |
 | §6.2 与 P5a | Task 12／5＋遗留第 2 条 | 只核 EvidenceId、`""→None` 映射 |
@@ -1984,32 +2126,32 @@ git commit -m "test(product): J19 依赖面、源码面与全量复核"
 | §6.4 与装配方 | Task 3／7／9 | 两个生成端口由 runtime 实现；P7A 不依赖 runtime |
 | §6.5 本轮能拍到哪一步 | Task 5／13／15／17 | 类型层／源码面／运行期；端到端三处拍不到 |
 | §7 明确不做 | Global Constraints | 不建、不留桩 |
-| §8 十七条遗留 | 文末「遗留/待协调」 | 不关闭任何规范缺口 |
+| §8 十七条遗留 | 文末「遗留/待协调」第一张表 | **17 条逐条登记**（#1–#17，各带收件人／本计划落点）；其中 9 条另有正文展开；不关闭任何规范缺口 |
 
 ### 二、J 照片归位
 
 | 判据 | 主 task | 具体用例／命令 |
 |---|---|---|
 | J1 | 4／17 | `the_product_fields_are_verbatim_in_order`；`Product { .. }` trybuild；`struct ProductId` 零命中 |
-| J2 | 4／10 | 正例＋四类负例＋`ProductExists`；`save_product_reloads_the_anchor_and_requires_ready` |
+| J2 | 4／10 | 正例＋四类负例＋`ProductExists`；`save_product_reloads_the_anchor_and_requires_ready`；`save_product_rejects_a_missing_anchor_intent`（区分 UnknownIntent）；`save_product_rejects_an_anchor_whose_contract_became_invalid`（contract 写路径复验） |
 | J3 | 1 | 九行源码面；`iter`／`dimension` 九枚；`readiness_has_no_score`／`average`／`sum`／`aggregate`；真实策略读值在 Task 8 |
-| J4 | 1／12 | `assessed` 五类负例；`record_milestone_progress_requires_every_referenced_evidence_id`；`FROM evidence` 零命中 |
-| J5 | 3／4／10／17 | 十字段源码面；假生成器正／负例；`a_generator_error_leaves_zero_product_rows`；`Product` 字面量／`Default`／`Deserialize` 三份 trybuild；`the_product_has_a_single_private_construction_point` |
+| J4 | 1／10／12 | `assessed` 五类负例：空 value／空 evidence／重复 evidence（Task 1）、Assessed 空 `last_verified`（Task 10 库行读回）、evidence id 不在传入集合（Task 12）；另加 crate 内 `ReadinessDimension::for_test` 的 `record_milestone_progress_rejects_assessed_without_evidence`（defense-in-depth）；`FROM evidence` 零命中 |
+| J5 | 3／4／10／17 | 十字段源码面；假生成器正／负例；`a_generator_error_leaves_zero_product_rows`；`Product` 字面量／`Default`／`Deserialize` 三份 trybuild；`the_product_has_a_single_private_construction_point` 的允许清单含 `src/product.rs` 的 `#[cfg(test)] for_test_with_unusable_baseline` 例外 |
 | J6 | 5／10 | `an_unusable_baseline_is_undetermined`；`load_product_rejects_an_empty_baseline_row` |
 | J7 | 7／11 | 七字段源码面；七状态往返；表外值／空 objective／空条件 `CorruptRow` |
 | J8 | 7／11 | 批次边界、空批次、两批 ordinal、孤儿 Product、缺 progress、空条件；零行断言 |
 | J9 | 7／11 | 菱形 DAG、自环／越界、依赖往返 |
-| J10 | 14 | 两次 lower 对照、跨 Product、空 exit `""`、`save_lowered_intent` 幂等／碰撞、trybuild |
+| J10 | 14 | 两次 lower 对照、跨 Product、空 exit `""`、空 objective（crate 内 `Milestone::for_test`）、无效 contract、`save_lowered_intent` 幂等／碰撞、trybuild |
 | J11 | 15 | 十三状态、两个 READY、RUNNING 未过 REVIEW、retire、唯一 `apply_intent_transition` |
 | J12 | 8 | 无策略、阈值 0、全未评、真实策略三 delta、无策略不 Triggered |
-| J13 | 8／12 | 真实策略序列、Improved／Regressed 打断、Undetermined 历史、重复／未完成负例 |
-| J14 | 13 | 重算 Triggered／NotTriggered／Undetermined、行数／事件数、重复 history、伪造 verdict trybuild、无 Planner |
+| J13 | 8／12 | `a_real_policy_progress_sequence_counts_to_the_threshold`（三条记录均由 `DeltaByDimension` 经 `record_milestone_progress` 写入，断言库里的 delta）；`an_improved_record_in_a_real_sequence_resets_the_run`；纯判定侧的 Regressed／Undetermined 历史；重复／未完成负例 |
+| J14 | 13 | 重算 Triggered／NotTriggered／Undetermined、行数／事件数、重复 history（去重后不含 record）、伪造 verdict trybuild、无 Planner |
 | J15 | 5 | 八分支＋三条组合负例；两臂都不产生 `Shippable` |
-| J16 | 2 | 六类构造负例；纯结构 assessment 负例 |
-| J17a | 6 | 只前进、不回退、不跳 Post |
+| J16 | 2／5 | Task 2 六类构造负例（含空 clause id 经 `ShippableClause::new`）；Task 5 的缺／多／重复三条纯结构 `AssessmentMismatch`，多一条那条无 NotSatisfied／Blocked |
+| J17a | 6 | 只前进、不回退（含 Shippable＋Shippable）、不跳 Post |
 | J17b | 16（仅 C2=(b)） | 默认 false、开关拒绝、Post 交接 gate、唯一 phase 写点；C2=(a) 延后 |
 | J18 | 9／17 | 版本 `[200]`／名称、四表或三表、启动 15／13／15、190 未改 |
-| J19 | 1／9／17 | 四条边、`ALLOWED` 精确、无 runtime／provider／registry／node／context、无第二份类型 |
+| J19 | 1／9／17 | 四条边、`ALLOWED` 精确、无 runtime／provider／registry／node／context、无第二份类型；`append_event` 零命中 |
 
 ### 三、Step scan
 
@@ -2029,7 +2171,7 @@ git commit -m "test(product): J19 依赖面、源码面与全量复核"
   `readiness: ProductReadiness`、`current_milestone: Option<MilestoneId>`、
   `milestone_history: Vec<MilestoneId>`、`shippable_predicate: ShippablePredicate`；
   `pub(crate) Product::from_verified_parts(..) -> Result<Product, ProductError>` 是 crate 内唯一
-  构造点。
+  **生产**构造点（`#[cfg(test)]` 的 `for_test_with_unusable_baseline` 另列在下方）。
 - `ReadinessDimension::assessed(Opaque, Vec<EvidenceId>, i64) -> Result<Self, ProductError>`；
   `ReadinessValue::as_assessed() -> Option<&Opaque>`；`ProductReadiness::iter() ->
   [(ReadinessDimensionName, &ReadinessDimension); 9]`。
@@ -2055,6 +2197,11 @@ git commit -m "test(product): J19 依赖面、源码面与全量复核"
 - `product_intent_for_handoff(&Tx<'_>, &Product, &MilestoneId) ->
   Result<Option<Intent>, ProductError>`。
 - `advance_product_phase(ProductPhase, &ShippableVerdict) -> ProductPhase`。
+- 测试构造（全部 `#[cfg(test)] pub(crate)`、不改变生产可见性）：
+  `Product::for_test_with_unusable_baseline`（Task 5，定义在 `src/product.rs`）、
+  `Milestone::for_test`（Task 11，`src/milestone.rs`）、
+  `ReadinessDimension::for_test`（Task 12，`src/readiness.rs`）。它们只服务 J6／J8／J4 的
+  防御面，生产构造点仍各只有一条。
 - 所有落库 API 的 `Tx<'_>` 参数、`i64` 时间戳、`Result<_, ProductError>` 在 Task 9–16 中一致；
   **没有第二个错误类型**。
 
@@ -2070,17 +2217,44 @@ git commit -m "test(product): J19 依赖面、源码面与全量复核"
 
 ### 六、比例
 
-- 设计 1974 行；本计划 **2137 行**；任务 **17 个**。头部／跨计划前置／文件结构／自审／
+- 设计 1974 行；本计划 **2316 行**；任务 **17 个**。头部／跨计划前置／文件结构／自审／
   遗留约占 40%，生产任务占 60%。测试量大于生产量是刻意的：本块判据几乎全是
   「形状＋边界＋否定面」。
-- 没有把设计 §8 的 17 条搬成 task：它们不是本块的实现面，逐条留在「遗留/待协调」或设计原文。
+- 设计 §8 的 17 条**已逐条登记**在「遗留/待协调」第一张表（含 #6／#8／#9／#11／#13／
+  #14／#15 的具名收件人）；它们不是本块的实现 task，计划只登记、不关闭。
 - 条件项只有一处：J17b／Task 16（C2=(b)）。**没有把条件项写成已闭合。**
 
 ---
 
 ## 遗留/待协调
 
-### 一、设计缺项（**发现即报，本计划不就地补**）
+### 〇、设计 §8 十七条逐条登记
+
+设计 §8 共 **17 条**（第 1–16 条规范／跨块遗留，第 17 条是设计自查的阻断项汇总）。下表
+逐条给出本计划的落点与具名收件人；**本计划不关闭任何一条**，也不把其中的规范缺口就地补成
+实现。
+
+| 设计 §8 # | 缺口 | 本计划落点／申报 | 收件人 | 状态 |
+|---|---|---|---|---|
+| 1 | A15／OPEN-010：九维聚合与 `progress_delta` 阈值未定义 | `ProgressPolicy` 由调用方申报；Task 8 `NoPolicy`／`InvalidThreshold`；**不设默认阈值** | 规范维护者＋P10 | 开 |
+| 2 | OPEN-015：有限视野与并行／汇合批次边界未定义 | Task 7 `BatchBoundary` 显式参数、超界拒绝；测试只钉「无完整未来」与「评估后再生成」 | 规范维护者＋P10 | 开 |
+| 3 | `CompletionVerdict` 无正臂，`Shippable` 不可达 | Task 5 `evaluate_shippable` 无 `Shippable` 返回行；Task 6 只接受合成值；P5a 加正臂时穷尽 `match` 会红（tripwire） | P5a＋P9（ENG-004） | 开 |
+| 4 | `Evidence` 只写不读，且无 Evidence→九维映射 | Task 12 只核 `EvidenceId` 存在性、只存 id；不读 `evidence` 表 | P5a＋规范维护者 | 开 |
+| 5 | replan 消费方无实现，`Decision` 选项无生产者 | Task 13 只出 `Decision`、只写 `decision.required`；不建 Planner、不执行 replan | 第 3 层 Planner 持有方＋协调者（P8 范围） | 开 |
+| 6 | §152 的 Milestone 图边不能完整 lower 到 §222 的 `Intent`（单亲 `parent_intent`） | Task 7 把图边留在 `milestone.dependencies`；Task 14 每次 lower 只产出节点值、都挂锚 Intent；**不伪造 `dependencies[]`** | P4＋规范维护者 | 开 |
+| 7 | `current_milestone` 单数、`milestone_history[]` 元素类型未给 | Task 11 `current_milestone` 作游标、`load_milestones` 按 `seq` 派生 history（只存 id）；并行时只有一个 current | 规范维护者＋协调者 | 开 |
+| 8 | `Product.baseline` 非可空 vs「baseline 缺失或不可判」 | Task 4 baseline 非可空；「没有 Product」＝`evaluate_shippable(None,..)` ⇒ `Undetermined(MissingProduct)`；「有行但 baseline 空」⇒ Task 10 `load_product` 的 `CorruptRow`；**不引入第三种 Product 状态** | 规范维护者 | 开 |
+| 9 | `ShippablePredicate` 字段与更新规则／版本化未给 | Task 2 取 `required_dimensions[]`＋`clauses[]`、空谓词拒绝；Task 4／10 创建后不可变、读回重走构造校验；**不做增量更新** | 规范维护者＋P4 | 开 |
+| 10 | lower 只到 `PROPOSED`，`PROPOSED → READY` 审查链未接线 | Task 14 lower 固定 `Proposed`；Task 15 handoff 只认 `Ready`；**P7A 不推进** | P4＋协调者 | 开 |
+| 11 | Milestone 七状态没有迁移表 | Task 11 只存 `state`，`record_milestone_state` 做乐观并发（`expected` 匹配即可写），**不判合法对**；不建状态机 | 规范维护者＋P1／协调者 | 开 |
+| 12 | `ContinuousProductDrive` 落点是切分偏离，C2 未裁定 | Task 9–16 全部条件于 C2；C2=(a) ⇒ Task 16 取消、J17b 延后、Task 15 改用 C2 面；C2=(b) ⇒ 四表与 Task 16 | 协调者（裁定并改切分 §2.3.1）＋规范维护者 | 开 |
+| 13 | `ProgressDelta::Regressed` 不直接触发 replan | Task 8 中 `Regressed` ⇒ `NotTriggered{0,..}` 并打断 run；Task 12 记录其 delta 但不出 Decision | 规范维护者＋P10 | 开 |
+| 14 | `ShippableVerdict` 公开可伪造 | Task 6 相位机接受合成 `Shippable`（J17a 的照片依赖它）；Task 5 的 `evaluate_shippable` 今天不生产该值；**不把构造点收私有**（否则正向相位机在 P5a 前不可测） | P5a＋P9＋协调者 | 开 |
+| 15 | baseline／predicate 的更新与版本化未定义 | Task 4／10 本轮创建后不可变（无 `set_baseline`／`set_shippable_predicate`）；产品合同变化只能新建 Product 或手工迁移 | 规范维护者＋P4 | 开 |
+| 16 | P7A 新 crate 会让 P6D 合并门变红 | Task 17 Step 3 列为**唯一已知红**；P7A 不碰 `p6_pre_allowed.txt`／`P6_EXPECTED_ROWS`；由 P7D 重新基线化或退役 | P7D＋协调者 | 开 |
+| 17 | 设计自查的实现级阻断项（I1 ordinal／I2 跨 Product lower／I3 handoff 按 id／I5 孤儿 Product／I6 读回复核／I7 空 exit→`None`／C3 不收 `Intent`） | 逐条有照片：I1 Task 7／11；I2 Task 14；I3 Task 15；I5 Task 11；I6 Task 10；I7 Task 14；C3 Task 14 trybuild。**任何一条失去照片，计划阶段不得开工** | P7A 实现者＋协调者（计划评审） | 本计划已落照片 |
+
+### 一、设计缺项的展开（对应上表 #1–#16 中的 9 条）（**发现即报，本计划不就地补**）
 
 1. **C2 裁定（`ContinuousProductDrive` 的落点）尚未作出**（设计 §4.7／§8 第 12 条；
    切分 §2.3.1 `:132-133`）。计划把 Task 9 的迁移 200 与 Tasks 10–16 的落库全部写成
@@ -2123,9 +2297,14 @@ git commit -m "test(product): J19 依赖面、源码面与全量复核"
 
 ### 二、本计划自定的形状（**申报**）
 
-- `tests/support/mod.rs` 的假生成器、`DeltaByDimension`、Intent／Evidence 夹具：设计只要求
-  「假实现由测试自己写」，没给名字／形状。本计划自定；`#![allow(dead_code)]` 避免跨 target
+- `tests/support/mod.rs` 的假生成器、`DeltaByDimension`、`seed_readiness`、Intent／Evidence
+  夹具：设计只要求「假实现由测试自己写」，没给名字／形状。本计划自定；`seed_readiness` 只
+  写内部 readiness JSON 作为测试起点，不伪造 delta；`#![allow(dead_code)]` 避免跨 target
   warning。
+- 三处 `#[cfg(test)]` 构造（`Product::for_test_with_unusable_baseline`／
+  `Milestone::for_test`／`ReadinessDimension::for_test`）是本计划为防御面拍的测试构造，
+  不是公开 API，也不在 Task 17 的生产构造点计数里；J5 的允许清单把第一处列为逐条登记的
+  例外，后两处不涉及 `Product` 构造点。
 - 内部 JSON 编码（baseline／readiness／predicate／dependencies／conditions）是**内部实现**，
   不是公开序列化契约；本计划在 Task 10 固定键名，测试按此断言。设计 §4.9 允许内部编码。
 - `ContinuousProductDrive`／`ProductDriveState` 的 `Default` 是「默认 false／Pre」的落点；
