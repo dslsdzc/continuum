@@ -1,14 +1,18 @@
 //! P6A Context Compiler：§280 的 `ContextPackage` 与装配入口 `compile`。
 //! 本 crate 不建执行器、不持久化；标签类型来自 `continuum-trust`（P6B）。
 
+mod candidate;
 mod package;
 mod reference;
+mod request;
 
 use continuum_artifact::ArtifactId;
 use continuum_memory::MemoryClaim;
 use continuum_trust::{ContextProvenance, ContextTrust};
 
+pub use candidate::ContextCandidate;
 pub use reference::Reference;
+pub use request::{ContextBudget, ContextRequest};
 
 /// §280 的六个字段。字段名与书写序照规范逐字，一个不改、一个不加。
 /// 字段私有：唯一的构造点是 `crate::compile`（设计 §4.3）。

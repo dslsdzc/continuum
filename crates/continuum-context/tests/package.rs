@@ -9,12 +9,14 @@ use continuum_memory::MemoryClaim;
 use continuum_trust::{ContextProvenance, ContextTrust};
 
 /// 源码面语料。下游断言一律遍历这个 helper，不在本地另写文件清单。
-/// Task 2 会扩到五个文件，Task 3 扩到六个。
+/// Task 2 扩到五个文件，Task 3 扩到六个。
 fn src_texts() -> Vec<(&'static str, &'static str)> {
     vec![
         ("src/lib.rs", include_str!("../src/lib.rs")),
         ("src/package.rs", include_str!("../src/package.rs")),
         ("src/reference.rs", include_str!("../src/reference.rs")),
+        ("src/request.rs", include_str!("../src/request.rs")),
+        ("src/candidate.rs", include_str!("../src/candidate.rs")),
     ]
 }
 
@@ -105,11 +107,32 @@ fn the_package_has_only_read_only_accessors() {
             "pub fn instructions_mut",
             "pub fn into_parts",
             "pub fn into_iter",
-            "pub instructions:",
         ] {
             assert!(
                 !text.contains(forbidden),
                 "{name} 不应出现可写／拆包入口：{forbidden:?}"
+            );
+        }
+    }
+
+    // `ContextPackage` 的六个字段必须私有。`ContextRequest` / `ContextCandidate`
+    // 的 `pub` 字段是设计 §5.2 的输入形状，不在这条断言的射程内——故只扫定义与
+    // 访问器所在的两个文件。
+    for (name, text) in src_texts() {
+        if name != "src/lib.rs" && name != "src/package.rs" {
+            continue;
+        }
+        for forbidden in [
+            "pub instructions:",
+            "pub references:",
+            "pub artifacts:",
+            "pub memories:",
+            "pub provenance:",
+            "pub trust_labels:",
+        ] {
+            assert!(
+                !text.contains(forbidden),
+                "{name} 不应出现 ContextPackage 的公开字段：{forbidden:?}"
             );
         }
     }
