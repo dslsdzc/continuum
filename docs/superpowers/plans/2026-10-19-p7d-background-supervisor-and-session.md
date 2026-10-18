@@ -78,7 +78,8 @@ dev 依赖：`continuum-canonical`、`trybuild`、`serde_json`。**不引入** `
   三处计数一行不动；**不占迁移 201**（设计 §9.1；J17／J19）。
 - **`ALLOWED` 恰五项**：`("continuum-supervisor", &["continuum-arbiter", "continuum-canonical",
   "continuum-intent-scheduler", "continuum-memory", "continuum-semantics"])`。内层数组按字母序；
-  **既有行不因本块增枚**；`continuum-runtime` 的 `ALLOWED` 行不动（设计 §2.1；J16）。
+  **既有行不因本块增枚**；`continuum-runtime` 的 `ALLOWED` 行不因**本块**改动（P7A 落地时会由它自己
+  加 `continuum-product`，那是 P7A 的 diff；P7D 合并门只断言 runtime 增量 ⊆ P7 名字）。（设计 §2.1；J16）
 - **P6D 合并门 rebaseline 的数据写死**：`p7_pre_allowed.txt` **31 行数据**（等于 `c89d839` 的
   `ALLOWED`，不含任何 P7 crate）；`P7_EXPECTED_ROWS` 恰四行；解析器与断言 1 的两个 `27` → `31`；
   断言 2 的 `P6_EXPECTED_ROWS.len() == 5` → `P7_EXPECTED_ROWS.len() == 4`；旧
@@ -100,8 +101,10 @@ dev 依赖：`continuum-canonical`、`trybuild`、`serde_json`。**不引入** `
   T9 的照片钉住两模式都含它；措辞订正记入「遗留/待协调」。
 - **源码面零命中一律去掉注释行再判**：所有 `grep` 型断言使用 `code_only()`——逐行丢弃
   `trim_start()` 以 `//` 开头的行（`///`／`//!` 同属注释），不把说明性注释算作命中。
-  J12 的 `Evidence`／`CompletionVerdict` 与 J17 的 `Tx` 只出现在注释里时**不算违规**；
-  测试代码在 `tests/`，`src/` 语料不包含测试构造（设计 §4.1）。
+  **边界写死**：本 crate 的 `src/` 只使用整行注释；**不使用 `/* ... */` 块注释，也不在代码后写
+  `//` 行尾注释**。Task 14 的 `src_uses_only_full_line_comments` 先拍这一条；违反时先改源码的注释
+  形式，不扩 `code_only`。J12 的 `Evidence`／`CompletionVerdict` 与 J17 的 `Tx` 只出现在注释里时
+  **不算违规**；测试代码在 `tests/`，`src/` 语料不包含测试构造（设计 §4.1）。
 - **测试全部放 `crates/continuum-supervisor/tests/`**，不放 `src/` 的 `#[cfg(test)]`；
   假 `IntentSelectionPolicy`／`SynthesisIo`／`CheckpointPort` 由 `tests/` 自己写。
 - 代码注释、错误信息、测试断言信息用中文；标识符用英文。
@@ -122,7 +125,7 @@ dev 依赖：`continuum-canonical`、`trybuild`、`serde_json`。**不引入** `
 | 2 | **Auto 的 `Resume` 选中项不在 candidates**：Waiting／Suspended Intent 被 `Advance` 后，`plan_auto` 反而为它造了一个 `SessionCandidate::Task`，或 `selection()` 丢失 | **Task 9** `resume_selection_need_not_appear_in_candidates`（`decision()` 是 `ContinueSession { Resume }`、`selected_intent()` 命中；`candidates()` 只有 `NewConversation`，没有该 Intent 的 Task） |
 | 3 | **`NoIntent` 清空既有会话**：`plan_auto` 用 `NoIntent` 当「没有会话」，把 candidates 里的 `ContinueSession`／`BackgroundFinding` 删掉，或把 `background` 置空 | **Task 9** `no_intent_keeps_existing_sessions_and_background`（J10-d；输入一条 session、一条 completed、一条 finding，逐项保留） |
 | 4 | **checkpoint 超时路径丢失状态**：端口在截止后成功或定时器触发后，相位仍报 `Suspended`／停在 `Checkpointing`，或晚到结果被写回 | **Task 12** `late_success_returns_timed_out_and_returns_to_throttled`／`timer_hook_returns_timed_out_and_throttles`／`port_failure_returns_checkpoint_error_and_throttles`；三条都断言相位 `Throttled` 且 `checkpoint_deadline()` 为 `None` |
-| 5 | **P6D 断言 5／8 在 rebaseline 后仍红**：只换 fixture、没改两个 `27`／断言 2，或把 P7 新 crate 混进 31 行基线；最终树断言 8 仍报「新增 subject 不在 `P6_NAMES`」 | **Task 2** Step 1 先看 `p6_union_adds_only_its_own_rows` 的断言 8 红（新增 `continuum-supervisor` 不在 `P6_NAMES`）→ Step 4 跑绿；**Task 14** `allowed_row_has_exactly_five_entries`＋最终树 `cargo test -p continuum-runtime --test dependency_direction` |
+| 5 | **P6D 断言 5／8 在 rebaseline 后仍红**：只换 fixture、没改两个 `27`／断言 2，或把 P7 新 crate 混进 31 行基线；最终树断言 8 仍报「新增 subject 不在 `P7_NAMES`」 | **Task 2** Step 1 先看 `p6_union_adds_only_its_own_rows` 的断言 8 红（新增 `continuum-supervisor` 不在 `P6_NAMES`；旧断言 5 也可能因 P7A 的 `continuum-product` 红）→ Step 4 跑绿（runtime 增量 ⊆ `P7_NAMES`）；**Task 14** `allowed_row_has_exactly_five_entries`＋最终树 `cargo test -p continuum-runtime --test dependency_direction` |
 
 ---
 
@@ -142,13 +145,14 @@ dev 依赖：`continuum-canonical`、`trybuild`、`serde_json`。**不引入** `
 | **`trybuild` / `serde_json`** | **workspace 已登记**（根 `Cargo.toml` 的 `[workspace.dependencies]`） | dev 依赖；外部 crate 不进 `ALLOWED` |
 | **`continuum-supervisor`** | **不存在**：`grep -rn "continuum-supervisor\|continuum_supervisor" crates/ Cargo.toml` 零命中 | 本计划的全部交付物 |
 
-**执行起点**：`continuum-intent-scheduler` 与 `continuum-arbiter` 必须先落地。Task 1 的
-`Cargo.toml` 一次登记四条普通边（设计 §2.1），`ALLOWED` 的五项与 `cargo tree` 逐对相等；任一 P7B／P7C
-crate 不在树里，Task 1 Step 1 的 `cargo metadata` 就会失败，连源码起草都不能算「已开始」。
-P7A／P7B／P7C 的实现不由本计划交付，本计划按它们设计的冻结名写；落地时若导出名不符，
-**回报协调者，不在 P7D 侧另造同义类型**。
-**Task 2 的最终树门**要求 P7A／P7B／P7C／P7D 四个 crate 全部在 workspace 里（设计 §5.7 第 7 步）；
-单块树只算部分绿。
+**执行起点（写死）**：**全部 14 个 task 等待 `continuum-intent-scheduler` 与 `continuum-arbiter`
+落地；任一 crate 不在树里，不得先写任何 task（包括 Task 2 的 rebaseline）——连源码起草都不算
+「已开始」。** Task 1 的 `Cargo.toml` 一次登记四条普通边（设计 §2.1），`ALLOWED` 的五项与
+`cargo tree` 逐对相等；`cargo metadata` 失败即停。P7A／P7B／P7C 的实现不由本计划交付，本计划按
+它们设计的冻结名写；落地时若导出名不符，**回报协调者，不在 P7D 侧另造同义类型**。
+**最终树门只有一个出口：Task 14 Step 3。** 它要求 P7A／P7B／P7C／P7D 四个 crate 全部在 workspace
+里（设计 §5.7 第 7 步）；Task 2 只负责 rebaseline 的**本地树绿**（31 行 fixture／四行常量／两个
+`27`／断言 2），**不叫「最终树门」**，也不对四块齐全作承诺；单块树只算部分绿。
 
 ### 二、P6D 合并门 rebaseline（唯一路径；Task 2 执行）
 
@@ -279,18 +283,18 @@ const P7_EXPECTED_ROWS: &[(&str, &[&str])] = &[
 | task | Step 2 量到的是 | 为什么 |
 |---|---|---|
 | Task 1 | **编译失败 `E0432`** | 测试先写，`TaskSource`／`PolicyGrantRef` 由 Step 4 才建出；crate 骨架与 `ALLOWED` 已在 Step 1 |
-| Task 2 | **运行期红（断言 8）** | `continuum-supervisor` 已进 `ALLOWED`，但 `P6_NAMES` 不认识它；rebaseline 后绿 |
-| Task 3 | **编译失败 `E0432`／`E0599`** | `AuthorizedTask` 与四个构造器由 Step 4 才建出 |
+| Task 2 | **运行期红（断言 8；可能兼有断言 5）** | `continuum-supervisor` 已进 `ALLOWED`，但 `P6_NAMES` 不认识它；P7A 的 `continuum-product` 也可能让旧断言 5 红；rebaseline 后都绿 |
+| Task 3 | **编译失败 `E0432`／`E0599`** | `AuthorizedTask` 与四个构造器由 Step 3 才建出 |
 | Task 4 | **trybuild 红（`.stderr` 缺失／不符）** | 样例先写，`.stderr` 在 Step 2 实跑取；本 task 不交付生产代码 |
-| Task 5 | **编译失败 `E0432`／`E0451`** | `SupervisorError`／`ContinueDisposition`／`SupervisorDecision` 由 Step 4 才建出 |
-| Task 6 | **编译失败 `E0432`／`E0599`** | `BackgroundSupervisor`／`next_tasks` 由 Step 4 才建出 |
-| Task 7 | **编译失败 `E0599`／`E0432`** | `decide` 由 Step 4 才建出；依赖 P7B 的 `IntentScheduler` |
-| Task 8 | **编译失败 `E0432`／`E0599`** | `SessionPlan`／`SessionOrchestrator::plan_manual` 由 Step 4 才建出 |
-| Task 9 | **编译失败 `E0599`** | `plan_auto` 由 Step 4 才建出 |
+| Task 5 | **编译失败 `E0432`／`E0451`** | `SupervisorError`／`ContinueDisposition`／`SupervisorDecision` 由 Step 3 才建出 |
+| Task 6 | **编译失败 `E0432`／`E0599`** | `BackgroundSupervisor`／`next_tasks` 由 Step 3 才建出 |
+| Task 7 | **编译失败 `E0599`／`E0432`** | `decide` 由 Step 3 才建出；依赖 P7B 的 `IntentScheduler` |
+| Task 8 | **编译失败 `E0432`／`E0599`** | `SessionPlan`／`SessionOrchestrator::plan_manual` 由 Step 3 才建出 |
+| Task 9 | **编译失败 `E0599`** | `plan_auto` 由 Step 3 才建出 |
 | Task 10 | **trybuild 红（`.stderr` 缺失／不符）** | 样例先写，`.stderr` 在 Step 2 实跑取 |
-| Task 11 | **编译失败 `E0599`／`E0432`** | `admit`／`release` 由 Step 4 才建出；依赖 P7C |
-| Task 12 | **编译失败 `E0599`** | `checkpoint`／`checkpoint_deadline`／`checkpoint_timed_out` 由 Step 4 才建出 |
-| Task 13 | **编译失败 `E0432`** | `SynthesisTriggerPoint` 由 Step 4 才建出 |
+| Task 11 | **编译失败 `E0599`／`E0432`** | `admit`／`release` 由 Step 3 才建出；依赖 P7C |
+| Task 12 | **编译失败 `E0599`** | `checkpoint`／`checkpoint_deadline`／`checkpoint_timed_out` 由 Step 3 才建出 |
+| Task 13 | **编译失败 `E0432`** | `SynthesisTriggerPoint` 由 Step 3 才建出 |
 | Task 14 | **首次即绿**（源码面） | 本 task 只新建断言；若红，说明前面 task 的源码漂了，回查拥有该代码的 task |
 
 **「首次即绿」不是缺陷**：Task 14 的交付物就是断言本身，它的红由 Task 14 Step 4 的变异复核取。
@@ -317,7 +321,8 @@ crates/continuum-supervisor/
   src/trigger.rs         SynthesisIo / SynthesisTriggerPoint
   src/error.rs           SupervisorError（十臂）
   tests/support/mod.rs   源码语料 code_only()／函数体提取；Intent／AuthorizedTask 夹具；
-                         假 IntentSelectionPolicy／CheckpointPort／SynthesisIo
+                         假 IntentSelectionPolicy／CheckpointPort／SynthesisIo；
+                         首行 #![allow(dead_code)]（共享夹具，各 test crate 只用一部分）
   tests/task_source.rs   J1-a／J1-b；J6 的引用形状（Task 1）
   tests/authorized_task.rs J3／J4／J5／J6／J22（Task 3）
   tests/compile_fail.rs  J2 与 J6 类型不匹配的 trybuild 驱动（Task 4）
@@ -436,8 +441,12 @@ Task 6 加 `BackgroundSupervisor`，Task 8 加 session 类型，Task 13 加 trig
 
 - [ ] **Step 2: 写 `tests/task_source.rs` 与夹具**
 
-`tests/support/mod.rs` 先写 `pub fn code_only(source: &str) -> String`：逐行丢弃
-`trim_start().starts_with("//")` 的行，其余原样拼接；再写 `pub fn intent(kind: IntentKind, status:
+`tests/support/mod.rs` 首行写 `#![allow(dead_code)]`（共享夹具；每个测试二进制只用其中一部分，
+P6A 计划 777 有先例；不加会让各 test crate 的未用 helper 触发 `dead_code`，0 warning 门会红），
+再写 `pub fn code_only(source: &str) -> String`：逐行丢弃 `trim_start().starts_with("//")` 的行，
+其余原样拼接。**边界写死**：本 crate 的 `src/` 只使用整行注释——不使用 `/* ... */` 块注释，也不在
+代码后写 `//` 行尾注释；Task 14 的 `src_uses_only_full_line_comments` 会先断言这一点，之后所有零
+命中都靠 `code_only`。再写 `pub fn intent(kind: IntentKind, status:
 IntentStatus) -> Intent` 与 `pub fn product_intent(status: IntentStatus) -> Intent`，字段逐项：
 `id: IntentId::from_str("intent-1")`、`version: 1`、`goal: EntityId::from_str("goal")`、
 `priority: Priority::from_str("normal")`、`created_at: 0`、`updated_at: 0`、`parent_intent: None`、
@@ -451,9 +460,10 @@ IntentStatus) -> Intent` 与 `pub fn product_intent(status: IntentStatus) -> Int
 - `task_source_has_exactly_four_values_and_verbatim_labels`：对四个变体逐个调 `as_str()`，断言
   等于 `"authorized_intent"`／`"policy"`／`"maintenance_schedule"`／`"product_drive"`；写一个
   **无 `_` 通配臂**的 `fn exhaustive(source: TaskSource) -> &'static str` 覆盖四变体（编译期穷尽）。
-- `task_source_has_no_parser_or_model_suggested_variant`：读 `code_only(include_str!("../src/task.rs"))`，
-  断言不含 `ModelSuggested`／`TaskSource::Model`／`impl FromStr for TaskSource`／`fn parse`；
-  并读 `code_only` 后的 `src/` 全部文件，断言同一组词根零命中。
+- `task_source_has_no_parser_or_model_suggested_variant`：读 `code_only` 后的 **`src/` 全部文件**
+  （`lib.rs` 与六个模块，不只 `task.rs`），断言四个来源词根 `ModelSuggested`／`TaskSource::Model`／
+  `UserRequested`／`SystemIdle` 零命中，且无 `impl FromStr for TaskSource`／`fn parse`。另读
+  `code_only(include_str!("../src/task.rs"))` 重复同一组来源词根（J1-a）；两处都必须空。
 - `policy_and_maintenance_refs_reject_empty_fields`：`PolicyGrantRef::new("", "g")` 与
   `new("i", "")` ⇒ `Err(TaskError::EmptyPolicyGrant)`；`MaintenanceOccurrenceRef::new("", "o")`
   与 `new("s", "")` ⇒ `Err(TaskError::EmptyMaintenanceRef)`；非空构造的 `issuer()`／`grant_id()`／
@@ -475,9 +485,11 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test task_so
 
 - [ ] **Step 4: 实现 `task.rs` 的四个类型**
 
-`TaskSource` 逐变体照设计 §4.2；`as_str` 的四个字面量写死；**不实现 `FromStr`／`parse`**。
-`TaskError` 六臂照设计 §4.3，手写 `Display`／`Error`。`PolicyGrantRef`／`MaintenanceOccurrenceRef`
-字段私有，`new` 只检查 `is_empty()`（**不 trim、不改写**）；访问器返回 `&str`。
+`TaskSource` 逐变体照设计 §4.2，派生 `Debug, Clone, Copy, PartialEq, Eq`；`as_str` 的四个字面量
+写死；**不实现 `FromStr`／`parse`**。`TaskError` 六臂照设计 §4.3，派生
+`Debug, Clone, PartialEq, Eq`，手写 `Display`／`Error`。`PolicyGrantRef`／`MaintenanceOccurrenceRef`
+字段私有，派生 `Debug, Clone, PartialEq, Eq`，`new` 只检查 `is_empty()`（**不 trim、不改写**）；
+访问器返回 `&str`。
 `AuthorizedTask` 与四个构造器**留到 Task 3**；本 task 的 `task.rs` 不写它们，避免半成品。
 
 **结果：** `cargo test -p continuum-supervisor --test task_source` 全绿；`src/task.rs` 的
@@ -512,9 +524,12 @@ git commit -m "feat(supervisor): crate 骨架、TaskSource 四值与授权引用
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test dependency_direction
 ```
 
-**结果：** `p6_union_adds_only_its_own_rows` 失败，失败信息命中「新增 subject 必须恰是已落地的 P6 crate」
-（`continuum-supervisor` 已在 `ALLOWED`，但不在 `P6_NAMES`）。断言 5 此时应为绿：`continuum-runtime`
-行没有增枚。若断言 5 也红，先查 `ALLOWED` 是否被误改。
+**结果：** `p6_union_adds_only_its_own_rows` 失败，至少断言 8 命中「新增 subject 必须恰是已落地的
+P6 crate」（`continuum-supervisor` 已在 `ALLOWED`，但不在 `P6_NAMES`）。**断言 5 也可能同时红**：
+这一步还是旧门，用的是 `P6_NAMES`；P7A 已把 `continuum-product` 加进 runtime 行，这个增量是合法的
+P7 增量，Step 3 把 `p6_names` 换成 `p7_names` 后会绿。**不要**因为断言 5 红去回滚 `ALLOWED`；只有
+runtime 行出现 P7 名字之外的新增才是误改。最终口径是：runtime 增量 **⊆ P7 名字**——P7A 落地时为
+`{continuum-product}`，只有 P7D 的单块树时为空；两者都合法。
 
 - [ ] **Step 2: 新建 `p7_pre_allowed.txt`，删除旧 fixture**
 
@@ -551,16 +566,16 @@ P6 基线；设计 §5.7 的改名清单不含它）。
 crates/continuum-runtime/tests/dependency_direction.rs` 零命中；`grep -n "rows.len(), 31"`
 与 `grep -n "baseline.len(), 31"` 各一处；`grep -n "P7_EXPECTED_ROWS.len(), 4"` 一处。
 
-- [ ] **Step 4: 跑合并门，确认最终树绿**
+- [ ] **Step 4: 跑合并门，确认本地树绿**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test dependency_direction
 ```
 
 **结果：** `p7_union_adds_only_its_own_rows` 全绿；断言 1 是 31 行、断言 2 是四行、断言 5 的
-runtime 增量为空、断言 8 的新增 subject 恰是已落地的 P7 crate。**若执行时 P7A／B／C 尚未落地**，
-断言 8 只覆盖已落地者、仍可绿；但设计 §5.7 第 7 步要求最终树四块齐全，Task 14 会再跑一次并记录
-「最终树」条件。
+runtime 增量 ⊆ P7 名字（P7A 落地时为 `{continuum-product}`，单 P7D 树时为空）、断言 8 的新增
+subject 恰是已落地的 P7 crate。**Task 2 只证明本地树（P6D rebaseline）绿**；最终树门只在 Task 14
+Step 3 的单一出口复核四块齐全，这里不报「最终树」。
 
 - [ ] **Step 5: 提交**
 
@@ -648,8 +663,8 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test authori
   `EmptyMaintenanceRef`。
 - **没有 `new(source, evidence)`**；`TaskEvidence` 私有；字段私有。
 
-访问器按 Interfaces 返回。`AuthorizedTask` 派生 `Debug, Clone`；**不派生** `PartialEq`／`Eq`
-（`Intent` 没有这些能力，设计 §4.10）。
+访问器按 Interfaces 返回。`AuthorizedTask` 派生 `Debug, Clone`，私有 `TaskEvidence` 同样派生
+`Debug, Clone`；**不派生** `PartialEq`／`Eq`（`Intent` 没有这些能力，设计 §4.10）。
 
 **结果：** `cargo test -p continuum-supervisor --test authorized_task` 全绿；J3 的十三态逐臂、
 J4 的两个 `WrongKind`、J5 的四类负例、J6 的引用形状、J22 的 `product_id` 都可观察。
@@ -753,7 +768,7 @@ git commit -m "test(supervisor): AuthorizedTask 唯一构造点的 trybuild 照�
 - Modify: `crates/continuum-supervisor/src/supervisor.rs`
 - Modify: `crates/continuum-supervisor/src/resource.rs`（只放 `CheckpointPort`／`CheckpointError`，供
   `SupervisorError::Checkpoint` 命名；`admit`／`checkpoint` 留给 Task 11／12）
-- Create: `crates/continuum-supervisor/src/error.rs`
+- Modify: `crates/continuum-supervisor/src/error.rs`（Task 1 已建空模块，这里填 `SupervisorError`）
 - Modify: `crates/continuum-supervisor/src/lib.rs`（导出上述类型）
 - Create: `crates/continuum-supervisor/tests/decision.rs`
 
@@ -793,12 +808,12 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test decisio
 
 - [ ] **Step 3: 实现决策类型、错误面与 `CheckpointPort` 类型**
 
-`ContinueDisposition` 两臂照设计 §4.4；`SupervisorDecision` 三臂与四个访问器照 §4.4。
-`SupervisorError` 十臂照 §4.9；`Display` 手写中文，`source()` 对
-`Task`／`Decision`／`Resource`／`Memory`／`Checkpoint` 返回内层错误，其余 `None`；
-**不派生 `Clone`**（`MemoryError` 不是 `Clone`）。
-`CheckpointPort` 的 trait 方法签名照 §4.7；`CheckpointError` 字段私有、`new`／`message`、
-手写 `Display`／`Error`。`lib.rs` 追加 `pub use error::SupervisorError;`、
+`ContinueDisposition` 两臂照设计 §4.4，派生 `Debug, Clone, Copy, PartialEq, Eq`；`SupervisorDecision`
+三臂与四个访问器照 §4.4，派生 `Debug, Clone`。`SupervisorError` 十臂照 §4.9，派生 `Debug`；
+`Display` 手写中文，`source()` 对 `Task`／`Decision`／`Resource`／`Memory`／`Checkpoint` 返回内层
+错误，其余 `None`；**不派生 `Clone`**（`MemoryError` 不是 `Clone`）。
+`CheckpointPort` 的 trait 方法签名照 §4.7；`CheckpointError` 字段私有，派生
+`Debug, Clone, PartialEq, Eq`，`new`／`message`、手写 `Display`／`Error`。`lib.rs` 追加 `pub use error::SupervisorError;`、
 `pub use resource::{CheckpointError, CheckpointPort};`、
 `pub use supervisor::{ContinueDisposition, SupervisorDecision};`。**本 task 不实现
 `admit`／`checkpoint`**，也不定义 `BackgroundSupervisor`（Task 6 才建）。
@@ -861,7 +876,8 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test next_ta
 
 - [ ] **Step 3: 实现状态表、`TaskKey` 与 `next_tasks`**
 
-`BackgroundSupervisor` 的字段与派生照设计 §4.4。`TaskKey` 私有，三臂：
+`BackgroundSupervisor` 字段私有 `states: HashMap<TaskKey, SuspensionState>`，派生 `Debug, Default`
+（照设计 §4.4）。`TaskKey` 私有，三臂：
 `Intent(String)`／`Policy { issuer, grant_id }`／`Maintenance { schedule_id, occurrence_id }`；
 派生 `Debug, Clone, PartialEq, Eq, Hash`。`TaskKey::for_task` 按 `source()` 与 accessor 机械派生：
 Intent 两路用 `intent().id.as_str().to_owned()`；Policy 用 `policy_grant()` 的两字段；Maintenance
@@ -1002,11 +1018,16 @@ git commit -m "feat(supervisor): decide 转调 P7B 并分派复用/恢复控制�
   `completed` 不作为 candidate。
 - `manual_plan_does_not_select`（J10）：`decision() == None`、`selection() == None`、
   `basis() == None`；`mode() == SessionMode::Manual`；`background()` 与输入逐项相等。
-- `session_plan_has_four_private_fields_and_six_accessors`（J11 源码面）：读
+- `session_plan_has_four_private_fields_and_six_accessors`（J11／J12 源码面）：读
   `code_only(include_str!("../src/session.rs"))`，在 `pub struct SessionPlan {` 与配对的 `}` 之间
-  断言字段恰四行且顺序为 `mode`／`candidates`／`decision`／`background`；断言
-  `impl SessionPlan {` 恰一处且 `pub fn` 恰六条（`mode`／`candidates`／`decision`／`selection`／
-  `background`／`basis`）；断言不含 `impl Default for SessionPlan`／`Deserialize`／`pub mode:`。
+  断言字段恰四行且顺序为 `mode`／`candidates`／`decision`／`background`，且 `background` 行是
+  `background: BackgroundDigest,`；断言 `session.rs` 不含 `SchedulerInputs`（digest 只进
+  `SessionPlan.background`）；断言 `impl SessionPlan {` 恰一处且 `pub fn` 恰六条（`mode`／
+  `candidates`／`decision`／`selection`／`background`／`basis`）；断言不含
+  `impl Default for SessionPlan`／`Deserialize`／`pub mode:`。
+- `background_note_has_exactly_two_private_fields`（J12 源码面）：读 `code_only` 的
+  `src/session.rs`，在 `pub struct BackgroundNote {` 与配对的 `}` 之间取非空字段行，断言恰两行且
+  顺序为 `label: String`／`at_millis: i64`，两行都不以 `pub ` 开头。
 - `background_note_rejects_empty_label`（J12）：`BackgroundNote::new("", 0)` ⇒
   `Err(SupervisorError::InvalidBackgroundNote)`；`new("发现", -1)` 通过且 `at_millis() == -1`
   （与会话时间同口径，不做非负校验）。
@@ -1014,10 +1035,12 @@ git commit -m "feat(supervisor): decide 转调 P7B 并分派复用/恢复控制�
   两数组为空且等于 `BackgroundDigest::default()`；`new(completed, findings)` 的两个访问器逐项保持
   输入序；不排序。
 - `background_does_not_enter_scheduler_inputs`（J12 源码面）：`code_only` 的
-  `src/supervisor.rs` 不含 `BackgroundDigest`／`BackgroundNote`；`plan_manual` 的函数体不含
-  `SchedulerInputs`／`decide`，且 `next_tasks` 恰出现一次（用 `fn_body`）。
+  `src/supervisor.rs` 不含 `BackgroundDigest`／`BackgroundNote`；`code_only` 的 `src/` 全部文件不含
+  `CompletionVerdict`／`continuum_verify`，且按标识符边界判独立 `Evidence` 零命中（`TaskEvidence`／
+  `evidence` 字段不算，见 Task 14 同一口径）；`plan_manual` 的函数体不含 `SchedulerInputs`／
+  `decide`，且 `next_tasks` 恰出现一次（用 `fn_body`）。
 
-**结果：** 六条用例名可列出；`SessionPlan`／`SessionOrchestrator` 尚未定义，Step 2 是编译失败。
+**结果：** 七条用例名可列出；`SessionPlan`／`SessionOrchestrator` 尚未定义，Step 2 是编译失败。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1030,12 +1053,13 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test session
 - [ ] **Step 3: 实现 `session.rs` 与 `plan_manual`**
 
 `SessionMode`／`SessionCandidate`／`BackgroundNote`／`BackgroundDigest`／`SessionPlan`／
-`SessionOrchestrator` 照设计 §4.5／§4.6。`BackgroundNote` 字段私有；`new` 只拒绝空 `label`
-（`is_empty()`，不 trim）；`BackgroundDigest` 派生 `Debug, Clone, PartialEq, Eq, Default`，
-`empty()` 返回 `Self::default()`。`SessionPlan` 字段私有；派生 `Debug, Clone`；**不实现
-`Default`／`Deserialize`**；六个访问器照设计 §4.5，`selection()` 只投影 Task／ContinueSession、
-`basis()` 委托 `decision`。`SessionOrchestrator` 派生 `Debug, Default`，持一个
-`BackgroundSupervisor`；`new`／`supervisor`／`supervisor_mut` 照 §4.6。
+`SessionOrchestrator` 照设计 §4.5／§4.6：`SessionMode` 派生 `Debug, Clone, Copy, PartialEq, Eq`；
+`SessionCandidate` 派生 `Debug, Clone`；`BackgroundNote` 字段私有、派生
+`Debug, Clone, PartialEq, Eq`，`new` 只拒绝空 `label`（`is_empty()`，不 trim）；
+`BackgroundDigest` 派生 `Debug, Clone, PartialEq, Eq, Default`，`empty()` 返回 `Self::default()`。
+`SessionPlan` 字段私有；派生 `Debug, Clone`；**不实现 `Default`／`Deserialize`**；六个访问器照设计
+§4.5，`selection()` 只投影 Task／ContinueSession、`basis()` 委托 `decision`。`SessionOrchestrator`
+派生 `Debug, Default`，持一个 `BackgroundSupervisor`；`new`／`supervisor`／`supervisor_mut` 照 §4.6。
 
 `plan_manual` 严格按设计 §5.4：先 `let visible = self.supervisor.next_tasks(candidates, tasks);`，
 再按 existing_sessions（输入序，`ContinueSession { intent: id.clone() }`）→ visible（输入序，
@@ -1147,7 +1171,9 @@ git commit -m "feat(supervisor): plan_auto 复用 P7B 选择并保留 NoIntent"
       };
   }
   ```
-  字段私有 ⇒ 编译失败。
+  样例故意给全四字段；字段私有 ⇒ `E0451`。设计 J11 的另一半「缺字段 ⇒ `E0063`」在字段私有下
+  从 crate 外不可达：外部构造（无论缺不缺字段）都先命中 `E0451`。本计划**以 `E0451` 代替
+  `E0063`**，不静默少一条照片，也不为拍 E0063 在 crate 内加 `#[cfg(test)]` 构造点。
 - `session_plan_has_no_default.rs`：`let _ = SessionPlan::default();` ⇒ `E0599`。
 - `session_plan_is_not_deserialize.rs`：
   ```rust
@@ -1271,7 +1297,7 @@ git commit -m "feat(supervisor): admit/release 与每任务挂起状态复用"
   `checkpoint_timed_out(&mut self, task, now_millis) -> Result<(), SupervisorError>`；
   `checkpoint_deadline(&self, task) -> Option<u64>`
 
-- [ ] **Step 1: 写假端口与七条用例**
+- [ ] **Step 1: 写假端口与八条用例**
 
 `support` 里的假端口：`struct CountingPort { result: Result<(), CheckpointError>, calls: Cell<usize> }`，
 `impl CheckpointPort` 每次 `calls.set(calls.get()+1)` 后返回 `result.clone()`。
@@ -1287,10 +1313,12 @@ git commit -m "feat(supervisor): admit/release 与每任务挂起状态复用"
    相位 `Throttled`、`checkpoint_deadline == None`；**不是 `Suspended`**。
 3. `port_failure_returns_checkpoint_error_and_throttles`：端口返回
    `Err(CheckpointError::new("磁盘已满"))` ⇒ `Err(SupervisorError::Checkpoint { error, phase:
-   SuspensionPhase::Throttled })`；`error.message()` 是原文；相位 `Throttled`。
+   SuspensionPhase::Throttled })`；`error.message()` 是原文；相位 `Throttled`、
+   `checkpoint_deadline == None`。
 4. `timer_hook_returns_timed_out_and_throttles`：`admit` 后调
    `checkpoint_timed_out(task, now + 60_000)` ⇒ `Err(SupervisorError::Resource(
-   SuspensionError::CheckpointTimedOut))`、相位 `Throttled`、端口计数 0。
+   SuspensionError::CheckpointTimedOut))`、相位 `Throttled`、`checkpoint_deadline == None`、
+   端口计数 0。
 5. `checkpoint_without_state_is_rejected`：未 `admit` 就调 `checkpoint` ⇒
    `Err(SupervisorError::NoSuspensionState { source })`；`release` 之后再调同样。
 6. `checkpoint_outside_checkpointing_does_not_call_port`：`admit` 在 `Low` 下得到 `Running`；
@@ -1299,8 +1327,13 @@ git commit -m "feat(supervisor): admit/release 与每任务挂起状态复用"
 7. `checkpoint_failure_can_be_retried_and_never_stays_checkpointing`：端口失败后相位 `Throttled`；
    在 `Critical` 下再次 `admit`（满足 P7C 的 retry cooldown 时传足够大的 `now_millis`）⇒
    重新 `Checkpointing`；`checkpoint` 成功 ⇒ `Suspended`。**任何出口都不停在 `Checkpointing`。**
+8. `checkpoint_timed_out_without_state_or_wrong_phase_is_rejected`：未 `admit` 就调
+   `checkpoint_timed_out(task, now)` ⇒ `Err(SupervisorError::NoSuspensionState { source })`；
+   成功 checkpoint 进入 `Suspended` 后再调 ⇒
+   `Err(SupervisorError::Resource(SuspensionError::NotCheckpointing { phase: Suspended }))`，
+   相位仍 `Suspended`。
 
-**结果：** 七条用例名可列出；`checkpoint`／`checkpoint_deadline`／`checkpoint_timed_out` 尚未定义，
+**结果：** 八条用例名可列出；`checkpoint`／`checkpoint_deadline`／`checkpoint_timed_out` 尚未定义，
 Step 2 是编译失败。
 
 - [ ] **Step 2: 运行，确认失败**
@@ -1335,7 +1368,7 @@ SuspensionState::checkpoint_deadline_millis)`；无状态或不在 `Checkpointin
 回 `Throttled`（设计 §4.7、§5.5）。
 
 **结果：** `cargo test -p continuum-supervisor --test checkpoint` 全绿；三出口＋定时器＋错相位
-七条都可观察。
+八条都可观察。
 
 - [ ] **Step 4: 提交**
 
@@ -1373,10 +1406,10 @@ staled_summaries: 0 }`。另写 `FailingIo` 返回 `Err(MemoryError::UnknownJob)
   `apply` 原样返回假 IO 的 `SynthesisReport`；`SynthesisTriggerPoint` 是 `Copy`，复制后调用不改变计数。
 - `memory_errors_are_wrapped_not_swallowed`：`FailingIo` 的三个方法各 ⇒
   `Err(SupervisorError::Memory(MemoryError::UnknownJob))`；**不是** `Ok`、不是 `NoIntent`。
-- `trigger_point_has_no_clock_retry_or_threshold`（J14 源码面）：读
-  `code_only(include_str!("../src/trigger.rs"))`，断言不含 `impl SynthesisIo`（实现不在本 crate）、
-  `enum SynthesisTrigger`（不重定义）、`Duration`／`Instant`／`SystemTime::now`／
-  `thread::sleep`／`retry`／`interval`／`idle`／`threshold`；三个函数体各恰一次对 `io` 的调用。
+- `trigger_point_has_no_clock_retry_or_threshold`（J14 源码面）：读 `code_only` 后的 **`src/` 全部
+  文件**（`lib.rs` 与六个模块），断言 `Duration`／`Instant`／`SystemTime::now`／`thread::sleep`／
+  `retry`／`interval`／`idle`／`threshold` 零命中；再读 `trigger.rs`，断言不含 `impl SynthesisIo`
+  （实现不在本 crate）、`enum SynthesisTrigger`（不重定义）；三个函数体各恰一次对 `io` 的调用。
 
 **结果：** 三条用例名可列出；`SynthesisIo`／`SynthesisTriggerPoint` 尚未定义，Step 2 是编译失败。
 
@@ -1390,8 +1423,9 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test trigger
 
 - [ ] **Step 3: 实现端口与三个转发**
 
-`SynthesisIo` 的三个方法照设计 §4.8；`SynthesisTriggerPoint` 不持状态、不取时钟；
-三个方法只做「转发 → `MemoryError` 包成 `SupervisorError::Memory` → 原样返回」。
+`SynthesisIo` 的三个方法照设计 §4.8；`SynthesisTriggerPoint` 派生
+`Debug, Default, Clone, Copy`，不持状态、不取时钟；三个方法只做「转发 → `MemoryError` 包成
+`SupervisorError::Memory` → 原样返回」。
 **不构造 `SynthesisRequest`、不生成 `SynthesisProposal`／`SynthesisJobId`、不决定何时调用、
 不重试、不取时钟**（`occurred_at` 由调用方给）。`trigger.rs` 的注释可说明「实现方持 `Tx`」，
 但**不要**在代码里命名 `Tx<'_>` 或调用 P6C 的自由函数。
@@ -1408,7 +1442,7 @@ git commit -m "feat(supervisor): SynthesisIo 端口与 §171 三个触发转发"
 
 ---
 
-### Task 14: 源码面 J16–J21、全量门与变异复核
+### Task 14: 源码面 J12／J13-d／J16–J21、全量门与变异复核
 
 **Files:**
 - Create: `crates/continuum-supervisor/tests/source_surface.rs`
@@ -1417,9 +1451,9 @@ git commit -m "feat(supervisor): SynthesisIo 端口与 §171 三个触发转发"
 
 **Interfaces:**
 - Consumes: 本 crate 的 `src/` 与 `Cargo.toml` 文本；`continuum-runtime` 的三个零表文件
-- Produces: J16／J17／J18／J19／J20／J21 的源码面断言；最终树的全量门
+- Produces: J12／J13-d／J16／J17／J18／J19／J20／J21 的源码面断言；最终树的全量门
 
-- [ ] **Step 1: 写 `tests/source_surface.rs` 的七条用例**
+- [ ] **Step 1: 写 `tests/source_surface.rs` 的十一条用例**
 
 用 `support::code_only` 拼 `src/` 六个文件（`task.rs`／`supervisor.rs`／`session.rs`／
 `resource.rs`／`trigger.rs`／`error.rs`）与 `lib.rs`；`Cargo.toml` 用 `include_str!("../Cargo.toml")`。
@@ -1427,21 +1461,26 @@ git commit -m "feat(supervisor): SynthesisIo 端口与 §171 三个触发转发"
 - `lib_rs_defines_no_types`：`code_only(src/lib.rs)` 不含 `pub struct`／`pub enum`／`pub trait`／
   `impl `（只做 `pub mod` 与 `pub use`）。
 - `allowed_row_has_exactly_five_entries`（J16）：读
-  `include_str!("../../../crates/continuum-runtime/tests/dependency_direction.rs")`，用一个小解析器
-  取 `("continuum-supervisor",` 到配对的 `)` 之间的所有引号串；断言恰五项且按字母序为
+  `code_only(include_str!("../../../crates/continuum-runtime/tests/dependency_direction.rs"))`，用一个小
+  解析器定位 `("continuum-supervisor",`；**跳过 subject 自身的引号串**（从 subject 收尾的 `",` 之后
+  开始），取到配对的 `)` 之间的所有引号串；断言恰五项且按字母序为
   `continuum-arbiter`／`continuum-canonical`／`continuum-intent-scheduler`／`continuum-memory`／
-  `continuum-semantics`；断言 `continuum-runtime` 行不含 `continuum-supervisor`。
+  `continuum-semantics`；另取 `("continuum-runtime",` 到配对 `)` 的括号范围，断言其中不含
+  `continuum-supervisor`（只看该行自己的范围，不做全文查找）。不跳过 subject 会数成六项，这是本条
+  解析口径的写死点。
 - `zero_persistence_and_no_intent_table`（J17）：`Cargo.toml` 不含 `continuum-persist`；
   `code_only` 的 `src/` 不含 `Migration`／`Tx`／`INSERT`／`UPDATE`／`load_intent`／
   `list_children`／`save_intent`／`apply_intent_transition`／`Event`／`EventType`；
   `crates/continuum-runtime/src/main.rs` 与 `tests/migrations.rs`／`tests/startup.rs` 不含
   `continuum_supervisor`／`continuum-supervisor`。
 - `no_user_behavior_or_model_paths`（J18）：`code_only(src)` 不含 `std::process`／`Command::new`／
-  `window`／`keyboard`／`screen`／`process_name`／`pid`／`continuum_provider`／`ModelProvider`／
-  `InvokeRequest`／`continuum_runtime`；`Cargo.toml` 不含这些依赖。
-- `no_second_intent_store_or_product_record`（J19）：`code_only(src)` 不含 `load_intent`／
+  `window`／`keyboard`／`screen`／`open files`／`process_name`／`pid`／`continuum_provider`／
+  `ModelProvider`／`InvokeRequest`／`continuum_runtime`；`Cargo.toml` 不含这些依赖。
+- `no_second_intent_store_or_product_record`（J19／J22）：`code_only(src)` 不含 `load_intent`／
   `list_children`／`save_intent`／`apply_intent_transition`／`continuum_product`／`Product::`／
-  `Milestone`／`load_product`；`Cargo.toml` 不含 `continuum-product`。
+  `Milestone`／`load_product`；`Cargo.toml` 不含 `continuum-product`。**`Product` 刻意收窄成
+  `Product::`**：`ProductIdRef` 与 `IntentKind::Product` 是合法词汇，裸 `Product` 会误伤；设计 J22
+  的裸 `Product` 按这条照片读。
 - `no_shippable_or_readiness_types`（J20）：`code_only(src)` 不含 `Shippable`／`ProductReadiness`／
   `CompletionVerdict`；文档面的「§7.4 没有 P7D」由本计划 Header 与设计 §3.6 承担，不另造源码断言。
 - `no_second_resource_scheduler`（J21）：`code_only(src)` 不含 `rank(`／`place(`／`RoutingRequest`／
@@ -1450,8 +1489,22 @@ git commit -m "feat(supervisor): SynthesisIo 端口与 §171 三个触发转发"
   `Cargo.toml` 不含 `PriorityTier`／`AssemblyView`／`ResourceObservation`／`assembly`；
   `code_only(src)` 不含 `impl CheckpointPort`／`enum ResourceAction`／`struct ResourceDecision`／
   `struct SuspensionState`／`struct ResourceArbiter`。
+- `background_is_not_evidence`（J12 源码面）：`code_only` 的 `src/` 全部文件按**标识符边界**判
+  `Evidence`——分词后等于 `Evidence` 的标识符零命中；`TaskEvidence`／`evidence` 字段不算（它们是
+  §4.3 的授权证据，不是第二枚 `Evidence`）；同时 `CompletionVerdict`／`continuum_verify` 子串零命中，
+  `Cargo.toml` 也不含 `continuum-verify`。
+- `suspension_state_is_owned_not_a_parameter`（J13-d 源码面）：读 `code_only` 的
+  `src/supervisor.rs`，断言含 `states: HashMap<TaskKey, SuspensionState>`；提取该文件中**每个**
+  `pub fn` 的签名（到 `{` 为止），断言任何参数表都不含 `SuspensionState`／`&mut SuspensionState`
+  （状态表由 supervisor 持有，不交给调用方；重点核对 `admit`／`checkpoint`／`checkpoint_timed_out`／
+  `release`）；提取 `checkpoint_timed_out` 的函数体，断言 `.checkpoint_timed_out(` 恰一次（调 P7C 的
+  同名方法）。
+- `src_uses_only_full_line_comments`：读**未过** `code_only` 的 `src/` 全部文件，逐行断言：若某行
+  含 `//`，则该行 `trim_start()` 必须以 `//` 开头；且全文不含 `/*`／`*/`。字符串字面量同样不使用
+  `//`／`/*`（避免把 URL 之类误当注释）。这是 `code_only` 只处理整行注释的边界照片；违反时改源码的
+  注释形式，不扩 `code_only`。
 
-**结果：** 八条用例名可列出；本 task 是源码面断言，预期**首次即绿**（若红，逐处读命中行：
+**结果：** 十一条用例名可列出；本 task 是源码面断言，预期**首次即绿**（若红，逐处读命中行：
 是源码真的违反了设计，还是注释里出现了被禁字面量；后者改注释，不改断言）。
 
 - [ ] **Step 2: 运行源码面**
@@ -1460,7 +1513,7 @@ git commit -m "feat(supervisor): SynthesisIo 端口与 §171 三个触发转发"
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-supervisor --test source_surface
 ```
 
-**结果：** 八条全绿；每条零命中都限定在 `code_only` 的语料上；若某条红，先区分「实现漂移」
+**结果：** 十一条全绿；每条零命中都限定在 `code_only` 的语料上；若某条红，先区分「实现漂移」
 与「注释漂移」。
 
 - [ ] **Step 3: 跑最终树的全量门与零表门**
@@ -1473,17 +1526,20 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test migrations
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 ```
 
-**结果：** 五个命令全绿、0 warning；`p7_union_adds_only_its_own_rows` 的断言 5／8 在最终树
-（P7A／B／C／D 四块齐全）成立；`migrations`／`startup` 的计数没有本 crate 的迁移。
-**若 P7A／B／C 尚未落地**：`cargo test --workspace` 可在本树跑，但 J15 的「最终树」只在四块齐全
-时成立；在交付回报里写明「部分树绿／最终树待四块合并」，不要把部分树写成最终树。
+**结果：** 五个命令全绿、0 warning；这是**唯一的最终树门**（Task 2 只做本地树）。
+`p7_union_adds_only_its_own_rows` 的断言 5 在最终树是 `{continuum-product}`（⊆ P7 名字；P7A 落地
+前是空集），断言 8 在 P7A／B／C／D 四块齐全时成立；`migrations`／`startup` 的计数没有本 crate 的
+迁移。**若 P7A／B／C 尚未落地**：`cargo test --workspace` 可在本树跑，但 J15 的「最终树」只在四块
+齐全时成立；在交付回报里写明「部分树绿／最终树待四块合并」，不要把部分树写成最终树。
 
 - [ ] **Step 4: 变异复核（确认断言会红）**
 
 依次做三个最小变异，每次改完跑对应测试后**用 `git checkout -- <文件>` 还原**：
 
-1. 在 `src/session.rs` 的 `plan_manual` 里加一句 `let _ = IntentScheduler::decide;`（或把
-   `next_tasks` 换成直接遍历）⇒ `session_plan` 的源码面应红；还原。
+1. 在 `src/session.rs` 的 `plan_manual` 里把
+   `let visible = self.supervisor.next_tasks(candidates, tasks);` 换成
+   `let visible: Vec<&AuthorizedTask> = tasks.iter().collect();`（编译安全；不新增未解析路径）
+   ⇒ `session_plan` 的 J10-b 源码面（`next_tasks` 恰一次）与 Manual 过滤用例应红；还原。
 2. 在 `src/supervisor.rs` 的 `next_tasks` 里把候选当前状态改成 `task.intent().status`（快照）
    ⇒ `next_tasks` 的 J8 应红；还原。
 3. 在 `src/supervisor.rs` 的 `checkpoint` 失败臂把 `CheckpointFailed` 改成 `Ok(Suspended)`
@@ -1496,7 +1552,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 
 ```bash
 git add crates/continuum-supervisor/tests/source_surface.rs
-git commit -m "test(supervisor): 源码面 J16-J21 与全量门复核"
+git commit -m "test(supervisor): 源码面 J12/J13-d/J16-J21 与全量门复核"
 ```
 
 ---
@@ -1512,7 +1568,7 @@ git commit -m "test(supervisor): 源码面 J16-J21 与全量门复核"
 | §4.4 `SupervisorDecision`／`ContinueDisposition`／`next_tasks`／`decide` | J7／J8／J9 | Task 5／6／7 |
 | §4.5 `SessionPlan` 四字段、`SessionCandidate`、`BackgroundNote`／`BackgroundDigest` | J10／J11／J12 | Task 8／9／10 |
 | §4.6 `SessionOrchestrator`、`plan_manual`／`plan_auto` | J10-a～d | Task 8／9 |
-| §4.7 `admit`／`checkpoint`／`checkpoint_timed_out`／`checkpoint_deadline`／`suspension_phase`／`release`／`CheckpointPort` | J13-a～d | Task 5／10／11／12 |
+| §4.7 `admit`／`checkpoint`／`checkpoint_timed_out`／`checkpoint_deadline`／`suspension_phase`／`release`／`CheckpointPort` | J13-a～d | Task 5／11／12（J13-d 的源码面在 Task 14） |
 | §4.8 `SynthesisIo`／`SynthesisTriggerPoint` | J14 | Task 13 |
 | §4.9 `SupervisorError` 十臂 | 错误面 | Task 5 |
 | §4.10 可见性、唯一构造点、不变量 | J2／J11／J12 | Task 4／8／10 |
@@ -1529,9 +1585,10 @@ git commit -m "test(supervisor): 源码面 J16-J21 与全量门复核"
 
 **J1–J22 的归位**：J1 Task 1；J2 Task 4；J3 Task 3；J4 Task 3；J5 Task 3；J6 Task 1（引用）
 ＋Task 4（类型不匹配）；J7 Task 7；J8 Task 6；J9 Task 7；J10 Task 8（b／c）＋Task 9（a／d）；
-J11 Task 8（字段面）＋Task 10（编译期）；J12 Task 8（运行期）＋Task 14（源码面）；J13 Task 11
-（a／b／d）＋Task 12（c）；J14 Task 13；J15 Task 2；J16 Task 1＋Task 14；J17 Task 14；J18 Task 14；
-J19 Task 14；J20 Task 14；J21 Task 14；J22 Task 3＋Task 14。
+J11 Task 8（字段面）＋Task 10（编译期）；J12 Task 8（运行期＋字段面）＋Task 14（源码面）；J13
+Task 11（a／d 运行期）＋Task 12（c）＋Task 14（d 源码面）；J14 Task 13；J15 Task 2（本地树）＋
+Task 14（最终树单一出口）；J16 Task 1＋Task 14；J17 Task 14；J18 Task 14；J19 Task 14；J20 Task 14；
+J21 Task 14；J22 Task 3＋Task 14。
 
 ### 2. Step scan
 
@@ -1597,7 +1654,12 @@ J19 Task 14；J20 Task 14；J21 Task 14；J22 Task 3＋Task 14。
    本计划按「两模式都含」实现，建议把 §4.5 的注解改成「固定 UI 选项（两模式都含）」。
 7. 设计 §9.1 第 4 条仍写「P7D 只调 P6C 的函数」；§4.8 已裁定端口。本计划按端口实现，建议
    §9.1 改成「P7D 只调 `SynthesisIo` 端口；装配方实现并持 `Tx`」。
+8. 设计 J12 的 `grep -rn "Evidence"` 会命中 §4.3 自己定义的私有 `TaskEvidence` 与字段
+   `evidence`；本计划的源码面按标识符边界判**独立** `Evidence`（`TaskEvidence`／`evidence` 不算），
+   主照片是 `BackgroundNote` 字段恰 `label`／`at_millis`。建议设计把 J12 的 grep 改成「独立
+   `Evidence` 类型」。
 
-**执行顺序提醒**：Task 1 起的硬前置是 `continuum-intent-scheduler` 与 `continuum-arbiter` 已落地
-（`Cargo.toml` 的四条普通边与 `ALLOWED` 的五项一次登记）；Task 2 的「最终树」绿要求 P7A／B／C／D
-四块齐全。两者都不由本计划交付；未满足时只报「部分树绿」，不报「P7D 完成」。
+**执行顺序提醒（写死）**：**全部 14 个 task 等待 `continuum-intent-scheduler` 与
+`continuum-arbiter` 落地；未交付前不得先写任何 task（包括 Task 2）。** Task 1 的 `Cargo.toml`
+四条普通边与 `ALLOWED` 五项一次登记；Task 2 只做本地树绿，**最终树门只在 Task 14 Step 3**，要求
+P7A／B／C／D 四块齐全。两者都不由本计划交付；未满足时只报「部分树绿」，不报「P7D 完成」。
