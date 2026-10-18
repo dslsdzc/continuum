@@ -42,7 +42,7 @@
 | Graph Scheduler 的消费（复用，不重造） | §303 `:1959-1969`；切分 §三第 4 条 | §4.6 | 零逻辑转调；不判 READY／并发 |
 | `ResourceDirectivePort` 与不透明指令值 | §304 `:1973-1982`；切分 §三第 5 条 | §4.7 | trait＋四槽载体；无实现 |
 | 三层分离的结构照片 | §301 `:1925-1935`；§77 `docs/spec/02-positioning.md:616-631` | §5.4、J10 | 三个独立决策面 + 一个转交入口；无合并函数 |
-| `NoIntent` 的负例 | 切分 §2.3.2（本设计订正其消费措辞） | §4.1、§5.3、J6–J8 | 空候选／无可推进候选／策略明确不推进三组；策略失败与越界走错误臂 |
+| `NoIntent` 的负例 | 切分 §2.3.2（已同步为「保留既有会话」） | §4.1、§5.3、J6–J8 | 空候选／无可推进候选／策略明确不推进三组；策略失败与越界走错误臂 |
 | 不解析 `priority`／`workload_class` 的源码面判据 | 切分 §2.4 | J3、J4 | 类型层＋源码面 |
 
 ## 1.2 不建什么（摘要；完整表在 §8）
@@ -1080,10 +1080,10 @@ P7D 可以直接用 `decide`（不取指令），也可以在需要资源指令�
   `BaselineIntentPolicy`，或装配方注入的 `IntentSelectionPolicy`。**P7D 自己实现一个新的
   `IntentSelectionPolicy` 就是第二个「最值得继续」排名**，违反切分 §五 P7D 的完成判据 2。
 
-**对切分 §2.3.2 的订正**：该节原文的消费措辞与 §223 的恢复路径不相容：P7D 可能在已有
+**切分 §2.3.2 已同步**：该节原先的消费措辞与 §223 的恢复路径不相容：P7D 可能在已有
 `RUNNING`／`WAITING`／`SUSPENDED` 会话时调用 `decide`，得到 `NoIntent` 只表示「本轮没有新的可推进项」，
-不能据此丢弃既有会话。本设计按 C1／C2 的收口订正为「保留既有会话」，建议协调者同步切分 §2.3.2
-（§11 第 7 条）。
+不能据此丢弃既有会话。切分已在 `:152-153` 改为「P7D 保留既有会话与后台任务」，与本设计的
+C1／C2 收口一致（§11 第 7 条）。
 
 ## 5.2 装配方消费 `ResourceDirectivePort`
 
@@ -1116,7 +1116,7 @@ P7D 可以直接用 `decide`（不取指令），也可以在需要资源指令�
 都表示「策略／decision 指向了不可推进的 id」，都返回 `Err`；不一个折叠成 `NoIntent`、一个返回 `Err`。
 
 **`NoIntent` 不表示「没有会话」**：P7D 收到它时必须保留既有会话与后台任务；它只表示「本轮没有新的
-可推进项」。这是对切分 §2.3.2 原措辞的订正（§5.1、§11 第 7 条）。
+可推进项」。切分 §2.3.2 已同步这一语义（§5.1、§11 第 7 条）。
 
 **负例的硬约束**：`NoIntent` 没有 `IntentId` 字段；`grep -rn "IntentId::from_str(\"\")"` 在本块 `src/` 零命中；
 P7D 不得用 `IntentId::from_str("")` 或任何空串 id 表示「没有 Intent」（J1）。
@@ -1210,7 +1210,7 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
 | **J5-b** | `Cargo.toml` 无 `continuum-persist`；`runtime_migrations()`（`main.rs:114`）无本块行；`expected_migrations()`（`migrations.rs:37`）与 `startup.rs` 计数不变 | 源码面 | —— |
 | **J6** | `candidates = &[]`、其余输入任意，基线策略：`decide(...) ⇒ Ok(NoIntent)`，`basis` 非空 | 运行期 | —— |
 | **J7** | 七个 P7B 非候选状态（`PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW`／`COMPLETED`／`FAILED`／`CANCELLED`）各一组，基线策略下 `decide(...) ⇒ Ok(NoIntent)`；六个可推进状态（`READY`／`RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING`）各一组，假策略返回合法 `Advance` ⇒ `Ok(Advance)`。六组正例只证 `decide` 的候选校验，不证基线会选中它们 | 运行期 | 只测这十三个状态；新增状态要补；`EVOLVING` 正例只按状态合法性构造，不代表存在活跃会话 |
-| **J7-b** | 基线正例对照：候选集含 `READY`／`RUNNING`／`WAITING` 各一枚，`BaselineIntentPolicy` 按 J9 次序选中预期 id ⇒ `Ok(Advance)`；证明基线不会把活跃状态过滤掉 | 运行期 | 只证基线可选中活跃状态，不证 P7D 的会话存在性；`EVOLVING` 仍受 P7D 的活跃会话条件约束 |
+| **J7-b** | 基线正例对照（逐活跃状态）：对五个活跃状态各一组，候选 `[READY, X]`（`X` 为该组活跃状态），`user_focus = UserFocus::Intent(X)`；显式调用 `IntentScheduler::decide(inputs, &BaselineIntentPolicy)` ⇒ `Ok(Advance)`，`advanced().map(IntentId::as_str) == Some(x_id.as_str())`、`basis().as_str() == "user_focus"`（`x_id` 是该活跃候选的 id）。若基线把活跃状态过滤掉，`X` 不在 `eligible`，只会落到 `READY` 而红；五组证明五个活跃状态都不过滤 | 运行期 | 只证基线可选中活跃状态，不证 P7D 的会话存在性；`EVOLVING` 仍受 P7D 的活跃会话条件约束 |
 | **J8-a** | 假策略返回 `Advance { intent: 不在候选集的 id, .. }` ⇒ `Err(IntentDecisionError::InvalidAdvance { .. })` | 运行期 | —— |
 | **J8-b** | 假策略返回 `Advance { intent: COMPLETED 候选的 id, .. }` ⇒ `Err(InvalidAdvance { .. })` | 运行期 | —— |
 | **J8-c** | 假策略返回 `Advance { intent: 任一可推进候选（如 READY）的 id, .. }` ⇒ `decide` 原样返回 `Ok(Advance)` | 运行期 | —— |
@@ -1424,9 +1424,10 @@ P7B 的 `BackgroundSuitability` 只是载体。**P7C 结论由端口实现持有
    第 4 层的缺口（切分 §6.2 第 12 条）。
 6. **切分 §2.3.2 的 `Advance(IntentId)`／`NoIntent` 是文字形状**：本设计取结构体变体
    `Advance { intent, basis }`／`NoIntent { basis }`，两臂语义不变；这是 §2.5 第 1 条的自定。
-7. **切分 §2.3.2 的 `NoIntent ⇒ 无会话` 措辞与 §223 不相容**：P7D 可能在已有 `RUNNING`／`WAITING`／
-   `SUSPENDED` 会话时调 `decide`；`NoIntent` 只能表示「本轮没有新的可推进项」，不能表示「没有会话」。
-   本设计按此订正为「P7D 必须保留既有会话」；建议协调者同步切分 §2.3.2。收件人：协调者 ＋ P7D。
+7. **切分 §2.3.2 的 `NoIntent` 措辞已同步**：原措辞「`NoIntent ⇒ 无会话`」与 §223 不相容；P7D 可能在
+   已有 `RUNNING`／`WAITING`／`SUSPENDED` 会话时调 `decide`，`NoIntent` 只能表示「本轮没有新的可推进项」。
+   切分 `:152-153` 已改为「P7D 保留既有会话与后台任务」，与本设计「P7D 必须保留既有会话」一致；
+   该 action item 关闭。
 
 ---
 
