@@ -16,9 +16,9 @@
 | 块 | 实现 | 终审 | 合入 main |
 |---|---|---|---|
 | P6C `continuum-memory` | 12 任务，干净单次全量门 **231 result / 1369 passed / 0 failed / 2 ignored / 0 warning / EXIT 0**（实现者曾报 1376/260，差异＝按 target 重复计数，终审已逐项解释） | **Approved**（0 Critical / 0 Important；4 Minor：`retrieval.rs` 两处仅 `is_ok`、`synthesis.rs` 三处 `expect`、A4/fail 的 `affected==1` 防御、全仓已无 `allow`） | **`e0adc69`（已推送）** |
-| P6B `continuum-trust` | Task 1–6 已提交（`4201a61`）；差 §9.4 变异与全量门 | 待做 | 待 |
-| P6D 两枚 crate | 8 任务已提交（`31de2b7`） | 待做 | 待（并集门等 A/B/C） |
-| P6A `continuum-context` | 未开工（前置：B/C 的 crate 进 main） | — | — |
+| P6B `continuum-trust` | 6 任务 + 源码面 + 14 行变异（全部一致）；干净全量门 **196 Running / 224 result / 1281 passed / 0 failed / 2 ignored / 0 warning / EXIT 0** | **Approved**（0 Critical / 0 Important；Minor：source_surface 钉行号、fmt 差异、§9.3(w) 字面读数） | **`7198dfd`（已推送）** |
+| P6D 两枚 crate | 8 任务（Task 8 仅核验无提交）；干净全量门 **198 Running / 227 result / 1272 passed / 0 failed / 2 ignored / 0 warning / EXIT 0**；P6D 专项 18/18；并集门 3/3；fixture 27 行、`P6_EXPECTED_ROWS` 5/5；5 条变异复核预期红 | **Approved**（0 Critical / 0 Important；Minor：`ProtectedCore::fingerprint` 的不可达 `expect`） | **`c55b03b`（已推送）** |
+| P6A `continuum-context` | 实现中（10 任务，`p6a-dev`） | — | — |
 
 P5 全量测试（main `e78eaec`）：**EXIT=0，216 result / 189 Running / 1253 passed / 0 failed / 0 warning**。
 
