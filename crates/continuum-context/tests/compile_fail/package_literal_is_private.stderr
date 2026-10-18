@@ -1,0 +1,17 @@
+error[E0451]: fields `instructions`, `references`, `artifacts`, `memories`, `provenance` and `trust_labels` of struct `ContextPackage` are private
+  --> tests/compile_fail/package_literal_is_private.rs:7:9
+   |
+ 6 |     let _ = ContextPackage {
+   |             -------------- in this type
+ 7 |         instructions: vec![],
+   |         ^^^^^^^^^^^^ private field
+ 8 |         references: vec![],
+   |         ^^^^^^^^^^ private field
+ 9 |         artifacts: vec![],
+   |         ^^^^^^^^^ private field
+10 |         memories: vec![],
+   |         ^^^^^^^^ private field
+11 |         provenance: vec![],
+   |         ^^^^^^^^^^ private field
+12 |         trust_labels: vec![],
+   |         ^^^^^^^^^^^^ private field

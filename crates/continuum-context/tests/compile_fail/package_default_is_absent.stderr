@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `default` found for struct `ContextPackage` in the current scope
+ --> tests/compile_fail/package_default_is_absent.rs:6:29
+  |
+6 |     let _ = ContextPackage::default();
+  |                             ^^^^^^^ function or associated item not found in `ContextPackage`

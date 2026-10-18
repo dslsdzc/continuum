@@ -22,3 +22,8 @@ serde_json = { workspace = true }
 # P6C 的测试构造面（`MemoryClaim::for_test`）：同一条 continuum-memory 边的测试
 # feature，不是第五条边。Task 4 Step 3b 预检通过后加入。
 continuum-memory = { path = "../continuum-memory", features = ["test-support"] }
+# `tests/type_level.rs` 的四份编译失败样例与一份编译通过的正控制：钉住
+# `ContextPackage` 的唯一构造点（J1-a／J1-b／J1-c 与外部写字段）。**外部 crate，
+# 不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表只断言 workspace 成员
+# 之间的边。
+trybuild = { workspace = true }

@@ -1,0 +1,15 @@
+warning: unreachable statement
+ --> tests/compile_fail/package_fields_are_read_only.rs:4:5
+  |
+3 |     let mut package: continuum_context::ContextPackage = todo!();
+  |                                                          ------- any code following this expression is unreachable
+4 |     package.instructions = vec![];
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ unreachable statement
+  |
+  = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0616]: field `instructions` of struct `ContextPackage` is private
+ --> tests/compile_fail/package_fields_are_read_only.rs:4:13
+  |
+4 |     package.instructions = vec![];
+  |             ^^^^^^^^^^^^ private field

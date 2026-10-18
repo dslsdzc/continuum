@@ -142,6 +142,7 @@ dependencies = [
  "continuum-memory",
  "continuum-trust",
  "serde_json",
+ "trybuild",
 ]
 
 [[package]]
