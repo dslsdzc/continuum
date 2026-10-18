@@ -33,8 +33,8 @@
 **普通依赖：零。外部依赖：零。dev 依赖：零。** 只用 `std`；错误类型手写 `Display`／`Error`；
 不引入 `serde`／`thiserror`／`trybuild`／`sysinfo`／`rand`／`tokio`（设计 §2.1）。
 测试也只用 `std`：编译失败夹具由 `std::process::Command` 调 `cargo check`，不用 `trybuild`
-（设计 §8.2）。**任务书里的「dev 只有 trybuild」与设计 §2.1 的「没有 dev-dependencies」相抵；
-按设计执行，见「遗留/待协调」第 5 条。**
+（设计 §8.2）。**若任务书要求「dev 只有 trybuild」，它与设计 §2.1 的「没有 dev-dependencies」相抵；
+本计划按设计执行（零 dev 依赖），见「遗留/待协调」第 5 条；本工作树未找到任务书原文，不把该要求写成事实。**
 
 **Spec:** 设计全文（**唯一事实来源**）；切分
 `docs/superpowers/specs/2026-10-18-p7-scope-and-split.md` §五 P7C 行（`:336`）、§2.2、§2.3.2 第 2 条
@@ -83,9 +83,18 @@
   `command_line`／`working_directory`／`window_title`；聚合 CPU／GPU 允许，逐进程 CPU／GPU 禁止
   （设计 §6.1、§4.13、J14）。
 - **不建 Resource Scheduler／不碰 budget**：`src/` 不出现 `continuum_provider`／`continuum_model_registry`／
-  `continuum_node`／`continuum_graph`／`continuum_budget`／`RoutingRequest`／`PlacementRequest`／
-  `ModelProvider`／`select_runnable`；`ResourceArbiter` 没有 `place`／`rank`／`model`／`tool`／`parallelism`
-  的决策方法（设计 §3.7、J16）。**不宣称 §304 已闭合**。
+  `continuum_node`／`continuum_graph`／`continuum_budget`／`continuum_verify`／`RoutingRequest`／`PlacementRequest`／
+  `ModelProvider`／`select_runnable`；`src/` 也不出现 `Evidence`／`CompletionVerdict`（词边界）；
+  `ResourceArbiter` 没有 `place`／`rank`／`model`／`tool`／`parallelism`
+  的决策方法（设计 §3.7、§2.5 第 4 条、J16）。**不宣称 §304 已闭合**。
+- **同名异物不落地**：`src/` 不出现本块之外的同名类型 `NodeState`／`IntentStatus`／`TaskSource`／
+  `Decision`／`ResourceDirective`／`ResourceContext`／`Budget`（词边界；`ResourceDecision` 不算命中
+  `Decision`）。P7C 的 `ResourceDecision`／`SuspensionPhase::Suspended`／`WorkloadDeclaration` 是自有类型
+  （设计 §2.6）。
+- **输入面可伪造，可信性归装配方＋P7D**：`ResourceObservation` 是公开可构造的输入面；任何持有
+  `&mut ResourceArbiter` 的调用方都能用伪造读数改变**共享**压力与所有消费者看到的
+  `ResourceSummary`。P7C 不验证真实性；输入面可信性由装配方负责（设计 §4.13、§8.4 第 4 条、
+  §11 第 9 条）。**收件人：装配方＋P7D。**
 - **不取时钟、不随机、无 I/O**：`src/` 不出现 `SystemTime::now`／`Instant::now`／`UNIX_EPOCH`／
   `thread_rng`／`rand::`／`std::process`／`Command::new`／`std::fs`／`std::net`／`std::env`／`unsafe`；
   所有时间由调用方的 `now_millis` 驱动（设计 §5.7、J17）。
@@ -131,7 +140,9 @@
 | **依赖门** | **已交付**：`ALLOWED` 在 `crates/continuum-runtime/tests/dependency_direction.rs:26`；逐对断言 `every_crate_depends_only_on_its_allowed_set` 在 `:494`；`cargo_tree_direct` 用 `--edges all`（`:476-491`） | J1(i)；新行必须精确为空 |
 | **P6D 合并门** | **未 rebaseline／退役**：`p6_union_adds_only_its_own_rows` 在 `:784`；断言 1 的 `baseline.len() == 27` 在 `:790`；解析器的 `rows.len() == 27` 在 `:615` | J1(ii) 的最终树前置；本块**不碰** `p6_pre_allowed.txt`／`P6_EXPECTED_ROWS`／27 字面量 |
 
-**结论：本块没有硬前置。** 零条内部边、零条外部边、零 dev 边；Task 1–8 只依赖本计划先前 task 的接口。
+**结论：无 crate 依赖前置；但有 §14 越步裁定前置（见「遗留/待协调」第 1 条）。**
+零条内部边、零条外部边、零 dev 边；Task 1–3 只依赖本计划先前 task 的接口。
+**§14 裁定未确认前，只能先做 Task 1–3；Task 4／5 不得开工**（不是“先按当前读法写着，等确认再改”）。
 唯一不能在本块交付点变绿的是 **J1(ii) 整树 `dependency_direction`**，前置是 P7D 完成 P6D 合并门的
 rebaseline／退役（设计 §2.1、§11 第 14 条；切分 §四第 1 条）。
 
@@ -198,9 +209,9 @@ crates/continuum-arbiter/
   src/state.rs              SuspensionPhase / SuspensionState / SuspensionError（设计 §4.8、§4.9）
   src/policy.rs             ArbiterPolicy / PolicyError（设计 §4.11）
   src/arbiter.rs            ResourceArbiter / ResourceDecision / 动作阶梯 / direct（设计 §4.10、§4.11）
-  tests/support/mod.rs      源码语料 helper：src_files（原文）／code_files（去注释与字符串）／
-                            code_only／struct_block／impl_block／field_names／public_fn_names／
-                            contains_token（Task 6 起）
+  tests/support/mod.rs      源码语料 helper：src_files（read_dir 全量，返回 (String, String)）／
+                            code_files（去注释与字符串）／code_only／struct_block／impl_block／
+                            impl_blocks／field_names／public_fn_names／contains_token（Task 6 起）
   tests/zero_deps.rs        J1(i)（Task 1）
   tests/workload.rs         J5（Task 1）
   tests/pressure.rs         J3 的压力分档／summary 运行期（Task 1 的 parse＋Task 2 的分档）
@@ -231,7 +242,8 @@ crates/continuum-arbiter/
 `summary.rs` 定义字段私有的 `ResourceSummary`，并提供一个 `pub(crate) fn from_parts(...)` 供
 `arbiter.rs` 的 `observe`／`summary` 使用。`pub(crate)` 不是公开构造点；J6 的
 `pub fn` 计数只数 `pub fn`，不会把它当成第三个公开访问器。**不提供** `pub fn new`／`Default`／
-`Deserialize`。
+`Deserialize`。源码面另有一条“`ResourceSummary::from_parts` 只由 `arbiter.rs` 调用”的断言，
+把 crate 内其他模块的调用也挡住（见 Task 6）。
 
 **本计划要改的既有文件**只有两处手写文件（都在共写表里），外加生成的 `Cargo.lock`：
 
@@ -380,6 +392,19 @@ fn pressure_has_four_ordered_bands() {
     assert!(ResourcePressure::Moderate < ResourcePressure::High);
     assert!(ResourcePressure::High < ResourcePressure::Critical);
 }
+
+#[test]
+fn pressure_has_an_exhaustive_match() {
+    fn name(pressure: ResourcePressure) -> &'static str {
+        match pressure {
+            ResourcePressure::Low => "LOW",
+            ResourcePressure::Moderate => "MODERATE",
+            ResourcePressure::High => "HIGH",
+            ResourcePressure::Critical => "CRITICAL",
+        }
+    }
+    assert_eq!(name(ResourcePressure::Critical), "CRITICAL");
+}
 ```
 
 - [ ] **Step 2: 运行，确认失败**
@@ -448,7 +473,8 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter --test zero_deps 
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency_direction every_crate_depends_only_on_its_allowed_set
 ```
 
-**结果：** 前一条全绿（7 条用例）；后一条只跑 `every_crate_depends_only_on_its_allowed_set`，绿。
+**结果：** 前一条全绿（8 条用例：zero_deps 2＋workload 3＋pressure 3）；后一条只跑
+`every_crate_depends_only_on_its_allowed_set`，绿。
 **不要跑整份 `dependency_direction`**：`p6_union_adds_only_its_own_rows` 此刻会红，那是 J1(ii) 的预期前置，
 不是本 task 的回归。
 
@@ -541,6 +567,18 @@ fn all_none_keeps_pressure_and_clears_the_class() {
     let summary = arbiter.observe(&ResourceObservation::default(), 1);
     assert_eq!(summary.resource_pressure(), ResourcePressure::Critical);
     assert_eq!(summary.workload_class(), None);
+
+    // 读数 Some、class=None 也必须清掉旧类别（不是只在“全 None”分支清）。
+    let with_class = ResourceObservation {
+        cpu: Some(10), workload_class: Some(WorkloadClass::Compiler), ..Default::default()
+    };
+    assert_eq!(arbiter.observe(&with_class, 2).workload_class(), Some(WorkloadClass::Compiler));
+    let clear_class = ResourceObservation {
+        cpu: Some(10), workload_class: None, ..Default::default()
+    };
+    let summary = arbiter.observe(&clear_class, 3);
+    assert_eq!(summary.resource_pressure(), ResourcePressure::Critical, "滞回保持压力");
+    assert_eq!(summary.workload_class(), None, "本次 class=None 必须清空旧类别");
 }
 
 #[test]
@@ -552,6 +590,10 @@ fn summary_has_exactly_two_read_only_accessors() {
     let _: fn(&ResourceSummary) -> (ResourcePressure, Option<WorkloadClass>) = reads;
 }
 ```
+
+**钳位照片的边界：** `cpu=101→Critical` 只证明分档，不证明 `>100` 被钳到 100（默认阈值下 101 与 100
+同为 `Critical`）。钳位发生在 `pub(crate) raw_pressure`，集成测试在 crate 外不可观察；本计划把它记为
+**设计约束，不写成已由测试证明**（J3 的其余项仍有照片，见 Task 8 Step 4 第 2 条）。
 
 `tests/policy.rs`：
 
@@ -638,10 +680,11 @@ Option<ResourcePressure>`——六项非 `None` 读数逐项钳到 `0..=100` 取
 `observe` 按 §5.1：
 
 1. 调 `pressure::raw_pressure(observation, &self.policy)` 取原始档位；
-2. 若为 `None`：不改变 `pressure`，但仍用本次 observation 的 `workload_class` 覆盖（`None` 就清空）；
-3. 否则把原始档位交给 §5.2 的滞回：升压立即；降压只在 `raw <= resume_at` 且
-   `now.saturating_sub(last_pressure_change_millis) >= cooldown_millis` 时生效；
+2. 若为 `None`：不改变 `pressure`；否则把原始档位交给 §5.2 的滞回：升压立即；降压只在
+   `raw <= resume_at` 且 `now.saturating_sub(last_pressure_change_millis) >= cooldown_millis` 时生效；
    **仅在实际变化时**更新 `last_pressure_change_millis`；
+3. **每次 observation 都覆盖 `workload_class`**（取本次的值；`None` 就清空，不保留旧类别）——
+   这一步与步骤 2 的读数分支无关，读数 Some 但 class=None 也要清空；
 4. 返回 `summary()`。
 
 `src/lib.rs` 追加三个模块与导出。**本 task 不实现 `direct`／`ResourceAction`／`SuspensionState`**。
@@ -652,7 +695,7 @@ Option<ResourcePressure>`——六项非 `None` 读数逐项钳到 `0..=100` 取
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter --test pressure --test policy --test hysteresis
 ```
 
-**结果：** 全绿（`pressure` 5 条、`policy` 3 条、`hysteresis` 1 条），0 warning。
+**结果：** 全绿（`pressure` 6 条＝Task 1 的 3＋本 task 的 3、`policy` 3 条、`hysteresis` 1 条），0 warning。
 
 - [ ] **Step 5: 提交**
 
@@ -806,9 +849,21 @@ impl ResourceArbiter {
 }
 ```
 
-`src/lib.rs` 必须是 `mod priority;`（**不是** `pub mod`），并加
-`#[cfg(feature = "assembly")] pub mod assembly;`。`assembly_view` 用 `crate::priority::classify`，
-**不**在装配方或 `assembly.rs` 里写第二份 `match`。
+`src/lib.rs` 必须是 `mod priority;`（**不是** `pub mod`），并加（属性与 `pub mod` **分行**，
+供源码面按行检查）：
+
+```rust
+#[cfg(feature = "assembly")]
+pub mod assembly;
+```
+
+`assembly_view` 用 `crate::priority::classify`，**不**在装配方或 `assembly.rs` 里写第二份 `match`。
+
+**Task 3 提交点的 `dead_code` 窗口**：默认构建里 `classify`／`PriorityTier` 还没有调用点
+（`assembly_view` 只在 `assembly` 特性下编译，`direct` 到 Task 4 才接入）。因此本 task 在
+`mod priority;` 的**上一行**写 `#[allow(dead_code)]`（单独一行），并注一句“Task 4 的 `direct` 接入后
+删除”；这保证 Task 3 的默认构建仍是 0 warning。**Task 4 Step 3 必须删除该 `#[allow(dead_code)]`**，
+在默认构建确认 `classify` 已被 `direct` 使用、不再需要豁免。
 
 - [ ] **Step 5: 跑装配测试与默认测试**
 
@@ -835,6 +890,9 @@ git commit -m "feat(p7c): 四档优先级与装配方特性面"
 
 ### Task 4: 四档动作、两阶段挂起、动作阶梯与结论值
 
+> **入口前置：** 先确认 §14 越步裁定（见「遗留/待协调」第 1 条）。**未确认前不得开工本 task 与
+> Task 5，只能先完成 Task 1–3**；不要按“当前读法”先把实现写掉再等裁定。
+
 **Files:**
 - Create: `crates/continuum-arbiter/src/action.rs`
 - Create: `crates/continuum-arbiter/src/state.rs`
@@ -855,6 +913,9 @@ git commit -m "feat(p7c): 四档优先级与装配方特性面"
     `checkpoint_succeeded(&mut self, now) -> Result<SuspensionPhase, SuspensionError>`、
     `checkpoint_failed(&mut self, now) -> SuspensionError`、
     `checkpoint_timed_out(&mut self, now) -> SuspensionError`
+  - `SuspensionState` 的 **crate-private 转移面**（`pub(crate)`，不属于公开面；`arbiter.rs` 的
+    `direct` 只能经它改状态）：`attempts()`、`last_transition_millis()`、
+    `enter_checkpointing(now, timeout)`、`throttle(now)`、`run(now)`、`resume(now)`
   - `continuum_arbiter::SuspensionError`：`CheckpointFailed`／`CheckpointTimedOut`／
     `NotCheckpointing { phase: SuspensionPhase }`；手写 `Display`／`Error`
   - `continuum_arbiter::ResourceDecision`：`summary()`／`action()`／`phase()`；字段私有
@@ -1056,6 +1117,8 @@ use continuum_arbiter::{
 
 const BACKGROUND: WorkloadDeclaration =
     WorkloadDeclaration { user_process: false, foreground: false, maintenance: false };
+const FOREGROUND: WorkloadDeclaration =
+    WorkloadDeclaration { user_process: false, foreground: true, maintenance: false };
 
 fn critical() -> ResourceArbiter {
     let mut arbiter = ResourceArbiter::new(ArbiterPolicy::default()).unwrap();
@@ -1141,6 +1204,19 @@ fn checkpoint_calls_outside_checkpointing_report_the_current_phase() {
         SuspensionError::NotCheckpointing { phase: SuspensionPhase::Running }
     );
 }
+
+#[test]
+fn throttle_while_already_throttled_is_a_no_op() {
+    let arbiter = critical();
+    let mut state = SuspensionState::new();
+    let first = arbiter.direct(FOREGROUND, &mut state, 0).unwrap();
+    assert_eq!(first.action(), Some(ResourceAction::Throttle));
+    assert_eq!(first.phase(), SuspensionPhase::Throttled);
+    let second = arbiter.direct(FOREGROUND, &mut state, 1).unwrap();
+    assert_eq!(second.action(), None, "Throttled + Throttle 必须无转移");
+    assert_eq!(second.phase(), SuspensionPhase::Throttled);
+    assert_eq!(state.phase(), SuspensionPhase::Throttled);
+}
 ```
 
 - [ ] **Step 2: 运行，确认失败**
@@ -1153,25 +1229,46 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter --test action --t
 
 - [ ] **Step 3: 实现动作、状态机与 `direct`（不含超时／重试上限）**
 
-`src/action.rs`／`src/state.rs` 按 §4.7–§4.9。`SuspensionState::new()` 为
-`Running`／`attempts=0`／`last_transition_millis=0`／`deadline=None`。`checkpoint_succeeded` 只允许
-从 `Checkpointing`：成功 → `Suspended`、清空截止、`last_transition=now`；**本 task 不检查截止**（J10 在
-Task 5）。`checkpoint_failed`／`checkpoint_timed_out` 只允许从 `Checkpointing`：回 `Throttled`、
-清空截止、`last_transition=now`；错相位返回 `NotCheckpointing { phase }`，相位不变。
-`checkpoint_timed_out` 本 task 就实现（无条件从 `Checkpointing` 回 `Throttled`）。
+`src/action.rs` 按 §4.7。`src/state.rs` 按 §4.8–§4.9 定义状态，并给 `arbiter.rs` 提供
+**crate-private 转移方法**——字段保持私有，`direct` 不直接读写 `phase`／`attempts`／
+`last_transition_millis`／`checkpoint_deadline_millis`（这是对设计 §4.8“字段私有”的具名解读：
+`pub(crate)` 只对 crate 内可见，不属于公开面）：
+
+- `pub(crate) fn attempts(&self) -> u32`、`pub(crate) fn last_transition_millis(&self) -> u64`；
+- `pub(crate) fn enter_checkpointing(&mut self, now_millis, timeout_millis)`：仅从
+  `Running`／`Throttled` 调用；相位 → `Checkpointing`、`attempts += 1`、
+  `deadline = Some(now.saturating_add(timeout_millis))`、`last_transition = now`；
+- `pub(crate) fn throttle(&mut self, now_millis)`：仅从 `Running` 调用；相位 → `Throttled`、
+  清空截止、`last_transition = now`；
+- `pub(crate) fn run(&mut self, now_millis)`：仅从 `Throttled` 调用；相位 → `Running`、清空截止、
+  `last_transition = now`；**本 task 不重置 `attempts`**（Task 5 补）；
+- `pub(crate) fn resume(&mut self, now_millis)`：仅从 `Suspended` 调用；相位 → `Running`、清空截止、
+  `last_transition = now`；**本 task 不重置 `attempts`**（Task 5 补）。
+
+`SuspensionState::new()` 为 `Running`／`attempts=0`／`last_transition_millis=0`／`deadline=None`。
+`checkpoint_succeeded` 只允许从 `Checkpointing`：成功 → `Suspended`、清空截止、
+`last_transition=now`；**本 task 不检查截止**（J10 在 Task 5）。`checkpoint_failed`／
+`checkpoint_timed_out` 只允许从 `Checkpointing`：回 `Throttled`、清空截止、`last_transition=now`；
+错相位返回 `NotCheckpointing { phase }`，相位不变。`checkpoint_timed_out` 本 task 就实现
+（无条件从 `Checkpointing` 回 `Throttled`）。
 `src/arbiter.rs` 加 `ResourceDecision`（字段私有，三个访问器）与 `direct`：
 
 1. `Checkpointing` 相位：**Task 5 前不检查截止**，返回 `Ok(action=None, phase=Checkpointing)`；
 2. `Suspended` 相位：若 `pressure <= policy.resume_at` 且
-   `now.saturating_sub(state.last_transition_millis) >= policy.cooldown_millis` → `Resume`／`Running`，
-   清空截止、`last_transition=now`；否则 `None`／`Suspended`。**本 task 不重置 `attempts`**（Task 5 补）；
+   `now.saturating_sub(state.last_transition_millis()) >= policy.cooldown_millis` → 调
+   `state.resume(now)`，返回 `Resume`／`Running`；否则 `None`／`Suspended`。**本 task 不重置
+   `attempts`**（Task 5 补）；
 3. 其余相位按 §5.4 的 4×4 表选动作，再按 §5.5 转移：
-   `Run` 从 `Throttled` → `Running`；`Throttle` 从 `Running` → `Throttled`；
-   `Suspend` 从 `Running`／`Throttled` → `Checkpointing`，`attempts += 1`、设置
-   `deadline = now.saturating_add(policy.checkpoint_timeout_millis)`、`last_transition=now`；
-   **每一条实际转移都把 `last_transition_millis` 设为 `now_millis`**；`action=None` 的 no-op 不更新
-   `last_transition`。**本 task 不实现 `attempts >= max` 的退化、不实现重试 cooldown、不重置
-   `attempts`**（J11 与 `Run`／`Resume` 重置都在 Task 5）。
+   `Run` 从 `Throttled` → 调 `state.run(now)`；`Run` 从 `Running` → `action=None`（no-op）；
+   `Throttle` 从 `Running` → 调 `state.throttle(now)`；`Throttle` 从 `Throttled` → `action=None`
+   （no-op，见 `throttle_while_already_throttled_is_a_no_op`）；
+   `Suspend` 从 `Running`／`Throttled` → 调
+   `state.enter_checkpointing(now, policy.checkpoint_timeout_millis)`；
+   每一条实际转移的 `last_transition_millis` 由上述方法设为 `now_millis`；`action=None` 的 no-op
+   不调用这些方法、不更新 `last_transition`。**本 task 不实现 `attempts >= max` 的退化、不实现重试
+   cooldown、不重置 `attempts`**（J11 与 `Run`／`Resume` 重置都在 Task 5）。
+4. 同时删除 Task 3 留在 `src/lib.rs` 的 `#[allow(dead_code)]`：`direct` 已调用 `classify`，
+   默认构建不再需要豁免。
 
 - [ ] **Step 4: 跑本 task 的测试**
 
@@ -1179,8 +1276,8 @@ Task 5）。`checkpoint_failed`／`checkpoint_timed_out` 只允许从 `Checkpoin
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter --test action --test ladder --test without_model --test suspension
 ```
 
-**结果：** 全绿（`action` 2 条、`ladder` 1 条 16 格、`without_model` 2 条、`suspension` 5 条），0 warning。
-**J10／J11 此时应红**（尚未写用例）；Task 5 补。
+**结果：** 全绿（`action` 2 条、`ladder` 1 条 16 格、`without_model` 2 条、`suspension` 6 条），0 warning。
+**J10／J11 此时尚无用例**（不是“红”）；Task 5 Step 1 补用例、Step 2 取运行期红。
 
 - [ ] **Step 5: 提交**
 
@@ -1200,8 +1297,11 @@ git commit -m "feat(p7c): 四档动作、动作阶梯与两阶段挂起"
 
 ### Task 5: 超时、重试上限、`max=0` 与 `Resume` 重置
 
+> **入口前置：** 同 Task 4——§14 越步裁定未确认前不得开工；只能先完成 Task 1–3。
+
 **Files:**
-- Modify: `crates/continuum-arbiter/src/state.rs`（`checkpoint_succeeded` 的截止检查）
+- Modify: `crates/continuum-arbiter/src/state.rs`（`checkpoint_succeeded` 的截止检查；
+  `run`／`resume` 的 `attempts = 0` 重置）
 - Modify: `crates/continuum-arbiter/src/arbiter.rs`（`direct` 的截止检查、重试上限、`max=0` 退化）
 - Create: `crates/continuum-arbiter/tests/timeout.rs`
 - Create: `crates/continuum-arbiter/tests/retry.rs`
@@ -1282,9 +1382,25 @@ fn timer_hook_outside_checkpointing_reports_the_phase() {
         SuspensionError::NotCheckpointing { phase: SuspensionPhase::Running }
     );
 }
+
+#[test]
+fn zero_timeout_expires_at_the_next_state_entry() {
+    let arbiter = critical_with_timeout(0);
+    let mut state = SuspensionState::new();
+    assert_eq!(
+        arbiter.direct(BACKGROUND, &mut state, 0).unwrap().phase(),
+        SuspensionPhase::Checkpointing
+    );
+    assert_eq!(state.checkpoint_deadline_millis(), Some(0));
+    assert_eq!(
+        arbiter.direct(BACKGROUND, &mut state, 0),
+        Err(SuspensionError::CheckpointTimedOut)
+    );
+    assert_eq!(state.phase(), SuspensionPhase::Throttled);
+}
 ```
 
-`tests/retry.rs` 五条（**每条独立 arbiter／state**）：
+`tests/retry.rs` 七条（**每条独立 arbiter／state**）：
 
 ```rust
 use continuum_arbiter::{
@@ -1378,6 +1494,41 @@ fn the_checkpointing_window_is_not_interrupted_while_retrying() {
 }
 
 #[test]
+fn first_attempt_from_throttled_does_not_wait_for_cooldown() {
+    let mut arbiter = ResourceArbiter::new(ArbiterPolicy {
+        max_checkpoint_attempts: 3, cooldown_millis: 10_000, ..ArbiterPolicy::default()
+    }).unwrap();
+    let mut state = SuspensionState::new();
+    observe(&mut arbiter, 80, 0);
+    assert_eq!(arbiter.direct(BACKGROUND, &mut state, 0).unwrap().action(),
+               Some(ResourceAction::Throttle));
+    assert_eq!(state.phase(), SuspensionPhase::Throttled);
+    observe(&mut arbiter, 95, 0);
+    let decision = arbiter.direct(BACKGROUND, &mut state, 0).unwrap();
+    assert_eq!(decision.action(), Some(ResourceAction::Suspend),
+               "首次尝试 attempts==0 不要求 cooldown");
+    assert_eq!(decision.phase(), SuspensionPhase::Checkpointing);
+}
+
+#[test]
+fn checkpoint_succeeded_does_not_reset_the_attempt_budget() {
+    let mut arbiter = ResourceArbiter::new(ArbiterPolicy {
+        max_checkpoint_attempts: 2, cooldown_millis: 0, ..ArbiterPolicy::default()
+    }).unwrap();
+    let mut state = SuspensionState::new();
+    observe(&mut arbiter, 95, 0);
+    assert_eq!(arbiter.direct(BACKGROUND, &mut state, 0).unwrap().action(),
+               Some(ResourceAction::Suspend));
+    assert_eq!(state.checkpoint_failed(0), SuspensionError::CheckpointFailed);
+    assert_eq!(arbiter.direct(BACKGROUND, &mut state, 0).unwrap().action(),
+               Some(ResourceAction::Suspend));
+    assert_eq!(state.checkpoint_succeeded(0), Ok(SuspensionPhase::Suspended));
+    // attempts 不公开；设计 §4.8 明确 Debug 打印尝试数，故用 Debug 断言“成功不重置”。
+    assert!(format!("{state:?}").contains("attempts: 2"),
+            "checkpoint_succeeded 不得重置 attempts：{state:?}");
+}
+
+#[test]
 fn zero_attempts_only_throttles() {
     let mut arbiter = ResourceArbiter::new(ArbiterPolicy {
         max_checkpoint_attempts: 0, ..ArbiterPolicy::default()
@@ -1390,6 +1541,11 @@ fn zero_attempts_only_throttles() {
     let decision = arbiter.direct(BACKGROUND, &mut state, 0).unwrap();
     assert_eq!(decision.action(), None);
     assert_eq!(decision.phase(), SuspensionPhase::Throttled);
+
+    observe(&mut arbiter, 10, 30_000);
+    let decision = arbiter.direct(BACKGROUND, &mut state, 30_000).unwrap();
+    assert_eq!(decision.action(), Some(ResourceAction::Run), "压力回 Low 后必须能 Run");
+    assert_eq!(decision.phase(), SuspensionPhase::Running);
 }
 ```
 
@@ -1401,30 +1557,39 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter --test timeout --
 
 **结果：** 运行期红：
 - `direct_at_the_deadline_returns_to_throttled` 得到 `Ok(Checkpointing)` 而不是 `Err(CheckpointTimedOut)`；
+- `zero_timeout_expires_at_the_next_state_entry` 第二次 `direct` 仍得到 `Ok(Checkpointing)`；
 - `late_success_is_rejected_after_the_deadline` 得到 `Ok(Suspended)`；
 - `attempts_are_capped...` 第三次仍得到 `Suspend`；
 - `retry_waits...` 在 500 就得到 `Suspend`；
 - `zero_attempts_only_throttles` 得到 `Suspend`／`Checkpointing`。
-- **`resume_resets_the_checkpoint_attempt_budget` 与 `the_checkpointing_window_is_not_interrupted_while_retrying`
-  在这一步先绿**：Task 4 还没有上限抑制（所以 `Resume` 后总会 `Suspend`），也没有打断
-  `Checkpointing`。它们不是“先红后绿”的例外，而是 Task 5 实现“上限 + 重置”组合的守卫；
-  去掉 `Resume` 重置后 `resume_resets...` 会红，见 Task 8 的变异复核。
+- **`resume_resets_the_checkpoint_attempt_budget`、`the_checkpointing_window_is_not_interrupted_while_retrying`、
+  `first_attempt_from_throttled_does_not_wait_for_cooldown` 与
+  `checkpoint_succeeded_does_not_reset_the_attempt_budget` 在这一步先绿**：Task 4 还没有上限抑制
+  （所以 `Resume` 后总会 `Suspend`、首次 retry 也不会被 cooldown 拦住），也没有打断
+  `Checkpointing`，且成功路径本来就不重置 `attempts`。它们不是“先红后绿”的例外，而是 Task 5
+  实现“上限 + 重置”组合的守卫；去掉 `Resume`／`Run` 重置或给 `checkpoint_succeeded` 加上重置后，
+  这些用例会红（见 Task 8 的变异复核）。
 
 - [ ] **Step 3: 实现截止检查、重试上限与 `max=0`**
 
-`src/arbiter.rs` 的 `direct` 开头加：若 `Checkpointing` 且 `now >= deadline`，相位回 `Throttled`、
-清空截止、`last_transition=now`，返回 `Err(CheckpointTimedOut)`。
+`src/arbiter.rs` 的 `direct` 开头加：若 `Checkpointing` 且
+`state.checkpoint_deadline_millis()` 为 `Some(deadline)` 且 `now >= deadline`，调
+`state.checkpoint_timed_out(now)`（它在 `Checkpointing` 下把相位回 `Throttled`、清空截止、
+`last_transition=now`），并返回 `Err(CheckpointTimedOut)`。`direct` 仍不直接读写私有字段。
 `src/state.rs` 的 `checkpoint_succeeded` 加同一截止检查（截止后回 `Throttled`、清空截止、
 `last_transition=now`，并返回 `Err(CheckpointTimedOut)`；晚到成功不报 `Suspended`）。
 `direct` 的 `Suspend` 分支按 §5.6：
 
-- `state.attempts >= policy.max_checkpoint_attempts` 时：`Running` → 发 `Throttle`、相位 `Throttled`
-  （**不增加 `attempts`**）；`Throttled` → `action=None`、相位保持 `Throttled`；
-- 否则从 `Throttled` 重试（`attempts > 0`）需
-  `now.saturating_sub(state.last_transition_millis) >= policy.cooldown_millis`；不满足 → `action=None`、
-  保持 `Throttled`；首次（`attempts == 0`）不要求 cooldown；
-- 通过后 `attempts += 1`、设置截止、`last_transition=now`、相位 `Checkpointing`。
-`Run`（从 `Throttled`）与 `Resume`（从 `Suspended`）重置 `attempts=0`；`checkpoint_succeeded` **不**重置。
+- `state.attempts() >= policy.max_checkpoint_attempts` 时：`Running` → 调 `state.throttle(now)` 发
+  `Throttle`、相位 `Throttled`（**不增加 `attempts`**）；`Throttled` → `action=None`、相位保持
+  `Throttled`；
+- 否则从 `Throttled` 重试（`state.attempts() > 0`）需
+  `now.saturating_sub(state.last_transition_millis()) >= policy.cooldown_millis`；不满足 →
+  `action=None`、保持 `Throttled`；首次（`state.attempts() == 0`）不要求 cooldown；
+- 通过后调 `state.enter_checkpointing(now, policy.checkpoint_timeout_millis)`（它把 `attempts += 1`、
+  设置截止、`last_transition=now`、相位 `Checkpointing`）。
+- 在 `src/state.rs` 的 `run`／`resume` 方法体里加入 `attempts = 0`（`Run` 从 `Throttled`、`Resume`
+  从 `Suspended`）；`checkpoint_succeeded` **不**重置。`direct` 只调用方法，不写字段。
 
 - [ ] **Step 4: 跑本 task 的测试与 T4 回归**
 
@@ -1433,7 +1598,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter --test timeout --
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-arbiter
 ```
 
-**结果：** 全绿（`timeout` 4 条、`retry` 5 条；默认全套绿），0 warning。
+**结果：** 全绿（`timeout` 5 条、`retry` 7 条；默认全套绿），0 warning。
 
 - [ ] **Step 5: 提交**
 
@@ -1464,19 +1629,29 @@ git commit -m "feat(p7c): checkpoint 超时与重试上限"
 **Interfaces:**
 - Consumes: Task 1–5 的全部公开面
 - Produces: 无生产类型；源码面 helper：
-  - `support::src_files() -> Vec<(&'static str, String)>`（**原文**，用于精确行匹配）
-  - `support::code_files() -> Vec<(&'static str, String)>`（对每个文件应用 `code_only`）
-  - `support::code_only(&str) -> String`（去 `//`／`///`／`/* */` 注释与字符串字面量，保留换行）
+  - `support::src_files() -> Vec<(String, String)>`（**原文**，用于精确行匹配；用 `read_dir` 枚举
+    `src/*.rs`，按文件名排序，不写文件白名单）
+  - `support::code_files() -> Vec<(String, String)>`（对每个文件应用 `code_only`，文件名同上）
+  - `support::code_only(&str) -> String`（去 `//`／`///`／`/* */` 注释与字符串字面量，保留换行；
+    至少支持普通字符串与 `r#"…"#`／`r##"…"##` 原始字符串）
   - `support::struct_block(&str, &str) -> &str`／`support::impl_block(&str, &str) -> &str`
     （花括号配对；返回 `{` 与配对 `}` **之间**的体）
+  - `support::impl_blocks(&str, &str) -> Vec<&str>`（同一文件里**全部**匹配的 impl 体）
   - `support::field_names(&str) -> Vec<&str>`／`support::public_fn_names(&str) -> Vec<&str>`
-  - `support::contains_token(&str, &str) -> bool`（按标识符边界匹配）
+    （后者只数 `pub fn`，**不**把 `pub(crate) fn` 算成公开访问器）
+  - `support::contains_token(&str, &str) -> bool`（按标识符边界匹配；标识符字符是 ASCII 字母／
+    数字／`_`，所以 `Budget` 不命中 `continuum_budget`、`Decision` 不命中 `ResourceDecision`）
 
 - [ ] **Step 1: 写 helper 与 `tests/source_surface.rs`**
 
-`tests/support/mod.rs` 先实现并自测 helper（`code_only` 至少覆盖 `//`、`///`、`/* */`、普通字符串与
-`r#"…"#` 原始字符串；`struct_block`／`impl_block` 用花括号计数，遇到字符串中的花括号先由 `code_only`
-抹掉）。`tests/source_surface.rs` 至少包含下面这些用例：
+`tests/support/mod.rs` 先实现并自测 helper（文件顶部写 `#![allow(dead_code)]`：同一 helper 会被多个
+test target 编译，某个 target 未用到的 helper 不应产生 warning）；`src_files` 用 `std::fs::read_dir` 枚举
+`env!("CARGO_MANIFEST_DIR")/src` 下所有 `.rs`（**不写文件白名单**），返回 `(String, String)`；
+`code_only` 至少覆盖 `//`、`///`、`/* */`、普通字符串与 `r#"…"#`／`r##"…"##` 原始字符串；
+`struct_block`／`impl_block`／`impl_blocks` 用花括号计数，遇到字符串中的花括号先由 `code_only`
+抹掉。`public_fn_names` 按**源码出现顺序**返回；下面断言的是设计顺序（`resource_pressure` 先于
+`workload_class`；`summary`→`action`→`phase`），实现必须按该顺序声明访问器。`tests/source_surface.rs`
+至少包含下面这些用例：
 
 ```rust
 mod support;
@@ -1485,6 +1660,14 @@ use continuum_arbiter::{
     ArbiterPolicy, ResourceArbiter, ResourceDecision, ResourceObservation, ResourceSummary,
     SuspensionState, WorkloadDeclaration,
 };
+
+fn file<'a>(files: &'a [(String, String)], name: &str) -> &'a str {
+    &files
+        .iter()
+        .find(|(file, _)| file.as_str() == name)
+        .unwrap_or_else(|| panic!("src/ 缺少 {name}"))
+        .1
+}
 
 #[test]
 fn the_source_helper_strips_comments_and_strings() {
@@ -1497,14 +1680,45 @@ fn the_source_helper_strips_comments_and_strings() {
 }
 
 #[test]
+fn the_source_helper_handles_raw_strings_and_nested_braces() {
+    let source = r##"let s = r#"PriorityTier } {"#; fn f() { let x = 1; }"##;
+    let code = support::code_only(source);
+    assert!(!code.contains("PriorityTier"), "raw string 内容必须被抹掉");
+    assert!(code.contains("fn f()"), "raw string 之后的代码必须保留");
+
+    let text = "pub struct S { a: u8, b: u8 }\n\
+                impl S { pub fn a(&self) -> u8 { self.a } pub fn b(&self) -> u8 { self.b } }";
+    let fields = support::struct_block(text, "pub struct S");
+    assert_eq!(support::field_names(fields), vec!["a", "b"]);
+    let block = support::impl_block(text, "impl S");
+    assert_eq!(support::public_fn_names(block), vec!["a", "b"],
+               "嵌套花括号（方法体）必须被正确配对");
+    let blocks = support::impl_blocks("impl S { } impl S { pub fn x() {} }", "impl S");
+    assert_eq!(blocks.len(), 2, "impl_blocks 必须返回同一文件的全部 impl 块");
+}
+
+#[test]
+fn src_files_reads_every_rust_file_in_src() {
+    let names: Vec<String> = support::src_files().into_iter().map(|(name, _)| name).collect();
+    let on_disk: Vec<String> = std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/src"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.ends_with(".rs"))
+        .collect();
+    for name in on_disk {
+        assert!(names.contains(&name), "src_files 必须用 read_dir 全量读到 {name}");
+    }
+}
+
+#[test]
 fn summary_has_exactly_two_public_accessors() {
     let files = support::code_files();
     let hits: Vec<_> = files.iter().filter(|(_, text)| text.contains("impl ResourceSummary")).collect();
     assert_eq!(hits.len(), 1, "impl ResourceSummary 必须恰一处");
     let block = support::impl_block(&hits[0].1, "impl ResourceSummary");
     assert_eq!(support::public_fn_names(block), vec!["resource_pressure", "workload_class"]);
-    let summary = files.iter().find(|(name, _)| *name == "summary.rs").unwrap().1.clone();
-    let fields = support::struct_block(&summary, "pub struct ResourceSummary");
+    let summary = file(&files, "summary.rs");
+    let fields = support::struct_block(summary, "pub struct ResourceSummary");
     assert_eq!(support::field_names(fields),
                vec!["resource_pressure", "workload_class"]);
     assert!(!fields.contains("pub "), "ResourceSummary 字段必须私有");
@@ -1513,9 +1727,9 @@ fn summary_has_exactly_two_public_accessors() {
 #[test]
 fn summary_source_has_no_priority_or_process_terms() {
     let files = support::code_files();
-    let summary = files.iter().find(|(name, _)| *name == "summary.rs").unwrap().1.clone();
-    let fields = support::struct_block(&summary, "pub struct ResourceSummary");
-    let block = support::impl_block(&summary, "impl ResourceSummary");
+    let summary = file(&files, "summary.rs");
+    let fields = support::struct_block(summary, "pub struct ResourceSummary");
+    let block = support::impl_block(summary, "impl ResourceSummary");
     for token in ["priority", "PriorityTier", "process_name", "process_id", "pid",
                   "cpu_usage", "gpu_usage"] {
         assert!(!support::contains_token(fields, token), "summary 字段出现 {token}");
@@ -1531,8 +1745,8 @@ fn decision_has_exactly_three_public_accessors_and_no_priority() {
     let block = support::impl_block(&hits[0].1, "impl ResourceDecision");
     assert_eq!(support::public_fn_names(block), vec!["summary", "action", "phase"]);
     assert!(!block.contains("PriorityTier"));
-    let arbiter = files.iter().find(|(name, _)| *name == "arbiter.rs").unwrap().1.clone();
-    let fields = support::struct_block(&arbiter, "pub struct ResourceDecision");
+    let arbiter = file(&files, "arbiter.rs");
+    let fields = support::struct_block(arbiter, "pub struct ResourceDecision");
     assert_eq!(support::field_names(fields), vec!["summary", "action", "phase"]);
     assert!(!fields.contains("pub "), "ResourceDecision 字段必须私有");
     assert!(!fields.contains("priority") && !fields.contains("PriorityTier"));
@@ -1541,13 +1755,24 @@ fn decision_has_exactly_three_public_accessors_and_no_priority() {
 #[test]
 fn priority_tier_is_private_by_default_and_only_assembly_re_exports_it() {
     let files = support::src_files();
-    let lib = files.iter().find(|(name, _)| *name == "lib.rs").unwrap().1.clone();
-    assert!(lib.lines().any(|line| line.trim_start().starts_with("mod priority;")));
-    assert!(!lib.lines().any(|line| line.trim_start().starts_with("pub mod priority;")));
-    assert!(lib.contains("#[cfg(feature = \"assembly\")] pub mod assembly;"));
+    let lib = file(&files, "lib.rs");
+    let lines: Vec<&str> = lib.lines().map(str::trim).collect();
+    assert!(lines.iter().any(|line| *line == "mod priority;"));
+    assert!(!lines.iter().any(|line| *line == "pub mod priority;"));
+    let assembly_line = lines
+        .iter()
+        .position(|line| *line == "pub mod assembly;")
+        .expect("lib.rs 必须分行写 pub mod assembly;");
+    let previous = lines[..assembly_line]
+        .iter()
+        .rev()
+        .find(|line| !line.is_empty())
+        .expect("assembly 的 cfg 属性必须在上一行");
+    assert_eq!(*previous, "#[cfg(feature = \"assembly\")]",
+               "assembly 模块必须由 cfg 属性门控（属性可与 pub mod 分行）");
     let reexports: Vec<&str> = files.iter()
         .filter(|(_, text)| text.contains("pub use crate::priority::PriorityTier;"))
-        .map(|(name, _)| *name)
+        .map(|(name, _)| name.as_str())
         .collect();
     assert_eq!(reexports, vec!["assembly.rs"]);
 }
@@ -1557,11 +1782,11 @@ fn priority_tier_is_confined_to_three_source_files() {
     let files = support::code_files();
     let hits: Vec<&str> = files.iter()
         .filter(|(_, text)| text.contains("PriorityTier"))
-        .map(|(name, _)| *name)
+        .map(|(name, _)| name.as_str())
         .collect();
     assert!(hits.iter().all(|name| matches!(*name, "priority.rs" | "assembly.rs" | "arbiter.rs")),
             "PriorityTier 出现在白名单外：{hits:?}");
-    let priority = files.iter().find(|(name, _)| *name == "priority.rs").unwrap().1.clone();
+    let priority = file(&files, "priority.rs");
     assert_eq!(priority.matches("fn classify(").count(), 1,
                "四档分类函数必须只有一个");
 }
@@ -1577,19 +1802,19 @@ fn no_raw_process_information_in_public_types() {
     assert!(!support::contains_token(&all, "pid"), "公开语料出现 pid");
     assert_eq!(
         support::field_names(support::struct_block(
-            &files.iter().find(|(name, _)| *name == "pressure.rs").unwrap().1,
+            file(&files, "pressure.rs"),
             "pub struct ResourceObservation")),
         vec!["cpu", "ram", "gpu", "vram", "disk_io", "network", "workload_class"]
     );
     assert_eq!(
         support::field_names(support::struct_block(
-            &files.iter().find(|(name, _)| *name == "arbiter.rs").unwrap().1,
+            file(&files, "arbiter.rs"),
             "pub struct ResourceDecision")),
         vec!["summary", "action", "phase"]
     );
     assert_eq!(
         support::field_names(support::struct_block(
-            &files.iter().find(|(name, _)| *name == "state.rs").unwrap().1,
+            file(&files, "state.rs"),
             "pub struct SuspensionState")),
         vec!["phase", "attempts", "last_transition_millis", "checkpoint_deadline_millis"]
     );
@@ -1612,20 +1837,45 @@ fn no_resource_scheduler_budget_or_persistence_surface() {
     let files = support::code_files();
     let all: String = files.iter().map(|(_, text)| text.as_str()).collect();
     for token in ["continuum_provider", "continuum_model_registry", "continuum_node",
-                  "continuum_graph", "continuum_budget", "RoutingRequest", "PlacementRequest",
-                  "ModelProvider", "select_runnable", "Migration", "Tx", "persist"] {
+                  "continuum_graph", "continuum_budget", "continuum_verify",
+                  "RoutingRequest", "PlacementRequest", "ModelProvider", "select_runnable",
+                  "Migration", "Tx", "persist"] {
         assert!(!all.contains(token), "src/ 出现禁用符号 {token}");
     }
+    for token in ["Evidence", "CompletionVerdict"] {
+        assert!(!support::contains_token(&all, token), "src/ 出现证据面符号 {token}");
+    }
     let arbiter_blocks: Vec<&str> = files.iter()
-        .filter(|(_, text)| text.contains("impl ResourceArbiter"))
-        .map(|(_, text)| support::impl_block(text, "impl ResourceArbiter"))
+        .flat_map(|(_, text)| support::impl_blocks(text, "impl ResourceArbiter"))
         .collect();
+    assert!(!arbiter_blocks.is_empty(), "必须找到 impl ResourceArbiter 块");
     for block in arbiter_blocks {
         for method in ["place", "rank", "model", "tool", "parallelism"] {
             assert!(!support::public_fn_names(block).contains(&method),
                     "ResourceArbiter 出现决策方法 {method}");
         }
     }
+}
+
+#[test]
+fn no_same_named_foreign_types() {
+    let all: String = support::code_files().iter().map(|(_, text)| text.as_str()).collect();
+    for token in ["NodeState", "IntentStatus", "TaskSource", "Decision", "ResourceDirective",
+                  "ResourceContext", "Budget"] {
+        assert!(!support::contains_token(&all, token), "src/ 出现同名异物 {token}");
+    }
+}
+
+#[test]
+fn summary_from_parts_is_only_called_by_the_arbiter() {
+    let all: String = support::code_files().iter().map(|(_, text)| text.as_str()).collect();
+    assert!(all.contains("pub(crate) fn from_parts"), "from_parts 必须是 crate-private");
+    let files = support::code_files();
+    let hits: Vec<&str> = files.iter()
+        .filter(|(_, text)| text.contains("ResourceSummary::from_parts"))
+        .map(|(name, _)| name.as_str())
+        .collect();
+    assert_eq!(hits, vec!["arbiter.rs"], "from_parts 只允许 arbiter.rs 调用");
 }
 
 #[test]
@@ -1644,13 +1894,35 @@ fn serialization_display_and_default_are_absent_from_conclusion_types() {
     for token in ["Serialize", "Deserialize", "serde"] {
         assert!(!all.contains(token), "src/ 出现序列化面 {token}");
     }
-    for ty in ["ResourceSummary", "ResourceDecision", "SuspensionState", "ResourceArbiter"] {
+    for ty in ["ResourceSummary", "ResourceDecision", "SuspensionState", "ResourceArbiter",
+               "AssemblyView", "PriorityTier"] {
         assert!(!all.contains(&format!("impl Display for {ty}")), "{ty} 不应实现 Display");
     }
-    assert!(!all.contains("impl Default for ResourceSummary"));
-    assert!(!all.contains("impl Default for ResourceDecision"));
-    assert!(!all.contains("impl Default for SuspensionState"));
-    assert!(!all.contains("impl Default for ResourceArbiter"));
+
+    fn assert_no_default(all: &str, ty: &str, decl: &str) {
+        assert!(!all.contains(&format!("impl Default for {ty}")), "{ty} 不应 impl Default");
+        let start = all.find(decl).unwrap_or_else(|| panic!("找不到 {decl}"));
+        let attrs: Vec<&str> = all[..start]
+            .lines()
+            .rev()
+            .skip_while(|line| line.trim().is_empty())
+            .take_while(|line| line.trim_start().starts_with("#["))
+            .collect();
+        assert!(!attrs.iter().any(|line| line.contains("Default")),
+                "{ty} 的 derive 列表不得包含 Default：{attrs:?}");
+    }
+
+    for (ty, decl) in [
+        ("ResourceSummary", "pub struct ResourceSummary"),
+        ("ResourceDecision", "pub struct ResourceDecision"),
+        ("SuspensionState", "pub struct SuspensionState"),
+        ("ResourceArbiter", "pub struct ResourceArbiter"),
+        ("AssemblyView", "pub struct AssemblyView"),
+        ("PriorityTier", "pub enum PriorityTier"),
+        ("WorkloadDeclaration", "pub struct WorkloadDeclaration"),
+    ] {
+        assert_no_default(&all, ty, decl);
+    }
 }
 ```
 
@@ -1671,16 +1943,80 @@ continuum-arbiter = { path = "../../.." }
 ```
 
 `tests/fixtures/default_surface/.gitignore`：`/target/` 与 `/Cargo.lock`。
-五份 bin 的内容分别是：
+五份 bin 的完整内容（每份都是独立 `src/bin/*.rs`，不用省略号）：
 
-- `priority.rs`：`use continuum_arbiter::PriorityTier; fn main() {}` → `E0432`
-- `assembly_view.rs`：`use continuum_arbiter::AssemblyView; fn main() {}` → `E0432`
-- `summary_priority.rs`：构造 `ResourceArbiter::new(Default::default()).unwrap()`，`summary.priority()`
-  → `E0599`
-- `summary_literal.rs`：`let _ = continuum_arbiter::ResourceSummary { ... };` → `E0451`
-- `decision_priority.rs`：`direct(..).unwrap().priority()` → `E0599`
+`src/bin/priority.rs` → `E0432`：
 
-`tests/compile_fail.rs`：
+```rust
+use continuum_arbiter::PriorityTier;
+
+fn main() {
+    let _ = PriorityTier::UserWorkload;
+}
+```
+
+`src/bin/assembly_view.rs` → `E0432`：
+
+```rust
+use continuum_arbiter::AssemblyView;
+
+fn main() {
+    let _ = core::mem::size_of::<AssemblyView>();
+}
+```
+
+`src/bin/summary_priority.rs` → `E0599`：
+
+```rust
+use continuum_arbiter::{ArbiterPolicy, ResourceArbiter, ResourceObservation};
+
+fn main() {
+    let mut arbiter = ResourceArbiter::new(ArbiterPolicy::default()).unwrap();
+    let summary = arbiter.observe(&ResourceObservation::default(), 0);
+    let _ = summary.priority();
+}
+```
+
+`src/bin/summary_literal.rs` → `E0451`：
+
+```rust
+use continuum_arbiter::{ResourcePressure, ResourceSummary};
+
+fn main() {
+    let _ = ResourceSummary {
+        resource_pressure: ResourcePressure::Low,
+        workload_class: None,
+    };
+}
+```
+
+`src/bin/decision_priority.rs` → `E0599`：
+
+```rust
+use continuum_arbiter::{
+    ArbiterPolicy, ResourceArbiter, SuspensionState, WorkloadDeclaration,
+};
+
+fn main() {
+    let arbiter = ResourceArbiter::new(ArbiterPolicy::default()).unwrap();
+    let mut state = SuspensionState::new();
+    let decision = arbiter
+        .direct(
+            WorkloadDeclaration {
+                user_process: false,
+                foreground: false,
+                maintenance: false,
+            },
+            &mut state,
+            0,
+        )
+        .unwrap();
+    let _ = decision.priority();
+}
+```
+
+`tests/compile_fail.rs`（target 放**workspace 根** `target/ui/default_surface`，由根 `.gitignore` 的
+`/target` 覆盖；不要落进 `crates/continuum-arbiter/target/`）：
 
 ```rust
 use std::path::Path;
@@ -1688,7 +2024,8 @@ use std::process::Command;
 
 fn run_bin(name: &str) -> String {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/default_surface");
-    let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/ui/default_surface");
+    // CARGO_MANIFEST_DIR 是绝对路径，因此 ../../target 解析到 workspace 根 target/。
+    let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/ui/default_surface");
     let output = Command::new(env!("CARGO"))
         .args(["check", "--quiet", "--bin", name])
         .current_dir(fixture)
@@ -1717,6 +2054,8 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-arbiter --test source_sur
 
 **结果：** 源码面若全绿，说明 Task 1–5 的实现没有漂；若红，按命中行回查拥有该代码的 task。
 编译失败夹具首轮可能因路径或错误码不符而红——按实际 rustc 输出修正夹具或断言，**不改生产代码语义**。
+夹具 target 在 workspace 根 `target/ui/`，已被根 `.gitignore` 的 `/target` 覆盖；不需要把
+`crates/continuum-arbiter/target/` 加进版本控制，手工清理可用 `rm -rf target/ui`。
 
 - [ ] **Step 4: 跑默认全套与装配全套**
 
@@ -1806,25 +2145,28 @@ fn action_and_phase_text_round_trip() {
 `tests/manifest.rs`：
 
 ```rust
-use std::path::Path;
+mod support;
 
 const MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
 fn the_manifest_is_zero_table_and_gates_the_assembly_target() {
+    let manifest_code: String = MANIFEST
+        .lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
     for forbidden in ["continuum-persist", "continuum-events", "continuum-runtime",
                       "continuum-model-registry", "continuum-node", "continuum-provider",
-                      "continuum-graph", "continuum-budget", "serde", "thiserror"] {
-        assert!(!MANIFEST.contains(forbidden), "Cargo.toml 出现禁用依赖 {forbidden}");
+                      "continuum-graph", "continuum-budget", "continuum-verify",
+                      "serde", "thiserror"] {
+        assert!(!manifest_code.contains(forbidden), "Cargo.toml 出现禁用依赖 {forbidden}");
     }
-    assert!(MANIFEST.contains("name = \"assembly\""));
-    assert!(MANIFEST.contains("required-features = [\"assembly\"]"));
-    let all: String = std::fs::read_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("src"))
-        .unwrap()
-        .map(|entry| std::fs::read_to_string(entry.unwrap().path()).unwrap())
-        .collect();
+    assert!(manifest_code.contains("name = \"assembly\""));
+    assert!(manifest_code.contains("required-features = [\"assembly\"]"));
+    let all: String = support::code_files().iter().map(|(_, text)| text.as_str()).collect();
     for token in ["Migration", "Tx", "persist"] {
-        assert!(!all.contains(token), "src/ 出现持久化符号 {token}");
+        assert!(!support::contains_token(&all, token), "src/ 出现持久化符号 {token}");
     }
 }
 
@@ -1857,15 +2199,22 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-arbiter --test determinis
 - [ ] **Step 3: 跑默认与装配两套，并核对 artifact**
 
 ```bash
+set -euo pipefail
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-arbiter
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-arbiter --features assembly
 TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-arbiter --no-run --message-format=json \
-  2>/dev/null | grep -E '"name"[[:space:]]*:[[:space:]]*"assembly"' > .tmp/p7c-assembly-artifacts.txt || true
-test ! -s .tmp/p7c-assembly-artifacts.txt
+  > .tmp/p7c-default-artifacts.json
+test -s .tmp/p7c-default-artifacts.json
+! grep -Eq '"name"[[:space:]]*:[[:space:]]*"assembly"' .tmp/p7c-default-artifacts.json
+TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-arbiter --features assembly --no-run \
+  --message-format=json > .tmp/p7c-assembly-artifacts.json
+grep -Eq '"name"[[:space:]]*:[[:space:]]*"assembly"' .tmp/p7c-assembly-artifacts.json
 ```
 
-**结果：** 两套全绿、0 warning；`p7c-assembly-artifacts.txt` 为空——默认构建没有编译 `assembly` 目标
-（J15）。若文件非空，回 Task 3 检查 `required-features`。
+**结果：** 两套全绿、0 warning；默认构建的 artifact 文件非空且**没有** `target.name == "assembly"`，
+装配构建的 artifact 里**有**——前者证明默认测试面不编译 `assembly`，后者证明 grep 本身有效（J15）。
+`cargo test --no-run` 若退出非零，`set -e` 会先停住，不会被 `grep`／`|| true` 吞掉。若默认文件出现
+`assembly`，回 Task 3 检查 `required-features`。
 
 - [ ] **Step 4: 提交**
 
@@ -1905,9 +2254,10 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-runtime --test dependency
 **结果：**
 - `cargo tree` 只有 `continuum-arbiter v0.1.0 (...)` 一行，无子节点；
 - `every_crate_depends_only_on_its_allowed_set` 绿；
-- 整份 `dependency_direction` **预期红在 `p6_union_adds_only_its_own_rows` 的断言 8**（新增 subject
-  `continuum-arbiter` 不在 `P6_NAMES`），**这不是 J1(ii) 绿灯**；在报告里抄下红的断言号与
-  `p6_pre_allowed.txt` 未被修改的事实。J1(ii) 的最终绿等 P7D 完成合并门 rebaseline／退役。
+- 整份 `dependency_direction` **预期红在 `p6_union_adds_only_its_own_rows` 的“断言 8”**（设计／切分
+  的称呼；新增 subject `continuum-arbiter` 不在 `P6_NAMES`），**这不是 J1(ii) 绿灯**；在报告里抄下
+  **测试名、源码行号、断言消息**（Rust 默认输出没有“断言号”这种编号）与 `p6_pre_allowed.txt` 未被
+  修改的事实。J1(ii) 的最终绿等 P7D 完成合并门 rebaseline／退役。
 
 - [ ] **Step 3: 零表／零迁移与 runtime 三处核对**
 
@@ -1928,10 +2278,10 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | 设计 §2.4 的行 | 本计划的用例 |
 |---|---|
 | 第 1 条（压力四档／最大值／默认阈值） | Task 2 的 `pressure_bands_use_the_max_of_non_none_readings`、`hysteresis` |
-| 第 2 条（`Option<u8>`、`None` 忽略、全 `None` 保持、`>100` 钳位） | Task 2 的 `all_none_keeps_pressure_and_clears_the_class`、`pressure_bands...` 的 101 |
+| 第 2 条（`Option<u8>`、`None` 忽略、全 `None` 保持、`>100` 钳位） | Task 2 的 `all_none_keeps_pressure_and_clears_the_class`；`pressure_bands...` 的 101 只覆盖分档，**钳位是设计约束、公开面不可观察**（见 Task 2 的钳位注记） |
 | 第 3 条（`WorkloadClass` 四档闭集、`INTERACTIVE` 不设变体） | Task 1 的 `the_class_set_is_exactly_four_and_round_trips`、`interactive_is_not_a_fifth_class` |
 | 第 4 条（分类器在本机探测器、进程名不进公开类型） | Task 6 的 `no_raw_process_information_in_public_types`；归属待协调见「遗留」第 2 条 |
-| 第 5 条（`workload_class` 可为 `None`） | Task 2 的 `all_none_keeps_pressure_and_clears_the_class`；Task 4 的 summary 断言 |
+| 第 5 条（`workload_class` 可为 `None`） | Task 2 的 `all_none_keeps_pressure_and_clears_the_class`（含“读数 Some、class=None 清空旧类”）；Task 6 的 `summary_has_exactly_two_public_accessors` |
 | 第 6 条（四档分类规则） | Task 3 的 `classification_follows_maintenance_user_foreground_default` |
 | 第 7 条（4×4 动作阶梯） | Task 4 的 `every_cell_of_the_four_by_four_ladder_is_explicit` |
 | 第 8 条（滞回默认值与升降方向） | Task 2 的 `pressure_rises_immediately_and_falls_only_below_resume_at_after_cooldown` |
@@ -1957,7 +2307,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | 把 `WorkloadClass::parse("INTERACTIVE")` 映射到 `Some(InteractiveGame)` | Task 1 的 `interactive_is_not_a_fifth_class` | Task 2／4 的行为用例 |
 | `direct` 在 `Running` 收到 `Suspend` 时直接设 `Suspended` | Task 4 的 `suspend_only_reaches_checkpointing...`、`every_cell...`、`high_pressure...` | Task 2 的压力用例 |
 | `checkpoint_failed` 停在 `Checkpointing` 或报 `Suspended` | Task 4 的 `checkpoint_failure_returns_to_throttled_and_never_suspends` | Task 2／Task 5 的重试用例（若未触发失败路径） |
-| 删掉 `direct` 的截止检查 | Task 5 的 `direct_at_the_deadline_returns_to_throttled`、`late_success_is_rejected_after_the_deadline` | Task 4 的成功路径 |
+| 删掉 `direct` 的截止检查 | Task 5 的 `direct_at_the_deadline_returns_to_throttled`、`zero_timeout_expires_at_the_next_state_entry`、`late_success_is_rejected_after_the_deadline` | Task 4 的成功路径 |
 | `max_checkpoint_attempts == 0` 分支返回 `None`／`Running` | Task 5 的 `zero_attempts_only_throttles` | Task 4 的 16 格（默认 max=3） |
 
 **结果：** 六轮都红在该红的位置、还原后 `sha256sum` 与变异前一致、`git status` 干净。
@@ -1981,7 +2331,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | §2.3 | 层间位置、入度为零、不接第 4／5／6 层边 | Task 1（零依赖）＋Task 6（源码面） |
 | §2.4 | 15 条自定判定 | Task 8 Step 4 的逐条表 |
 | §2.5 | 切分 §四六条横切约束 | Task 1（ALLOWED／零迁移）＋Task 6（词汇表／源码面）＋Task 8（复核） |
-| §2.6 | 同名异物（`Suspended`／`priority`／`workload_class`／`TaskSource`／`Decision`／`ResourceDirective`／`Budget`） | Task 6 的源码面；Task 3／4 的类型名与测试注释 |
+| §2.6 | 同名异物（`Suspended`／`priority`／`workload_class`／`TaskSource`／`Decision`／`ResourceDirective`／`Budget`） | Task 6 的 `no_same_named_foreign_types`（`contains_token` 词边界）＋Task 3／4 的类型名与测试注释 |
 | §3.1–§3.3 | §300／§13／§14 的规范依据 | Task 2（压力）／Task 1（负载类）／Task 3（优先级）／Task 4／5（挂起） |
 | §3.4 | §7.1–§7.4；判据 3 只覆盖 J1＋J2 | Task 1／Task 4；「遗留」第 4 条 |
 | §3.5 | A14／OPEN-012 的暴露面 | Task 3／6；「遗留」第 4 条 |
@@ -1999,7 +2349,7 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | §4.10 | `ResourceDecision` | Task 4 |
 | §4.11 | `ArbiterPolicy`／`PolicyError`／`ResourceArbiter` | Task 2（new／observe／summary）＋Task 4／5（direct） |
 | §4.12 | `AssemblyView`／`assembly` 特性 | Task 3 |
-| §4.13 | 可见性、构造点、不变量 | Task 2（summary）＋Task 6（源码面） |
+| §4.13 | 可见性、构造点、不变量 | Task 2（summary）＋Task 4／5（`SuspensionState` 的 crate-private 转移面，字段仍私有）＋Task 6（源码面） |
 | §5.1 | 压力计算 | Task 2 |
 | §5.2 | 滞回 | Task 2 |
 | §5.3 | 四档分类 | Task 3 |
@@ -2017,11 +2367,11 @@ TMPDIR="$PWD/.tmp" timeout 900 cargo test -p continuum-runtime --test startup
 | §8.1 | J1–J17 | 「二、照片归位」 |
 | §8.2 | 照片的语料与读法 | Task 6 的 `tests/support/mod.rs`＋Task 6 Step 1 |
 | §8.3 | 变异预告 | Task 8 Step 5（六条承重变异） |
-| §8.4 | 拍不出照片的地方 | 「遗留/待协调」逐条列 |
+| §8.4 | 拍不出照片的地方 | 「遗留/待协调」逐条列（第 1 §14／第 2 分类器／第 3 P6D／第 4 A14／第 5 dev 口径／第 6 预算／第 7 P7B 投影／第 8 输入面可信性） |
 | §8.5 | §7.4 判据 3 与自报判据的关系 | Task 8 Step 2／Step 4；Global Constraints |
 | §9 | 明确不做 | Global Constraints 末段；Task 6 源码面 |
 | §10 | 零持久化／不占迁移档 | Task 7 的 manifest；Task 8 Step 3 |
-| §11 | 14 条设计问题 | 「遗留/待协调」列与本块直接相关的四条＋两条接缝 |
+| §11 | 14 条设计问题 | 「遗留/待协调」列本块直接相关的 8 条（第 1／3／4／6／9／12／13／14 条；第 3／4 条合并在遗留第 2 项）＋1 条 dev 口径；第 2 条在 Global Constraints／J5 具名（收件人规范维护者），第 5／7／8／10／11 条留在设计或本块外消费方 |
 | §12 | 实测对账 | 本计划引用其结论，不重述 |
 
 **照片归位（J1–J17）**：照片按设计 §5 的判定分节归位——J12→§5.4、J8→§5.5、J11→§5.6、J2→§5.4、
@@ -2032,20 +2382,20 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
 | **J1(i)** | `tests/zero_deps.rs` 两条＋`every_crate_depends_only_on_its_allowed_set` | Task 1 Step 5／Task 8 Step 2 |
 | **J1(ii)** | 整份 `dependency_direction` 的最终树；**P7D 完成合并门前预期红在断言 8** | Task 8 Step 2（记录，不算绿灯） |
 | **J2** | `high_pressure_limits_background_and_maintenance_without_any_model_path`（独立状态） | Task 4 |
-| **J3** | `pressure_bands_use_the_max_of_non_none_readings`、`all_none_...`、`policy` 的非法策略、`pressure_text_is_exact_uppercase` | Task 1／Task 2 |
+| **J3** | `pressure_bands_use_the_max_of_non_none_readings`、`all_none_...`、`pressure_text_is_exact_uppercase`、`pressure_has_an_exhaustive_match`、`policy` 的非法策略；**钳位为设计约束、公开面不可观察（101 只证分档）** | Task 1／Task 2 |
 | **J4** | `pressure_rises_immediately_and_falls_only_below_resume_at_after_cooldown` | Task 2 |
 | **J5** | `the_class_set_is_exactly_four_and_round_trips`、`interactive_is_not_a_fifth_class`、穷尽 match | Task 1 |
-| **J6** | `summary_has_exactly_two_public_accessors`、`summary_source_has_no_priority_or_process_terms`、`serialization_display_and_default_are_absent...`、`summary_priority`／`summary_literal` 夹具 | Task 6 |
+| **J6** | `summary_has_exactly_two_public_accessors`、`summary_source_has_no_priority_or_process_terms`、`serialization_display_and_default_are_absent...`（含 `#[derive(Default)]` 与 `AssemblyView`／`PriorityTier`）、`summary_from_parts_is_only_called_by_the_arbiter`、`summary_priority`／`summary_literal` 夹具 | Task 6 |
 | **J7** | 装配测试三条＋`priority_tier_is_private_by_default...`、`priority_tier_is_confined...`、`priority`／`assembly_view` 夹具 | Task 3／Task 6 |
 | **J8** | `suspend_only_reaches_checkpointing_and_success_reaches_suspended`、`resume_uses_the_suspension_state_clock_not_the_pressure_clock`、`resume_waits_for_the_state_cooldown...` | Task 4 |
 | **J9** | `checkpoint_failure_returns_to_throttled_and_never_suspends`、`checkpoint_calls_outside_checkpointing_report_the_current_phase` | Task 4 |
-| **J10** | `direct_at_the_deadline_returns_to_throttled`、`late_success_is_rejected_after_the_deadline`、`the_timer_hook_returns_to_throttled`、`timer_hook_outside_checkpointing...` | Task 5 |
-| **J11** | `attempts_are_capped_and_run_resets_the_budget`、`resume_resets_the_checkpoint_attempt_budget`、`retry_waits_for_the_state_clock_cooldown`、`the_checkpointing_window_is_not_interrupted_while_retrying`、`zero_attempts_only_throttles` | Task 5 |
+| **J10** | `direct_at_the_deadline_returns_to_throttled`、`zero_timeout_expires_at_the_next_state_entry`、`late_success_is_rejected_after_the_deadline`、`the_timer_hook_returns_to_throttled`、`timer_hook_outside_checkpointing...` | Task 5 |
+| **J11** | `attempts_are_capped_and_run_resets_the_budget`、`resume_resets_the_checkpoint_attempt_budget`、`retry_waits_for_the_state_clock_cooldown`、`the_checkpointing_window_is_not_interrupted_while_retrying`、`first_attempt_from_throttled_does_not_wait_for_cooldown`、`checkpoint_succeeded_does_not_reset_the_attempt_budget`、`zero_attempts_only_throttles` | Task 5 |
 | **J12** | `every_cell_of_the_four_by_four_ladder_is_explicit`（16 格逐格） | Task 4 |
 | **J13** | `decision_has_exactly_three_public_accessors_and_no_priority`、`decision_priority` 夹具 | Task 6 |
 | **J14** | `no_raw_process_information_in_public_types`＋`format!("{:?}", …)` 断言 | Task 6 |
-| **J15** | `the_manifest_is_zero_table_and_gates_the_assembly_target`、`default_test_build_does_not_compile_the_assembly_target`、Task 3 Step 3 | Task 3／Task 7 |
-| **J16** | `no_resource_scheduler_budget_or_persistence_surface`＋manifest 的禁用依赖 | Task 6／Task 7 |
+| **J15** | `the_manifest_is_zero_table_and_gates_the_assembly_target`、Task 7 Step 3 的 shell artifact 检查（默认 artifact 无 `assembly`、装配 artifact 有）、Task 3 Step 3 | Task 3／Task 7 |
+| **J16** | `no_resource_scheduler_budget_or_persistence_surface`（含 `continuum_verify`／`Evidence`／`CompletionVerdict`）、`no_same_named_foreign_types`＋manifest 的禁用依赖 | Task 6／Task 7 |
 | **J17** | `no_clock_random_process_filesystem_network_environment_or_unsafe`＋`the_same_sequence_yields_equal_values`＋`action`／`phase` 的穷尽 match | Task 4／Task 6／Task 7 |
 
 ### 二、Step scan
@@ -2054,8 +2404,9 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
   Task 3 的 `[[test]]` 门控单独一步；Task 5 的超时与重试合为一个行为补全 task（同一状态机出口）；
   Task 8 只有验证与复核，不新增语义。
 - **“运行，确认失败”逐 task 标注量到什么**：Task 1 是 package 未找到（不是编译失败）；Task 2／3／4 是
-  `E0432`／`E0599`（不算红）；Task 5 主体是运行期红（`resume_resets...` 与
-  `the_checkpointing_window...` 两条是 Task 5 实现的守卫，先绿；见 Task 5 Step 2）；Task 6／7
+  `E0432`／`E0599`（不算红）；Task 5 主体是运行期红（`resume_resets...`、
+  `the_checkpointing_window...`、`first_attempt...`、`checkpoint_succeeded_does_not_reset...`
+  四条是 Task 5 实现的守卫，先绿；见 Task 5 Step 2）；Task 6／7
   首次即绿（或夹具首轮红），其红由 Task 8 的
   变异复核取；Task 8 无“确认失败”步。
 - **测试命令精确到 `--test` 目标**：`zero_deps`／`workload`／`pressure`／`policy`／`hysteresis`／
@@ -2068,26 +2419,36 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
 
 ### 三、Type consistency
 
-- `ResourcePressure`：四变体；`as_str` 返回 `"LOW"`／`"MODERATE"`／`"HIGH"`／`"CRITICAL"`；`parse` 精确大写。
+- `ResourcePressure`：四变体；`as_str` 返回 `"LOW"`／`"MODERATE"`／`"HIGH"`／`"CRITICAL"`；`parse` 精确大写；
+  派生 `Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord`。
 - `ResourceObservation`：`cpu`／`ram`／`gpu`／`vram`／`disk_io`／`network: Option<u8>`＋
   `workload_class: Option<WorkloadClass>`；派生 `Debug, Clone, Copy, PartialEq, Eq, Default`。
-- `WorkloadClass`：四变体；`ALL: [WorkloadClass; 4]`；`as_str`／`parse`；无 `Default`。
+- `WorkloadClass`：四变体；`ALL: [WorkloadClass; 4]`；`as_str`／`parse`；派生
+  `Debug, Clone, Copy, PartialEq, Eq`；无 `Default`。
 - `ResourceSummary`：字段私有；`resource_pressure()`／`workload_class()`；`pub(crate) from_parts`；
   派生 `Debug, Clone, Copy, PartialEq, Eq`；无 `Default`／`Serialize`／`Deserialize`／`Display`。
 - `WorkloadDeclaration`：三个 `pub bool`；派生 `Debug, Clone, Copy, PartialEq, Eq`；无 `Default`。
-- `PriorityTier`：四变体；私有模块；`#[cfg(feature = "assembly")] as_str`／`rank`；**不派生 `Ord`**。
-- `AssemblyView`：字段私有；`summary()`／`priority()`；只由 `assembly_view` 构造。
-- `ResourceAction`：四变体；`as_str`／`parse`；无 `Kill`。
-- `SuspensionPhase`：四相位；`as_str`／`parse`；**没有 `Resume` 相位**。
-- `SuspensionState`：字段私有；`new`／`phase`／`checkpoint_deadline_millis`／`checkpoint_succeeded`／
-  `checkpoint_failed`／`checkpoint_timed_out`；`checkpoint_failed`／`checkpoint_timed_out` 返回
-  `SuspensionError`，不是 `Result`。
-- `SuspensionError`：三臂；手写 `Display`／`Error`。
-- `ResourceDecision`：字段私有；`summary()`／`action()`／`phase()`；`action: Option<ResourceAction>`。
-- `ArbiterPolicy`：七个公开字段与默认值；`impl Default`。
-- `PolicyError`：两臂；手写 `Display`／`Error`。
+- `PriorityTier`：四变体；私有模块；派生 `Debug, Clone, Copy, PartialEq, Eq`；
+  `#[cfg(feature = "assembly")] as_str`／`rank`；**不派生 `Ord`**；无 `Default`／`Display`。
+- `AssemblyView`：字段私有；`summary()`／`priority()`；只由 `assembly_view` 构造；派生
+  `Debug, Clone, Copy, PartialEq, Eq`；无 `Default`／`Display`。
+- `ResourceAction`：四变体；`as_str`／`parse`；派生 `Debug, Clone, Copy, PartialEq, Eq`；无 `Kill`。
+- `SuspensionPhase`：四相位；`as_str`／`parse`；派生 `Debug, Clone, Copy, PartialEq, Eq`；
+  **没有 `Resume` 相位**。
+- `SuspensionState`：字段私有；派生 `Debug, PartialEq, Eq`（**不派生 `Clone`／`Copy`**）；公开面
+  `new`／`phase`／`checkpoint_deadline_millis`／`checkpoint_succeeded`／`checkpoint_failed`／
+  `checkpoint_timed_out`；`checkpoint_failed`／`checkpoint_timed_out` 返回 `SuspensionError`，不是
+  `Result`。**crate-private 转移面**（`pub(crate)`，不是公开面）：`attempts()`、
+  `last_transition_millis()`、`enter_checkpointing(now, timeout)`、`throttle(now)`、`run(now)`、
+  `resume(now)`；`direct` 不直接读写字段——字段仍私有，这是对设计 §4.8／§4.13 的具名解读。
+- `SuspensionError`：三臂；派生 `Debug, Clone, Copy, PartialEq, Eq`；手写 `Display`／`Error`。
+- `ResourceDecision`：字段私有；`summary()`／`action()`／`phase()`；`action: Option<ResourceAction>`；
+  派生 `Debug, Clone, Copy, PartialEq, Eq`。
+- `ArbiterPolicy`：七个公开字段与默认值；派生 `Debug, Clone, Copy, PartialEq, Eq`＋`impl Default`。
+- `PolicyError`：两臂；派生 `Debug, Clone, Copy, PartialEq, Eq`；手写 `Display`／`Error`。
 - `ResourceArbiter`：`new`／`observe`／`summary`／`direct`／`assembly_view`（后者仅特性面）；
-  `direct(&self, declaration, &mut state, now_millis) -> Result<ResourceDecision, SuspensionError>`。
+  `direct(&self, declaration, &mut state, now_millis) -> Result<ResourceDecision, SuspensionError>`；
+  派生 `Debug`（**只派生 `Debug`**）。
 - **没有自造** `NodeState`／`IntentStatus`／`Intent`／`Decision`／`TaskSource`／`AuthorizedTask`／
   `ResourceDirective`／`ResourceContext`／`RoutingRequest`／`PlacementRequest`／`Budget`。
 
@@ -2103,15 +2464,16 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
 
 ### 五、比例
 
-- 设计 1535 行；本计划 **2160 行**（`wc -l` 实测）。任务 **8 个**。
+- 设计 1535 行；本计划 **2531 行**（`wc -l` 实测）。任务 **8 个**。
 - 比例约 1.4×设计，与 P6A（1828／1283）／P7B（1752／1451）同量级；文档里没有实现函数体，
   只有签名、测试断言、转移表、4×4 阶梯与源码面规则。测试量大于生产量是刻意的——本块的判据几乎全是
   “形状＋状态边界＋否定面＋源码面”。
 - J1–J17 每条至少有一张照片；**J1(ii) 明确标“待 P7D 合并门”，不是全绿**；J6／J7／J13 的
   `impl` 块扫描覆盖全量 `src/`，不按文件白名单偷懒；J12 的 16 格逐格列出；J11 的 `max=0` 与
   `Resume` 重置各有一条独立用例。
-- 没有把设计 §11 的 14 条全部搬成 task：与本块实现直接相关的第 1／4／6／14 条进「遗留」，
-  第 7／8／9／10／11／12／13 条留在设计里（重述就是第二份转录）。
+- 没有把设计 §11 的 14 条全部搬成 task：与本块实现直接相关的第 1／3／4／6／9／12／13／14 条进
+  「遗留」（第 3／4 条合并在第 2 项，第 9 条见第 8 项），外加 1 条本计划的 dev 口径；第 2 条在
+  Global Constraints／J5 具名；第 5／7／8／10／11 条留在设计或本块外消费方（重述就是第二份转录）。
 
 ---
 
@@ -2125,10 +2487,12 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
    读作必经，Task 4 的阶梯与 Task 5 的转移必须先改（先 `Throttle` 再 `Suspend`），J8／J12 整组重写。
    **收件人：规范维护者＋协调者。未确认前不得把本计划当“设计已裁定”。**
 
-2. **`workload_class` 判定器归属**：设计 §11 第 4 条把分类器放在本机 Resource Arbiter 组件的本地探测器
-   （装配方落地），`continuum-arbiter` 只收已分类的 `Option<WorkloadClass>`。若协调者读作“判定器也必须在
-   `continuum-arbiter` 内”，本块要么加 workspace 依赖（破坏 `ALLOWED == []`），要么在 `src/` 读 OS
-   （破坏 §5.7 无 I/O 与 J17），两条都与设计边界相抵。**收件人：规范维护者＋协调者＋装配方。**
+2. **`workload_class` 判定器归属与分类规则（设计 §11 第 3／4 条）**：设计 §11 第 4 条把分类器放在本机
+   Resource Arbiter 组件的本地探测器（装配方落地），`continuum-arbiter` 只收已分类的
+   `Option<WorkloadClass>`；第 3 条则把“谁声明、如何验证、三个布尔冲突时谁优先”留给规范与 P7D。
+   若协调者读作“判定器也必须在 `continuum-arbiter` 内”，本块要么加 workspace 依赖（破坏
+   `ALLOWED == []`），要么在 `src/` 读 OS（破坏 §5.7 无 I/O 与 J17），两条都与设计边界相抵。
+   **收件人：规范维护者＋协调者＋装配方。**
 
 3. **P6D 合并门与 J1(ii)**：`continuum-arbiter` 进 `ALLOWED` 后，`p6_union_adds_only_its_own_rows` 的
    断言 8（新增 subject 不在 `P6_NAMES`）会红；P7C 只新增 subject，先撞的是断言 8（切分 §四第 1 条另
@@ -2141,11 +2505,12 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
    边界，同一构建图里启用特性的消费方仍可命名 `PriorityTier`。**P7C 不声称 SHOULD 已变成 MUST**。
    **收件人：规范维护者＋P9**（主树 `docs/superpowers/p8-p10-scope.md:63`、`:68`）。
 
-5. **dev-dependencies 口径（本计划自定，按设计执行）**：任务书写“dev 只有 `trybuild`”，但设计 §2.1
-   逐字写“测试也只使用 `std`，**没有 dev-dependencies**”，且 J1(a) 的 `cargo tree --edges all` 要求
-   只有本 crate 一行；加 `trybuild` 会引入外部子节点并破坏 J1(a)。本计划因此**零 dev 依赖**，编译失败
-   夹具用 `std::process::Command` 调 `cargo check`（设计 §8.2）。若协调者坚持 `trybuild`，必须先改设计
-   §2.1 与 J1(a)，不能在实现期偷偷加。**收件人：协调者。**
+5. **dev-dependencies 口径（本计划自定，按设计执行）**：本工作树未找到任务书原文；**若任务书要求
+   “dev 只有 `trybuild`”**，它与设计 §2.1 逐字写的“测试也只使用 `std`，**没有 dev-dependencies**”相抵，
+   且 J1(a) 的 `cargo tree --edges all` 要求只有本 crate 一行；加 `trybuild` 会引入外部子节点并破坏
+   J1(a)。本计划因此**零 dev 依赖**，编译失败夹具用 `std::process::Command` 调 `cargo check`
+   （设计 §8.2）。若协调者坚持 `trybuild`，必须先改设计 §2.1 与 J1(a)，不能在实现期偷偷加。
+   **收件人：协调者。**
 
 6. **预算与资源仲裁的关系**：设计 §11 第 13 条明确 `continuum-budget` 是记账，不是资源仲裁；P7C 不依赖、
    不读预算。若将来要让预算读数影响压力／动作，必须另立一条边并升级裁定，**不能把 `continuum-budget`
@@ -2154,6 +2519,12 @@ J7→§4.6／§6.5、J13→§4.10；其余按 §8.1 的 J 编号直接归位。
 7. **P7B 的 `BackgroundSuitability` 投影**：设计 §11 第 12 条把投影取值域／语义留给 P7B＋装配方；
    P7C 只给 `resource_pressure`＋`workload_class` 两个访问器，不定义投影。本块不实现、不写第二套词汇。
    **收件人：P7B＋装配方＋规范维护者。**
+
+8. **输入面可伪造／可信性归装配方＋P7D（设计 §8.4 第 4 条、§11 第 9 条）**：`ResourceObservation` 是
+   公开可构造的输入面；任何持有 `&mut ResourceArbiter` 的调用方都能伪造读数，改变**共享**压力与所有
+   消费者看到的 `ResourceSummary`／`direct` 结果。P7C 只消费读数、不验证真实性，也不读 OS；探测器
+   来源、频率、失败/过期语义与调用方授权都在装配方，P7D 负责谁有资格持有并调用 arbiter。
+   **不要把“零依赖／无 OS”误当成输入可信。收件人：装配方＋P7D。**
 
 **不列入本计划的**：`TaskSource`→`WorkloadDeclaration` 的映射（设计 §7.1 明确是 P7D 的设计决定）、
 `throttle` 的量化语义（P7D）、checkpoint 的内容／存储／重启恢复（P7D）、OS 探测器的频率与失败语义
