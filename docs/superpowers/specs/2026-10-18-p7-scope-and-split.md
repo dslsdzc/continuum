@@ -153,7 +153,9 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
    Intent，P7D 必须按「无会话／无后台任务」处理，不得用哨兵 `IntentId`。**评分算法、权重、模型提示不冻**。
    这一页由 P7B 开工第一件事冻结，P7D 对着它写。
 2. **P7C 的仲裁结论面**：对 AI／后台暴露的结论**只有** `resource_pressure` 与 `workload_class` 两项
-   （§13 的原话，`docs/spec/01-concepts.md:717-722`）；对 P7D 另有 `run`／`throttle`／`suspend`／`resume`
+   （§13 的原话，`docs/spec/01-concepts.md:717-722`）；**§300 的四档优先级另有一张只对装配方
+   （`ResourceDirectivePort` 的实现）可见的面，不进 AI／后台暴露面，也不进 P7D 的结论面**——四档分类由
+   P7C 给出，装配方只消费，不自行做资源仲裁。对 P7D 另有 `run`／`throttle`／`suspend`／`resume`
    四档动作，以及可观察的 `SuspensionPhase`（`Running`／`Throttled`／`Checkpointing`／`Suspended`）。
    **`suspend` 是两阶段：先 checkpoint 再 suspended**；`Checkpointing` 表示「已要求挂起但尚未完成」，
    checkpoint 失败不得报 `Suspended`。**`Checkpointing` 必须有失败臂**：checkpoint 失败返回错误
@@ -211,17 +213,30 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
 6. **P7A 与 P7D 之间有一条按值交接的 Product Intent**：P7A 按 §152 的 lower 确定产出
    `Intent.kind = Product` 的值（`product_id: ProductIdRef`，其余字段照 §222 的 `Intent`），P7D 的
    `product drive` 来源按值消费它；**这不是新的 crate 边**（P7D 不登记 `continuum-product`），
-   也不要求 P7A 等 P7D。交接约定：只交「已过 `REVIEW` 且未终态」的 Intent 值或 id；`PROPOSED` 的 lower
-   结果不算交接完成，须由 §223 的状态机推进到 `READY` 后才可交；P7D 不读 §231 的 Product 记录。
+   也不要求 P7A 等 P7D。交接约定：只交 **`status == READY`** 的 Product Intent 值或 id；`PROPOSED` 的
+   lower 结果不算交接完成，须由 §223 的状态机推进到 `READY` 后才可交；P7D 不读 §231 的 Product 记录。
    §156 的「后台继续低风险 Milestone」就是这一路。
+   **`READY` 是唯一可用的状态证据**：P4 的迁移表里 `READY` 只有 `REVIEW → READY` 一条入边
+   （`docs/superpowers/specs/2026-10-06-p4-semantic-layer-design.md:879`；
+   `crates/continuum-semantics/src/intent.rs:249`），故「已过 §223 的 `REVIEW`」由状态本身可证明。
+   运行态不能证明：同一张表允许 `PLANNING → SUSPENDED`（P4 设计 `:878`；`intent.rs:247`）与
+   `SUSPENDED → RUNNING`（P4 设计 `:883`；`intent.rs:264`），故 `PLANNING → SUSPENDED → RUNNING`
+   可绕过 `REVIEW`；把 `RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／`EVOLVING` 任一当证据都会接受
+   一条从未过审的 Intent。
    **授权证据（选项 a，本轮写死）**：不新增证据输入面；证据就是交接值上的 `contract_id`
    （`ContractRef { id, version }`，`crates/continuum-semantics/src/intent.rs:458`）与 `status`
    （`IntentStatus`，`:61`／`:445`）。P7D 的私有构造器按下列规则判定，任一不满足即拒绝：
    (i) `kind == Product`；(ii) `contract_id.id` 非空且 `contract_id.version >= 1`；
-   (iii) `status ∈ {READY, RUNNING, WAITING, SUSPENDED, VERIFYING, EVOLVING}`（已过 `REVIEW` 且未终态）；
-   `PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW` 与 `COMPLETED`／`FAILED`／`CANCELLED` 一律拒绝。
-   `contract_id` 指向 §224 的 `TaskContract`（含 `authority_limit` 与三组 policy），`status` 表示它已过
-   §223 的 `REVIEW`；P7D 只查这两个字段，不读合同内容、不解释 policy。**代价照实写**：这是「合同版本引用
+   (iii) `status == READY`；
+   `PROPOSED`／`SPECIFYING`／`PLANNING`／`REVIEW` 与 `RUNNING`／`WAITING`／`SUSPENDED`／`VERIFYING`／
+   `EVOLVING`／`FAILED`／`CANCELLED` 一律拒绝。
+   **`COMPLETED` 单列，不并入终态拒绝**：它对 Product 不是严格终态（P4 只允许 `COMPLETED → EVOLVING`、
+   仅 Product，P4 设计 `:885`／`:893`；`intent.rs:222`）。但它也不是可执行任务，P7D 不接；处置是
+   **P7A 在交接前把该 Product Intent 推进到 `EVOLVING`（或按新的 Milestone 重新 lower 出一个 `READY`
+   的 Product Intent）**，P7D 只认 `READY`；`COMPLETED` 本身按「非 `READY`」拒绝。`FAILED`／`CANCELLED`
+   才是终态。
+   `contract_id` 指向 §224 的 `TaskContract`（含 `authority_limit` 与三组 policy）；P7D 只查这两个字段，
+   不读合同内容、不解释 policy。**代价照实写**：这是「合同版本引用
    ＋状态」，不是第 5 层的 policy／capability 判定引用；它不能证明合同当前仍存在、policy 未被撤销，也不能
    防止生产方自报状态。若将来要求独立可验证的授权证据，走选项 (b)：新增
    `ProductIntentGrant { intent_id, intent_version, contract_id, contract_version, decision_ref }` 输入面，
@@ -288,8 +303,8 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
      获得 workspace 依赖，§7.3 的「入度为零」与判据 3 的可观察性同时消失。
    - **P7A 与三块都无未冻接口，但有一条按值交接**：Product 面只在 P7A 内部；P7A **确定**按 §152 的 lower
      产出 Product Intent，P7D 的 `product drive` 按值消费它——这是语义交接，不是 crate 边（§三第 6 条），
-     也不要求 P7A 等 P7D。`Intent` 形状由 §222 冻结，故 **A 可全并行**；P7D 的设计只需把「已过 `REVIEW` 的
-     Product Intent」当输入（授权证据见 §三第 6 条）。**运行时的 `product drive` 以 P7A 的实际产出为前置**，这是值的前置，不是设计串行。
+     也不要求 P7A 等 P7D。`Intent` 形状由 §222 冻结，故 **A 可全并行**；P7D 的设计只需把 `status == READY` 的
+     Product Intent 当输入（授权证据见 §三第 6 条）。**运行时的 `product drive` 以 P7A 的实际产出为前置**，这是值的前置，不是设计串行。
    - **P7B 与 P7C 之间无未冻接口，设计可全并行**：两块唯一的共享词汇是 §13 的四档 `workload_class` 与
      §300 的压力（均已冻结）；`BackgroundSuitability` 的投影只在装配方实现一次（§2.4），P7B 不解析
      `workload_class`，P7C 不依赖 P7B；运行时由装配方在 P7C 结论之后接线 `ResourceDirectivePort`——
@@ -345,23 +360,24 @@ P7C 的 `ALLOWED` 行必须是 `&[]`（同 P6D 的 `continuum-protected` 先例�
 **若 P7C 需要任何 workspace 内 crate，判据 3 就不再可观察**，该边必须先报协调者。
 P7C 的结论面按 §2.3.2 第 2 条冻结，含 `Checkpointing` 两阶段与失败回退（失败返回错误并回
 `Throttled`，不落 `Suspended`）；`workload_class`＋`resource_pressure` 是
-P7B `BackgroundSuitability` 的唯一投影源，投影只在装配方实现；`ResourceDirectivePort` 的实现消费这两项
-（§三第 5 条），P7B 不直接消费 P7C。
+P7B `BackgroundSuitability` 的唯一投影源，投影只在装配方实现；`ResourceDirectivePort` 的实现消费
+`resource_pressure` 与 §300 的四档优先级（§三第 5 条），P7B 不直接消费 P7C。四档优先级的可见面只对
+装配方，不进 AI／后台暴露面。
 
 ### P7D 的完成判据（§7.4 没有，必须自报）
 
 P7D 的设计必须自报至少三条：
 1. **任务来源闭集**：`TaskSource` 恰四值，且没有从模型输出构造第五类的入口（§299 的类型照片）；
    裸 `TaskSource` 不能构造 `AuthorizedTask`；`product drive` 的证据按 §三第 6 条的选项 (a) 判定，
-   缺失或来源不匹配时拒绝任务；
+   `status` 必须为 `READY`，缺失或来源不匹配时拒绝任务；
 2. **会话选择不另造排名**：Auto 模式的「最值得继续」调 P7B 的 Intent Scheduler 决策面（含 `NoIntent`），
    Manual 模式只做候选展示；两模式共用同一份 `SessionPlan`；
 3. **触发不越界**：§171 直接调 P6C（`continuum-memory` 是确定边），P7D 不持阈值、不改 `SynthesisTrigger` 类型。
 
-**§299 的 `product drive` 来源在 P7D 里读作「已授权（证据按 §三第 6 条判定）的 Product Intent」**（`Intent.kind = Product`，
+**§299 的 `product drive` 来源在 P7D 里读作「`status == READY`（证据按 §三第 6 条判定）的 Product Intent」**（`Intent.kind = Product`，
 `crates/continuum-semantics/src/intent.rs:40`）。它的生产者是 **P7A**：§152 的 Milestone→Intent lower 确定产出
 Product Intent（`product_id: ProductIdRef`，其余字段照 §222 的 `Intent`，状态与 `completion_predicate` 按该类型），
-P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交「已过 `REVIEW` 且未终态」的 Intent 值或 id；
+P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交 `status == READY` 的 Product Intent 值或 id；
 授权证据按 §三第 6 条的选项 (a) 取 `contract_id`＋`status`，不另加边；P7D 不读 §231 的 Product 记录。
 若设计发现必须读 Product 记录或合同内容才能判定授权，那是**一条要报协调者的新边**，
 不在本文预登记。§156 的「后台继续低风险 Milestone」就是这一路。
@@ -381,7 +397,7 @@ P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交
 
 | # | 缺口 | 收件人 | 可落地子集 |
 |---|---|---|---|
-| 1 | **A14 / OPEN-012**：Resource Arbiter 的最小暴露面只有 SHOULD，强制点在第 5 层（`docs/02-工程.md:345`；`docs/01-总纲.md:1698`、`:1881`） | 规范维护者 ＋ P9（边界；主树已列入 `p8-p10-scope.md:63`，接缝 `:68`） | P7C 的公开结论类型**只有**压力＋负载类别两项，原始进程信息私有；公开类型的 `Debug`／序列化面也不得带原始信息。规范级「SHOULD 是否够」不关闭 |
+| 1 | **A14 / OPEN-012**：Resource Arbiter 的最小暴露面只有 SHOULD，强制点在第 5 层（`docs/02-工程.md:345`；`docs/01-总纲.md:1698`、`:1881`） | 规范维护者 ＋ P9（边界；主树已列入 `p8-p10-scope.md:63`，接缝 `:68`） | P7C 对 AI／后台的公开结论类型**只有**压力＋负载类别两项；**§300 的四档优先级只对装配方（端口实现）可见，不进 AI／后台暴露面**；原始进程信息私有，公开类型的 `Debug`／序列化面也不得带原始信息。规范级「SHOULD 是否够」不关闭 |
 | 2 | **§232 与 §153 的九维名字／顺序不一致**（`functional` vs `functional_completeness`） | 规范维护者 | P7A 用 §232；§153 **不建第二套枚举**（两者只是同一维的两种叫法，规范未定版本先后；顺序不同也以 §232 为准） |
 | 3 | **§300 四档与 §79 四档是两张表**（`User workload` vs `Interactive`） | 规范维护者 | P7C 用 §300；§79 只作解释 |
 | 4 | **§13 的四档进程类与输出示例 `INTERACTIVE` 不一致**（`docs/spec/01-concepts.md:708-722`） | 规范维护者 | P7C 只实现四档；`INTERACTIVE` 不设变体 |
@@ -400,7 +416,7 @@ P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交
 主树 `docs/superpowers/p8-p10-scope.md` 已按第一轮建议落实（`b5e987b`）；以下行号按主树，P7 侧不再把这三项列为待协调：
 
 - **P9（边界与验证）**：**A14／OPEN-012** 已列入 P9 表（`:63`），前置写明「A14 还需要 P7C 的 Arbiter 暴露面」
-  （`:68`）。P7C 只交公开结论面，规范强度的收口在 P9；两侧接缝已由 `:68` 写明。
+  （`:68`）。P7C 只交结论面（对 AI／后台是压力＋负载类别，对装配方另有 §300 四档优先级），规范强度的收口在 P9；两侧接缝已由 `:68` 写明。
 - **P10（记忆与长期演化）**：**A15／OPEN-010** 与 **OPEN-015** 已列入 P10 表（`:96-97`）；§171 已拆成
   「阈值／频率／重试／触发策略（P10）」与「触发点／调用面（P7D）」（`:95`）。P10 的前置写「P7 的调度框架」
   （`:105`），三项都落在那套框架之上；P7A 只交申报策略输入，P7D 只交触发点。
@@ -464,7 +480,9 @@ P7D 按值消费，不登记 `continuum-product` 边。交接约定：P7A 只交
    §152 的 Milestone→Product Intent lower 产出 §222 的 `Intent`；Progress Gate 的 replan 只出 `Decision`，
    消费方按 §6.2 第 13 条另行落实。
 5. **新增冻结点各有一张照片**：P7D 的 `AuthorizedTask` 对 `product drive` 只按 §三第 6 条的
-   `contract_id`＋`status` 规则接受（选项 a），缺失即拒绝；P7C 的 `Checkpointing` 失败返回错误并回
+   `contract_id`＋`status` 规则接受（选项 a），缺失或 `status != READY` 即拒绝；并加一条负例：
+   `PLANNING → SUSPENDED → RUNNING` 的 Intent（状态是 `RUNNING`，但从未过 `REVIEW`）必须被拒绝——
+   这是「允许集只剩 `READY`」的照片；P7C 的 `Checkpointing` 失败返回错误并回
    `Throttled`，不得停在 `Checkpointing`；`ResourceDirectivePort` 的实现（不是 P7B）消费 P7C 的结论。
 
 **本轮验收**：四份设计文档过审 ＋ 各自的实现计划。**本轮不写实现代码**（设计未批不落实现）。
