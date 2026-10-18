@@ -52,7 +52,7 @@
 | P7B 的 `ResourceDirectivePort` 实现 | 装配方 `continuum-runtime`；P7B 定义 trait，P7C 只提供结论（切分 §三第 5 条 `:205-212`） |
 | `continuum-provider`／`continuum-model-registry`／`continuum-node` 的依赖或转调 | 与 §7.3「入度为零」相抵；P7C 不选模型、不放置 Node、不选工具（§2.1、§9） |
 | 模型调用、提示、上下文装配、`ContextPackage` | P3／P6A；P7C 没有模型面（§13 `:673`） |
-| 进程探测（读 CPU／RAM／GPU／VRAM／Disk IO／Network、进程名、PID） | 本机装配方／探测器；P7C 只接收聚合读数与**已分类**的 `WorkloadClass`，公开类型不携带进程名／PID（§2.4 第 4 条） |
+| 进程探测（读 CPU／RAM／GPU／VRAM／Disk IO／Network、进程名、PID） | 本机 Resource Arbiter 组件的本地探测器（装配方落地；**不在零依赖决策核 `continuum-arbiter` 内**）；P7C 只接收聚合读数与**已分类**的 `WorkloadClass`，公开类型不携带进程名／PID（§2.4 第 4 条） |
 | `throttle` 的量化语义（降多少并发／速率） | P7D；P7C 只给动作名（§11 第 7 条） |
 | checkpoint 的内容、落点、重试执行、重启恢复 | P7D；P7C 只拥有 `Checkpointing`／`Suspended` 相位与失败结果（§11 第 8 条） |
 | 后台任务来源（§299 四类）与 `TaskSource` | P7D；P7C 的 `WorkloadDeclaration` 不是 `TaskSource`（§2.6） |
@@ -109,7 +109,18 @@ assembly = []
 
 [dev-dependencies]
 # 空
+
+# `tests/assembly.rs` 只在启用 assembly 特性时构建；默认 `cargo test -p continuum-arbiter`
+# 不得编译它（否则 `continuum_arbiter::assembly` 不存在，默认全套测试红）。
+[[test]]
+name = "assembly"
+required-features = ["assembly"]
 ```
+
+**P6D 合并门的前置**：加入 `("continuum-arbiter", &[])` 后，`p6_union_adds_only_its_own_rows`
+的断言 8（新增 subject 恰是已落地的 P6 crate）必红——`continuum-arbiter` 不在 `P6_NAMES`。
+P7C 本地只验 J1(i)；J1(ii) 的整树绿依赖 P7D 先完成 P6D 合并门的 rebaseline／退役（§11 第 14 条）。
+本块**不**改 `P6_EXPECTED_ROWS`、`p6_pre_allowed.txt` 或断言计数。
 
 **共写文件**（切分 §一 的共写文件表给的是多处；本块只碰下面两处）：
 
@@ -167,7 +178,8 @@ AssemblyView              —— summary＋priority；只对装配方（§4.12�
 6. `SuspensionPhase` 的转移、失败、超时、重试上限（§5.5、§5.6）——§14 只给相位与滞回的名字。
 7. 四档优先级只在装配方可见的类型层与构建层落法（§4.6、§4.12、§6.5）。
 
-**本块不持有的判定**：OS 探测与进程名分类（装配方，§2.4 第 4 条）；`throttle` 的执行语义（P7D）；
+**本块不持有的判定**：OS 探测与进程名分类（本机 Resource Arbiter 组件的本地探测器，装配方落地，
+不在零依赖决策核内；§2.4 第 4 条）；`throttle` 的执行语义（P7D）；
 checkpoint 的内容与存储（P7D）；后台任务来源（P7D，§299）；模型选择／放置／工具／并行度（第 4 层，§304）；
 产品状态与 Shippable（P7A）；Intent 调度（P7B）；§331 的 `Decision`（P7A）。
 
@@ -191,24 +203,27 @@ P7C 的消费方是 P7D 与装配方；**P7C 不依赖 P7B、不依赖 P7D、不
 
 ## 2.4 本设计自定的判定（逐条：规范给到哪、代价、边界、落点、收件人）
 
-**这一节是本块的「发明判据」总账（共 15 条）。** 规范没给、而本设计不得不定的每一处判定，都在下表里
-有一条；**没进这张表的判定，本块一处也没有定**。代码块只是示意，正文措辞才是约束。
+**这一节是本块的「发明判据」总账（共 15 条自定判定）。** 规范没给、而本设计必须落成实质行为的判定，
+都在下表里有一条。**接口细节**（`parse` 的精确大小写、`rank` 的 3/2/1/0、`Debug` 形状、
+`checkpoint_failed` 的返回类型）不进这张表，但它们不是规范判定；除此之外，本块没有另定规范级判定。
+代码块只是示意，正文措辞才是约束。**§11 的 14 条是跨块设计问题，不是这张 15 条表的子集**；
+两处编号不要互相套用（评审按 13 条看会漏掉两条自定判定）。
 
 | # | 本设计自定的判定 | 规范给到哪一步为止 | 代价 | 边界（拦不住什么） | 落点 | 收件人 |
 |---|---|---|---|---|---|---|
 | 1 | **`ResourcePressure` 的量纲（本设计自定）**：`Low`／`Moderate`／`High`／`Critical` 四档；六项聚合读数取**最大值**；默认阈值 `50/75/90`（百分比） | §13 `:720` 只给示例 `resource_pressure = HIGH`；**等级集合、单位、阈值、聚合函数一处未给** | 四档不是规范值；`HIGH` 只对上 `High`；最大值把所有资源同权，Disk IO 尖峰可以与 CPU 饱和同级 | 不覆盖「按资源加权」「按资源分别设阈」「多资源同时中等」；不提供 `Unknown`（见第 2 条） | §4.2、§5.1 | 规范维护者（§13）＋协调者 |
 | 2 | **聚合观察的取值域**：六项 `Option<u8>` 百分比（0–100）；`None` 忽略；**全 `None` 保持上一压力**；`>100` 钳到 100 | §13 `:675-684` 只列六项名字；**单位、缺失语义、钳位未给** | 探测器要负责归一化；探测器在 Low 时失效会**保持 Low**（fail-open），不会自动升压 | 不覆盖「读数过期」「探测器整体失联」；不覆盖每进程 CPU／GPU（那是第 4 条） | §4.2、§5.1 | 规范维护者＋装配方 |
 | 3 | **`WorkloadClass` 四档闭集**：`InteractiveGame`／`ComputeWorkload`／`Compiler`／`VideoRender`；**不设 `Interactive`**；`parse("INTERACTIVE") == None` | §13 `:708-715` 给四档；`:721` 的输出示例写 `workload_class = INTERACTIVE`，**不在四档里** | 若 `INTERACTIVE` 原意是「汇总后的暴露类」，本设计暴露的是具体类（如 `INTERACTIVE_GAME`），比示例更细 | 不覆盖「四档之外的进程」——未知返回 `None`，不猜；不建第五变体 | §4.3、§8 J5 | 规范维护者（§13）＋P9 |
-| 4 | **`workload_class` 的判定来源（本设计自定）**：本机 Resource Arbiter 的本地探测器（P7C 之外的适配器）读进程名并分类，P7C 决策核只接收**已分类**的 `Option<WorkloadClass>`；**进程名／PID 不进 P7C 公开类型** | §13 `:686-706` 允许读进程名／PID，`:708` 说「进程名只在本机 Resource Arbiter 中分类」；**没有进程名→四档的映射表，也没说分类器在哪个 crate** | P7C 无法验证分类是否正确；分类器在零依赖 crate 之外，可能各实现不同；未知进程只能 `None` | 不覆盖「分类器把游戏误判为编译」；不覆盖「用户改名规避」；不覆盖「读进程的隐私授权」（A14／P2） | §4.2、§6.5、§11 第 4 条 | 规范维护者＋装配方 |
+| 4 | **`workload_class` 的判定来源（本设计自定）**：本机 Resource Arbiter **组件**的本地探测器（属于部署整体，**不是零依赖决策核 `continuum-arbiter`**）读进程名并分类；决策核只接收**已分类**的 `Option<WorkloadClass>`；**进程名／PID 不进 P7C 公开类型** | §13 `:686-706` 允许读进程名／PID，`:708` 说「进程名只在本机 Resource Arbiter 中分类」；**没有进程名→四档的映射表，也没说分类器在哪个 crate** | P7C 无法验证分类是否正确；分类器不在零依赖决策核内，可能各实现不同；未知进程只能 `None` | 不覆盖「分类器把游戏误判为编译」；不覆盖「用户改名规避」；不覆盖「读进程的隐私授权」（A14／P2）；判定器归属待协调者确认（§11 第 4 条） | §4.2、§6.5、§11 第 4 条 | 规范维护者＋协调者＋装配方 |
 | 5 | **`workload_class` 可为 `None`**：`ResourceSummary.workload_class: Option<WorkloadClass>` | §13 `:717-722` 的示例总带一个 `workload_class`；**没有说它一定可判** | AI 可能看到「没有类别」；示例的「总是有」不能兑现 | 不覆盖「没有类别时 AI 应如何理解」；不把 `None` 当成某一档 | §4.4、§8 J6 | 规范维护者 |
 | 6 | **四档优先级的分类规则（本设计自定）**：输入 `WorkloadDeclaration { user_process, foreground, maintenance }`；**判定顺序**（不是资源优先级）先 `maintenance`、再 `user_process`、再 `foreground`，否则默认 `BackgroundRuntime` | §300 `:1909-1919` 只给 `User workload > Foreground Runtime > Background Runtime > Maintenance` 的**顺序**；**没有说谁声明、怎么判定** | 调用方可以自报 `user_process = true` 逃避限流；P7C 没有独立证据；三个布尔的组合有歧义，只能按上面的判定顺序消解 | 不覆盖「声明造假」；不覆盖「同一任务在不同时刻改变来源」；不覆盖 §299 的 `TaskSource`（见 §2.6） | §4.5、§5.3、§8 J7／J12 | 规范维护者（§300）＋协调者＋P7D |
 | 7 | **压力×优先级的动作阶梯（本设计自定）**：见 §5.4 的 4×4 表；`UserWorkload` 恒 `Run`；`ForegroundRuntime` 仅 `Critical` 时 `Throttle`；`BackgroundRuntime` `High` 时 `Throttle`、`Critical` 时 `Suspend`；`Maintenance` `Moderate` 时 `Throttle`、`High`／`Critical` 时 `Suspend` | §300 只给顺序；§14 只给相位；**没有压力→动作的映射** | 切点不是规范值；不同实现会给出不同让路时机；本设计不提供按部署调整这张表的策略面（只调阈值） | 不覆盖「同一压力下不同任务类型的差异」；不覆盖 `throttle` 的量化（P7D） | §5.4、§8 J12 | 规范维护者＋协调者 |
 | 8 | **滞回参数与默认值**：`moderate_at=50`、`high_at=75`、`critical_at=90`；`resume_at=Low`；`cooldown_millis=30_000`；升压**立即**生效，降压只在 `raw <= resume_at` 且 cooldown 已过时生效 | §14 `:746-754` 只给 `suspend threshold`／`resume threshold`／`cooldown` 三个名字；**没有数值、没有升降方向、没有默认值** | 默认值可能过慢或过度挂起；`resume_at=Low` 很保守，可能让后台长时间停着；没有按资源分别滞回 | 不覆盖「临界点附近的高频抖动」——本设计只保证不因降压立即回弹；不覆盖「用户手动强制恢复」 | §4.11、§5.2、§8 J4 | 规范维护者＋协调者 |
-| 9 | **`SuspensionPhase` 转移图**：`Suspend` 可从 `Running` 或 `Throttled` 直接进 `Checkpointing`；`Throttled` **不是**必经点；`Checkpointing` 不被压力动作打断；失败／超时→`Throttled`；成功→`Suspended`；`Resume`→`Running` | §14 `:735-743` 列出了相位序列 `Running → Throttled → Checkpointing → Suspended → Resume`；**没有说箭头是否强制、是否允许跳过、谁能打断** | 若规范维护者读作「必须经过 `Throttled`」，P7C 的动作序列要改（先 `Throttle` 再 `Suspend`）；本设计选择「相位集合＋受控转移」 | 不覆盖「规范要求先降速再 checkpoint」；不覆盖「checkpoint 期间的资源压力变化」——本设计一律不打断 | §5.5、§8 J8 | 规范维护者（§14）＋P7D |
+| 9 | **`SuspensionPhase` 转移图（当前读法）**：`Suspend` 可从 `Running` 或 `Throttled` 直接进 `Checkpointing`；`Throttled` **不是**必经点；`Checkpointing` 不被压力动作打断；失败／超时→`Throttled`；成功→`Suspended`；`Resume`→`Running` | §14 `:735-743` 列出了相位序列 `Running → Throttled → Checkpointing → Suspended → Resume`；**没有说箭头是否强制、是否允许跳过、谁能打断** | 若规范维护者读作「必须经过 `Throttled`」，P7C 的动作序列要改（先 `Throttle` 再 `Suspend`）；本设计选择「相位集合＋受控转移」，**未裁定前 J8 按当前读法写** | 不覆盖「规范要求先降速再 checkpoint」；不覆盖「checkpoint 期间的资源压力变化」——本设计一律不打断 | §5.5、§8 J8、§8.4 第 9 条 | 规范维护者（§14）＋协调者＋P7D |
 | 10 | **失败结果类型（本设计自定）**：`SuspensionError::{CheckpointFailed, CheckpointTimedOut, NotCheckpointing { phase }}`；失败／超时后相位回 `Throttled` | §14 与切分 §2.3.2 第 2 条 `:160-164` 要求「失败返回错误并回 `Throttled`」，**没有给错误类型名、臂、是否带原因** | P7D 要自己映射错误；本设计不保存失败原因（避免原始信息）；错误名不是规范值 | 不覆盖「失败原因的分类」；不覆盖「重试策略的可观察原因」 | §4.9、§5.6、§8 J9／J10 | P7D＋规范维护者 |
-| 11 | **超时／重试／时钟**：调用方给 `now_millis`；`checkpoint_timeout_millis` 默认 `60_000`；`max_checkpoint_attempts` 默认 `3`；超时在 `direct`／`checkpoint_succeeded` 时检查；**不建定时器线程**；`Run`（从 `Throttled`）或 `Resume` 后重置尝试计数，`checkpoint_succeeded` 不重置 | §14 只给 cooldown；**没有重试上限、超时、时钟归属** | 若调用方从不调用 `direct`，`Checkpointing` 不会被自动推进；「不卡死」只在每次调用时成立；晚到的 `checkpoint_succeeded` 会被超时拒绝 | 不覆盖「调用方完全不轮询」；不覆盖「跨进程重启后的超时」 | §4.8、§5.6、§8 J10／J11 | P7D＋协调者 |
+| 11 | **超时／重试／时钟**：调用方给 `now_millis`；`checkpoint_timeout_millis` 默认 `60_000`；`max_checkpoint_attempts` 默认 `3`；超时在 `direct`／`checkpoint_succeeded` 时检查；**不建定时器线程**；`Run`（从 `Throttled`）或 `Resume` 后重置尝试计数，`checkpoint_succeeded` 不重置；**`Resume` 的 cooldown 用 `SuspensionState.last_transition_millis`（状态时钟），不用 `ResourceArbiter.last_pressure_change_millis`（压力时钟）** | §14 只给 cooldown；**没有重试上限、超时、时钟归属** | 若调用方从不调用 `direct`，`Checkpointing` 不会被自动推进；「不卡死」只在每次调用时成立；晚到的 `checkpoint_succeeded` 会被超时拒绝；压力已 `Low` 但挂起不足 cooldown 时不会恢复 | 不覆盖「调用方完全不轮询」；不覆盖「跨进程重启后的超时」 | §4.8、§5.5、§5.6、§8 J8／J10／J11 | P7D＋协调者 |
 | 12 | **四档优先级的暴露机制**：`PriorityTier` 定义在**私有模块** `priority`；只有 `#[cfg(feature = "assembly")]` 的 `assembly` 模块公开它；默认构建的公开面没有 `PriorityTier`／`AssemblyView`；`ResourceSummary`／`ResourceDecision` 不含优先级 | §300 `:1921` 是 **SHOULD**；切分 §2.3.2 第 2 条 `:155-165` 要求「只对装配方可见」；A14／OPEN-012 说强制点未定 | `assembly` 特性不是安全边界：同一构建图里启用特性后别的 crate 也可能命名它；跨 crate 可见性 Rust 无法按消费方区分；P7D 只能靠源码纪律 | 不覆盖「恶意消费方启用特性」；不覆盖「P7D 把 `ResourceDecision` 转发给 AI」；规范级强制仍在 P9 | §4.6、§4.12、§6.5、§8 J6／J7 | P9＋协调者＋规范维护者 |
-| 13 | **纯决策核＋外部探测器**：P7C 只做决策，不读 OS；六项聚合读数与 `workload_class` 由本机装配方探测器填入 | §13 `:675-684` 说 Arbiter 读聚合状态；**没说探测器属于哪个 crate**；§7.3 要求零依赖 | 两个部件要接线；探测器失效／过期时 P7C 只能保持上一压力；探测器质量不在 P7C | 不覆盖「探测器读数造假」；不覆盖「读取频率」；不覆盖「探测器自身对模型的依赖」（装配方要保证不接） | §4.2、§7.3、§11 第 9 条 | 装配方＋协调者 |
+| 13 | **纯决策核＋本地探测器**：P7C 只做决策，不读 OS；六项聚合读数与 `workload_class` 由本机 Resource Arbiter 组件的本地探测器（装配方落地）填入 | §13 `:675-684` 说 Arbiter 读聚合状态；**没说探测器属于哪个 crate**；§7.3 要求零依赖 | 两个部件要接线；探测器失效／过期时 P7C 只能保持上一压力；探测器质量不在 P7C | 不覆盖「探测器读数造假」（公开输入面可伪造，见 §4.13）；不覆盖「读取频率」；不覆盖「探测器自身对模型的依赖」（装配方要保证不接） | §4.2、§7.3、§11 第 9 条 | 装配方＋协调者 |
 | 14 | **零持久化**：`SuspensionState`／`ResourceArbiter` 都是内存值；不建表、不占迁移号、不实现 `Serialize`／`Deserialize` | §14 没有持久化要求；切分 §四第 2 条 `:265-276` 说「无表则不占号」 | 重启后压力与相位丢失；P7D 若要恢复任务，必须自己决定如何重建状态；本 crate 不提供反序列化入口 | 不覆盖「重启后已挂起任务的恢复」；不覆盖「相位审计」 | §10、§11 第 8 条 | P7D＋协调者 |
 | 15 | **`ResourceDecision.action: Option<ResourceAction>`**：`None` 表示「当前相位已经是所需状态，无转移」；`ResourceAction` 仍恰四变体 | 切分 §2.3.2 第 2 条 `:158-159` 说四档动作；**没有说幂等时返回什么** | P7D 必须把 `None` 当「不动作」，不能当 `Run`；多一个 `Option` 分支 | 不覆盖「P7D 误读 `None`」；不覆盖「需要显式 no-op 动作」的消费方 | §4.7、§4.10、§8 J13 | P7D |
 
@@ -216,11 +231,11 @@ P7C 的消费方是 P7D 与装配方；**P7C 不依赖 P7B、不依赖 P7D、不
 
 | 切分 §四 | 要求（要点） | 本设计的落点 | 可观察判据 |
 |---|---|---|---|
-| **第 1 条**（`:253-264`） | 不新增反向边；四块各自在 `ALLOWED` 加自己一行；既有行不因 P7 增枚，唯一例外是装配方 `continuum-runtime` | §2.1：`("continuum-arbiter", &[])`；不碰 runtime 行；P7D 落地时加 `continuum-supervisor` 行 | J1：`cargo test -p continuum-runtime --test dependency_direction` 绿；`ALLOWED` 行空；`cargo tree` 无子节点 |
+| **第 1 条**（`:253-264`） | 不新增反向边；四块各自在 `ALLOWED` 加自己一行；既有行不因 P7 增枚，唯一例外是装配方 `continuum-runtime` | §2.1：`("continuum-arbiter", &[])`；不碰 runtime 行；P7D 落地时加 `continuum-supervisor` 行 | J1(i)：`cargo tree` 无子节点、`ALLOWED` 行精确为空、`every_crate_depends_only_on_its_allowed_set` 绿；J1(ii)：**最终树** `dependency_direction` 全绿（前置：P7D 已完成 P6D 合并门 rebaseline／退役） |
 | **第 2 条**（`:265-276`） | 迁移号段；无表不占号 | §10：零表、零迁移；不改 `runtime_migrations()`／`expected_migrations()`／`startup.rs` | J15：`Cargo.toml` 无 `continuum-persist`；`src/` 无 `Migration`／`Tx`；runtime 三处无本 crate |
 | **第 3 条**（`:277-285`） | 同一件事两个词汇表：§300 四档、§13 四档、`INTERACTIVE` 笔误、`Suspended` 三处 | §2.6 的同名异物表；§4.3 不设 `Interactive`；§4.8 的 `SuspensionPhase` 不复用 `NodeState`／`IntentStatus` | J5：四档闭集；`parse("INTERACTIVE")==None`；J14：公开类型无原始进程信息 |
 | **第 4 条**（`:286-293`） | 工具结果／Evidence 的消费；P7 只消费 `Evidence`／`CompletionVerdict` | P7C **不消费**任何工具结果或证据；没有 `continuum-verify` 边 | J1／J16：零依赖；`src/` 无 `Evidence`／`CompletionVerdict` |
-| **第 5 条**（`:294-296`） | 依赖边只登记实际用到的；`ALLOWED` 与实际依赖精确一致 | §2.1：零边；无 dev 边 | J1：`cargo tree --edges all` 只有本 crate；`ALLOWED` 空 |
+| **第 5 条**（`:294-296`） | 依赖边只登记实际用到的；`ALLOWED` 与实际依赖精确一致 | §2.1：零边；无 dev 边 | J1(i)：`cargo tree --edges all` 只有本 crate；`ALLOWED` 空 |
 | **第 6 条**（`:297-311`） | P7C → P7D：P7C 先冻一页，P7D 对着写；P7B 与 P7C 无未冻接口 | §4 冻结论／控制／装配三面；§7.1 给 P7D 的消费清单；§7.2 给装配方的端口消费；P7C 不依赖 P7B | J6／J7／J13：三面形状；P7D 只依赖 `ResourceDecision`／`SuspensionState`；P7B 端口不引入 P7C 类型 |
 
 ## 2.6 同名异物（**都不是**同一个概念）
@@ -327,7 +342,8 @@ P7C 的消费方是 P7D 与装配方；**P7C 不依赖 P7B、不依赖 P7D、不
 **强制点**；⑥`workload_class` 是否总是可判。
 
 **本设计怎么落**：P7C 是**零依赖的决策核**（§2.1），不读 OS、不调模型；六项聚合读数与已分类的
-`WorkloadClass` 由本机探测器填入 `ResourceObservation`（§4.2、§11 第 9 条）。压力四档与阈值是本设计
+`WorkloadClass` 由本机 Resource Arbiter 组件的本地探测器填入 `ResourceObservation`（§4.2、§11 第 9 条）。
+压力四档与阈值是本设计
 自定（§2.4 第 1 条）；四档进程类严格照 §13，`INTERACTIVE` 不设变体（§4.3）。对 AI 的结论只有
 `ResourceSummary` 两项（§4.4）；原始进程信息不进公开类型（§8 J14）。**§13 的「独立于 AI」由零依赖
 与无模型路径共同兑现**（J1／J2）。
@@ -453,6 +469,11 @@ P7B 的端口只承载四问，工具选择与并行度仍在第 4 层缺口里�
 「源码面判据」的语料（`src/`）里没有测试构造，`grep` 的零命中断言不会被测试代码污染（同 P6A §8.2 的
 纪律）。测试只用 `std`，没有 dev-dependencies。
 
+**`tests/assembly.rs` 的门控**：`Cargo.toml` 必须有
+`[[test]] name = "assembly" required-features = ["assembly"]`（§2.1 的形状）。没有它，默认
+`cargo test -p continuum-arbiter` 也会把 `tests/assembly.rs` 当集成测试编译，而默认构建没有
+`continuum_arbiter::assembly`，全套测试会因编译失败而红。J15 专门验这道门控。
+
 ## 4.2 `ResourcePressure`、`ResourceObservation`
 
 ```rust
@@ -471,8 +492,9 @@ impl ResourcePressure {
 }
 
 /// 六项**聚合**读数＋已分类的负载类别。**不是**每进程读数；没有进程名／PID。
+/// **聚合 CPU／GPU 允许；逐进程 CPU／GPU 禁止**（§6.1、J14）。
 /// 六项单位是百分比（0–100）；`None` 表示该项不可读；`>100` 在 observe 里钳到 100。
-/// `workload_class` 由本机探测器分类后填入；P7C 不读进程名（§2.4 第 4 条）。
+/// `workload_class` 由本机 Resource Arbiter 组件的本地探测器分类后填入；P7C 不读进程名（§2.4 第 4 条）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ResourceObservation {
     pub cpu: Option<u8>,
@@ -485,9 +507,9 @@ pub struct ResourceObservation {
 }
 ```
 
-**为什么 `ResourceObservation` 是公开的**：它是装配方探测器的**输入面**，不是 AI 的结论面。
-它只有六项聚合读数与一个类，**没有进程名／PID／逐进程 CPU／GPU**（§13 `:686-706` 允许读进程名，
-但本设计不让它进入公开类型；分类在探测器里完成，P7C 只收结果）。`ResourceObservation` 的 `Debug` 会
+**为什么 `ResourceObservation` 是公开的**：它是本机 Resource Arbiter 组件探测器的**输入面**，不是 AI
+的结论面。它只有六项聚合读数与一个类，**没有进程名／PID／逐进程 CPU／GPU**（§13 `:686-706` 允许读
+进程名，但本设计不让它进入公开类型；分类在探测器里完成，P7C 只收结果）。`ResourceObservation` 的 `Debug` 会
 打印百分比，这是聚合读数，不是用户行为；它也不实现 `Serialize`。
 
 ## 4.3 `WorkloadClass`
@@ -657,6 +679,8 @@ impl SuspensionPhase {
 
 /// 每个后台/维护任务的挂起状态机。P7D 持有；P7C 不集中管理任务表。
 /// 字段私有；唯一构造点 `new()`；不实现 `Default`／`Deserialize`。
+/// `last_transition_millis` 在每一次**被接受的相位转移**时更新（含进入 `Suspended`）；
+/// `Resume` 的 cooldown 从它起算，不从压力时钟起算（§5.5）。
 #[derive(Debug, PartialEq, Eq)]
 pub struct SuspensionState {
     phase: SuspensionPhase,
@@ -676,14 +700,14 @@ impl SuspensionState {
     pub fn checkpoint_succeeded(&mut self, now_millis: u64)
         -> Result<SuspensionPhase, SuspensionError>;
 
-    /// 只允许从 `Checkpointing` 调用。相位回 `Throttled`，返回 `Err(CheckpointFailed)`。
-    pub fn checkpoint_failed(&mut self, now_millis: u64)
-        -> Result<(), SuspensionError>;
+    /// 只允许从 `Checkpointing` 调用。相位回 `Throttled`，返回 `CheckpointFailed`；
+    /// 错相位返回 `NotCheckpointing { phase }`。**总是返回错误（没有 Ok 路径）**。
+    pub fn checkpoint_failed(&mut self, now_millis: u64) -> SuspensionError;
 
     /// 定时器钩子；只允许从 `Checkpointing` 调用。相位回 `Throttled`，
-    /// 返回 `Err(CheckpointTimedOut)`。`direct` 也会在截止时自动做同一转移。
-    pub fn checkpoint_timed_out(&mut self, now_millis: u64)
-        -> Result<(), SuspensionError>;
+    /// 返回 `CheckpointTimedOut`；错相位返回 `NotCheckpointing { phase }`。
+    /// `direct` 也会在截止时自动做同一转移。**总是返回错误（没有 Ok 路径）**。
+    pub fn checkpoint_timed_out(&mut self, now_millis: u64) -> SuspensionError;
 }
 ```
 
@@ -691,9 +715,16 @@ impl SuspensionState {
 `TaskId`、不存任务映射、不读任务存储。这样 P7C 不需要知道 P7D 的任务身份，也不会把后台任务表
 变成第二套调度面。
 
+**Resume 的 cooldown 时钟（写死）**：`Suspended → Running` 的 cooldown 只看
+`SuspensionState.last_transition_millis`——即「进入 `Suspended` 的时刻」；`ResourceArbiter` 的
+`last_pressure_change_millis` 只服务 §5.2 的降压，不参与 `Resume`。两种时钟在 J8 的照片里给出的
+结果不同：`checkpoint_succeeded(0)` 后 `observe(Low,30_000)`，压力时钟差为 0，状态时钟差为
+30_000；本设计取后者（§5.5、§8 J8）。
+
 **`attempts` 不公开**：它是内部重试预算；P7D 通过「`direct` 不再发出 `Suspend`」观察上限（J11），
 不需要读计数。**`last_transition_millis` 不公开**：cooldown 由 `direct` 内部判断；P7D 只按
-`checkpoint_deadline_millis` 安排超时。
+`checkpoint_deadline_millis` 安排超时。派生 `Debug` 会打印相位／尝试数／最后转移时刻／截止，
+仍不含进程名／PID（§4.13）。
 
 ## 4.9 `SuspensionError`：失败结果类型（本设计命名）
 
@@ -711,6 +742,10 @@ pub enum SuspensionError {
 **`Display` / `Error`**：手写实现（`std` only；不引入 `thiserror`）。`CheckpointFailed` 与
 `CheckpointTimedOut` 不携带原因字符串，避免把 checkpoint 内部信息带进公开面；P7D 若要记录原因，
 记在它自己的 checkpoint 记录里，不进 P7C 的类型。
+
+**返回类型**：`checkpoint_failed`／`checkpoint_timed_out` 直接返回 `SuspensionError`，**不是**
+`Result`——它们没有成功路径，`Result` 会让 P7D 误以为存在 `Ok`。`checkpoint_succeeded` 仍返回
+`Result<SuspensionPhase, SuspensionError>`，因为截止前成功是正常出口。
 
 **`NotCheckpointing`**：在非 `Checkpointing` 相位调用 `checkpoint_*` 时返回；相位不变。
 `phase` 字段让调用方知道当前相位，不需要再查一次。
@@ -785,7 +820,10 @@ impl ResourceArbiter {
     /// - 相位 `Checkpointing` 且未到截止：Ok(action=None, phase=Checkpointing)；
     ///   到截止：相位回 `Throttled`，返回 Err(CheckpointTimedOut)；
     /// - 其余相位：按 §5.4／§5.5 选动作；`None` 表示无转移；
-    /// - `Suspend` 只把相位推进到 `Checkpointing`，**不会**直接到 `Suspended`。
+    /// - `Suspend` 只把相位推进到 `Checkpointing`，**不会**直接到 `Suspended`；
+    ///   若 `attempts >= max_checkpoint_attempts`，`Running` 退化为 `Throttle`、
+    ///   `Throttled` 退化为 `None`（§5.6）；
+    /// - `Suspended` 的 `Resume` cooldown 只看 `state.last_transition_millis`（§5.5）。
     pub fn direct(
         &self,
         declaration: WorkloadDeclaration,
@@ -809,6 +847,7 @@ pub mod assembly {
 
     /// 只对装配方（`ResourceDirectivePort` 的实现）可见的结论面：
     /// summary 两项＋§300 四档。**不进 AI／后台的 `ResourceSummary`／`ResourceDecision`。**
+    /// 默认构建不可命名；装配构建下不承诺跨 crate 强制（§6.5、J7）。
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct AssemblyView {
         summary: ResourceSummary,
@@ -834,17 +873,21 @@ pub mod assembly {
 ## 4.13 可见性、构造点与不变量
 
 - **私有字段**：`ResourceSummary`、`ResourceDecision`、`AssemblyView`、`SuspensionState`、
-  `ResourceArbiter`。没有 `pub` 字段、没有 `Default`／`Deserialize`（除输入面
-  `ResourceObservation` 的 `Default`）。
+  `ResourceArbiter`。没有 `pub` 字段、没有 `Default`／`Deserialize`。**`Default` 的例外只有两个**：
+  输入面 `ResourceObservation` 与配置面 `ArbiterPolicy`；其余类型（含 `SuspensionState`／
+  `ResourceSummary`／`ResourceDecision`）没有 `Default`。
 - **唯一构造点**：`ResourceSummary` 只由 `observe`／`summary` 产出；`ResourceDecision` 只由 `direct`
   产出；`AssemblyView` 只由 `assembly_view` 产出；`SuspensionState` 只由 `new` 产出；
   `ResourceArbiter` 只由 `new` 产出（并校验策略）。
-- **输入面**：`ResourceObservation` 与 `WorkloadDeclaration` 是公开字段，装配方／P7D 可以构造；
-  它们不承载结论，伪造它们只能影响调用方自己的判断。
+- **输入面**：`ResourceObservation` 与 `WorkloadDeclaration` 是公开字段，装配方／P7D 可以构造。
+  它们不承载结论，但 `ResourceObservation` **会改变共享压力**：任何持有 `&mut ResourceArbiter` 的
+  调用方都能用伪造读数影响所有消费者看到的 `ResourceSummary` 与 `direct` 结果。P7C 不验证输入
+  真实性；**输入面可信性由装配方负责**（§8.4 第 4 条、§11 第 9 条）。`WorkloadDeclaration` 的自报
+  只影响该次 `direct` 的动作，但同样无法验证（§11 第 3 条）。
 - **不实现**：`Serialize`／`Deserialize`／`Display`（`SuspensionError`／`PolicyError` 的 `Display`
   除外）；没有 serde 依赖。
 - **`Debug`**：`ResourceSummary` 只打印两项；`ResourceDecision` 只打印三项；`SuspensionState` 打印
-  相位/尝试数/截止；没有进程名／PID。
+  相位／尝试数／最后转移时刻／截止；没有进程名／PID。
 
 ---
 
@@ -950,33 +993,38 @@ pub(crate) fn classify(declaration: WorkloadDeclaration) -> PriorityTier {
 |---|---|---|---|
 | `Running` | `Run` | `Running` | 无转移（`direct` 返回 `action=None`） |
 | `Running` | `Throttle` | `Throttled` | 立即降速 |
-| `Running` | `Suspend` | `Checkpointing` | `attempts += 1`；设置截止时刻 |
+| `Running` | `Suspend` | `Checkpointing` | 若 `attempts >= max_checkpoint_attempts`（含 `max=0`）：改为发 `Throttle`，相位到 `Throttled`，**不增加 `attempts`**（§5.6）；否则 `attempts += 1`、设置截止时刻、`last_transition = now` |
 | `Running` | `Resume` | — | `direct` 不发出；不是合法动作 |
 | `Throttled` | `Run` | `Running` | `attempts = 0` |
 | `Throttled` | `Throttle` | `Throttled` | 无转移 |
-| `Throttled` | `Suspend` | `Checkpointing` | 仅当 `attempts < max_checkpoint_attempts`；**首次尝试**（`attempts == 0`）立即，**重试**（`attempts > 0`）需 cooldown 已过；`attempts += 1` |
+| `Throttled` | `Suspend` | `Checkpointing` | 若 `attempts >= max_checkpoint_attempts`：`action=None`，相位保持 `Throttled`，**不增加 `attempts`**（§5.6）；否则**首次尝试**（`attempts == 0`）立即，**重试**（`attempts > 0`）需 `now - last_transition >= cooldown`，不满足时 `action=None`、相位保持 `Throttled`；通过后 `attempts += 1`、设置截止时刻、`last_transition = now` |
 | `Throttled` | `Resume` | — | `direct` 不发出；用 `Run` |
 | `Checkpointing` | 压力动作（`Run`／`Throttle`／`Suspend`／`Resume`） | `Checkpointing` | **不打断**；`direct` 返回 `action=None` |
-| `Checkpointing` | `checkpoint_succeeded`（截止前） | `Suspended` | 唯一进入 `Suspended` 的路径 |
-| `Checkpointing` | `checkpoint_succeeded`（截止后） | `Throttled` | 返回 `Err(CheckpointTimedOut)`；晚到成功拒绝 |
-| `Checkpointing` | `checkpoint_failed` | `Throttled` | 返回 `Err(CheckpointFailed)` |
-| `Checkpointing` | `checkpoint_timed_out`／`direct` 到截止 | `Throttled` | 返回 `Err(CheckpointTimedOut)` |
-| `Suspended` | `Resume`（压力 ≤ `resume_at` 且 cooldown 已过） | `Running` | `attempts = 0`；清空截止 |
-| `Suspended` | `Resume`（条件不满足） | `Suspended` | `direct` 返回 `action=None` |
+| `Checkpointing` | `checkpoint_succeeded`（截止前） | `Suspended` | 唯一进入 `Suspended` 的路径；`last_transition = now` |
+| `Checkpointing` | `checkpoint_succeeded`（截止后） | `Throttled` | 返回 `Err(CheckpointTimedOut)`；晚到成功拒绝；`last_transition = now` |
+| `Checkpointing` | `checkpoint_failed` | `Throttled` | 返回 `CheckpointFailed`；`last_transition = now` |
+| `Checkpointing` | `checkpoint_timed_out`／`direct` 到截止 | `Throttled` | 返回 `CheckpointTimedOut`；`last_transition = now` |
+| `Suspended` | `Resume`（压力 ≤ `resume_at` 且 `now - state.last_transition_millis >= cooldown`） | `Running` | `attempts = 0`；清空截止；`last_transition = now` |
+| `Suspended` | `Resume`（条件不满足） | `Suspended` | `direct` 返回 `action=None`；不更新 `last_transition` |
 | `Suspended` | `Run`／`Throttle`／`Suspend` | `Suspended` | 无转移；已挂起不需要再降速 |
-| 非 `Checkpointing` | `checkpoint_*` | 不变 | 返回 `Err(NotCheckpointing { phase })` |
+| 非 `Checkpointing` | `checkpoint_*` | 不变 | 返回 `NotCheckpointing { phase }`（`checkpoint_succeeded` 为 `Err`，另两个为直接返回值） |
 
-**`Throttled` 是否必经**：本设计读作「相位集合＋受控转移」，不把 §14 `:735-743` 的箭头读成
-「每次挂起必须先经过 `Throttled`」。`Suspend` 从 `Running` 直接进 `Checkpointing`，因为
+**`last_transition_millis` 的更新**：表中每一条**实际转移**都把 `last_transition_millis` 设为
+`now_millis`；`action=None` 的 no-op 不更新。`Resume` 的 cooldown 从进入 `Suspended` 的那一刻
+起算，**不从压力变化的那一刻起算**；后者只用于 §5.2 的降压。
+
+**`Throttled` 是否必经（当前读法）**：本设计读作「相位集合＋受控转移」，不把 §14 `:735-743` 的
+箭头读成「每次挂起必须先经过 `Throttled`」。`Suspend` 从 `Running` 直接进 `Checkpointing`，因为
 「已要求挂起但尚未完成」本身就是 `Checkpointing` 的定义（切分 §2.3.2 第 2 条 `:160-161`）。
-若规范维护者读作必经，P7C 的动作序列要改成先 `Throttle` 再 `Suspend`（§11 第 6 条）。
+**这是当前读法，不是已裁定结论**：若规范维护者读作必经，J8 与 §5.4 的动作阶梯必须重写（先
+`Throttle` 再 `Suspend`）；具名前置见 §8.4 第 9 条、§11 第 6 条。
 
 ## 5.6 失败、超时、重试
 
 **失败**：
 
 - `checkpoint_failed(now)` 只允许从 `Checkpointing`；相位回 `Throttled`，返回
-  `Err(SuspensionError::CheckpointFailed)`。
+  `SuspensionError::CheckpointFailed`（**直接返回，不是 `Result`**）。
 - **不得**报 `Suspended`；**不得**停在 `Checkpointing`（切分 §2.3.2 第 2 条 `:161-164`）。
 - `checkpoint_succeeded` 在非 `Checkpointing` 相位返回 `Err(NotCheckpointing { phase })`，相位不变。
 
@@ -989,24 +1037,35 @@ pub(crate) fn classify(declaration: WorkloadDeclaration) -> PriorityTier {
 - `checkpoint_succeeded` 在截止后调用，同样回 `Throttled` 并返回 `Err(CheckpointTimedOut)`；
   **晚到的成功不报 `Suspended`**（fail-closed）。
 - `checkpoint_timed_out(now)` 是定时器钩子；P7D 可以用 `checkpoint_deadline_millis()` 安排。
+  它直接返回 `SuspensionError::CheckpointTimedOut`（非 `Result`）。
 - **P7C 不建定时器线程**：若调用方从不调用 `direct`／`checkpoint_succeeded`／`checkpoint_timed_out`，
   相位不会被自动推进。这是库的边界；P7D 的轮询/定时器是其职责（§11 第 11 条）。**`Checkpointing` 不是
-  可停留的稳态**：只要任一公开入口被调用，超时就会把它推到 `Throttled` 并返回错误；P7D 的
-  `checkpoint_deadline_millis()` 定时器是契约的一部分（§7.1 义务 3）。
+  可停留的稳态**：只要任一**相关状态入口**（`direct`／`checkpoint_succeeded`／`checkpoint_failed`／
+  `checkpoint_timed_out`）被调用，超时就会把它推到 `Throttled` 并返回错误；`observe`／`summary`／
+  `phase()` 不接收状态，不会推进超时。P7D 的 `checkpoint_deadline_millis()` 定时器是契约的一部分
+  （§7.1 义务 3）。
 
 **重试**：
 
-- 每次 `Suspend`（从 `Running` 或 `Throttled`）`attempts += 1`；`attempts >= max_checkpoint_attempts`
-  时 `direct` 不再发出 `Suspend`，相位保持 `Throttled`（或 `Running`，如果从未 throttle）。
+- 每次**进入 `Checkpointing`** 才 `attempts += 1`；`attempts >= max_checkpoint_attempts` 时
+  `direct` 不再发出 `Suspend`（也不增加 `attempts`），而是落到下面两条之一：
+  - 当前 `Running`（只可能发生在 `max_checkpoint_attempts == 0`）：发出 `Throttle`，相位转
+    `Throttled`（满足「0 表示从不 suspend（只 throttle）」，不是 `None`、也不是停在 `Running`）；
+  - 当前 `Throttled`：返回 `action=None`，相位保持 `Throttled`（已在降速态，没有可再发的动作）。
 - **首次从 `Throttled` 进 `Checkpointing` 不要求 cooldown**（`attempts == 0`）：压力从 `High` 升到
   `Critical` 时不应因为刚 throttle 过就延迟挂起。**失败后的重试**（`attempts > 0`）要求
-  `now - last_transition >= cooldown`，避免失败后立即重试。
+  `now.saturating_sub(state.last_transition_millis) >= cooldown`，避免失败后立即重试；这里用的是
+  **状态时钟**（`last_transition_millis`），不是压力时钟。cooldown 未过时 `direct` 返回
+  `action=None`，相位保持 `Throttled`（不重试、也不改成 `Throttle`）。
 - `Run`（从 `Throttled`）与 `Resume`（从 `Suspended`）把 `attempts` 重置为 0；一个新的压力周期有
-  新的预算。
+  新的预算。`Resume` 的 cooldown 同样用 `state.last_transition_millis`（§5.5）；成功转 `Running`
+  时把 `last_transition` 设为 `now`。
 - **重试窗口内相位仍是 `Checkpointing`**：如果 P7D 选择在内部重试，它不应在每次失败时调
   `checkpoint_failed`，而应保持 `Checkpointing` 直到最后一次失败或超时；`checkpoint_timeout_millis`
   是外层上限。P7C 不观察内部重试次数；它只保证最终有 `CheckpointFailed`／`CheckpointTimedOut` 出口。
-- **`max_checkpoint_attempts = 0`**：从不 `Suspend`；只可能 `Throttle`。这是策略选择，不是错误。
+- **`max_checkpoint_attempts = 0`**：从不 `Suspend`，只可能 `Throttle`。`Running` 在 `Critical` 下
+  第一次 `direct` 得到 `action=Throttle`、`phase=Throttled`；同压力下再次 `direct` 得到
+  `action=None`、`phase=Throttled`；压力回 `Low` 后 `Run` 回 `Running`。这是策略选择，不是错误。
 
 ## 5.7 纯函数、确定性与无时钟
 
@@ -1035,6 +1094,10 @@ pub(crate) fn classify(declaration: WorkloadDeclaration) -> PriorityTier {
 
 **`workload_class` 是 `Option`**：`None` 只表示「未分类」，不是第五档（§2.4 第 5 条）。AI 侧不得把
 `None` 当成「没有用户行为」或「可以全速」。
+
+**聚合 CPU／GPU 允许，逐进程 CPU／GPU 禁止**：`ResourceSummary` 本身不含任何读数；输入面
+`ResourceObservation` 的六项是整机聚合（§4.2）。切分 §2.3.2 第 2 条 `:164` 的「CPU/GPU 占用」按
+**聚合**读；任何带进程维度的 CPU／GPU 都不在公开类型里（J14）。
 
 ## 6.2 P7D 的控制面：`ResourceDecision`／`SuspensionState`
 
@@ -1165,7 +1228,8 @@ pub trait ResourceDirectivePort {
 
 **装配方给 P7C 的**：
 
-1. `ResourceObservation`：六项聚合读数＋已分类的 `WorkloadClass`；由本机探测器填。
+1. `ResourceObservation`：六项聚合读数＋已分类的 `WorkloadClass`；由本机 Resource Arbiter 组件的
+   本地探测器填（装配方落地，不在零依赖决策核内）。
 2. 在构造端口值时持有 `ResourceSummary`／`AssemblyView`；调用时读自己的状态。
 3. 启用 `assembly` 特性；在 `ALLOWED` 里把 `continuum-arbiter` 加进 runtime 行（装配方落地时）。
 
@@ -1202,22 +1266,22 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
 
 | # | 判据 | 规范节 | 照片（可执行断言/命令） |
 |---|---|---|---|
-| **J1** | **零 workspace 依赖（硬断言）**：`ALLOWED` 行是 `("continuum-arbiter", &[])`；`cargo tree --edges all` 只有本 crate 一行；没有 dev 边 | §7.3 `:452`、`:458`；§7.4 判据 3 `:465`；切分 §八第 1 条 `:472-473` | (a) `tests/zero_deps.rs` 跑 `cargo tree -p continuum-arbiter --depth 1 --edges all --prefix none`，断言输出恰一行 `continuum-arbiter v…`、无子节点；(b) `grep -n '"continuum-arbiter"' crates/continuum-runtime/tests/dependency_direction.rs` 命中一行，数组为空；(c) 在含 P7 全部 crate 的树上 `cargo test -p continuum-runtime --test dependency_direction` 绿；(d) `Cargo.toml` 的 `[dependencies]`／`[dev-dependencies]` 为空 |
-| **J2** | **模型层完全不可用仍能限制后台负载**：没有模型依赖/调用；高压力下 `BackgroundRuntime`／`Maintenance` 得到 `Throttle`／`Suspend`，`UserWorkload` 仍 `Run` | §13 `:673`；《工程》§7.2 `:441`；§7.4 判据 3 `:465` | `cargo test -p continuum-arbiter --test without_model`：构造 `observe(cpu=95)`，`direct(BackgroundRuntime)` ⇒ `action=Suspend`、`phase=Checkpointing`；`direct(Maintenance)` ⇒ `Suspend`；`direct(UserWorkload)` ⇒ `action=None`、`phase=Running`；测试文件只 `use continuum_arbiter::…`，没有任何模型 crate；J1 的 `cargo tree` 同时证明没有模型路径 |
+| **J1** | **零 workspace 依赖（硬断言，分两段）**：**J1(i) P7C 本地**——`ALLOWED` 行是 `("continuum-arbiter", &[])`；`cargo tree --edges all` 只有本 crate 一行；没有 dev 边；`every_crate_depends_only_on_its_allowed_set` 绿。**J1(ii) 最终树**——`cargo test -p continuum-runtime --test dependency_direction` 全绿，**前置：P7D 已完成 P6D 合并门 rebaseline／退役**（§11 第 14 条） | §7.3 `:452`、`:458`；§7.4 判据 3 `:465`；切分 §八第 1 条 `:472-473` | (a) `tests/zero_deps.rs` 跑 `cargo tree -p continuum-arbiter --depth 1 --edges all --prefix none`，断言输出恰一行 `continuum-arbiter v…`、无子节点；(b) 按 `ALLOWED` 的 **subject 行**精确匹配 `("continuum-arbiter", &[])` 并断言解析出的允许集合为空；**不**断言全文件只命中一行（最终树 runtime 行也会出现本 crate 名，J1(b) 的旧写法只在 P7C 自己的树上成立）；(c) `cargo test -p continuum-runtime --test dependency_direction every_crate_depends_only_on_its_allowed_set` 绿（P7C 本地可达）；(d) `Cargo.toml` 的 `[dependencies]`／`[dev-dependencies]` 为空；(e) J1(ii) 最终树全绿；在 P7D 完成前，`p6_union_adds_only_its_own_rows` 的断言 8（新增 subject 不在 `P6_NAMES`）会红，**不算 J1(ii) 绿灯** |
+| **J2** | **模型层完全不可用仍能限制后台负载**：没有模型依赖/调用；高压力下 `BackgroundRuntime`／`Maintenance` 得到 `Throttle`／`Suspend`，`UserWorkload` **无让路动作**（`action=None`、`phase=Running`，不是“仍 Run”这个动作） | §13 `:673`；《工程》§7.2 `:441`；§7.4 判据 3 `:465` | `cargo test -p continuum-arbiter --test without_model`：构造 `observe(cpu=95,0)`；**每个声明用独立的 `SuspensionState::new()`**（`direct` 会推进状态，复用同一个状态会让第二个／第三个声明不从 `Running` 出发）：`direct(BackgroundRuntime, &mut s1, 0)` ⇒ `action=Suspend`、`phase=Checkpointing`；`direct(Maintenance, &mut s2, 0)` ⇒ `action=Suspend`、`phase=Checkpointing`；`direct(UserWorkload, &mut s3, 0)` ⇒ `action=None`、`phase=Running`；测试文件只 `use continuum_arbiter::…`，没有任何模型 crate；J1(i) 的 `cargo tree` 同时证明没有模型路径 |
 | **J3** | **压力分档与聚合**：`Low/Moderate/High/Critical` 四档；六项取最大值；`None` 忽略；全 `None` 保持上一压力；`101` 钳到 100；非法策略被拒 | §13 `:675-684`、`:720`；§2.4 第 1、2 条 | `tests/pressure.rs` 表驱动（每档用新 arbiter）：`cpu=49→Low`、`50→Moderate`、`75→High`、`90→Critical`；`cpu=10,gpu=100→Critical`；`all None` 在 `Critical` 后仍 `Critical`；`cpu=101→Critical`；`cpu=0→Low`；`ResourcePressure::parse("HIGH")==Some(High)`、`parse("HIGHER")==None`；`ResourceArbiter::new` 对 `moderate_at=80,high_at=70` 返回 `Err(ThresholdsNotIncreasing)`、对 `resume_at=High` 返回 `Err(ResumeAtTooHigh)`；四档穷尽 `match` 编译通过 |
 | **J4** | **滞回**：升压立即；降压只在 `raw <= resume_at` 且 cooldown 已过；冷却期内不反复 | §14 `:746-754`；§2.4 第 8 条 | `tests/hysteresis.rs`（默认 cooldown 30_000）：`observe(95,0)→Critical`；`observe(10,10_000)→Critical`；`observe(10,30_000)→Low`；`observe(80,30_001)→High`（升压不等 cooldown）；`observe(80,31_000)→High` |
 | **J5** | **`WorkloadClass` 四档闭集**：`ALL.len()==4`；`as_str`／`parse` 往返；`parse("INTERACTIVE")==None`；没有 `Interactive` 变体 | §13 `:708-715`、`:721`；切分 §2.4 `:175`；§2.4 第 3 条 | `tests/workload.rs`：四档 `ALL`；`parse(as_str(c))==Some(c)`；`parse("INTERACTIVE")==None`；`parse("interactive_game")==None`（精确大写）；对 `WorkloadClass` 的穷尽 `match`（若加第五变体，测试编译失败） |
-| **J6** | **AI／后台结论只有两项**：`ResourceSummary` 恰两个访问器；无优先级字段；`Debug` 不含优先级/原始信息；无 `Serialize`／`Deserialize`／`Display` | §300 `:1921`；§13 `:717-724`；A14；切分 §6.2 第 1 条 `:400` | `tests/source_surface.rs`：`src/summary.rs` 的 `pub fn` 恰 `resource_pressure`／`workload_class`；**去注释/字符串后** `src/summary.rs` 中 `PriorityTier` 标识符、`priority:` 字段名、`pub fn priority` 零命中；`process_name`／`pid` 标识符零命中；`format!("{:?}", summary)` 不含 `Priority`／`pid`／`process`；`Serialize`／`Deserialize`／`serde` 零命中；运行期 `summary.resource_pressure()`／`.workload_class()` 可读，别的字段读不到（私有） |
-| **J7** | **§300 四档只对装配方**：默认构建的公开面没有 `PriorityTier`／`AssemblyView`；只有 `assembly` 特性公开；`PriorityTier` 名字只在 `priority.rs`／`assembly.rs`／`arbiter.rs` 出现 | §300 `:1909-1921`；切分 §2.3.2 第 2 条 `:155-165`；A14／OPEN-012 | (a) `src/lib.rs` 是 `mod priority;`（不是 `pub mod`）＋ `#[cfg(feature = "assembly")] pub mod assembly;`；(b) **去注释/字符串后** `src/summary.rs` 中 `PriorityTier` 零命中；`src/arbiter.rs` 只在内部动作选择里出现 `PriorityTier`，`ResourceDecision` 的字段/访问器不出现；(c) `cargo check -p continuum-arbiter` 绿；`cargo test -p continuum-arbiter --features assembly --test assembly` 绿：`maintenance→Maintenance`、`user_process→UserWorkload`、`foreground→ForegroundRuntime`、全 false→`BackgroundRuntime`、`maintenance+user_process→Maintenance`；`PriorityTier::as_str` 逐字四档、`rank` 3/2/1/0；(d) P7D 设计/源码不得 import `PriorityTier`（P7D 的 J 判据；P7C 只能拍到自己的公开面） |
-| **J8** | **两阶段成功路径**：`Suspend` 只到 `Checkpointing`；`checkpoint_succeeded` 才到 `Suspended`；`Resume` 回 `Running` | §14 `:735-743`；切分 §2.3.2 第 2 条 `:159-161` | `tests/suspension.rs`：`Critical` 下 `direct(BackgroundRuntime)` ⇒ `action=Suspend`、`phase=Checkpointing`；`checkpoint_succeeded(0)` ⇒ `Ok(Suspended)`；`observe(Low,30_000)` 后 `direct(30_000)` ⇒ `action=Resume`、`phase=Running`；`Suspended` 只在 `checkpoint_succeeded` 之后出现 |
-| **J9** | **失败回 `Throttled`**：`checkpoint_failed` 返回 `Err(CheckpointFailed)`；相位 `Throttled`；不报 `Suspended`；错相位返回 `NotCheckpointing` | §14 `:730-744`；切分 §2.3.2 第 2 条 `:161-164` | `tests/suspension.rs`：`Suspend` ⇒ `Checkpointing`；`checkpoint_failed(1)` ⇒ `Err(CheckpointFailed)` 且 `phase()==Throttled`；`checkpoint_succeeded(2)` ⇒ `Err(NotCheckpointing { phase: Throttled })`；断言没有 `Suspended` 逃出 |
-| **J10** | **超时不得停在 `Checkpointing`**：截止后 `direct`／`checkpoint_succeeded` 返回 `Err(CheckpointTimedOut)` 并回 `Throttled`；晚到成功拒绝；`checkpoint_deadline_millis` 在 `Checkpointing` 时 `Some` | 切分 §2.3.2 第 2 条 `:161-164`；§14 `:746-754` | `tests/timeout.rs`（`checkpoint_timeout_millis=100`）：`Suspend(0)` ⇒ `Checkpointing`、deadline `Some(100)`；`direct(99)` ⇒ `Ok(action=None, phase=Checkpointing)`；`direct(100)` ⇒ `Err(CheckpointTimedOut)` 且 `phase()==Throttled`、deadline `None`；另一例 `checkpoint_succeeded(100)` ⇒ `Err(CheckpointTimedOut)`、`phase()==Throttled`；`checkpoint_timed_out(50)` ⇒ `Err(CheckpointTimedOut)`、`Throttled` |
-| **J11** | **重试有上限**：连续失败到 `max_checkpoint_attempts` 后不再 `Suspend`；`Run`／`Resume` 重置预算；重试受 cooldown 约束；内部重试期间相位保持 `Checkpointing` | 切分 §2.3.2 第 2 条 `:162-164`；§2.4 第 11 条 | `tests/retry.rs`（max=2，cooldown=0）：`Suspend→failed` ×2 后 `direct` 在 `Critical` 下 `action=None`、`phase=Throttled`；`observe(Low)` 后 `direct` ⇒ `Run`；再 `observe(Critical)` ⇒ `Suspend`（预算重置）；另一例（cooldown=1_000）：`Suspend(0)`→`checkpoint_failed(1)` 后 `direct(500)` ⇒ `action=None`，`direct(1_001)` ⇒ `Suspend`（重试需 cooldown）；另一例：`Suspend(0)` 后不调失败，`direct(49)` ⇒ `Ok(action=None, phase=Checkpointing)`，`checkpoint_succeeded(50)` ⇒ `Suspended`（重试/等待期间相位仍是 `Checkpointing`） |
-| **J12** | **四档动作阶梯**：§5.4 的 4×4 表逐格可测；`UserWorkload` 恒 `Run`；`ForegroundRuntime` 仅 `Critical` `Throttle`；`BackgroundRuntime` `High` `Throttle`、`Critical` `Suspend`；`Maintenance` `Moderate` `Throttle`、`High`／`Critical` `Suspend` | §300 `:1909-1919`；§2.4 第 7 条 | `tests/ladder.rs` 表驱动 16 格（policy 的 `cooldown=0`）：按压力用 `observe(10/60/80/95)`；期望 `Throttle`／`Suspend` 时从 `Running` 直接 `direct`；期望 `Run` 时先用 `BackgroundRuntime` 在 `High` 下 `direct` 到 `Throttled`，再 `observe` 目标压力，再用目标声明 `direct`（`SuspensionState` 没有公开的相位构造器，故用真实转移把状态置到 `Throttled`）；`direct` 后断言 `action` 与 `phase`；`ResourceAction` 穷尽 `match` 四变体（无 `Kill`） |
-| **J13** | **P7D 结论形状**：`ResourceDecision` 恰 `summary`／`action`／`phase` 三个访问器；无优先级；`action=None` 不是第五动作 | 切分 §2.3.2 第 2 条 `:158-159`；§2.4 第 15 条 | `tests/source_surface.rs`：`src/arbiter.rs` 的 `ResourceDecision` 字段/`pub fn` 只有三项，字段/访问器不出现 `PriorityTier`；`format!("{:?}", decision)` 不含 `Priority`；运行期 `decision.summary()`／`.action()`／`.phase()` 可读；`action` 是 `Option<ResourceAction>`，`None` 时相位不变 |
-| **J14** | **原始进程信息不进公开类型**：没有 `process_name`／`pid`／`cpu_usage`／`gpu_usage`／`command_line`／`working_directory`／`window_title` 字段；`ResourceSummary`／`ResourceDecision`／`SuspensionState` 的 `Debug` 无原始信息 | §13 `:686-706`；§300 `:1921`；A14；切分 §五 P7C `:334` | `tests/source_surface.rs`：`src/` 对上述标识符零命中；公开类型定义逐字段读出（`ResourceObservation` 六项聚合＋class；`ResourceSummary` 两项；`ResourceDecision` 三项；`SuspensionState` 相位/计数/时间）；`format!("{:?}", …)` 断言不含 `pid`／`process_name`／`command_line`；`grep -rn "std::process" src` 零命中 |
-| **J15** | **零表、零迁移**：不依赖 `continuum-persist`；`src/` 无 `Migration`／`Tx`；`runtime_migrations()`／`expected_migrations()`／`startup.rs` 无本 crate | 切分 §四第 2 条 `:265-276`；§10 | `tests/source_surface.rs`：`Cargo.toml` 无 `continuum-persist`；`src/` 无 `Migration`／`Tx`／`persist`；`crates/continuum-runtime/src/main.rs:114` 的 `runtime_migrations()` 无 `continuum_arbiter`；`tests/migrations.rs:37`／`tests/startup.rs:26,81,94` 无本 crate；`cargo test -p continuum-arbiter` 不启数据库 |
-| **J16** | **不建 Resource Scheduler／不碰 budget**：无 `continuum-provider`／`continuum-model-registry`／`continuum-node`／`continuum-graph`／`continuum-budget` 依赖或引用；不回答 §304 四问 | §301 `:1925-1935`；§304 `:1973-1982`；《工程》§7.3 `:452`；切分 §6.2 第 12 条 `:411` | `tests/source_surface.rs`：`src/` 对 `continuum_provider`／`continuum_model_registry`／`continuum_node`／`continuum_graph`／`continuum_budget`／`RoutingRequest`／`PlacementRequest`／`ModelProvider`／`select_runnable` 零命中；`Cargo.toml` 无这些依赖；`ResourceArbiter` 无 `place`／`rank`／`model`／`tool`／`parallelism` 的决策方法；J1 的 `cargo tree` 一并证明 |
+| **J6** | **AI／后台结论只有两项**：`ResourceSummary` 恰两个访问器；无优先级字段；`Debug` 不含优先级/原始信息；无 `Serialize`／`Deserialize`／`Display` | §300 `:1921`；§13 `:717-724`；A14；切分 §6.2 第 1 条 `:400` | `tests/source_surface.rs`：**全量 `src/` 扫描（不是只扫 `summary.rs`）**——`grep -rn "impl ResourceSummary" src/` 恰一处；用花括号配对取该 `impl` 块，块内 `pub fn` 恰 `resource_pressure`／`workload_class`；该块与 `ResourceSummary` 的字段声明中 `priority`／`PriorityTier`／`process_name`／`process_id`／`pid`／`cpu_usage`／`gpu_usage` 零命中；**去注释/字符串后** `src/` 所有文件都没有第二个 `impl ResourceSummary`（防在 `lib.rs`／`arbiter.rs` 里加 `pub fn priority`）；`format!("{:?}", summary)` 不含 `Priority`／`pid`／`process`；`Serialize`／`Deserialize`／`serde` 零命中；运行期 `summary.resource_pressure()`／`.workload_class()` 可读；编译失败夹具 `tests/fixtures/default_surface` 的 `summary_priority` bin（`summary.priority()`）与 `summary_literal` bin（结构体字面量）在默认特性下 `cargo check` 必红（E0599／E0451） |
+| **J7** | **默认构建不可命名 `PriorityTier`／`AssemblyView`；装配构建下不承诺跨 crate 强制**：默认构建的公开面没有这两个名字；`PriorityTier` 的实现只允许在 `priority.rs`／`assembly.rs`／`arbiter.rs` 三个文件里 | §300 `:1909-1921`；切分 §2.3.2 第 2 条 `:155-165`；A14／OPEN-012 | (a) `src/lib.rs` 是 `mod priority;`（不是 `pub mod`）＋ `#[cfg(feature = "assembly")] pub mod assembly;`；(b) **全量** `grep -rn "PriorityTier" src/` 只允许 `priority.rs`／`assembly.rs`／`arbiter.rs` 命中（白名单之外零命中）；`pub use crate::priority::PriorityTier` 只允许出现在 `assembly.rs`；`impl ResourceSummary`／`impl ResourceDecision` 块内不出现 `PriorityTier`；(c) `cargo check -p continuum-arbiter` 绿；`cargo test -p continuum-arbiter --features assembly --test assembly` 绿：`maintenance→Maintenance`、`user_process→UserWorkload`、`foreground→ForegroundRuntime`、全 false→`BackgroundRuntime`、`maintenance+user_process→Maintenance`；`PriorityTier::as_str` 逐字四档、`rank` 3/2/1/0；(d) 编译失败夹具 `tests/fixtures/default_surface` 的 `priority` bin（`use continuum_arbiter::PriorityTier`）与 `assembly_view` bin（`use continuum_arbiter::AssemblyView`）在默认特性下 `cargo check` 必红（E0432）；(e) **强度边界**：装配构建下不承诺跨 crate 强制——同一构建图里启用 `assembly` 的消费方仍可命名；P7D 不启用与是否 import 由 P7D 的判据拍；规范级强制归 P9，P7C 只拍自己的默认公开面 |
+| **J8** | **两阶段成功路径（当前读法）**：`Suspend` 只到 `Checkpointing`；`checkpoint_succeeded` 才到 `Suspended`；`Resume` 回 `Running`；**Resume cooldown 用状态时钟 `last_transition_millis`** | §14 `:735-743`；切分 §2.3.2 第 2 条 `:159-161`；§2.4 第 11 条 | `tests/suspension.rs`：`Critical` 下 `direct(BackgroundRuntime)` ⇒ `action=Suspend`、`phase=Checkpointing`；`checkpoint_succeeded(0)` ⇒ `Ok(Suspended)`；`observe(Low,30_000)` 后 `direct(30_000)` ⇒ `action=Resume`、`phase=Running`（进入 `Suspended` 的 `last_transition=0`，状态时钟差 30_000；**若误用压力时钟，`observe(Low,30_000)` 刚把压力时钟设为 30_000，差为 0，本断言会红**）；**反例**：`checkpoint_succeeded(20_000)` 进 `Suspended`、`observe(Low,30_000)`（压力时钟从 0 起已过 30_000，压力可降到 `Low`）、`direct(30_000)` ⇒ `action=None`／`Suspended`（压力已是 `Low`，但状态只挂起 10_000 < cooldown 30_000）；再 `direct(50_000)` ⇒ `action=Resume`／`Running`；`Suspended` 只在 `checkpoint_succeeded` 之后出现；本照片按“`Throttled` 不必经”的当前读法写，规范若读作必经则整条重写（§8.4 第 9 条） |
+| **J9** | **失败回 `Throttled`**：`checkpoint_failed` 返回 `CheckpointFailed`（直接值，不是 `Err`）；相位 `Throttled`；不报 `Suspended`；错相位返回 `NotCheckpointing` | §14 `:730-744`；切分 §2.3.2 第 2 条 `:161-164` | `tests/suspension.rs`：`Suspend` ⇒ `Checkpointing`；`checkpoint_failed(1)` ⇒ `CheckpointFailed` 且 `phase()==Throttled`；`checkpoint_succeeded(2)` ⇒ `Err(NotCheckpointing { phase: Throttled })`；在 `Running` 调 `checkpoint_failed(3)` ⇒ `NotCheckpointing { phase: Running }` 且相位不变；断言没有 `Suspended` 逃出 |
+| **J10** | **超时不得停在 `Checkpointing`**：截止后 `direct`／`checkpoint_succeeded` 返回 `Err(CheckpointTimedOut)` 并回 `Throttled`；`checkpoint_timed_out` 直接返回 `CheckpointTimedOut`；晚到成功拒绝；`checkpoint_deadline_millis` 在 `Checkpointing` 时 `Some` | 切分 §2.3.2 第 2 条 `:161-164`；§14 `:746-754` | `tests/timeout.rs`（`checkpoint_timeout_millis=100`）：`Suspend(0)` ⇒ `Checkpointing`、deadline `Some(100)`；`direct(99)` ⇒ `Ok(action=None, phase=Checkpointing)`；`direct(100)` ⇒ `Err(CheckpointTimedOut)` 且 `phase()==Throttled`、deadline `None`；另一例 `checkpoint_succeeded(100)` ⇒ `Err(CheckpointTimedOut)`、`phase()==Throttled`；`checkpoint_timed_out(50)` ⇒ `CheckpointTimedOut`、`Throttled`；在 `Running` 调 `checkpoint_timed_out(50)` ⇒ `NotCheckpointing { phase: Running }` |
+| **J11** | **重试有上限**：连续失败到 `max_checkpoint_attempts` 后不再 `Suspend`；`Run`／`Resume` 都重置预算；重试受状态时钟 cooldown 约束；内部重试期间相位保持 `Checkpointing`；`max=0` 只 throttle | 切分 §2.3.2 第 2 条 `:162-164`；§2.4 第 11 条；§5.6 | `tests/retry.rs`（max=2，cooldown=0）：`Suspend→failed` ×2 后 `direct` 在 `Critical` 下 `action=None`、`phase=Throttled`；`observe(Low)` 后 `direct` ⇒ `Run`；再 `observe(Critical)` ⇒ `Suspend`（**`Run` 重置**）；**`Resume` 重置**（max=1，cooldown=0）：`Critical→Suspend`、`checkpoint_succeeded(0)` ⇒ `Suspended`、`observe(Low,30_000)`、`direct(30_000)` ⇒ `Resume`／`Running`；再 `observe(Critical,30_001)`、`direct(30_001)` ⇒ `Suspend`（若 `Resume` 不重置，`attempts=1` 会按上限抑制并退化为 `Throttle`）；另一例（cooldown=1_000）：`Suspend(0)`→`checkpoint_failed(1)` 后 `direct(500)` ⇒ `action=None`，`direct(1_001)` ⇒ `Suspend`（重试需状态时钟 cooldown）；另一例：`Suspend(0)` 后不调失败，`direct(49)` ⇒ `Ok(action=None, phase=Checkpointing)`，`checkpoint_succeeded(50)` ⇒ `Suspended`（重试/等待期间相位仍是 `Checkpointing`）；**`max=0`**：`Critical`、`BackgroundRuntime`、`Running`，`direct` ⇒ `action=Throttle`、`phase=Throttled`（不是 `None`、也不停在 `Running`）；同压力再次 `direct` ⇒ `action=None`、`phase=Throttled` |
+| **J12** | **四档动作阶梯**：§5.4 的 4×4 表逐格可测；`UserWorkload` 恒 `Run`；`ForegroundRuntime` 仅 `Critical` `Throttle`；`BackgroundRuntime` `High` `Throttle`、`Critical` `Suspend`；`Maintenance` `Moderate` `Throttle`、`High`／`Critical` `Suspend` | §300 `:1909-1919`；§2.4 第 7 条 | `tests/ladder.rs` 表驱动 16 格：**每格新建 `ResourceArbiter`＋新建 `SuspensionState`**，先 `observe(10/60/80/95)` 到目标压力，断言 `arbiter.summary().resource_pressure()` **等于目标档**（防止 `resume_at=Low` 下从 `High` 只观察到 `Moderate` 时压力仍是 `High`，用 `High` 行冒充 `Moderate` 行），再从 `Running` 调 `direct`；断言 `action` 与 `phase`（`Run`→`action=None`／`phase=Running`；`Throttle`→`action=Throttle`／`phase=Throttled`；`Suspend`→`action=Suspend`／`phase=Checkpointing`）；**不采用**“先用 `BackgroundRuntime` 在 `High` 打到 `Throttled` 再 observe 目标压力”的旧写法（那会漏掉 4 个 `Moderate` 格）；`ResourceAction` 穷尽 `match` 四变体（无 `Kill`） |
+| **J13** | **P7D 结论形状**：`ResourceDecision` 恰 `summary`／`action`／`phase` 三个访问器；无优先级；`action=None` 不是第五动作 | 切分 §2.3.2 第 2 条 `:158-159`；§2.4 第 15 条 | `tests/source_surface.rs`：**全量 `src/` 扫描（不是只扫 `arbiter.rs`）**——`grep -rn "impl ResourceDecision" src/` 恰一处；用花括号配对取该 `impl` 块，块内 `pub fn` 恰 `summary`／`action`／`phase`；该块与字段声明中 `priority`／`PriorityTier` 零命中（防在 `state.rs` 或别的文件里加 `pub fn priority`）；`format!("{:?}", decision)` 不含 `Priority`；运行期 `decision.summary()`／`.action()`／`.phase()` 可读；`action` 是 `Option<ResourceAction>`，`None` 时相位不变；编译失败夹具的 `decision_priority` bin（`decision.priority()`）在默认特性下 `cargo check` 必红（E0599） |
+| **J14** | **原始进程信息不进公开类型**：没有 `process_name`／`process_id`／`pid`（词边界）／`cpu_usage`／`gpu_usage`／`command_line`／`working_directory`／`window_title` 字段；**聚合 CPU／GPU 允许，逐进程 CPU／GPU 禁止**；`ResourceSummary`／`ResourceDecision`／`SuspensionState` 的 `Debug` 无原始信息 | §13 `:686-706`；§300 `:1921`；A14；切分 §五 P7C `:334` | `tests/source_surface.rs`：`src/` 对上述标识符零命中（`pid` 用词边界，`process_id` 单独列出；`process_name` 不会覆盖它）；公开类型定义逐字段读出（`ResourceObservation` 六项聚合＋class；`ResourceSummary` 两项；`ResourceDecision` 三项；`SuspensionState` 相位/计数/时间）；`format!("{:?}", …)` 断言不含 `pid`／`process_id`／`process_name`／`command_line`；`grep -rn "std::process" src` 零命中；源码面允许聚合字段名 `cpu`／`gpu`／`vram`，不允许 `cpu_usage`／`gpu_usage` 这类逐进程命名 |
+| **J15** | **零表、零迁移＋默认测试面干净**：不依赖 `continuum-persist`；`src/` 无 `Migration`／`Tx`；`runtime_migrations()`／`expected_migrations()`／`startup.rs` 无本 crate；默认 `cargo test -p continuum-arbiter` 不编译 `assembly` 测试目标 | 切分 §四第 2 条 `:265-276`；§10；§4.1 | `tests/source_surface.rs`：`Cargo.toml` 无 `continuum-persist`；有 `[[test]] name = "assembly"` 且 `required-features = ["assembly"]`；`src/` 无 `Migration`／`Tx`／`persist`；`crates/continuum-runtime/src/main.rs:114` 的 `runtime_migrations()` 无 `continuum_arbiter`；`tests/migrations.rs:37`／`tests/startup.rs:26,81,94` 无本 crate；`cargo test -p continuum-arbiter` 绿且不启数据库；`cargo test -p continuum-arbiter --no-run --message-format=json` 的 artifact 里**没有** `target.name == "assembly"`；`cargo test -p continuum-arbiter --features assembly --test assembly` 绿 |
+| **J16** | **不建 Resource Scheduler／不碰 budget**：无 `continuum-provider`／`continuum-model-registry`／`continuum-node`／`continuum-graph`／`continuum-budget` 依赖或引用；不回答 §304 四问 | §301 `:1925-1935`；§304 `:1973-1982`；《工程》§7.3 `:452`；切分 §6.2 第 12 条 `:411` | `tests/source_surface.rs`：`src/` 对 `continuum_provider`／`continuum_model_registry`／`continuum_node`／`continuum_graph`／`continuum_budget`／`RoutingRequest`／`PlacementRequest`／`ModelProvider`／`select_runnable` 零命中；`Cargo.toml` 无这些依赖；`ResourceArbiter` 无 `place`／`rank`／`model`／`tool`／`parallelism` 的决策方法；J1(i) 的 `cargo tree` 一并证明 |
 | **J17** | **确定性、无时钟、无 kill**：同一序列重复结果相等；`src/` 无 `SystemTime::now`／`Instant::now`／`rand`；`ResourceAction` 恰四变体、`SuspensionPhase` 恰四相位；无 `Kill` | §13 `:673`；§14 `:730`；§2.4 第 9、11 条 | `tests/determinism.rs`：两次相同 `observe`／`direct` 序列得到相等 `ResourceSummary`／`ResourceDecision`／`SuspensionPhase`；`src/` 对 `SystemTime::now`／`Instant::now`／`UNIX_EPOCH`／`thread_rng`／`rand::` 零命中；`src/` 对 `std::process`／`Command::new`／`kill(`／`std::fs`／`std::net`／`std::env`／`unsafe` 零命中；`ResourceAction`／`SuspensionPhase` 的 `as_str`／`parse` 往返；对 `ResourceAction`／`SuspensionPhase` 的穷尽 `match`（加第五变体即编译失败） |
 
 ## 8.2 照片的语料与读法
@@ -1228,8 +1292,14 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
   故 `src/` 里没有测试构造。
 - **运行期**：`tests/*.rs` 用公开 API；不读私有字段；断言 `ResourceSummary`／`ResourceDecision`
   的访问器与 `SuspensionState::phase()`。
-- **依赖面**：J1 的 `cargo tree` 与 `dependency_direction` 是真跑，不靠逐字推演（切分 §八第 1 条
-  `:472-473`）。J7 的 `--features assembly` 测试单独跑；J6 的默认构建测试不启用特性。
+- **依赖面**：J1(i) 的 `cargo tree`／`ALLOWED` 精确行／`every_crate_depends_only_on_its_allowed_set`
+  在 P7C 自己的树上真跑；J1(ii) 的整树 `dependency_direction` 要等 P7D 完成 P6D 合并门
+  rebaseline／退役后再真跑，不靠逐字推演（切分 §八第 1 条 `:472-473`）。J7 的 `--features assembly`
+  测试由 `[[test]] required-features` 单独构建；J6 的默认构建测试不启用特性。源码面全量扫描
+  `src/`，不按文件白名单偷懒；编译失败夹具用 `std::process::Command` 调 `cargo check`，target 目录
+  隔离到 `target/ui/`。夹具 `tests/fixtures/default_surface/Cargo.toml` 带空 `[workspace]`（避免被
+  父 workspace 吸纳），每个反例是一个独立 `--bin`（`priority`／`assembly_view`／`summary_priority`／
+  `summary_literal`／`decision_priority`），单跑时断言非零退出与对应 rustc 错误码。
 - **P7D／装配方的照片不在本 crate**：P7C 只能证明自己的公开面；AI 实际收到什么、P7D 是否转发
   优先级、装配方是否把 summary 投影正确，分别由 P9／P7D／装配方的判据证明（§8.4）。
 
@@ -1237,17 +1307,18 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
 
 | 变异 | 该红 | 不该红 |
 |---|---|---|
-| 给本 crate 加任一 workspace 依赖（如 `continuum-budget`） | J1（`cargo tree` 出现子节点／`ALLOWED` 不符）、J2（若引入模型路径）、J16（若引入 router／placement） | J3–J12（单元行为仍可过） |
+| 给本 crate 加任一 workspace 依赖（如 `continuum-budget`） | J1(i)（`cargo tree` 出现子节点／`ALLOWED` 不符）、J2（若引入模型路径）、J16（若引入 router／placement） | J3–J12（单元行为仍可过） |
 | 把 `INTERACTIVE` 加成第五变体，或把 `parse("INTERACTIVE")` 映射到 `InteractiveGame` | J5（闭集／笔误断言） | J3、J4、J8–J12（不读该变体） |
 | 给 `ResourceSummary` 加 `priority` 字段或访问器 | J6（恰两个访问器／源码面）、J13（若 `ResourceDecision` 也带） | J1–J5、J8–J12（不读 summary 的优先级） |
 | 默认构建公开 `PriorityTier`（把 `mod priority` 改成 `pub mod` 或去掉 `cfg`） | J7（默认面／源码面） | J3–J6、J8–J12（行为仍可过） |
 | `checkpoint_failed` 后报 `Suspended`，或停在 `Checkpointing` | J9（失败回 `Throttled`）、J10（超时出口） | J8（成功路径不受影响，若失败路径不被触发） |
 | 不做超时检查，`Checkpointing` 可以无限停 | J10（截止后仍 `Checkpointing`）、J11（重试上限的最终出口） | J8（成功路径） |
-| 压力动作忽略优先级（四档同表） | J12（阶梯表）、J2（User 仍 Run 的断言） | J3、J4（压力本身仍对） |
+| 压力动作忽略优先级（四档同表） | J12（阶梯表）、J2（`UserWorkload` 无让路动作的断言） | J3、J4（压力本身仍对） |
 | 加 `Kill` 动作或 `Suspended` 直接由 `Suspend` 到达 | J17（动作/相位穷尽）、J8（两阶段） | J12（若阶梯表没改，仍可能过；J8 抓两阶段） |
-| 把压力/相位写进表或迁移 | J15（零表）、J1（若加 `continuum-persist`） | J3–J12（内存行为仍可过） |
+| 把压力/相位写进表或迁移 | J15（零表）、J1(i)（若加 `continuum-persist`） | J3–J12（内存行为仍可过） |
 | 用 `SystemTime::now` 代替调用方时间 | J17（无时钟）、J4／J10（时间相关断言可能变得不可控） | J3、J5、J12（不读时间） |
-| 在公开类型里加 `process_name`／`pid` | J14（源码面）、J6（若进 summary） | J1–J5、J8–J12（不读原始信息） |
+| 在公开类型里加 `process_name`／`process_id`／`pid` | J14（全量源码面）、J6（若进 summary） | J1–J5、J8–J12（不读原始信息） |
+| 在 `lib.rs`／`state.rs` 里给 summary／decision 加 `pub fn priority` | J6／J13（全量 `impl` 块扫描＋编译失败夹具） | J3–J5、J8–J12（行为仍可过） |
 
 ## 8.4 拍不出照片的地方（据实）
 
@@ -1257,19 +1328,27 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
    与 J 判据负责。**收件人：P7D＋P9**。
 3. **「模型层完全不可用」的真实停机**：J2 是结构证明（零依赖、无模型路径），不是把模型进程杀掉的
    端到端演练；P7C 不拥有模型进程。**收件人：装配方＋P9**。
-4. **探测器读数是否真实/新鲜**：P7C 只消费 `ResourceObservation`；读数来源、频率、失败语义在装配方
-   （§11 第 9 条）。**收件人：装配方**。
+4. **探测器读数是否真实/新鲜，以及输入面可伪造**：P7C 只消费 `ResourceObservation`；读数来源、
+   频率、失败语义在装配方（§11 第 9 条）。`ResourceObservation` 是公开可构造的输入面：任何持有
+   `&mut ResourceArbiter` 的调用方都能伪造读数，改变共享压力与所有消费者看到的 `ResourceSummary`；
+   P7C 不验证真实性，**输入面可信性由装配方负责**。**收件人：装配方＋P7D**。
 5. **`throttle` 是否真的降速**：P7C 只发动作；P7D 的执行语义不在本 crate（§11 第 7 条）。
 6. **checkpoint 是否可恢复**：P7C 只保证相位；内容、存储、重启恢复在 P7D（§11 第 8 条）。
 7. **四档优先级的跨 crate 强制**：`assembly` 特性不是安全边界（§6.5）；规范级强制在 P9
    （§11 第 1、10 条）。
 8. **重启后的相位**：P7C 零持久化（§10）；恢复策略在 P7D（§11 第 8 条）。
+9. **§14 箭头是否强制经过 `Throttled`**：J8／§5.4 按**当前读法**（`Suspend` 可从 `Running` 直达
+   `Checkpointing`）写；若规范维护者读作必经，J8 与动作阶梯必须重写（先 `Throttle` 再 `Suspend`），
+   不是实现期再补。**收件人：规范维护者＋协调者。这是 P7C 计划开工前的具名前置。**
+10. **P6D 合并门尚未 rebaseline／退役**：P7C 的 `("continuum-arbiter", &[])` 会让
+    `p6_union_adds_only_its_own_rows` 断言 8 红（新增 subject 不在 `P6_NAMES`）。J1(ii) 在 P7C 自己的
+    交付点上不可达；**P7D 完成合并门前，J1(ii) 不是绿灯**。**收件人：P7D＋协调者**（§11 第 14 条）。
 
 ## 8.5 §7.4 判据 3 与本设计自报判据的关系
 
 - **§7.4 判据 3**（`docs/02-工程.md:465`）只要求「模型层完全不可用仍能限制后台负载」。
-  **J1（零依赖）＋J2（无模型路径的高压力限流）**是这条判据的两半：J1 证明结构上不可能依赖模型，
-  J2 证明行为上仍能产出 `Throttle`／`Suspend`。
+  **J1(i)（零依赖结构）＋J2（无模型路径的高压力限流）**是这条判据的两半；J1(ii) 只是整树复核，
+  不额外证明判据 3。J1(i) 证明结构上不可能依赖模型，J2 证明行为上仍能产出 `Throttle`／`Suspend`。
 - **§7.4 不覆盖 P7C 的其余交付**：压力分档（J3）、滞回（J4）、四档进程类（J5）、最小暴露面
   （J6／J7／J14）、两阶段成功（J8）、失败（J9）、超时（J10）、重试上限（J11）、动作阶梯（J12）、
   P7D 结论形状（J13）、零表（J15）、不建 Resource Scheduler／不碰 budget（J16）、确定性/无 kill
@@ -1291,7 +1370,7 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
 | `ResourceDirective`／四槽载体 | P7B（设计 `:832-936`）；P7C 不定义、不填槽 |
 | 对 `continuum-provider`／`continuum-model-registry`／`continuum-node`／`continuum-graph`／`continuum-budget` 的依赖 | §7.3 入度为零（`:452`、`:458`）；J1／J16 |
 | 模型调用、提示、`ContextPackage`、`Message` | P3／P6A；§13 `:673` |
-| 进程探测／进程名分类器／PID 读取 | 本机装配方探测器；P7C 只收聚合读数与已分类的 `WorkloadClass`（§2.4 第 4 条） |
+| 进程探测／进程名分类器／PID 读取 | 本机 Resource Arbiter 组件的本地探测器（装配方落地，不在零依赖决策核内）；P7C 只收聚合读数与已分类的 `WorkloadClass`（§2.4 第 4 条） |
 | `throttle` 的量化执行 | P7D；P7C 只给动作名（§11 第 7 条） |
 | checkpoint 的内容、存储、重试执行、重启恢复 | P7D；P7C 只拥有相位与失败结果（§11 第 8 条） |
 | 后台任务来源（§299 四类）／`TaskSource`／`AuthorizedTask` | P7D；P7C 的 `WorkloadDeclaration` 不是 `TaskSource`（§2.6） |
@@ -1335,14 +1414,16 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
 
 # 11. 设计问题（逐条具名）
 
-**每条给「缺的是哪一步」与收件人；不用「后续」「长期阶段」兜。共 13 条。**
+**每条给「缺的是哪一步」与收件人；不用「后续」「长期阶段」兜。共 14 条。** §2.4 的 **15 条**是
+本设计自定判定，本节 **14 条**是跨块设计问题；两处编号不是同一张表（评审按 13 条看会漏项）。
 
 1. **A14／OPEN-012：Resource Arbiter 的暴露面强制**。§300 `:1921` 是 SHOULD；§13 的「只传两项」
    不是规范段；P7C 只能交可观察的公开面（`ResourceSummary` 两项、`ResourceDecision` 无优先级、
    `PriorityTier` 默认不导出、原始信息不入类型）。**缺的是「规范级强制点」这一步**；P7C 不声称
    SHOULD 已变成 MUST。**收件人：规范维护者＋P9（边界）**（主树 `docs/superpowers/p8-p10-scope.md:63`、
    `:68` 已列 A14／OPEN-012 与「A14 还需要 P7C 的 Arbiter 暴露面」）。代价：一个能依赖本 crate 的
-   消费方仍可启用 `assembly` 特性或把 `ResourceDecision` 转发给 AI；P7C 的 J6／J7 只是源码面纪律。
+   消费方仍可启用 `assembly` 特性或把 `ResourceDecision` 转发给 AI；P7C 的 J6／J7 只是**默认构建**的
+   源码面／公开面纪律，装配构建下不承诺跨 crate 强制（J7(e)）。
 
 2. **§13 的 `INTERACTIVE` 笔误**：§13 `:708-715` 的四档是 `INTERACTIVE_GAME`／`COMPUTE_WORKLOAD`／
    `COMPILER`／`VIDEO_RENDER`；`:721` 的输出示例写 `workload_class = INTERACTIVE`，**不在四档里**。
@@ -1360,9 +1441,14 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
 
 4. **`workload_class` 的判定来源**：§13 `:686-706` 允许本机读进程名／PID，`:708` 说进程名在本机
    Arbiter 分类，但**没有给进程名→四档的映射表，也没说分类器在哪个 crate**。本设计把分类放在
-   零依赖 crate 之外的**本机探测器**，P7C 只接收 `Option<WorkloadClass>`；公开类型不携带进程名／PID
-   （§2.4 第 4 条）。**缺的是「映射表与分类器归属」这一步**；**收件人：规范维护者＋装配方**。
-   代价：P7C 无法验证分类；不同探测器可能给出不同结果；未知进程只能 `None`。
+   **本机 Resource Arbiter 组件的本地探测器**（部署整体的一部分，**不是零依赖决策核
+   `continuum-arbiter`**），决策核只接收 `Option<WorkloadClass>`；公开类型不携带进程名／PID
+   （§2.4 第 4 条）。**缺的是「映射表与分类器归属」这一步**；**收件人：规范维护者＋协调者＋装配方**。
+   代价：P7C 无法验证分类；不同探测器可能给出不同结果；未知进程只能 `None`。**待协调者确认的读法**：
+   切分 §五 P7C 行的「负载类别」指类型／闭集与判定规则的所有权，判定器属于本机组件但不属于零依赖
+   决策核；若协调者读作「判定器也必须在 `continuum-arbiter` 内」，本块要么加依赖（破坏
+   `ALLOWED == []`），要么把分类器移进 crate（`src/` 读 OS，违反 §5.7 的无 I/O 与 J17），两条都
+   与本设计的纯决策核边界相抵，必须升级裁定。
 
 5. **§7.4 只覆盖判据 3，不覆盖 P7C 的其余交付**：§7.4 `:460-467` 的四条里只有 `:465` 落 P7C，
    它只测「模型层完全不可用仍能限制后台负载」；**压力分档、滞回、四档进程类、四档优先级、两阶段
@@ -1374,8 +1460,9 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
    Resume`，但**没有说箭头是否强制、`Checkpointing` 能否被压力打断、失败结果类型是什么**。本设计
    读作「相位集合＋受控转移」：`Suspend` 可从 `Running`／`Throttled` 直接进 `Checkpointing`，
    `Throttled` 不是必经点；失败／超时回 `Throttled`（§5.5）。**缺的是「§14 的箭头是否强制经过
-   `Throttled`」这一步**；**收件人：规范维护者（§14）＋P7D**。代价：若读作必经，P7C 的动作序列要改成
-   先 `Throttle` 再 `Suspend`；当前设计在 `Running` 收到 `Suspend` 会直接进 `Checkpointing`。
+   `Throttled`」这一步**；**收件人：规范维护者（§14）＋协调者＋P7D**。代价：若读作必经，P7C 的动作
+   序列要改成先 `Throttle` 再 `Suspend`；当前设计在 `Running` 收到 `Suspend` 会直接进
+   `Checkpointing`。**这是 P7C 计划开工前的具名前置**（§8.4 第 9 条）；J8 已标「当前读法」。
 
 7. **`throttle` 的量化语义**：§14 只给相位，§300 只给顺序；**没有说 `throttle` 降多少并发／速率、
    如何观测、是否可跳过**。P7C 只发 `ResourceAction::Throttle`；P7D 决定执行。**缺的是「throttle 的
@@ -1388,11 +1475,13 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
    挂起任务可恢复；重启后 `SuspensionState` 丢失，P7D 必须重建；若 P7D 落库相位，它要自己决定
    编码（本 crate 不提供 `Deserialize`）。
 
-9. **OS 探测器的归属与频率**：P7C 是纯决策核；六项聚合读数与进程名分类由本机探测器填
-   `ResourceObservation`。**缺的是「探测器在哪个 crate、读取频率、失败/过期语义」这一步**；
-   **收件人：装配方（`continuum-runtime`）＋协调者**。代价：探测器失效／过期时 P7C 只能保持上一
-   压力（全 `None` 不升压）；探测器若接了模型路径，会间接破坏「独立于 AI」的可观察性；装配方必须
-   保证探测器不依赖模型。
+9. **OS 探测器的归属、频率与输入面可信性**：P7C 是纯决策核；六项聚合读数与进程名分类由本机
+   Resource Arbiter 组件的本地探测器填 `ResourceObservation`。**缺的是「探测器在哪个 crate、读取
+   频率、失败/过期语义」这一步**；**收件人：装配方（`continuum-runtime`）＋协调者**。代价：探测器
+   失效／过期时 P7C 只能保持上一压力（全 `None` 不升压）；探测器若接了模型路径，会间接破坏
+   「独立于 AI」的可观察性；装配方必须保证探测器不依赖模型。**输入面可信性**：`ResourceObservation`
+   的字段公开、`observe(&mut self)` 公开，任何持有 arbiter 的调用方都能伪造读数并改变**共享**压力与
+   `ResourceSummary`；P7C 不验证真实性，可信性由装配方负责（§4.13、§8.4 第 4 条）。
 
 10. **四档优先级的暴露机制不是硬边界**：本设计用私有 `priority` 模块＋`assembly` 特性＋
     `AssemblyView`；默认构建不能命名 `PriorityTier`，但 Cargo 特性在同一构建图里可能被统一启用，
@@ -1414,6 +1503,15 @@ P7A 按 §152 的 lower 产出 Product Intent，P7D 的 `product drive` 按值�
     **收件人：P4／budget 持有方＋协调者**。代价：P7C 可能对「预算内但资源重」的任务照常让路，
     也可能对「预算耗尽但资源轻」的任务不感知；两者不是同一个问题，若将来要合并，必须另立一条边，
     不能把 `continuum-budget` 塞进 `ALLOWED == []`。
+
+14. **P6D 合并门与 J1(ii) 的跨块前置**：P7C 加 `("continuum-arbiter", &[])` 后，
+    `p6_union_adds_only_its_own_rows` 的断言 8（新增 subject 恰是已落地的 P6 crate）必红：
+    `continuum-arbiter` 不在 `P6_NAMES`。P7C 本地只能交 J1(i)（`cargo tree`／`ALLOWED` 精确行／
+    `every_crate_depends_only_on_its_allowed_set`）；J1(ii) 的整树 `dependency_direction` 全绿
+    **前置是 P7D 完成 P6D 合并门的 rebaseline／退役**（切分 §四第 1 条 `:253-264`）。**缺的是
+    「合并门重基线或退役」这一步**；**收件人：P7D＋协调者**。代价：P7C 先落地时 J1(ii) 不能当
+    绿灯；若计划把 P7C 排在 P7D 前，验收必须拆成「J1(i) 绿＋J1(ii) 待前置」，不能把整树
+    `dependency_direction` 写成 P7C 的完成条件。
 
 ---
 
