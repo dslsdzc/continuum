@@ -2,6 +2,7 @@
 //! 本 crate 不建执行器、不持久化；标签类型来自 `continuum-trust`（P6B）。
 
 mod candidate;
+mod compile;
 mod package;
 mod reference;
 mod request;
@@ -11,6 +12,7 @@ use continuum_memory::MemoryClaim;
 use continuum_trust::{ContextProvenance, ContextTrust};
 
 pub use candidate::ContextCandidate;
+pub use compile::compile;
 pub use reference::Reference;
 pub use request::{ContextBudget, ContextRequest};
 

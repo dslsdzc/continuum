@@ -9,7 +9,7 @@ use continuum_memory::MemoryClaim;
 use continuum_trust::{ContextProvenance, ContextTrust};
 
 /// 源码面语料。下游断言一律遍历这个 helper，不在本地另写文件清单。
-/// Task 2 扩到五个文件，Task 3 扩到六个。
+/// Task 3 起覆盖六个源文件。
 fn src_texts() -> Vec<(&'static str, &'static str)> {
     vec![
         ("src/lib.rs", include_str!("../src/lib.rs")),
@@ -17,6 +17,7 @@ fn src_texts() -> Vec<(&'static str, &'static str)> {
         ("src/reference.rs", include_str!("../src/reference.rs")),
         ("src/request.rs", include_str!("../src/request.rs")),
         ("src/candidate.rs", include_str!("../src/candidate.rs")),
+        ("src/compile.rs", include_str!("../src/compile.rs")),
     ]
 }
 
