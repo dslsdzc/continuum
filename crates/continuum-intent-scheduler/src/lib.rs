@@ -4,12 +4,17 @@
 pub mod decision;
 pub mod graph;
 pub mod inputs;
+pub mod resource;
 
 pub use decision::{
     BaselineIntentPolicy, DecisionBasis, IntentDecision, IntentDecisionError,
     IntentSelectionPolicy, IntentScheduler,
 };
 pub use graph::runnable_nodes;
+pub use resource::{
+    DirectiveForError, ExecutionRequest, ExecutionSignals, ResourceDirective,
+    ResourceDirectiveError, ResourceDirectivePort,
+};
 pub use inputs::{
     BackgroundSuitability, Blocking, Deadline, PrioritySignal, SchedulerInputs, UserFocus,
 };
