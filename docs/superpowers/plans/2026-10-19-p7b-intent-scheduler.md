@@ -117,7 +117,7 @@ DirectiveForError>`）；§302 的五个输入全部显式化，`BaselineIntentP
 **结论：本块没有硬前置。** 三个 workspace 依赖都已落地；P7C／P7D 尚未实现也不阻塞本块。
 Task 2–8 只依赖本计划先前 task 的接口，不依赖外部块。
 
-### 二、共写文件（**只有两处**）
+### 二、共写文件（**两处手写 ＋ 生成的 `Cargo.lock`**）
 
 | 文件 | 本块的改动 | 落在哪个 task |
 |---|---|---|
@@ -164,23 +164,27 @@ crates/continuum-intent-scheduler/
   tests/decision.rs      J1-a、J8-a–e（Task 2）
   tests/baseline.rs      J1-c／J6、J9 七项、J3-b（Task 3）
   tests/status_matrix.rs J7 七负例／六正例、J7-b（Task 4）
-  tests/graph.rs         J11-a／J11-b、J10-b（Task 5）
-  tests/resource.rs      J13-a–e、J12-a／J12-b、J10-c（Task 6）
-  tests/source_surface.rs J1-b、J3-a、J4-a、J5-a、J10-a、J14、J15（Task 7）
+  tests/graph.rs         J11-a、J11-b（局部）、J10-b（graph.rs 半边）（Task 5）
+  tests/resource.rs      J13-a–e（J13-e 仅源码面）、J12-a／J12-b、J10-c（Task 6）
+  tests/source_surface.rs J1-b、J3-a、J4-a、J5-a、J10-a、J10-b（decision.rs 半边）、
+                         J11-b（src/ 全体）、J14、J15（Task 7）
   tests/manifest.rs      清单恰三条边、零表／零资源／零运行时边（Task 8）
 ```
 
-**本计划要改的既有文件**只有两处（都在共写表里）：
+**本计划要改的既有文件**只有两处手写文件（都在共写表里），外加生成的 `Cargo.lock`：
 
 ```
 Cargo.toml                                             members 加 crates/continuum-intent-scheduler（Task 1）
 crates/continuum-runtime/tests/dependency_direction.rs  ALLOWED 加 continuum-intent-scheduler 行（Task 1）
+Cargo.lock                                             随新 crate 生成（Task 1 一并提交）
 ```
 
 **测试构造的限制（实读结论）**：`AdfirGraph` 的非空节点需要 `Node::new(NodeId, OperatorId, OperatorVersion)`，
-而 `OperatorId`／`OperatorVersion` 由 `continuum-operator` 提供；端口还需要 `continuum-port`。设计 §2.1 的
-dev 边只允许 `continuum-canonical`，因此 **Task 5 的运行期图夹具只建空图**；J11 的主证据是源码面
-（函数体恰一行转调），不是非空图的行为。这条限制记在「遗留/待协调」第 5 条。
+而 `OperatorId`／`OperatorVersion` 由 `continuum-operator` 提供；只有再加端口／前驱边时才需要
+`continuum-port::Port`。设计 §2.1 的 dev 边只允许 `continuum-canonical`，因此 **Task 5 的运行期图
+夹具只建空图**；J11 的主证据是源码面（函数体恰一行转调），不是非空图的行为。协调者若要运行期
+非空图，至少要补 `continuum-operator`（必需），有端口／边时再加 `continuum-port`；**Task 5 不擅自加边**。
+这条限制记在「遗留/待协调」第 5 条。
 
 ---
 
@@ -361,7 +365,7 @@ impl BackgroundSuitability {
 **动作 3d：** 根 `Cargo.toml` 的 `members` 加 `"crates/continuum-intent-scheduler"`。
 
 **动作 3e：** `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` 加一条
-（放在 `continuum-graph` 行之后、按 crate 名字母序找位置；内层数组按字母序）：
+（放在 `continuum-graph` 行之后；**外层表不是全局字母序，不要重排既有行**；只有内层数组按字母序）：
 
 ```rust
     // P7B Intent Scheduler（设计 §2.1）。两条普通边 + 一条 dev 边：
@@ -467,6 +471,36 @@ pub fn advance(id: &str, basis: &str) -> IntentDecision {
 
 pub fn no_intent(basis: &str) -> IntentDecision {
     IntentDecision::NoIntent { basis: DecisionBasis::new(basis) }
+}
+
+/// 去掉整行 `//` 注释；源码面用例共用（Task 5／6／7）。
+pub fn code_without_comments(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 取函数体，按**花括号平衡**收尾。`directive_for` 开头的 `let ... else { ... }`
+/// 不能被第一个 `}` 截断；trait 方法没有函数体，不能用于本函数。
+pub fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
+    let start = source.find(signature).expect("函数签名应存在");
+    let open = start + source[start..].find('{').expect("函数应有函数体");
+    let mut depth = 0usize;
+    for (offset, ch) in source[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &source[open + 1..open + offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("函数体未闭合");
 }
 
 pub struct FixedPolicy {
@@ -618,7 +652,7 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test d
 签名与语义逐字照设计 §4.1／§4.4／§4.5：
 
 ```rust
-use continuum_semantics::{Intent, IntentId, IntentStatus};
+use continuum_semantics::{IntentId, IntentStatus};
 
 use crate::inputs::SchedulerInputs;
 
@@ -740,11 +774,13 @@ git commit -m "feat(intent-scheduler): IntentDecision 与 decide 的校验面"
 
 **Files:**
 - Modify: `crates/continuum-intent-scheduler/src/decision.rs`（追加基线）
+- Modify: `crates/continuum-intent-scheduler/src/lib.rs`（根导出 `BaselineIntentPolicy`）
 - Create: `crates/continuum-intent-scheduler/tests/baseline.rs`
 
 **Interfaces:**
 - Consumes: Task 2 的 `IntentSelectionPolicy`／`IntentDecision`／`is_advanceable`；Task 1 的 `SchedulerInputs`
-- Produces: `BaselineIntentPolicy`（`Debug, Default, Clone, Copy`）
+- Produces: `BaselineIntentPolicy`（`Debug, Default, Clone, Copy`）＋ crate 根导出
+  `continuum_intent_scheduler::BaselineIntentPolicy`（Task 4 从根导入）
 
 - [ ] **Step 1: 写 `tests/baseline.rs` 的九条用例**
 
@@ -787,8 +823,10 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test b
 - [ ] **Step 3: 在 `decision.rs` 追加基线**
 
 次序逐字照设计 §4.4；**基线不读 `priority`、不读 `background_suitability`**。
-`decision.rs` 的 `use crate::inputs::{Blocking, SchedulerInputs, UserFocus};` 要补齐
-（`Deadline` 只经字段访问，不必单独命名）：
+`decision.rs` 的 `use crate::inputs::{Blocking, SchedulerInputs, UserFocus};` 要补齐；
+`use continuum_semantics::{Intent, IntentId, IntentStatus};` 中的 `Intent` 在本 task 加回
+（Task 2 暂时去掉，避免 unused import；blocking 的 `Option<(&Intent, usize)>` 需要它）。
+`Deadline` 只经字段访问，不必单独命名：
 
 1. `eligible` = 候选里 `is_advanceable(status)` 为真者；空 ⇒
    `Ok(NoIntent { basis: "no_advanceable_candidate" })`。
@@ -839,12 +877,17 @@ for candidate in &eligible {
 }
 ```
 
+`src/lib.rs` 的 decision 导出加 `BaselineIntentPolicy`：Task 2 的
+`pub use decision::{DecisionBasis, IntentDecision, IntentDecisionError, IntentSelectionPolicy, IntentScheduler};`
+改为六项同列（加 `BaselineIntentPolicy`）。Task 4 从 crate 根导入它，根导出缺一不可。
+
 - [ ] **Step 4: 运行本 task 的测试并提交**
 
 ```bash
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test baseline
 TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test decision
 git add crates/continuum-intent-scheduler/src/decision.rs \
+        crates/continuum-intent-scheduler/src/lib.rs \
         crates/continuum-intent-scheduler/tests/baseline.rs
 git commit -m "feat(intent-scheduler): 确定性基线策略"
 ```
@@ -990,24 +1033,11 @@ git commit -m "test(intent-scheduler): 六个可推进状态与七个非候选�
 - [ ] **Step 1: 写 `tests/graph.rs` 的三条用例**
 
 ```rust
+mod support;
+
 use continuum_graph::{select_runnable, AdfirGraph, ContractIdRef, GraphId, SchedulerConfig};
 
 const GRAPH_SRC: &str = include_str!("../src/graph.rs");
-
-fn code_without_comments(source: &str) -> String {
-    source
-        .lines()
-        .filter(|line| !line.trim_start().starts_with("//"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-fn function_body<'a>(source: &'a str, signature: &str) -> &'a str {
-    let start = source.find(signature).expect("函数签名应存在");
-    let open = start + source[start..].find('{').expect("函数应有函数体");
-    let close = open + source[open..].find('}').expect("函数应有闭合花括号");
-    &source[open + 1..close]
-}
 
 #[test]
 fn an_empty_graph_yields_no_runnable_nodes() {
@@ -1020,9 +1050,10 @@ fn an_empty_graph_yields_no_runnable_nodes() {
 
 #[test]
 fn the_graph_entry_is_a_zero_logic_transfer() {
-    let code = code_without_comments(GRAPH_SRC);
-    let body = function_body(&code, "pub fn runnable_nodes");
+    let code = support::code_without_comments(GRAPH_SRC);
+    let body = support::function_body(&code, "pub fn runnable_nodes");
     assert_eq!(body.trim(), "continuum_graph::select_runnable(graph, config)");
+    // 局部禁止词表；设计 J11-b 的 `src/` 全体扫描在 Task 7（本用例只守这一个函数体）。
     for forbidden in [
         "if ", "for ", "while ", "match ", "NodeState", "edges_to", "predecessors",
         "apply_blocking", "apply_unblocking", "transition(", "max_parallel",
@@ -1033,14 +1064,16 @@ fn the_graph_entry_is_a_zero_logic_transfer() {
 
 #[test]
 fn graph_source_mentions_neither_intent_nor_resource() {
-    let code = code_without_comments(GRAPH_SRC);
+    let code = support::code_without_comments(GRAPH_SRC);
     for forbidden in ["IntentDecision", "ResourceDirective", "DirectiveForError"] {
         assert!(!code.contains(forbidden), "src/graph.rs 不得出现 {forbidden}");
     }
 }
 ```
 
-**结果：** 三条用例名可列出。
+**结果：** 三条用例名可列出。`src/graph.rs` 的 J10-b 半边在此；`src/decision.rs` 的 J10-b 半边与
+`src/` 全体的 J11-b 扫描在 Task 7。**Task 5 只建空图夹具；不要为了非空图给 `Cargo.toml` 加
+`continuum-operator`／`continuum-port` dev 边**（设计 §2.1 未允许；见遗留第 5 条）。
 
 - [ ] **Step 2: 运行，确认失败**
 
@@ -1077,7 +1110,7 @@ git add crates/continuum-intent-scheduler/src/graph.rs \
 git commit -m "feat(intent-scheduler): Graph 的零逻辑消费入口"
 ```
 
-**结果：** 三条全绿；`function_body` 取到的函数体去掉空白后恰是
+**结果：** 三条全绿；`support::function_body`（平衡花括号）取到的函数体去掉空白后恰是
 `continuum_graph::select_runnable(graph, config)`。
 
 ---
@@ -1090,7 +1123,7 @@ git commit -m "feat(intent-scheduler): Graph 的零逻辑消费入口"
 - Modify: `crates/continuum-intent-scheduler/src/lib.rs`（导出 resource）
 
 **Interfaces:**
-- Consumes: Task 1 的 `SchedulerInputs`／`Deadline`／`BackgroundSuitability`；Task 2 的
+- Consumes: Task 1 的 `SchedulerInputs`／`PrioritySignal`／`Deadline`／`BackgroundSuitability`；Task 2 的
   `IntentDecision`／`is_advanceable`；`continuum_semantics::{Intent, IntentId, Priority}`；
   `continuum_graph::NodeId`
 - Produces: `ExecutionRequest`／`ExecutionSignals`／`ResourceDirective`／`ResourceDirectiveError`／
@@ -1108,10 +1141,12 @@ use std::cell::{Cell, RefCell};
 
 use continuum_graph::NodeId;
 use continuum_intent_scheduler::{
-    DirectiveForError, ExecutionRequest, IntentDecision, IntentScheduler, ResourceDirective,
-    ResourceDirectiveError, ResourceDirectivePort, SchedulerInputs, UserFocus,
+    BackgroundSuitability, Deadline, DirectiveForError, ExecutionRequest, IntentScheduler,
+    PrioritySignal, ResourceDirective, ResourceDirectiveError, ResourceDirectivePort,
 };
 use continuum_semantics::{IntentId, IntentStatus, Priority};
+
+const RESOURCE_SRC: &str = include_str!("../src/resource.rs");
 
 struct FakePort {
     directive: ResourceDirective,
@@ -1158,6 +1193,12 @@ struct RecordingPort {
     seen: RefCell<Option<Seen>>,
 }
 
+impl RecordingPort {
+    fn new() -> Self {
+        Self { seen: RefCell::new(None) }
+    }
+}
+
 impl ResourceDirectivePort for RecordingPort {
     fn direct(
         &self,
@@ -1178,7 +1219,7 @@ impl ResourceDirectivePort for RecordingPort {
 八条用例：
 
 1. `no_intent_returns_none_without_calling_the_port`（**J13-a**）：
-   `decision = NoIntent { basis: "none" }`；`directive_for` ⇒ `Ok(None)`，`calls() == 0`。
+   `let decision = support::no_intent("none");`；`directive_for` ⇒ `Ok(None)`，`calls() == 0`。
 2. `a_legal_advance_calls_the_port_once_and_returns_four_slots_verbatim`（**J13-b**）：
    候选 `Ready`；假端口返回 `ResourceDirective::new(Some("node-a"), Some("model-x"),
    Some("tool-y"), Some("8"))`；`directive_for` ⇒ `Ok(Some(d))`，`calls() == 1`，四个访问器逐字节
@@ -1187,23 +1228,31 @@ impl ResourceDirectivePort for RecordingPort {
    ⇒ `matches!(directive_for(...), Err(DirectiveForError::Port(e)) if e.message() == "rank unavailable")`；
    `calls() == 1`。
 4. `an_invalid_advance_is_rejected_without_calling_the_port`（**J13-d**，两组）：
-   `Advance` 指向候选集外 `ghost` ⇒ `Err(InvalidDecision)`、`calls() == 0`；
-   `Advance` 指向 `Completed` 候选 ⇒ 同样 `Err(InvalidDecision)`、`calls() == 0`。
+   `support::advance("ghost", "chosen")` 指向候选集外 ⇒ `Err(InvalidDecision)`、`calls() == 0`；
+   `support::advance("done", "chosen")` 指向 `Completed` 候选 ⇒ 同样 `Err(InvalidDecision)`、`calls() == 0`。
 5. `the_port_receives_first_priority_earliest_deadline_and_round_background`（**设计 §2.5 第 15 条**）：
    候选 `Ready`；`priority` 条目两条（`"first"`、`"second"`）；`deadline` 条目 `500` 与 `100`；
-   `background = "bg-value"`；`node = Some(&NodeId::new("n1"))`。用 `RecordingPort` 断言：
+   `background = "bg-value"`；`node = Some(&NodeId::new("n1"))`。先把两个信号数组绑定到局部变量
+   （`let priority = [...]`／`let deadline = [...]`），再赋给 `support::inputs` 返回的 `inputs`
+   的对应字段，借用期覆盖 `directive_for` 调用。用 `RecordingPort::new()` 断言：
    `priority == Some("first")`、`deadline == Some(100)`、`background == "bg-value"`、
    `intent == "ready"`、`node == Some("n1")`。
-6. `resource_directive_fields_are_private_and_default_is_absent`（**J13-e**）：读 `../src/resource.rs`，
-   在 `pub struct ResourceDirective {` 与随后的 `}` 之间逐行断言**没有 `pub ` 字段**；
-   断言全文件没有 `impl Default for ResourceDirective`。**不建 trybuild**：设计 §2.1 没有这条 dev 边。
+6. `resource_directive_fields_are_private_and_default_is_absent`（**J13-e 的源码面半边／partial**）：
+   读 `RESOURCE_SRC`，在 `pub struct ResourceDirective {` 与随后的 `}` 之间逐行断言**没有 `pub `
+   字段**；断言全文件没有 `impl Default for ResourceDirective`。**编译期半边（crate 外构造
+   `ResourceDirective { .. }` 编不过）没有照片**：设计 §2.1 没有 `trybuild` 这条 dev 边，见遗留第 8 条。
+   **不建 trybuild**，也不把源码面当成完整的 J13-e。
 7. `there_is_no_production_port_implementation_or_router_placement_surface`（**J12-a／J12-b**）：
    `src/resource.rs` 与 `src/` 全体（去注释行）零 `impl ResourceDirectivePort`；
    零 `rank(`／`place(`／`RoutingRequest`／`PlacementRequest`／`ComputeNode`／`ExecutionCandidate`／
    `continuum_model_registry`／`continuum_node`。
-8. `directive_for_only_transfers_and_makes_no_new_decisions`（**J10-c**）：取 `pub fn directive_for`
-   的函数体，断言包含 `port.direct` 与 `NoIntent`；不包含 `continuum_graph`／`select_runnable`／
-   `ResourceDirective::new`／`apply_intent_transition`／`transition(`。它不填槽、不产出新的 Intent 决策。
+8. `directive_for_only_transfers_and_makes_no_new_decisions`（**J10-c**）：用
+   `support::code_without_comments(RESOURCE_SRC)` 去注释，再用**平衡花括号**的
+   `support::function_body(..., "pub fn directive_for")` 取完整函数体（必须跨过开头的
+   `let ... else { return Ok(None); }`），断言包含 `Ok(None)`、`port.direct` 与 `is_advanceable`；
+   **不要求 `NoIntent` 字面量**（设计 §4.8 用 let-else，函数体没有这个字面量）。不包含
+   `continuum_graph`／`select_runnable`／`ResourceDirective::new`／`apply_intent_transition`／
+   `transition(`。它不填槽、不产出新的 Intent 决策。
 
 **结果：** 八条用例名可列出。
 
@@ -1222,8 +1271,10 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test r
 - `ExecutionRequest<'a> { intent: &'a Intent, node: Option<&'a NodeId>, signals: ExecutionSignals<'a> }`
 - `ExecutionSignals<'a> { priority: Option<&'a Priority>, deadline: Option<&'a Deadline>,
   background_suitability: &'a BackgroundSuitability }`
-- `ResourceDirective`：四个**私有** `Option<String>` 槽 + `new` + 四个只读访问器；**无 `Default`**
-- `ResourceDirectiveError(String)`：`new`／`message`／`Display`／`Error`
+- `ResourceDirective`：四个**私有** `Option<String>` 槽 + `new` + 四个只读访问器；**无 `Default`**；
+  派生 `Debug, Clone, PartialEq, Eq`（测试的 `FakePort` 依赖 `Clone`）
+- `ResourceDirectiveError(String)`：`new`／`message`／`Display`／`Error`；派生
+  `Debug, Clone, PartialEq, Eq`（`FakePort::direct` 的 `error.clone()` 依赖 `Clone`）
 - `ResourceDirectivePort::direct(&self, &ExecutionRequest) -> Result<ResourceDirective, ResourceDirectiveError>`
 - `DirectiveForError::{InvalidDecision { intent }, Port(ResourceDirectiveError)}`，手写 `Display` 与
   `Error::source`
@@ -1231,6 +1282,8 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test r
   `NoIntent ⇒ Ok(None)`，**不调端口**；`Advance` 的 id 不在候选集/不可推进 ⇒ `Err(InvalidDecision)`；
   合法 ⇒ 取该候选、第一条 `PrioritySignal`、最早 `Deadline`、整轮 `background_suitability`，
   组装 `ExecutionRequest`，调一次 `port.direct(&request)` 并 `map(Some)`／`map_err(Port)`。
+  **实现按设计 §4.8 的 let-else 写**（`let IntentDecision::Advance { .. } = decision else {
+  return Ok(None); };`）；不要为了 J10-c 的源码面断言硬加 `NoIntent` 字面量。
 
 `src/lib.rs` 加 `pub mod resource;` 与设计 §2.2 的导出（`ResourceDirectivePort` 在内）。
 
@@ -1255,7 +1308,8 @@ git commit -m "feat(intent-scheduler): 资源端口与 directive_for 转交"
 
 **Interfaces:**
 - Consumes: Task 1–6 的全部 `src/` 文件
-- Produces: 无生产代码；J1-b／J3-a／J4-a／J5-a／J10-a／J14／J15 的源码面照片
+- Produces: 无生产代码；J1-b／J3-a／J4-a／J5-a／J10-a／J10-b（`decision.rs` 半边）／
+  J11-b（`src/` 全体）／J14／J15 的源码面照片
 
 **扫描口径（所有用例共用）**：
 
@@ -1286,15 +1340,27 @@ fn code_without_comments(source: &str) -> String {
         .join("\n")
 }
 
-/// 取一条函数签名（从 needle 到第一个 `{`），用于 J10-a 的返回类型比较。
+/// 取一条函数／trait 方法的签名：有函数体时截到第一个 `{`，trait 方法截到第一个 `;`。
+/// `fn direct` 是 trait 方法，没有函数体；只按 `{` 截断会越过它、切到后面的 item。
 fn signature<'a>(source: &'a str, needle: &str) -> &'a str {
     let start = source.find(needle).expect("签名应存在");
-    let end = start + source[start..].find('{').expect("签名后应有函数体");
-    &source[start..end]
+    let rest = &source[start..];
+    let end = match (rest.find('{'), rest.find(';')) {
+        (Some(brace), Some(semi)) => brace.min(semi),
+        (Some(brace), None) => brace,
+        (None, Some(semi)) => semi,
+        (None, None) => panic!("签名后应有 `{{` 或 `;`"),
+    };
+    &rest[..end]
+}
+
+/// 把签名里的换行／多空格折叠成单空格，便于做子串断言。
+fn flat(signature: &str) -> String {
+    signature.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 ```
 
-- [ ] **Step 1: 写九条用例**
+- [ ] **Step 1: 写十一条用例**
 
 1. `lib_rs_only_declares_modules_and_reexports`：`code_without_comments(LIB)` 不含
    `struct `／`enum `／`impl `／`fn `／`const `／`static `；只含 `pub mod`／`pub use`。
@@ -1312,19 +1378,29 @@ fn signature<'a>(source: &'a str, needle: &str) -> &'a str {
    `VIDEO_RENDER`。
 6. `no_intent_storage_or_transition_surface_in_source`（**J5-a**）：代码行零
    `load_intent`／`list_children`／`save_intent`／`apply_intent_transition`／`continuum_persist`。
-7. `the_three_decision_faces_have_distinct_signatures`（**J10-a**）：用 `signature(source, needle)`
-   取四条签名（从 needle 到第一个 `{`，空白折叠成单空格），断言：
+7. `the_three_decision_faces_have_distinct_signatures`（**J10-a**）：用 `signature` 取四条签名
+   （函数截到 `{`，trait 方法 `fn direct` 截到 `;`），再用 `flat` 把空白折叠成单空格，断言：
    - `pub fn decide` 含 `IntentDecision` 与 `IntentDecisionError`，不含 `NodeId`、`ResourceDirective`；
    - `pub fn runnable_nodes` 含 `Vec<NodeId>`，不含 `IntentDecision`、`ResourceDirective`；
-   - `fn direct` 含 `ResourceDirective` 与 `ResourceDirectiveError`，不含 `IntentDecision`、`Vec<NodeId>`；
+   - `fn direct(` 含 `ResourceDirective` 与 `ResourceDirectiveError`，不含 `IntentDecision`、`Vec<NodeId>`
+     （用带括号的 needle，避免命中 `fn directive_for` 的前缀）；
    - `pub fn directive_for` 含 `Option<ResourceDirective>` 与 `DirectiveForError`；
-   - 上述任一条签名中，`IntentDecision`／`Vec<NodeId>`／`ResourceDirective` 三者**只出现一个**。
-   `directive_for` 是转交入口，不参与「三个决策面」的返回类型比较（设计 §5.4）。
+   - **只对前三条（三个决策面）的返回类型**检查：`decide` 的返回类型命中 `IntentDecision`、
+     `runnable_nodes` 命中 `Vec<NodeId>`、`direct` 命中 `ResourceDirective`；每条整签名不再含
+     另外两个决策类型。`directive_for` 是转交入口，**明确排除**在这项比较之外：它的合法签名
+     同时含 `IntentDecision` 参数与 `ResourceDirective` 返回（设计 §5.4）。
 8. `no_model_call_surface_in_source`（**J14**）：代码行零
    `ModelProvider`／`InvokeRequest`／`continuum_provider`／`continuum_runtime`。
 9. `no_resource_scheduler_type_in_source`（**J15**）：代码行零 `ResourceScheduler`。
+10. `decision_source_names_no_execution_ids_or_resource_directives`（**J10-b 的 `decision.rs` 半边**）：
+    `code_without_comments(DECISION)` 零 `NodeId`／`ResourceDirective`／`DirectiveForError`。
+    与 Task 5 的 `src/graph.rs` 半边合起来覆盖设计 J10-b。
+11. `no_graph_logic_vocabulary_anywhere_in_source`（**J11-b**）：把 `src_texts()` 的五个文件各自
+    `code_without_comments` 后拼接，零 `NodeState`／`edges_to`／`predecessors`／`apply_blocking`／
+    `apply_unblocking`／`transition(`／`max_parallel`。Task 5 的函数体禁止词只守一个函数；这一条
+    按设计扫 `src/` 全体非注释行。
 
-**结果：** 九条用例名可列出。
+**结果：** 十一条用例名可列出。
 
 - [ ] **Step 2: 运行，确认形态**
 
@@ -1342,7 +1418,7 @@ git add crates/continuum-intent-scheduler/tests/source_surface.rs
 git commit -m "test(intent-scheduler): 源码面与三层分离照片"
 ```
 
-**结果：** 九条全绿；`src/` 仍恰五个文件。
+**结果：** 十一条全绿；`src/` 仍恰五个文件。
 
 ---
 
@@ -1421,15 +1497,22 @@ TMPDIR="$PWD/.tmp" timeout 600 cargo test -p continuum-intent-scheduler --test m
 TMPDIR="$PWD/.tmp" timeout 1800 cargo test -p continuum-runtime --test dependency_direction
 git diff --stat c89d839 -- crates/continuum-runtime/src/main.rs \
     crates/continuum-runtime/tests/migrations.rs crates/continuum-runtime/tests/startup.rs
-grep -rn "continuum-intent-scheduler" crates/continuum-runtime/src/main.rs \
+! grep -rn "continuum-intent-scheduler" crates/continuum-runtime/src/main.rs \
     crates/continuum-runtime/tests/migrations.rs crates/continuum-runtime/tests/startup.rs
+git diff --quiet c89d839 -- crates/continuum-runtime/tests/fixtures/p6_pre_allowed.txt
+! git diff -U0 c89d839 -- crates/continuum-runtime/tests/dependency_direction.rs \
+    | grep -E '^[+-].*(P6_EXPECTED_ROWS|p6_pre_allowed)'
 TMPDIR="$PWD/.tmp" timeout 1200 cargo test -p continuum-runtime --test migrations --test startup
 ```
 
 **结果：**
 - 依赖门绿；`ALLOWED` 的 `continuum-intent-scheduler` 行**恰三项**
   （`continuum-canonical`／`continuum-graph`／`continuum-semantics`），既有行不出现本 crate 名。
-- `git diff --stat c89d839` 对三个迁移相关文件输出为空；`grep` 零命中。
+- `git diff --stat c89d839` 对三个迁移相关文件输出为空；`! grep` 零命中（`grep` 零命中退出 1，
+  前置 `!` 把它变成成功，避免脚本误判）。
+- `p6_pre_allowed.txt` 与 `P6_EXPECTED_ROWS` 不变：前者 `git diff --quiet` 退出 0；
+  后者在 `dependency_direction.rs` 的 diff 中无 `^[+-]` 行命中（文件本身因 Task 1 的 `ALLOWED`
+  有改动，所以只核这两枚 P6 记号）。
 - `migrations` 与 `startup` 全绿，计数不变。
 
 - [ ] **Step 4: 全量门**
@@ -1442,6 +1525,9 @@ TMPDIR="$PWD/.tmp" timeout 1800 cargo build --workspace --all-targets
 **结果：** 全绿，**0 warning**；全量日志里的 `Running` 与 `test result:` 行覆盖新增的八个测试目标。
 
 - [ ] **Step 5: 变异复核（承重守卫，六轮）**
+
+设计 §7.3 共 **15 条**变异预告；本 task 只复核其中 **6 条承重变异**（核心行为）。J10／J11／J12／
+J14／J15 的源码面守卫没有变异复核；这是本计划的取舍，不是设计验收硬要求。
 
 每轮：备份被改文件 → `sha256sum` 记录 → 改一处 → 跑指定测试读红位 → 还原 → `sha256sum` 与备份比对
 一致。**每轮独立日志路径**（`.tmp/p7b-mutations/<编号>.log`）；**不得用 `git checkout --` 顺手还原**
@@ -1456,8 +1542,9 @@ TMPDIR="$PWD/.tmp" timeout 1800 cargo build --workspace --all-targets
 | 5 | 基线只把 `Ready` 放进 `eligible` | Task 4 `baseline_selects_each_active_status_under_user_focus` | Task 3 `candidate_order_is_the_last_tiebreak` |
 | 6 | 基线在 focus 之前按 `priority.as_str()` 升序排序 `eligible` | Task 3 `priority_and_background_suitability_do_not_change_the_decision` | Task 3 的 `user_focus_beats_deadline_and_blocking`（focus 仍应命中） |
 
-**结果：** 六轮的「该红」逐条实测为红，「不该红」保持绿；六个文件的 sha256 前后一致；
-`.tmp/p7b-mutations/` 的日志保留到复审结束。
+**结果：** 六轮的「该红」逐条实测为红，「不该红」保持绿；**两个被改文件**
+（`src/decision.rs`、`src/resource.rs`）的 sha256 前后一致；`.tmp/p7b-mutations/` 的日志保留到复审结束。
+设计 §7.3 的另外 9 条变异预告不在本轮复核范围。
 
 - [ ] **Step 6: 提交**
 
@@ -1496,14 +1583,14 @@ git commit -m "test(intent-scheduler): 清单边、依赖门与零表收尾"
 | §5.1 | P7D 的消费契约 | **不在本块代码内**；Task 2／4 的测试注释钉住边界，契约留给 P7D（Review Focus 2／5） |
 | §5.2 | 装配方接线 | **不在本块代码内**；Task 6 的假端口只证接口；实现方归 P7C／装配方（遗留第 3 条） |
 | §5.3 | `NoIntent` 三种来源与硬约束 | Task 2（规范化）＋Task 3（空候选）＋Task 4（七负例）＋Task 7（空串哨兵） |
-| §5.4 | 三层分离的结构照片 | Task 5（J10-b）＋Task 6（J10-c）＋Task 7（J10-a） |
+| §5.4 | 三层分离的结构照片 | Task 5（J10-b 的 graph.rs 半边）＋Task 6（J10-c）＋Task 7（J10-a、J10-b 的 decision.rs 半边） |
 | §6 | 跨块接缝 | Task 1（零 P7C／P7D 边）＋「跨计划前置」 |
 | §7.1／§7.2 | J1–J16 与照片 | 下面的「照片归位」表 |
-| §7.3 | 变异预告 | Task 8 Step 5（六条承重变异） |
+| §7.3 | 变异预告 | Task 8 Step 5（设计 15 条中的 6 条承重变异；其余 9 条为源码面守卫，不做变异） |
 | §7.4 | 拍不出照片的地方 | 「遗留/待协调」逐条列，不冒充覆盖 |
 | §8 | 明确不做 | Global Constraints 末段；Task 7 的源码面 |
 | §9 | 零表零迁移零事件 | Task 8 Step 3／4；Global Constraints |
-| §10 | 十二条设计问题 | 「遗留/待协调」只列与本块实现直接相关的四条＋本计划新查出的夹具限制 |
+| §10 | 十二条设计问题 | 「遗留/待协调」列与本块实现直接相关的四条＋两条已知接缝（第 9、11 条）＋本计划新查出的夹具限制 |
 | §11 | 实测与口径订正 | 本计划引用其结论，不重述 |
 | §12 | 验收口径 | 自审「照片归位」＋Task 8 全量门 |
 
@@ -1533,17 +1620,17 @@ git commit -m "test(intent-scheduler): 清单边、依赖门与零表收尾"
 | **J8-e** | `an_empty_no_intent_basis_is_normalized_to_no_intent` | Task 2 |
 | **J9** | 七项分列：`user_focus_beats_deadline_and_blocking`／`the_earliest_deadline_wins_and_multiple_entries_take_the_minimum`／`the_largest_deduped_blocking_set_wins`／`candidate_order_is_the_last_tiebreak`／`priority_and_background_suitability_do_not_change_the_decision`／`signals_pointing_outside_the_candidates_are_ignored`／`duplicate_candidate_ids_are_not_deduplicated`＋`the_same_inputs_yield_the_same_decision` | Task 3 |
 | **J10-a** | `the_three_decision_faces_have_distinct_signatures` | Task 7 |
-| **J10-b** | `graph_source_mentions_neither_intent_nor_resource` | Task 5 |
-| **J10-c** | `directive_for_only_transfers_and_makes_no_new_decisions` | Task 6 |
+| **J10-b** | `graph_source_mentions_neither_intent_nor_resource`（graph.rs 半边，**partial**）＋`decision_source_names_no_execution_ids_or_resource_directives`（decision.rs 半边，**partial**）；合起来覆盖设计 J10-b | Task 5＋Task 7 |
+| **J10-c** | `directive_for_only_transfers_and_makes_no_new_decisions`（平衡花括号函数体；断言 `Ok(None)`／`port.direct`，不要求 `NoIntent` 字面量） | Task 6 |
 | **J11-a** | `the_graph_entry_is_a_zero_logic_transfer`（函数体恰一行） | Task 5 |
-| **J11-b** | 同一用例的禁止词根表 | Task 5 |
+| **J11-b** | Task 5 的函数体禁止词表（**partial**，只守一个函数）＋`no_graph_logic_vocabulary_anywhere_in_source`（`src/` 全体非注释行）；合起来覆盖设计 J11-b | Task 5＋Task 7 |
 | **J12-a** | `there_is_no_production_port_implementation_or_router_placement_surface` | Task 6 |
 | **J12-b** | 同一用例的 `rank`／`place`／第 4 层类型表 | Task 6 |
 | **J13-a** | `no_intent_returns_none_without_calling_the_port` | Task 6 |
 | **J13-b** | `a_legal_advance_calls_the_port_once_and_returns_four_slots_verbatim` | Task 6 |
 | **J13-c** | `a_port_error_is_passed_through` | Task 6 |
 | **J13-d** | `an_invalid_advance_is_rejected_without_calling_the_port` | Task 6 |
-| **J13-e** | `resource_directive_fields_are_private_and_default_is_absent` | Task 6 |
+| **J13-e** | `resource_directive_fields_are_private_and_default_is_absent`（**partial**：仅源码面半边；编译期半边无照片，见遗留第 8 条） | Task 6 |
 | **J14** | `no_model_call_surface_in_source`＋清单门 | Task 7／Task 8 |
 | **J15** | `no_resource_scheduler_type_in_source` | Task 7 |
 | **J16** | Task 8 Step 3 的 `dependency_direction`；`ALLOWED` 行恰三项 | Task 8 |
@@ -1599,13 +1686,15 @@ git commit -m "test(intent-scheduler): 清单边、依赖门与零表收尾"
 
 ### 五、比例
 
-- 设计 1451 行；本计划 **1655 行**（`wc -l` 实测）。任务 **8 个**；
-  J1–J16 每条至少有一张照片（J3-c 设计自注可选，本计划不建；J7 的七负例／六正例／J7-b 三个函数分开；
-  J10 的 a／b／c 分在 Task 7／5／6）。
+- 设计 1451 行；本计划 **1752 行**（`wc -l` 实测）。任务 **8 个**。
+- J1–J16 每条至少有**一张**照片，但不把「有测试函数」当成「照片完整」：J10-b／J11-b 各自分工在
+  Task 5（局部）与 Task 7（`src/` 全体／`decision.rs`），合起来才覆盖设计判据；**J13-e 只有源码面
+  半边（partial）**，编译期半边没有照片，见遗留第 8 条。J3-c 设计自注可选，本计划不建；J7 的七负例／
+  六正例／J7-b 三个函数分开；J10 的 a／b／c 分在 Task 7／5＋7／6。
 - 生产代码集中在 `src/` 的五个文件；测试量大于生产量是刻意的——本块的判据几乎全是
   「形状＋状态边界＋否定面＋源码面」。
-- 没有把设计 §10 的十二条全部搬成 task：与本块实现直接相关的四条进「遗留/待协调」，
-  其余照原文留在设计里（重述就是第二份转录）。
+- 没有把设计 §10 的十二条全部搬成 task：与本块实现直接相关的四条＋两条已知接缝（第 9、11 条）
+  进「遗留/待协调」，其余照原文留在设计里（重述就是第二份转录）。
 
 ---
 
@@ -1613,7 +1702,8 @@ git commit -m "test(intent-scheduler): 清单边、依赖门与零表收尾"
 
 **凡设计未给判据的，下标「规范未给判据」；凡本计划自己定了的，下标「本计划自定」。**
 
-设计 §10 的十二条**逐条仍有效**；下面只列与本块实现直接相关的四条，以及本计划新查出的夹具限制。
+设计 §10 的十二条**逐条仍有效**；下面列与本块实现直接相关的四条、两条已知接缝（第 9、11 条），
+以及本计划新查出的夹具限制。
 
 1. **§302 五输入的组合函数／权重未定**（**规范未给判据**）。§302 只给五个名字；`BaselineIntentPolicy`
    的五步次序是**本设计自定**，不是规范排名；`priority` 不透明，基线不读它，§78 的「显式 priority
@@ -1632,11 +1722,12 @@ git commit -m "test(intent-scheduler): 清单边、依赖门与零表收尾"
    P7B 没有规范判据，本设计自报 J10 作为完成判据，**不修改 §7.4**。**收件人：协调者 ＋ 《工程》维护者。**
    代价：P7B 的验收依赖自报判据，跨文档不一致时没有规范锚（设计 §3.7、§10 第 5 条）。
 5. **非空 `AdfirGraph` 夹具需要本块未获准的 dev 边**（**本计划新查出**）。`Node::new` 需要
-   `continuum_operator::{OperatorId, OperatorVersion}`，`add_port` 需要 `continuum_port::Port`；
-   设计 §2.1 只允许 `continuum-canonical` 一条 dev 边。因此 Task 5 的运行期图夹具只建空图，
-   J11 的主证据是「函数体恰一行转调」的源码面。**收件人：设计持有方 ＋ 协调者。**
-   若要在运行期覆盖非空图的 READY／截断行为，需先改设计 §2.1 的 dev 边表，再补
-   `continuum-operator`／`continuum-port` 两条 dev 边；本轮不擅自加。
+   `continuum_operator::{OperatorId, OperatorVersion}`；只有再加端口／前驱边时才需要
+   `continuum_port::Port`。设计 §2.1 只允许 `continuum-canonical` 一条 dev 边。因此 Task 5 的
+   运行期图夹具只建空图，J11 的主证据是「函数体恰一行转调」的源码面。**报协调者两条候选：
+   `continuum-operator`（非空节点必需）／`continuum-port`（仅端口／边时需要）。收件人：设计持有方 ＋ 协调者。**
+   若要在运行期覆盖非空图的 READY／截断行为，需先改设计 §2.1 的 dev 边表，再按需补这两条；
+   **Task 5 不擅自加边**。
 6. **`EVOLVING` 的会话存在性不在 P7B**（**契约边界，不是缺陷**）。`is_advanceable` 只判状态；
    P7D 必须只在确有对应活跃会话时才把 `Evolving` 放进候选集，否则不得以 `Advance` 驱动其迁移。
    **收件人：P7D。** 本块的 Task 4 用测试注释钉住这条边界（设计 §2.5 第 3 条、§5.1）。
@@ -1645,11 +1736,17 @@ git commit -m "test(intent-scheduler): 清单边、依赖门与零表收尾"
    若 P4 将来给 `Priority` 可比较取值域，J3-b／J3-c 的照片要同步调整（设计 §11 第 3 条）。
 8. **J13-e 的编译期半边没有 `trybuild`**（**本计划新查出**）。设计 §7.2 的 J13-e 写「编译期＋源码面」，
    但设计 §2.1 的 dev 边只有 `continuum-canonical`；要拍「crate 外写 `ResourceDirective { .. }` 编不过」
-   需 `trybuild` 或一个独立编译失败样例，两者都不在本块的允许清单里。本计划用源码面
-   （字段无 `pub`、无 `impl Default`）替代编译期半边。**收件人：设计持有方 ＋ 协调者。**
-   若协调者要求补编译期样例，先改设计 §2.1 的 dev 边表，再补 `trybuild`。
+   需 `trybuild` 或一个独立编译失败样例，两者都不在本块的允许清单里。本计划只测源码面
+   （字段无 `pub`、无 `impl Default`），**J13-e 标 partial，不冒充完整照片**。
+   **收件人：设计持有方 ＋ 协调者。** 若协调者要求补编译期样例，先改设计 §2.1 的 dev 边表，再补 `trybuild`。
+9. **模型驱动策略的归属未定**（**设计 §10 第 9 条；不在本块实现**）。P7B 只冻 `IntentSelectionPolicy`；
+   由谁实现模型策略、提示、重试／降级、模型选择，都不在本块。**收件人：P7D。**
+   代价：P7B 的基线只保证确定性，不保证「模型策略」的行为一致。
+10. **四槽内容格式未定**（**设计 §10 第 11 条；不在本块实现**）。`ResourceDirective` 只保证四个
+    `Option<String>` 槽存在；槽内容的格式、解析、`None` 的消费语义由消费方定义。
+   **收件人：P7D ＋ 装配方 ＋ P8。** 代价：同一槽的字符串在不同消费方之间不可比。
 
 ---
 
-**计划行数核对：** 写完后以 `wc -l` 复核；若与本自审的「1000 行左右」偏差超过 20%，在提交前
-改「比例」一节，不改正文结构。
+**计划行数核对：** 本文以 `wc -l` 实测；若后续修订改变行数，同步更新「比例」一节的实测值，
+不以行数目标改写正文结构。
