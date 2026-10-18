@@ -1,0 +1,11 @@
+[package]
+name = "continuum-learning"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-protected = { path = "../continuum-protected" }
+
+[dev-dependencies]
+trybuild = { workspace = true }

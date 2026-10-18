@@ -87,3 +87,6 @@ async-trait = { workspace = true }
 # **不用 `futures-util`**——`stream::iter` 在它里面，本仓不引它；判据见
 # `crates/continuum-provider/tests/common/mod.rs:31-32` 的同一句话（同一取舍的第二份副本）。
 futures-core = { workspace = true }
+# P6D 的 R9 装配照片（设计 §3.2、§8.1）：唯一使用点是 tests/p6d_protected_core.rs。
+# 生产装配落位后边别升为普通边，ALLOWED 数组不变，只改行内注记。
+continuum-protected = { path = "../continuum-protected" }

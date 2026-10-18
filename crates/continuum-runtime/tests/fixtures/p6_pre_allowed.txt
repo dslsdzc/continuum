@@ -1,0 +1,30 @@
+# P6D 自己的基线：03e79c7 的 ALLOWED（27 行）。
+# 改这个文件是 P6D 的改动，不是 P6 任一执行块的改动；合并评审必须单独核这一处 diff。
+# 这是 P6 合并门，不是永久门；P7 起按 §7.6 重新基线化或退役，不得在此追加行。
+continuum-core:
+continuum-events:continuum-core
+continuum-persist:continuum-events
+continuum-provider:continuum-capability,continuum-core,continuum-persist
+continuum-artifact:continuum-core,continuum-events,continuum-persist
+continuum-port:continuum-artifact
+continuum-operator:continuum-artifact
+continuum-graph:continuum-artifact,continuum-events,continuum-port,continuum-operator,continuum-persist
+continuum-workspace:continuum-events,continuum-persist
+continuum-sandbox:continuum-workspace
+continuum-effect:continuum-events,continuum-persist
+continuum-policy:continuum-artifact,continuum-effect,continuum-persist
+continuum-capability:continuum-core,continuum-effect,continuum-events,continuum-persist
+continuum-secrets:continuum-capability
+continuum-connector:continuum-capability,continuum-core,continuum-effect,continuum-persist,continuum-provider,continuum-secrets
+continuum-model-registry:continuum-capability,continuum-core,continuum-persist
+continuum-node:continuum-artifact
+continuum-method:
+continuum-canonical:continuum-persist
+continuum-semantics:continuum-canonical,continuum-persist
+continuum-budget:continuum-persist,continuum-semantics
+continuum-media:continuum-artifact,continuum-graph,continuum-method,continuum-operator,continuum-verify
+continuum-verify:continuum-artifact,continuum-events,continuum-graph,continuum-operator,continuum-persist
+continuum-research:continuum-artifact,continuum-graph,continuum-method,continuum-operator,continuum-verify
+continuum-code:continuum-artifact,continuum-graph,continuum-method,continuum-operator,continuum-verify,continuum-workspace
+continuum-image:continuum-artifact,continuum-graph,continuum-operator,continuum-persist,continuum-verify
+continuum-runtime:continuum-artifact,continuum-budget,continuum-canonical,continuum-capability,continuum-core,continuum-effect,continuum-events,continuum-graph,continuum-model-registry,continuum-persist,continuum-policy,continuum-provider,continuum-sandbox,continuum-secrets,continuum-semantics,continuum-verify,continuum-workspace

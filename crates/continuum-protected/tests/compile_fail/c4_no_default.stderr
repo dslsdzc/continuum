@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `default` found for struct `ProtectedCore` in the current scope
+ --> tests/compile_fail/c4_no_default.rs:5:32
+  |
+5 |     let _core = ProtectedCore::default();
+  |                                ^^^^^^^ function or associated item not found in `ProtectedCore`
