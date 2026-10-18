@@ -40,10 +40,12 @@ fn allowed_table_has_the_memory_row_and_the_runtime_entry() {
         1,
         "ALLOWED 应恰有一行 (\"continuum-memory\", &[\"continuum-persist\"])（S2）"
     );
+    // P6A 的 continuum-context 条目把 continuum-memory 列为四条允许边之一，
+    // 故 3 = memory 行 + runtime 条目 + P6A 条目。
     assert_eq!(
         text.matches("\"continuum-memory\",").count(),
-        2,
-        "`\"continuum-memory\",` 应恰出现两次：新 crate 行与 runtime 行各一次（S2）"
+        3,
+        "`\"continuum-memory\",` 应恰出现三次：memory 行、runtime 条目与 P6A 条目各一次（S2）"
     );
 
     let start = text

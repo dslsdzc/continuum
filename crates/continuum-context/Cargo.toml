@@ -1,0 +1,21 @@
+[package]
+name = "continuum-context"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `ArtifactId`：`artifacts[]` 的元素（设计 §4.1）。
+continuum-artifact = { path = "../continuum-artifact" }
+# `Message` / `ToolResult`：`Reference` 的两个载荷（设计 §4.5）。
+continuum-core = { path = "../continuum-core" }
+# `MemoryClaim`：`memories[]` 的元素；`MemoryRetrieval` / `RetrievalQuery` /
+# `MemoryScope` / `MemoryError` 由 Task 4 使用。**P6C 的 crate，硬前置。**
+continuum-memory = { path = "../continuum-memory" }
+# `ContextProvenance` / `ContextTrust` / `label` / `PackageShape` / `validate`。
+# **P6B 的 crate，硬前置**；本 crate 不定义这两个类型（设计 §4.6）。
+continuum-trust = { path = "../continuum-trust" }
+
+[dev-dependencies]
+# `ToolResult.output` 的构造与 J1-c 的反序列化样例（设计 §8.2 J1-c）。
+serde_json = { workspace = true }

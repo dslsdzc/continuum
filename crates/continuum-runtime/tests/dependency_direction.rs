@@ -415,6 +415,19 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // P6B 的 §281 上下文信任词汇，不是节点/工具/权威信任域（设计 §8.5）
     // 空数组是硬断言：本 crate 对 workspace 内零依赖。
     ("continuum-trust", &[]),
+    // P6A Context Compiler（设计 §2.1）。四条边全部是 P6A → 上游：
+    // artifact（ArtifactId）、core（Message / ToolResult）、
+    // memory（P6C 的 claim 与检索面）、trust（P6B 的 provenance 与标签）。
+    // **P6B／P6C 不依赖本块**；本块不碰 runtime_migrations()（零表）。
+    (
+        "continuum-context",
+        &[
+            "continuum-artifact",
+            "continuum-core",
+            "continuum-memory",
+            "continuum-trust",
+        ],
+    ),
 ];
 
 /// workspace 成员名单，派生自 cargo 自身解析出的 workspace 定义。
