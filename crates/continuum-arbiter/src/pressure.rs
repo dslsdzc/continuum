@@ -1,3 +1,4 @@
+use crate::policy::ArbiterPolicy;
 use crate::workload::WorkloadClass;
 
 /// §13 的压力等级。**规范只给示例 HIGH**；四档是本设计自定（设计 §2.4 第 1 条）。
@@ -46,4 +47,34 @@ pub struct ResourceObservation {
     pub disk_io: Option<u8>,
     pub network: Option<u8>,
     pub workload_class: Option<WorkloadClass>,
+}
+
+/// 设计 §5.1 第 1–3 步：六项非 `None` 读数先钳到 `0..=100`，取最大值后按阈值分档。
+/// 六项全 `None` 返回 `None`（调用方保持上一压力）。
+pub(crate) fn raw_pressure(
+    observation: &ResourceObservation,
+    policy: &ArbiterPolicy,
+) -> Option<ResourcePressure> {
+    let max = [
+        observation.cpu,
+        observation.ram,
+        observation.gpu,
+        observation.vram,
+        observation.disk_io,
+        observation.network,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|value| value.min(100))
+    .max()?;
+
+    Some(if max >= policy.critical_at {
+        ResourcePressure::Critical
+    } else if max >= policy.high_at {
+        ResourcePressure::High
+    } else if max >= policy.moderate_at {
+        ResourcePressure::Moderate
+    } else {
+        ResourcePressure::Low
+    })
 }
