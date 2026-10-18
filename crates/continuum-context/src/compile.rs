@@ -41,12 +41,16 @@ pub fn compile(
         trust_labels.push(label_value);
     }
 
-    // references：只丢空 `Text`，纯空白保留；本 task 暂不截断（设计 §5.3 第 1／3 条）。
+    // references：只丢空 `Text`，纯空白保留；按输入序取前 max_references 条
+    // （先过滤再计数，空串不占预算位；设计 §5.3 第 1／3 条）。
     for candidate in references {
         if let Reference::Text(text) = &candidate.content
             && text.is_empty()
         {
             continue;
+        }
+        if references_out.len() >= budget.max_references {
+            break;
         }
         let label_value = continuum_trust::label(&candidate.provenance);
         references_out.push(candidate.content);
@@ -54,8 +58,15 @@ pub fn compile(
         trust_labels.push(label_value);
     }
 
-    // artifacts：按输入序装 id；本 task 暂不去重、暂不截断（设计 §5.3 第 4 条）。
+    // artifacts：先去重（首个保留），再截断到 max_artifacts（设计 §5.3 第 4 条）。
+    let mut seen_artifacts: HashSet<String> = HashSet::new();
     for candidate in artifacts {
+        if !seen_artifacts.insert(candidate.content.as_str().to_string()) {
+            continue;
+        }
+        if artifacts_out.len() >= budget.max_artifacts {
+            break;
+        }
         let label_value = continuum_trust::label(&candidate.provenance);
         artifacts_out.push(candidate.content);
         provenance.push(candidate.provenance);
