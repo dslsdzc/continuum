@@ -14,7 +14,9 @@ use continuum_semantics::{
 use serde_json::{Map, Value as JsonValue, json};
 
 use crate::baseline::EngineeringBaseline;
-use crate::drive::{ContinuousProductDrive, ProductDriveState, ProductPhase};
+use crate::drive::{
+    ContinuousProductDrive, ProductDriveState, ProductPhase, advance_product_phase,
+};
 use crate::error::ProductError;
 use crate::milestone::{Milestone, MilestoneId, MilestoneState};
 use crate::predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
@@ -26,6 +28,7 @@ use crate::progress::{
 use crate::readiness::{
     ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
 };
+use crate::shippable::ShippableVerdict;
 use continuum_verify::Evidence;
 
 /// 迁移 200，名称 `p7a_product`。版本恰 `[200]`。
@@ -891,6 +894,126 @@ pub fn emit_replan_decision(
     };
     create_decision(tx, &decision, occurred_at)?;
     Ok(Some(decision))
+}
+
+// ===========================================================================
+// Task 16：ProductDrive 落库（C2=(b)）
+// ===========================================================================
+
+fn load_drive_required(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+) -> Result<ProductDriveState, ProductError> {
+    load_product_drive(tx, product_id)?.ok_or_else(|| ProductError::MissingDriveState {
+        product: product_id.as_str().to_owned(),
+    })
+}
+
+/// **唯一**的 phase 写点：所有相位变化都经这里。
+fn write_drive_phase(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+    phase: ProductPhase,
+    occurred_at: i64,
+) -> Result<(), ProductError> {
+    tx.execute(
+        "UPDATE product_drive SET phase = ?2, updated_at = ?3 WHERE product_id = ?1",
+        &[
+            Value::text(product_id.as_str()),
+            Value::text(phase.as_str()),
+            Value::Int(occurred_at),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 只写开关（0／1）与 `updated_at`，不改 phase。
+pub fn set_continuous_product_drive(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+    enabled: bool,
+    occurred_at: i64,
+) -> Result<ProductDriveState, ProductError> {
+    let current = load_drive_required(tx, product_id)?;
+    tx.execute(
+        "UPDATE product_drive
+         SET continuous_product_drive = ?2, updated_at = ?3
+         WHERE product_id = ?1",
+        &[
+            Value::text(product_id.as_str()),
+            Value::Int(i64::from(enabled)),
+            Value::Int(occurred_at),
+        ],
+    )?;
+    Ok(ProductDriveState {
+        continuous_product_drive: ContinuousProductDrive { enabled },
+        phase: current.phase,
+    })
+}
+
+/// 记录一次 Shippable 判定，只推进相位；**不存 verdict 本身**。
+pub fn record_shippable_evaluation(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+    verdict: &ShippableVerdict,
+    occurred_at: i64,
+) -> Result<ProductDriveState, ProductError> {
+    let current = load_drive_required(tx, product_id)?;
+    let next = advance_product_phase(current.phase, verdict);
+    if next != current.phase {
+        write_drive_phase(tx, product_id, next, occurred_at)?;
+    }
+    Ok(ProductDriveState {
+        continuous_product_drive: current.continuous_product_drive,
+        phase: next,
+    })
+}
+
+/// 进入 post-shippable：Pre ⇒ `NotShippableYet`；Shippable＋关 ⇒ `DriveDisabled`；
+/// Shippable＋开 ⇒ 写 Post；已 Post ⇒ 幂等 `Ok`。Milestone 必须属于本 Product 且不终态。
+pub fn begin_post_shippable_work(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+    milestone: &MilestoneId,
+    occurred_at: i64,
+) -> Result<ProductDriveState, ProductError> {
+    let Some(found) = load_milestone(tx, milestone)? else {
+        return Err(ProductError::UnknownMilestone {
+            id: milestone.as_str().to_owned(),
+        });
+    };
+    if found.product_id().as_str() != product_id.as_str() {
+        return Err(ProductError::MilestoneProductMismatch {
+            milestone: milestone.as_str().to_owned(),
+            product: product_id.as_str().to_owned(),
+        });
+    }
+    if is_terminal(found.state()) {
+        return Err(ProductError::TerminalMilestone {
+            id: milestone.as_str().to_owned(),
+        });
+    }
+
+    let current = load_drive_required(tx, product_id)?;
+    match current.phase {
+        ProductPhase::PostShippableImprovement => Ok(current),
+        ProductPhase::PreShippable => Err(ProductError::NotShippableYet),
+        ProductPhase::Shippable => {
+            if !current.continuous_product_drive.enabled {
+                return Err(ProductError::DriveDisabled);
+            }
+            write_drive_phase(
+                tx,
+                product_id,
+                ProductPhase::PostShippableImprovement,
+                occurred_at,
+            )?;
+            Ok(ProductDriveState {
+                continuous_product_drive: current.continuous_product_drive,
+                phase: ProductPhase::PostShippableImprovement,
+            })
+        }
+    }
 }
 
 // ===========================================================================

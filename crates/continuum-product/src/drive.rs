@@ -26,7 +26,16 @@ pub enum ProductPhase {
 }
 
 impl ProductPhase {
-    /// 落库编码的逆（小写、多词下划线）；认不出就是 `None`。
+    /// 落库编码（小写、多词下划线）。与类型同址；表外值读回即 `CorruptRow`。
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            Self::PreShippable => "pre_shippable",
+            Self::Shippable => "shippable",
+            Self::PostShippableImprovement => "post_shippable_improvement",
+        }
+    }
+
+    /// [`Self::as_str`] 的逆；认不出就是 `None`。
     pub(crate) fn parse(s: &str) -> Option<Self> {
         Some(match s {
             "pre_shippable" => Self::PreShippable,

@@ -31,9 +31,10 @@ pub use milestone::{
     MilestoneGenerator, MilestoneId, MilestoneProposalInput, MilestoneState, propose_next_batch,
 };
 pub use persist::{
-    emit_replan_decision, load_milestone, load_milestones, load_product, load_product_drive,
-    load_progress, p7a_product_migrations, record_milestone_progress, record_milestone_state,
-    save_milestones, save_product, set_current_milestone,
+    begin_post_shippable_work, emit_replan_decision, load_milestone, load_milestones,
+    load_product, load_product_drive, load_progress, p7a_product_migrations,
+    record_milestone_progress, record_milestone_state, record_shippable_evaluation,
+    save_milestones, save_product, set_continuous_product_drive, set_current_milestone,
 };
 pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use product::{Product, establish_baseline};
