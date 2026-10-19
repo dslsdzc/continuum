@@ -1,0 +1,29 @@
+[package]
+name = "continuum-context"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `ArtifactId`：`artifacts[]` 的元素（设计 §4.1）。
+continuum-artifact = { path = "../continuum-artifact" }
+# `Message` / `ToolResult`：`Reference` 的两个载荷（设计 §4.5）。
+continuum-core = { path = "../continuum-core" }
+# `MemoryClaim`：`memories[]` 的元素；`MemoryRetrieval` / `RetrievalQuery` /
+# `MemoryScope` / `MemoryError` 由 Task 4 使用。**P6C 的 crate，硬前置。**
+continuum-memory = { path = "../continuum-memory" }
+# `ContextProvenance` / `ContextTrust` / `label` / `PackageShape` / `validate`。
+# **P6B 的 crate，硬前置**；本 crate 不定义这两个类型（设计 §4.6）。
+continuum-trust = { path = "../continuum-trust" }
+
+[dev-dependencies]
+# `ToolResult.output` 的构造与 J1-c 的反序列化样例（设计 §8.2 J1-c）。
+serde_json = { workspace = true }
+# P6C 的测试构造面（`MemoryClaim::for_test`）：同一条 continuum-memory 边的测试
+# feature，不是第五条边。Task 4 Step 3b 预检通过后加入。
+continuum-memory = { path = "../continuum-memory", features = ["test-support"] }
+# `tests/type_level.rs` 的四份编译失败样例与一份编译通过的正控制：钉住
+# `ContextPackage` 的唯一构造点（J1-a／J1-b／J1-c 与外部写字段）。**外部 crate，
+# 不进 `dependency_direction.rs` 的 `ALLOWED`**——那张表只断言 workspace 成员
+# 之间的边。
+trybuild = { workspace = true }

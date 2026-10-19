@@ -433,6 +433,19 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // 迁移 200 与落库 API 条件于 C2 裁定；裁定前只用到 canonical／verify 的类型与
     // semantics 的错误类型，边仍按冻结清单登记。
     ("continuum-product", &["continuum-canonical", "continuum-persist", "continuum-semantics", "continuum-verify"]),
+    // P6A Context Compiler（设计 §2.1）。四条边全部是 P6A → 上游：
+    // artifact（ArtifactId）、core（Message / ToolResult）、
+    // memory（P6C 的 claim 与检索面）、trust（P6B 的 provenance 与标签）。
+    // **P6B／P6C 不依赖本块**；本块不碰 runtime_migrations()（零表）。
+    (
+        "continuum-context",
+        &[
+            "continuum-artifact",
+            "continuum-core",
+            "continuum-memory",
+            "continuum-trust",
+        ],
+    ),
 ];
 
 /// workspace 成员名单，派生自 cargo 自身解析出的 workspace 定义。

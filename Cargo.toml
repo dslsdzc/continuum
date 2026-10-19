@@ -34,6 +34,7 @@ members = [
     "crates/continuum-learning",
     "crates/continuum-product",
     "crates/continuum-arbiter",
+    "crates/continuum-context",
 ]
 
 [workspace.package]

@@ -7,8 +7,10 @@
 //! - (t) 七个引号串共 **十四条**（编码表七臂 + 解码表七臂），全部在 `trust.rs`；
 //! - (u) `enum .*Trust` / `struct .*Trust` 共 **四处**（含 `TrustError` 的前缀命中）；
 //! - (v) `continuum-trust` 的直接依赖只有四个外部 crate，没有 `continuum-*` / `path`；
-//! - (w) `label(&` 的**可执行**命中只有 `validate.rs` 一处，定义只有 `label.rs` 一处
-//!   （`validate.rs` 的文档注释里还有一处同形文本，不算调用）。
+//! - (w) 在 `crates/continuum-trust/src` 内，`label(&` 的**可执行**命中只有 `validate.rs`
+//!   一处，定义只有 `label.rs` 一处（`validate.rs` 的文档注释里还有一处同形文本，不算调用）。
+//!   扫描范围收窄到本 crate：P6A 的 `continuum-context/src/compile.rs` 按设计 §4.2 第 5 条／
+//!   §5.3 第 6 条每片段调一次 `label()`，那四个生产调用点不归本 crate 的语料管。
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,6 +64,18 @@ fn rust_sources() -> Vec<PathBuf> {
         }
     }
     assert!(!sources.is_empty(), "crates/*/src 下必须至少有一个 .rs");
+    sources
+}
+
+/// 本 crate 的 `src` 语料。(w) 只在这里数：P6A 的 `compile.rs` 另有四个生产调用点。
+fn trust_sources() -> Vec<PathBuf> {
+    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut sources = Vec::new();
+    collect_rs(&src, &mut sources);
+    assert!(
+        !sources.is_empty(),
+        "continuum-trust/src 下必须至少有一个 .rs"
+    );
     sources
 }
 
@@ -231,13 +245,13 @@ fn the_manifest_declares_only_external_dependencies() {
     }
 }
 
-/// (w)：`label(&` 的可执行命中只有 `validate.rs` 一处；定义只有 `label.rs` 一处。
+/// (w)：本 crate 内 `label(&` 的可执行命中只有 `validate.rs` 一处；定义只有 `label.rs` 一处。
 #[test]
-fn label_is_defined_once_and_called_only_by_validate() {
+fn label_is_defined_once_and_called_only_by_validate_within_trust() {
     let mut calls: Vec<(String, usize, String)> = Vec::new();
     let mut definitions: Vec<(String, usize)> = Vec::new();
 
-    for path in rust_sources() {
+    for path in trust_sources() {
         for (line_no, line) in source_text(&path).lines().enumerate() {
             if line.contains("pub fn label") {
                 definitions.push((relative(&path), line_no + 1));

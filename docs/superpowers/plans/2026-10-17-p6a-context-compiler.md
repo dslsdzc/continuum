@@ -199,6 +199,12 @@ P6C Task 7 的检索面与**claim 测试构造面**（`MemoryClaim::for_test` �
 | `crates/continuum-runtime/tests/dependency_direction.rs` 的 `ALLOWED` | 加 `("continuum-context", &["continuum-artifact", "continuum-core", "continuum-memory", "continuum-trust"])`；内层数组按字母序 | Task 1 Step 3 |
 | `crates/continuum-runtime/src/main.rs` 的 `runtime_migrations()` | **一行都不加**（本块零表） | —— |
 
+**计划外的一处测试共写（补记，不计入上面两行）**：`crates/continuum-memory/tests/wiring.rs`
+的 S2 断言（`allowed_table_has_the_memory_row_and_the_runtime_entry`）在实施期改为只在
+`ALLOWED` 表段内计数，与 main 的 `e4a1ab2` 一致（本块的提交为 `481c19d`）。起因是 P6D 的
+`P6_EXPECTED_ROWS` 与 P6A 的 `continuum-context` 条目都会引用 `continuum-memory`，全文计数
+会随块数漂移。本块不改 P6C 的源码，只同步这一条测试断言。
+
 **不碰的文件**：`crates/continuum-artifact/src/artifact.rs`、`crates/continuum-graph/src/**`、
 `crates/continuum-operator/src/**`、`crates/continuum-runtime/src/**`（本块没有装配面）、
 `docs/02-工程.md`、`docs/spec/**`、`docs/superpowers/specs/**`（设计一份都不改）。
@@ -1826,3 +1832,18 @@ git commit -m "docs(context): P6A 的收尾与复核"
   的内外、以及遗留第一节的新缺口。
 - **交给复审者**：本计划的 **10 个 task**、**J1–J14 的照片归位**与 **Review Focus 5 条**；
   请先对 Task 4 的 J14、Task 6 的 J3、Task 8／Task 9 的「唯一构造点」逐行核。
+
+---
+
+## 收尾记录（2026-10-19）
+
+- **全量门（工作树独立 `CARGO_TARGET_DIR=$PWD/target`）**：`EXIT=0`，**250** 个 `test result:`
+  行（含 Doc-tests），**1449 passed / 0 failed / 2 ignored / 0 warning**。日志 `.tmp/full2.log`
+  （不入库）。独立 target 是刻意的：共享 target 下测试二进制的 `CARGO_MANIFEST_DIR` 可能指向
+  别的树，源码面语料会假绿。
+- **计划外的一处测试共写**：见「跨计划前置」§三的补记——`crates/continuum-memory/tests/wiring.rs`
+  的 S2 断言与 main `e4a1ab2` 对齐，本块提交为 `481c19d`。
+- **终审修复（P6A Needs fixes）**：源码面 (w) 的语料收窄到 `continuum-trust/src`（P6A 的
+  `compile.rs` 有四个设计要求的 `label()` 调用点）；`continuum-context` 补「生产路径不调用
+  `validate`」的守卫；J4 的 project／tool／provider／artifact 四个用例补「不在别的字段」断言；
+  清理测试文件里已过期的过程注释。
