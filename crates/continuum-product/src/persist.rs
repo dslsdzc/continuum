@@ -8,7 +8,8 @@
 use continuum_canonical::Opaque;
 use continuum_persist::{Migration, Tx, Value};
 use continuum_semantics::{
-    IntentError, IntentKind, IntentStatus, ProductIdRef, load_intent,
+    Decision, DecisionId, IntentError, IntentKind, IntentStatus, ProductIdRef, create_decision,
+    load_intent,
 };
 use serde_json::{Map, Value as JsonValue, json};
 
@@ -19,7 +20,8 @@ use crate::milestone::{Milestone, MilestoneId, MilestoneState};
 use crate::predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 use crate::product::Product;
 use crate::progress::{
-    ProgressDelta, ProgressGateVerdict, ProgressPolicy, ProgressRecord, evaluate_progress,
+    ProgressDelta, ProgressGateVerdict, ProgressPolicy, ProgressRecord, ReplanDraft,
+    evaluate_progress,
 };
 use crate::readiness::{
     ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
@@ -806,6 +808,89 @@ pub fn load_progress(
         })
     })
     .collect()
+}
+
+// ===========================================================================
+// Task 13：只出 replan Decision，不执行 replan
+// ===========================================================================
+
+/// 从**去重后的写前 history** 重算 Progress Gate；`Triggered` 时写一张 `Decision`
+/// 与一条 `decision.required` 事件，其余两值零行零事件。
+///
+/// 签名里没有 `ProgressGateVerdict`：调用方无法把伪造的 `Triggered` 传进来。
+pub fn emit_replan_decision(
+    tx: &Tx<'_>,
+    product: &Product,
+    record: &ProgressRecord,
+    history: &[ProgressRecord],
+    policy: Option<&dyn ProgressPolicy>,
+    draft: ReplanDraft,
+    occurred_at: i64,
+) -> Result<Option<Decision>, ProductError> {
+    if record.product_id.as_str() != product.id().as_str() {
+        return Err(ProductError::MilestoneProductMismatch {
+            milestone: record.milestone_id.as_str().to_owned(),
+            product: product.id().as_str().to_owned(),
+        });
+    }
+    let Some(milestone) = load_milestone(tx, &record.milestone_id)? else {
+        return Err(ProductError::UnknownMilestone {
+            id: record.milestone_id.as_str().to_owned(),
+        });
+    };
+    if milestone.product_id().as_str() != product.id().as_str() {
+        return Err(ProductError::MilestoneProductMismatch {
+            milestone: record.milestone_id.as_str().to_owned(),
+            product: product.id().as_str().to_owned(),
+        });
+    }
+    if draft.issue.as_str().is_empty() {
+        return Err(ProductError::EmptyReplanField { field: "issue" });
+    }
+    if draft.options.is_empty() {
+        return Err(ProductError::EmptyReplanField { field: "options" });
+    }
+
+    // 只做两件事：去掉本记录（它作为 previous/current 参数传入），其余重复
+    // milestone 保留最后一条。record 不回到 history，否则本次 NoProgress 会数两次。
+    let without_record: Vec<&ProgressRecord> = history
+        .iter()
+        .filter(|item| item.milestone_id != record.milestone_id)
+        .collect();
+    let deduped: Vec<ProgressRecord> = without_record
+        .iter()
+        .enumerate()
+        .filter(|(index, item)| {
+            !without_record[index + 1..]
+                .iter()
+                .any(|later| later.milestone_id == item.milestone_id)
+        })
+        .map(|(_, item)| (*item).clone())
+        .collect();
+
+    let verdict = evaluate_progress(
+        &record.previous_product_state,
+        &record.current_product_state,
+        &deduped,
+        policy,
+    );
+    if !matches!(verdict, ProgressGateVerdict::Triggered { .. }) {
+        return Ok(None);
+    }
+
+    let decision = Decision {
+        id: DecisionId::from_str(&format!(
+            "decision/{}/replan/{}",
+            product.id().as_str(),
+            record.milestone_id.as_str()
+        )),
+        intent_id: product.intent_id().clone(),
+        issue: draft.issue,
+        options: draft.options,
+        blocking: draft.blocking,
+    };
+    create_decision(tx, &decision, occurred_at)?;
+    Ok(Some(decision))
 }
 
 // ===========================================================================

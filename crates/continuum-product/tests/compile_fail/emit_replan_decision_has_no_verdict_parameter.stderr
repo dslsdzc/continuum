@@ -1,0 +1,16 @@
+error[E0061]: this function takes 7 arguments but 8 arguments were supplied
+  --> tests/compile_fail/emit_replan_decision_has_no_verdict_parameter.rs:16:13
+   |
+16 |     let _ = emit_replan_decision(tx, product, record, history, None, draft, verdict, 0);
+   |             ^^^^^^^^^^^^^^^^^^^^                                            ------- unexpected argument #7 of type `ProgressGateVerdict`
+   |
+note: function defined here
+  --> src/persist.rs
+   |
+   | pub fn emit_replan_decision(
+   |        ^^^^^^^^^^^^^^^^^^^^
+help: remove the extra argument
+   |
+16 -     let _ = emit_replan_decision(tx, product, record, history, None, draft, verdict, 0);
+16 +     let _ = emit_replan_decision(tx, product, record, history, None, draft, 0);
+   |
