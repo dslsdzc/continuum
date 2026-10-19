@@ -25,6 +25,18 @@ pub enum ProductPhase {
     PostShippableImprovement,
 }
 
+impl ProductPhase {
+    /// 落库编码的逆（小写、多词下划线）；认不出就是 `None`。
+    pub(crate) fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "pre_shippable" => Self::PreShippable,
+            "shippable" => Self::Shippable,
+            "post_shippable_improvement" => Self::PostShippableImprovement,
+            _ => return None,
+        })
+    }
+}
+
 /// 开关＋相位；与 §231 的 Product 分开存（`product_drive` 表），
 /// **不是 §231 的第八个字段**。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

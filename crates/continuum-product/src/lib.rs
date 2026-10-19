@@ -24,7 +24,9 @@ pub use milestone::{
     BatchBoundary, Milestone, MilestoneBatchDraft, MilestoneDependency, MilestoneDraft,
     MilestoneGenerator, MilestoneId, MilestoneProposalInput, MilestoneState, propose_next_batch,
 };
-pub use persist::p7a_product_migrations;
+pub use persist::{
+    load_product, load_product_drive, p7a_product_migrations, save_product,
+};
 pub use predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 pub use product::{Product, establish_baseline};
 pub use progress::{

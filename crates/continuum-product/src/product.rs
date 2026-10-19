@@ -155,7 +155,7 @@ pub async fn establish_baseline(
 }
 
 /// 只用于错误消息，不用于落库。
-fn status_name(status: IntentStatus) -> &'static str {
+pub(crate) fn status_name(status: IntentStatus) -> &'static str {
     match status {
         IntentStatus::Proposed => "proposed",
         IntentStatus::Specifying => "specifying",
