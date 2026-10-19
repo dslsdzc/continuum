@@ -263,11 +263,11 @@ pub fn boundary(max_milestones: usize, max_dependency_depth: u32) -> BatchBounda
     BatchBoundary::new(max_milestones, max_dependency_depth).unwrap()
 }
 
-/// 一封 `e{id}` 的 Test 证据（不依赖制品）。
+/// 一封 `e{id}` 的 HumanConfirmation 证据（十三型里唯一不要求制品的）。
 pub fn evidence(id: &str) -> Evidence {
     Evidence::from_tool_result(
         EvidenceId::from_str(id),
-        EvidenceType::Test,
+        EvidenceType::HumanConfirmation,
         EvidenceSubject::Unattached,
         Claim::from_str("tests pass"),
         EvidenceProducer::Human,

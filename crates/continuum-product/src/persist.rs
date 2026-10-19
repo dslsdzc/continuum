@@ -18,9 +18,13 @@ use crate::error::ProductError;
 use crate::milestone::{Milestone, MilestoneId, MilestoneState};
 use crate::predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 use crate::product::Product;
+use crate::progress::{
+    ProgressDelta, ProgressGateVerdict, ProgressPolicy, ProgressRecord, evaluate_progress,
+};
 use crate::readiness::{
     ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
 };
+use continuum_verify::Evidence;
 
 /// 迁移 200，名称 `p7a_product`。版本恰 `[200]`。
 ///
@@ -607,6 +611,204 @@ pub fn load_product_drive(
 }
 
 // ===========================================================================
+// Task 12：Progress 落库与读回
+// ===========================================================================
+
+fn delta_name(delta: ProgressDelta) -> &'static str {
+    match delta {
+        ProgressDelta::Improved => "improved",
+        ProgressDelta::NoProgress => "no_progress",
+        ProgressDelta::Regressed => "regressed",
+        ProgressDelta::Undetermined => "undetermined",
+    }
+}
+
+fn parse_delta(raw: &str) -> Result<ProgressDelta, ProductError> {
+    match raw {
+        "improved" => Ok(ProgressDelta::Improved),
+        "no_progress" => Ok(ProgressDelta::NoProgress),
+        "regressed" => Ok(ProgressDelta::Regressed),
+        "undetermined" => Ok(ProgressDelta::Undetermined),
+        other => Err(corrupt(
+            "product_progress",
+            format!("表外的 progress_delta: {other}"),
+        )),
+    }
+}
+
+fn decode_readiness_in(raw: &str, table: &'static str) -> Result<ProductReadiness, ProductError> {
+    // 复用 product 面解码，再把错误表名替换成 progress 表。
+    decode_readiness(raw).map_err(|error| match error {
+        ProductError::CorruptRow { detail, .. } => ProductError::CorruptRow { table, detail },
+        other => other,
+    })
+}
+
+/// 写一条 Progress：完成态／跨 Product／重复／证据 id 全部在写入前核完；
+/// verdict 从**写前**的 history 算出（本行不计入自己）；delta 只来自策略；
+/// 写 readiness 与 `updated_at`，必要时推进游标。**不 commit。**
+pub fn record_milestone_progress(
+    tx: &Tx<'_>,
+    product: &Product,
+    milestone: &Milestone,
+    current: ProductReadiness,
+    evidence: &[Evidence],
+    policy: Option<&dyn ProgressPolicy>,
+    occurred_at: i64,
+) -> Result<(ProgressRecord, ProgressGateVerdict), ProductError> {
+    if milestone.product_id().as_str() != product.id().as_str() {
+        return Err(ProductError::MilestoneProductMismatch {
+            milestone: milestone.id().as_str().to_owned(),
+            product: product.id().as_str().to_owned(),
+        });
+    }
+    if milestone.state() != MilestoneState::Completed {
+        return Err(ProductError::MilestoneNotCompleted {
+            id: milestone.id().as_str().to_owned(),
+        });
+    }
+
+    let duplicate = tx.query(
+        "SELECT 1 FROM product_progress WHERE product_id = ?1 AND milestone_id = ?2",
+        &[
+            Value::text(product.id().as_str()),
+            Value::text(milestone.id().as_str()),
+        ],
+    )?;
+    if !duplicate.is_empty() {
+        return Err(ProductError::DuplicateProgress {
+            product: product.id().as_str().to_owned(),
+            milestone: milestone.id().as_str().to_owned(),
+        });
+    }
+
+    let supplied: Vec<&str> = evidence.iter().map(|e| e.id().as_str()).collect();
+    for (name, dimension) in current.iter() {
+        let dimension_name = name.as_str();
+        match dimension.value() {
+            ReadinessValue::Unassessed => {
+                if !dimension.evidence().is_empty() {
+                    return Err(ProductError::ReadinessEvidenceWithoutValue {
+                        dimension: dimension_name,
+                    });
+                }
+                if dimension.last_verified().is_some() {
+                    return Err(ProductError::ReadinessLastVerifiedMismatch {
+                        dimension: dimension_name,
+                    });
+                }
+            }
+            ReadinessValue::Assessed(value) => {
+                if value.as_str().is_empty() {
+                    return Err(ProductError::EmptyReadinessValue {
+                        dimension: dimension_name,
+                    });
+                }
+                if dimension.evidence().is_empty() {
+                    return Err(ProductError::ReadinessValueWithoutEvidence {
+                        dimension: dimension_name,
+                    });
+                }
+                for (i, id) in dimension.evidence().iter().enumerate() {
+                    if dimension.evidence()[..i].iter().any(|prev| prev == id) {
+                        return Err(ProductError::DuplicateEvidence {
+                            id: id.as_str().to_owned(),
+                        });
+                    }
+                    if !supplied.contains(&id.as_str()) {
+                        return Err(ProductError::EvidenceNotSupplied {
+                            id: id.as_str().to_owned(),
+                        });
+                    }
+                }
+                if dimension.last_verified().is_none() {
+                    return Err(ProductError::ReadinessLastVerifiedMismatch {
+                        dimension: dimension_name,
+                    });
+                }
+            }
+        }
+    }
+
+    let previous = product.readiness().clone();
+    let history = load_progress(tx, product.id())?;
+    let verdict = evaluate_progress(&previous, &current, &history, policy);
+    let progress_delta = policy
+        .map(|policy| policy.delta(&previous, &current))
+        .unwrap_or(ProgressDelta::Undetermined);
+
+    tx.execute(
+        "INSERT INTO product_progress
+           (product_id, milestone_id, previous_product_state, current_product_state,
+            progress_delta, recorded_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        &[
+            Value::text(product.id().as_str()),
+            Value::text(milestone.id().as_str()),
+            Value::text(encode_readiness(&previous)),
+            Value::text(encode_readiness(&current)),
+            Value::text(delta_name(progress_delta)),
+            Value::Int(occurred_at),
+        ],
+    )?;
+
+    tx.execute(
+        "UPDATE product SET readiness = ?2, updated_at = ?3 WHERE id = ?1",
+        &[
+            Value::text(product.id().as_str()),
+            Value::text(encode_readiness(&current)),
+            Value::Int(occurred_at),
+        ],
+    )?;
+
+    advance_cursor_if_current(tx, product.id(), milestone.id(), occurred_at)?;
+
+    Ok((
+        ProgressRecord {
+            product_id: product.id().clone(),
+            milestone_id: milestone.id().clone(),
+            previous_product_state: previous,
+            current_product_state: current,
+            progress_delta,
+            recorded_at: occurred_at,
+        },
+        verdict,
+    ))
+}
+
+/// 按 `recorded_at`／插入序升序读一个 Product 的 Progress。
+pub fn load_progress(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+) -> Result<Vec<ProgressRecord>, ProductError> {
+    tx.query(
+        "SELECT product_id, milestone_id, previous_product_state, current_product_state,
+                progress_delta, recorded_at
+         FROM product_progress WHERE product_id = ?1
+         ORDER BY recorded_at, rowid",
+        &[Value::text(product_id.as_str())],
+    )?
+    .iter()
+    .map(|row| {
+        Ok(ProgressRecord {
+            product_id: ProductIdRef::from_str(&text_at(row, 0, "product_progress")?),
+            milestone_id: MilestoneId::from_str(&text_at(row, 1, "product_progress")?),
+            previous_product_state: decode_readiness_in(
+                &text_at(row, 2, "product_progress")?,
+                "product_progress",
+            )?,
+            current_product_state: decode_readiness_in(
+                &text_at(row, 3, "product_progress")?,
+                "product_progress",
+            )?,
+            progress_delta: parse_delta(&text_at(row, 4, "product_progress")?)?,
+            recorded_at: int_at(row, 5, "product_progress")?,
+        })
+    })
+    .collect()
+}
+
+// ===========================================================================
 // Task 11：Milestone 落库、状态更新与游标
 // ===========================================================================
 
@@ -906,33 +1108,48 @@ pub fn record_milestone_state(
     )?;
 
     if is_terminal(to) {
-        let owners = tx.query(
-            "SELECT id FROM product WHERE current_milestone = ?1",
-            &[Value::text(id.as_str())],
-        )?;
-        for row in owners {
-            let product_id = text_at(&row, 0, "product")?;
-            let next = tx.query(
-                "SELECT id FROM milestone
-                 WHERE product_id = ?1
-                   AND state NOT IN ('completed', 'failed', 'superseded')
-                 ORDER BY seq LIMIT 1",
-                &[Value::text(&product_id)],
-            )?;
-            let next = next
-                .first()
-                .map(|row| text_at(row, 0, "milestone"))
-                .transpose()?;
-            tx.execute(
-                "UPDATE product SET current_milestone = ?2, updated_at = ?3 WHERE id = ?1",
-                &[
-                    Value::text(&product_id),
-                    next.map(Value::text).unwrap_or(Value::Null),
-                    Value::Int(occurred_at),
-                ],
-            )?;
-        }
+        advance_cursor_if_current(tx, &milestone.product_id(), id, occurred_at)?;
     }
+    Ok(())
+}
+
+/// 若 `milestone_id` 是某个 Product 的当前游标，把它推进到按 `seq` 的第一枚
+/// 非终态；没有则置 NULL。
+fn advance_cursor_if_current(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+    milestone_id: &MilestoneId,
+    occurred_at: i64,
+) -> Result<(), ProductError> {
+    let is_current = tx.query(
+        "SELECT 1 FROM product WHERE id = ?1 AND current_milestone = ?2",
+        &[
+            Value::text(product_id.as_str()),
+            Value::text(milestone_id.as_str()),
+        ],
+    )?;
+    if is_current.is_empty() {
+        return Ok(());
+    }
+    let next = tx.query(
+        "SELECT id FROM milestone
+         WHERE product_id = ?1
+           AND state NOT IN ('completed', 'failed', 'superseded')
+         ORDER BY seq LIMIT 1",
+        &[Value::text(product_id.as_str())],
+    )?;
+    let next = next
+        .first()
+        .map(|row| text_at(row, 0, "milestone"))
+        .transpose()?;
+    tx.execute(
+        "UPDATE product SET current_milestone = ?2, updated_at = ?3 WHERE id = ?1",
+        &[
+            Value::text(product_id.as_str()),
+            next.map(Value::text).unwrap_or(Value::Null),
+            Value::Int(occurred_at),
+        ],
+    )?;
     Ok(())
 }
 
@@ -994,7 +1211,10 @@ mod tests {
 
     use crate::baseline::EngineeringBaseline;
     use crate::predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
-    use crate::readiness::{ProductReadiness, ReadinessDimensionName};
+    use crate::readiness::{
+        ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
+    };
+    use continuum_verify::EvidenceId;
 
     fn baseline() -> EngineeringBaseline {
         EngineeringBaseline {
@@ -1149,6 +1369,61 @@ mod tests {
             }
         ));
         assert_eq!(count(&tx), 0);
+    }
+
+    #[test]
+    fn record_milestone_progress_rejects_assessed_without_evidence() {
+        let (_dir, db, product) = setup();
+        let tx = db.begin().unwrap();
+        let milestone = forged("milestone/p/0", "m", vec![], vec![]);
+        save_milestones(&tx, &product, &[milestone], 1).unwrap();
+        record_milestone_state(
+            &tx,
+            &MilestoneId::from_str("milestone/p/0"),
+            MilestoneState::Proposed,
+            MilestoneState::Completed,
+            2,
+        )
+        .unwrap();
+        let milestone = load_milestone(&tx, &MilestoneId::from_str("milestone/p/0"))
+            .unwrap()
+            .unwrap();
+        let current = ProductReadiness::unassessed().with_dimension(
+            ReadinessDimensionName::Documentation,
+            ReadinessDimension::for_test(
+                ReadinessValue::Assessed(Opaque::from_str("0.8")),
+                vec![],
+                Some(100),
+            ),
+        );
+        let err = record_milestone_progress(
+            &tx,
+            &product,
+            &milestone,
+            current,
+            &[],
+            None,
+            3,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ProductError::ReadinessValueWithoutEvidence {
+                dimension: "documentation"
+            }
+        ));
+        assert_eq!(
+            tx.query("SELECT COUNT(*) FROM product_progress", &[]).unwrap()[0][0],
+            Value::Int(0)
+        );
+        let stored = load_product(&tx, product.id()).unwrap().unwrap();
+        assert!(
+            stored
+                .readiness()
+                .iter()
+                .into_iter()
+                .all(|(_, dimension)| dimension.value().is_unassessed())
+        );
     }
 
     #[test]
