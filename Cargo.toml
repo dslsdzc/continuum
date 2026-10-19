@@ -33,6 +33,7 @@ members = [
     "crates/continuum-protected",
     "crates/continuum-learning",
     "crates/continuum-product",
+    "crates/continuum-arbiter",
 ]
 
 [workspace.package]

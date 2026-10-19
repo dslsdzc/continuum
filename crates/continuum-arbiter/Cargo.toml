@@ -1,0 +1,21 @@
+[package]
+name = "continuum-arbiter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+assembly = []
+
+[dependencies]
+# 空：workspace 内零依赖、外部零依赖
+
+[dev-dependencies]
+# 空
+
+# `tests/assembly.rs` 只在启用 assembly 特性时构建；默认 `cargo test -p continuum-arbiter`
+# 不得编译它（否则 `continuum_arbiter::assembly` 不存在，默认全套测试红）。
+[[test]]
+name = "assembly"
+required-features = ["assembly"]
