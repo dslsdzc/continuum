@@ -1422,7 +1422,6 @@ mod tests {
     use crate::readiness::{
         ProductReadiness, ReadinessDimension, ReadinessDimensionName, ReadinessValue,
     };
-    use continuum_verify::EvidenceId;
 
     fn baseline() -> EngineeringBaseline {
         EngineeringBaseline {
