@@ -63,6 +63,7 @@ impl SuspensionState {
     }
 
     /// 只允许从 `Checkpointing` 调用。截止前成功 → `Suspended`（`Ok`）；
+    /// 已过截止 → 相位回 `Throttled` 并返回 `Err(CheckpointTimedOut)`（晚到成功也拒绝）；
     /// 错相位返回 `NotCheckpointing { phase }`，相位不变。
     pub fn checkpoint_succeeded(
         &mut self,
@@ -70,6 +71,14 @@ impl SuspensionState {
     ) -> Result<SuspensionPhase, SuspensionError> {
         if self.phase != SuspensionPhase::Checkpointing {
             return Err(SuspensionError::NotCheckpointing { phase: self.phase });
+        }
+        if let Some(deadline) = self.checkpoint_deadline_millis
+            && now_millis >= deadline
+        {
+            self.phase = SuspensionPhase::Throttled;
+            self.checkpoint_deadline_millis = None;
+            self.last_transition_millis = now_millis;
+            return Err(SuspensionError::CheckpointTimedOut);
         }
         self.phase = SuspensionPhase::Suspended;
         self.checkpoint_deadline_millis = None;
@@ -102,8 +111,7 @@ impl SuspensionState {
         SuspensionError::CheckpointTimedOut
     }
 
-    /// 重试预算；Task 5 起由 `direct` 的上限判断读取。不公开。
-    #[allow(dead_code)] // Task 5 接入上限判断后删除本豁免。
+    /// 重试预算；由 `direct` 的上限判断读取。不公开。
     pub(crate) fn attempts(&self) -> u32 {
         self.attempts
     }
@@ -128,16 +136,18 @@ impl SuspensionState {
         self.last_transition_millis = now_millis;
     }
 
-    /// 仅从 `Throttled` 调用。
+    /// 仅从 `Throttled` 调用。新的压力周期有新的重试预算。
     pub(crate) fn run(&mut self, now_millis: u64) {
         self.phase = SuspensionPhase::Running;
+        self.attempts = 0;
         self.checkpoint_deadline_millis = None;
         self.last_transition_millis = now_millis;
     }
 
-    /// 仅从 `Suspended` 调用。
+    /// 仅从 `Suspended` 调用。新的压力周期有新的重试预算。
     pub(crate) fn resume(&mut self, now_millis: u64) {
         self.phase = SuspensionPhase::Running;
+        self.attempts = 0;
         self.checkpoint_deadline_millis = None;
         self.last_transition_millis = now_millis;
     }

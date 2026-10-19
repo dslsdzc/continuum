@@ -67,11 +67,18 @@ impl ResourceArbiter {
         now_millis: u64,
     ) -> Result<ResourceDecision, SuspensionError> {
         match state.phase() {
-            SuspensionPhase::Checkpointing => Ok(ResourceDecision {
-                summary: self.summary(),
-                action: None,
-                phase: SuspensionPhase::Checkpointing,
-            }),
+            SuspensionPhase::Checkpointing => {
+                if let Some(deadline) = state.checkpoint_deadline_millis()
+                    && now_millis >= deadline
+                {
+                    return Err(state.checkpoint_timed_out(now_millis));
+                }
+                Ok(ResourceDecision {
+                    summary: self.summary(),
+                    action: None,
+                    phase: SuspensionPhase::Checkpointing,
+                })
+            }
             SuspensionPhase::Suspended => {
                 if self.pressure <= self.policy.resume_at
                     && now_millis.saturating_sub(state.last_transition_millis())
@@ -100,11 +107,17 @@ impl ResourceArbiter {
                             (Some(ResourceAction::Throttle), state.phase())
                         }
                         ResourceAction::Suspend => {
-                            state.enter_checkpointing(
-                                now_millis,
-                                self.policy.checkpoint_timeout_millis,
-                            );
-                            (Some(ResourceAction::Suspend), state.phase())
+                            if state.attempts() >= self.policy.max_checkpoint_attempts {
+                                // 预算耗尽（含 max=0）：只 throttle，不进入 checkpoint。
+                                state.throttle(now_millis);
+                                (Some(ResourceAction::Throttle), state.phase())
+                            } else {
+                                state.enter_checkpointing(
+                                    now_millis,
+                                    self.policy.checkpoint_timeout_millis,
+                                );
+                                (Some(ResourceAction::Suspend), state.phase())
+                            }
                         }
                         // `direct` 不发出 `Resume`：它只由 `Suspended` 分支在恢复条件满足时发出。
                         ResourceAction::Resume => (None, SuspensionPhase::Running),
@@ -124,11 +137,22 @@ impl ResourceArbiter {
                         }
                         ResourceAction::Throttle => (None, SuspensionPhase::Throttled),
                         ResourceAction::Suspend => {
-                            state.enter_checkpointing(
-                                now_millis,
-                                self.policy.checkpoint_timeout_millis,
-                            );
-                            (Some(ResourceAction::Suspend), state.phase())
+                            if state.attempts() >= self.policy.max_checkpoint_attempts {
+                                // 预算耗尽：不再发出 Suspend，保持 Throttled。
+                                (None, SuspensionPhase::Throttled)
+                            } else if state.attempts() > 0
+                                && now_millis.saturating_sub(state.last_transition_millis())
+                                    < self.policy.cooldown_millis
+                            {
+                                // 失败后的重试需状态时钟 cooldown；首次尝试不要求。
+                                (None, SuspensionPhase::Throttled)
+                            } else {
+                                state.enter_checkpointing(
+                                    now_millis,
+                                    self.policy.checkpoint_timeout_millis,
+                                );
+                                (Some(ResourceAction::Suspend), state.phase())
+                            }
                         }
                         // `direct` 不发出 `Resume`：它只由 `Suspended` 分支在恢复条件满足时发出。
                         ResourceAction::Resume => (None, SuspensionPhase::Throttled),
