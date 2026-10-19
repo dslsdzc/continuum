@@ -7,6 +7,8 @@
 mod baseline;
 mod drive;
 mod error;
+mod handoff;
+mod lower;
 mod milestone;
 mod persist;
 mod predicate;
@@ -20,6 +22,8 @@ pub use drive::{
     ContinuousProductDrive, ProductDriveState, ProductPhase, advance_product_phase,
 };
 pub use error::{PortError, ProductError};
+pub use handoff::save_lowered_intent;
+pub use lower::lower_milestone;
 pub use milestone::{
     BatchBoundary, Milestone, MilestoneBatchDraft, MilestoneDependency, MilestoneDraft,
     MilestoneGenerator, MilestoneId, MilestoneProposalInput, MilestoneState, propose_next_batch,
