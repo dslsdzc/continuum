@@ -125,6 +125,7 @@ pub(crate) fn runtime_migrations() -> Vec<Migration> {
     migrations.extend(continuum_budget::p4_budget_migrations());         // 120：树与账本
     migrations.extend(continuum_verify::p5a_verify_migrations());        // 130：验证与证据五表
     migrations.extend(continuum_memory::p6c_memory_migrations());        // 190：记忆八表
+    migrations.extend(continuum_product::p7a_product_migrations());      // 200：产品循环四表
     migrations
 }
 
