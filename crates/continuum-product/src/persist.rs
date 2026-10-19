@@ -15,7 +15,7 @@ use serde_json::{Map, Value as JsonValue, json};
 use crate::baseline::EngineeringBaseline;
 use crate::drive::{ContinuousProductDrive, ProductDriveState, ProductPhase};
 use crate::error::ProductError;
-use crate::milestone::{MilestoneId, MilestoneState};
+use crate::milestone::{Milestone, MilestoneId, MilestoneState};
 use crate::predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
 use crate::product::Product;
 use crate::readiness::{
@@ -606,9 +606,564 @@ pub fn load_product_drive(
     }))
 }
 
+// ===========================================================================
+// Task 11：Milestone 落库、状态更新与游标
+// ===========================================================================
+
+const MILESTONE_COLUMNS: &str =
+    "id, product_id, seq, objective, dependencies, entry_conditions, exit_conditions, state";
+
+fn decode_id_array(raw: &str, what: &str) -> Result<Vec<MilestoneId>, ProductError> {
+    Ok(string_array(
+        &parse_json(raw, "milestone")?,
+        "milestone",
+        what,
+    )?
+    .into_iter()
+    .map(|id| MilestoneId::from_str(&id))
+    .collect())
+}
+
+fn decode_opaque_conditions(raw: &str, what: &str) -> Result<Vec<Opaque>, ProductError> {
+    opaque_array(&parse_json(raw, "milestone")?, "milestone", what)
+}
+
+fn decode_milestone(row: &[Value]) -> Result<Milestone, ProductError> {
+    let id = MilestoneId::from_str(&text_at(row, 0, "milestone")?);
+    let product_id = ProductIdRef::from_str(&text_at(row, 1, "milestone")?);
+    let _seq = int_at(row, 2, "milestone")?;
+    let objective = Opaque::from_str(&text_at(row, 3, "milestone")?);
+    let dependencies = decode_id_array(
+        &text_at(row, 4, "milestone")?,
+        "milestone.dependencies",
+    )?;
+    let entry_conditions = decode_opaque_conditions(
+        &text_at(row, 5, "milestone")?,
+        "milestone.entry_conditions",
+    )?;
+    let exit_conditions = decode_opaque_conditions(
+        &text_at(row, 6, "milestone")?,
+        "milestone.exit_conditions",
+    )?;
+    let state_name = text_at(row, 7, "milestone")?;
+    let state = MilestoneState::parse(&state_name)
+        .ok_or_else(|| corrupt("milestone", format!("表外的 state: {state_name}")))?;
+    Milestone::from_verified_parts(
+        id,
+        product_id,
+        objective,
+        dependencies,
+        entry_conditions,
+        exit_conditions,
+        state,
+    )
+    .map_err(|e| corrupt("milestone", format!("Milestone 复核失败: {e}")))
+}
+
+/// 保存一个批次：开头的 `load_product` 防孤儿；批内查重先于一切 INSERT；
+/// 逐枚校验 product_id／state／objective／conditions／id 与全局 ordinal；
+/// 评估门（已完成但无 progress）在任何 INSERT 之前。
+pub fn save_milestones(
+    tx: &Tx<'_>,
+    product: &Product,
+    milestones: &[Milestone],
+    occurred_at: i64,
+) -> Result<(), ProductError> {
+    if load_product(tx, product.id())?.is_none() {
+        return Err(ProductError::UnknownProduct {
+            id: product.id().as_str().to_owned(),
+        });
+    }
+
+    for (i, milestone) in milestones.iter().enumerate() {
+        if milestones[..i]
+            .iter()
+            .any(|previous| previous.id() == milestone.id())
+        {
+            return Err(ProductError::MilestoneIdCollision {
+                id: milestone.id().as_str().to_owned(),
+            });
+        }
+    }
+
+    let base = match tx
+        .query(
+            "SELECT COALESCE(MAX(seq), -1) + 1 FROM milestone WHERE product_id = ?1",
+            &[Value::text(product.id().as_str())],
+        )?
+        .first()
+        .and_then(|row| row.first())
+    {
+        Some(Value::Int(seq)) => *seq,
+        other => {
+            return Err(corrupt(
+                "milestone",
+                format!("MAX(seq) 不是整数: {other:?}"),
+            ))
+        }
+    };
+
+    for (offset, milestone) in milestones.iter().enumerate() {
+        let seq = base + offset as i64;
+        if milestone.product_id().as_str() != product.id().as_str() {
+            return Err(ProductError::MilestoneProductMismatch {
+                milestone: milestone.id().as_str().to_owned(),
+                product: product.id().as_str().to_owned(),
+            });
+        }
+        if milestone.state() != MilestoneState::Proposed {
+            return Err(ProductError::MilestoneStateMismatch {
+                id: milestone.id().as_str().to_owned(),
+                expected: MilestoneState::Proposed.as_str().to_owned(),
+                actual: milestone.state().as_str().to_owned(),
+            });
+        }
+        if milestone.objective().as_str().is_empty() {
+            return Err(ProductError::EmptyMilestoneObjective);
+        }
+        for (field, conditions) in [
+            ("entry_conditions", milestone.entry_conditions()),
+            ("exit_conditions", milestone.exit_conditions()),
+        ] {
+            for (index, condition) in conditions.iter().enumerate() {
+                if condition.as_str().is_empty() {
+                    return Err(ProductError::EmptyMilestoneCondition { field, index });
+                }
+            }
+        }
+        let exists = tx.query(
+            "SELECT 1 FROM milestone WHERE id = ?1",
+            &[Value::text(milestone.id().as_str())],
+        )?;
+        if !exists.is_empty() {
+            return Err(ProductError::MilestoneIdCollision {
+                id: milestone.id().as_str().to_owned(),
+            });
+        }
+        let suffix = milestone
+            .id()
+            .as_str()
+            .rsplit('/')
+            .next()
+            .unwrap_or_default();
+        let actual = suffix.parse::<u64>().unwrap_or(u64::MAX);
+        if actual != seq as u64 {
+            return Err(ProductError::MilestoneOrdinalMismatch {
+                id: milestone.id().as_str().to_owned(),
+                expected: seq as u64,
+                actual,
+            });
+        }
+    }
+
+    let missing = tx.query(
+        "SELECT m.id FROM milestone m
+         LEFT JOIN product_progress p
+           ON p.product_id = m.product_id AND p.milestone_id = m.id
+         WHERE m.product_id = ?1 AND m.state = 'completed' AND p.milestone_id IS NULL
+         LIMIT 1",
+        &[Value::text(product.id().as_str())],
+    )?;
+    if let Some(row) = missing.first() {
+        return Err(ProductError::MissingProgressForCompleted {
+            milestone: text_at(row, 0, "milestone")?,
+        });
+    }
+
+    for (offset, milestone) in milestones.iter().enumerate() {
+        let seq = base + offset as i64;
+        tx.execute(
+            "INSERT INTO milestone
+               (id, product_id, seq, objective, dependencies, entry_conditions,
+                exit_conditions, state, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+            &[
+                Value::text(milestone.id().as_str()),
+                Value::text(product.id().as_str()),
+                Value::Int(seq),
+                Value::text(milestone.objective().as_str()),
+                Value::text(
+                    serde_json::to_string(
+                        &milestone
+                            .dependencies()
+                            .iter()
+                            .map(|id| id.as_str())
+                            .collect::<Vec<_>>(),
+                    )
+                    .expect("字符串数组可序列化"),
+                ),
+                Value::text(
+                    serde_json::to_string(
+                        &milestone
+                            .entry_conditions()
+                            .iter()
+                            .map(Opaque::as_str)
+                            .collect::<Vec<_>>(),
+                    )
+                    .expect("字符串数组可序列化"),
+                ),
+                Value::text(
+                    serde_json::to_string(
+                        &milestone
+                            .exit_conditions()
+                            .iter()
+                            .map(Opaque::as_str)
+                            .collect::<Vec<_>>(),
+                    )
+                    .expect("字符串数组可序列化"),
+                ),
+                Value::text(milestone.state().as_str()),
+                Value::Int(occurred_at),
+            ],
+        )?;
+    }
+
+    let current = load_product(tx, product.id())?.and_then(|stored| {
+        stored
+            .current_milestone()
+            .map(|id| id.as_str().to_owned())
+    });
+    if current.is_none() {
+        if let Some(first) = milestones.first() {
+            tx.execute(
+                "UPDATE product SET current_milestone = ?2, updated_at = ?3 WHERE id = ?1",
+                &[
+                    Value::text(product.id().as_str()),
+                    Value::text(first.id().as_str()),
+                    Value::Int(occurred_at),
+                ],
+            )?;
+            return Ok(());
+        }
+    }
+    tx.execute(
+        "UPDATE product SET updated_at = ?2 WHERE id = ?1",
+        &[
+            Value::text(product.id().as_str()),
+            Value::Int(occurred_at),
+        ],
+    )?;
+    Ok(())
+}
+
+/// 按 id 读一枚 Milestone；不存在 ⇒ `Ok(None)`。
+pub fn load_milestone(
+    tx: &Tx<'_>,
+    id: &MilestoneId,
+) -> Result<Option<Milestone>, ProductError> {
+    let rows = tx.query(
+        &format!("SELECT {MILESTONE_COLUMNS} FROM milestone WHERE id = ?1"),
+        &[Value::text(id.as_str())],
+    )?;
+    rows.first().map(|row| decode_milestone(row)).transpose()
+}
+
+/// 按 `seq` 升序读一个 Product 的 Milestone。
+pub fn load_milestones(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+) -> Result<Vec<Milestone>, ProductError> {
+    tx.query(
+        &format!(
+            "SELECT {MILESTONE_COLUMNS} FROM milestone WHERE product_id = ?1 ORDER BY seq"
+        ),
+        &[Value::text(product_id.as_str())],
+    )?
+    .iter()
+    .map(|row| decode_milestone(row))
+    .collect()
+}
+
+/// 乐观并发：`expected` 必须等于当前状态；写入终态时若该枚是游标，游标推进到
+/// 按 `seq` 的第一枚非终态（没有则置 NULL）。
+pub fn record_milestone_state(
+    tx: &Tx<'_>,
+    id: &MilestoneId,
+    expected: MilestoneState,
+    to: MilestoneState,
+    occurred_at: i64,
+) -> Result<(), ProductError> {
+    let Some(milestone) = load_milestone(tx, id)? else {
+        return Err(ProductError::UnknownMilestone {
+            id: id.as_str().to_owned(),
+        });
+    };
+    if milestone.state() != expected {
+        return Err(ProductError::MilestoneStateMismatch {
+            id: id.as_str().to_owned(),
+            expected: expected.as_str().to_owned(),
+            actual: milestone.state().as_str().to_owned(),
+        });
+    }
+
+    tx.execute(
+        "UPDATE milestone SET state = ?2, updated_at = ?3 WHERE id = ?1",
+        &[
+            Value::text(id.as_str()),
+            Value::text(to.as_str()),
+            Value::Int(occurred_at),
+        ],
+    )?;
+
+    if is_terminal(to) {
+        let owners = tx.query(
+            "SELECT id FROM product WHERE current_milestone = ?1",
+            &[Value::text(id.as_str())],
+        )?;
+        for row in owners {
+            let product_id = text_at(&row, 0, "product")?;
+            let next = tx.query(
+                "SELECT id FROM milestone
+                 WHERE product_id = ?1
+                   AND state NOT IN ('completed', 'failed', 'superseded')
+                 ORDER BY seq LIMIT 1",
+                &[Value::text(&product_id)],
+            )?;
+            let next = next
+                .first()
+                .map(|row| text_at(row, 0, "milestone"))
+                .transpose()?;
+            tx.execute(
+                "UPDATE product SET current_milestone = ?2, updated_at = ?3 WHERE id = ?1",
+                &[
+                    Value::text(&product_id),
+                    next.map(Value::text).unwrap_or(Value::Null),
+                    Value::Int(occurred_at),
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// 写游标。`None` 只把 current 置 NULL，仍要求 Product 行存在。
+pub fn set_current_milestone(
+    tx: &Tx<'_>,
+    product_id: &ProductIdRef,
+    milestone: Option<&MilestoneId>,
+    occurred_at: i64,
+) -> Result<(), ProductError> {
+    if load_product(tx, product_id)?.is_none() {
+        return Err(ProductError::UnknownProduct {
+            id: product_id.as_str().to_owned(),
+        });
+    }
+    if let Some(id) = milestone {
+        let Some(found) = load_milestone(tx, id)? else {
+            return Err(ProductError::UnknownMilestone {
+                id: id.as_str().to_owned(),
+            });
+        };
+        if found.product_id().as_str() != product_id.as_str() {
+            return Err(ProductError::MilestoneProductMismatch {
+                milestone: id.as_str().to_owned(),
+                product: product_id.as_str().to_owned(),
+            });
+        }
+        if is_terminal(found.state()) {
+            return Err(ProductError::TerminalMilestone {
+                id: id.as_str().to_owned(),
+            });
+        }
+    }
+    tx.execute(
+        "UPDATE product SET current_milestone = ?2, updated_at = ?3 WHERE id = ?1",
+        &[
+            Value::text(product_id.as_str()),
+            milestone
+                .map(|id| Value::text(id.as_str()))
+                .unwrap_or(Value::Null),
+            Value::Int(occurred_at),
+        ],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn is_terminal(state: MilestoneState) -> bool {
     matches!(
         state,
         MilestoneState::Completed | MilestoneState::Failed | MilestoneState::Superseded
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use continuum_canonical::Opaque;
+    use continuum_persist::{Db, builtin_migrations};
+
+    use crate::baseline::EngineeringBaseline;
+    use crate::predicate::{ShippableClause, ShippableClauseId, ShippablePredicate};
+    use crate::readiness::{ProductReadiness, ReadinessDimensionName};
+
+    fn baseline() -> EngineeringBaseline {
+        EngineeringBaseline {
+            product_goal: Opaque::from_str("ship"),
+            target_users: vec![Opaque::from_str("devs")],
+            required_capabilities: vec![Opaque::from_str("build")],
+            hard_constraints: vec![Opaque::from_str("offline")],
+            architecture: Opaque::from_str("library"),
+            technology_choices: vec![Opaque::from_str("rust")],
+            minimum_complete_system: vec![Opaque::from_str("cli")],
+            known_unknowns: vec![Opaque::from_str("demand")],
+            engineering_risks: vec![Opaque::from_str("scope")],
+            acceptance_criteria: vec![Opaque::from_str("tests")],
+        }
+    }
+
+    fn predicate() -> ShippablePredicate {
+        ShippablePredicate::new(
+            vec![ReadinessDimensionName::Functional],
+            vec![
+                ShippableClause::new(
+                    ShippableClauseId::from_str("c1"),
+                    Opaque::from_str("works"),
+                )
+                .unwrap(),
+            ],
+        )
+        .unwrap()
+    }
+
+    fn setup() -> (tempfile::TempDir, Db, Product) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("product.db");
+        let mut migrations = builtin_migrations();
+        migrations.extend(p7a_product_migrations());
+        migrations.extend(continuum_semantics::p4_semantics_migrations());
+        let db = Db::open_with(&path, migrations).unwrap();
+        db.migrate().unwrap();
+
+        let product = Product::from_verified_parts(
+            ProductIdRef::from_str("p"),
+            continuum_semantics::IntentId::from_str("intent/p"),
+            baseline(),
+            ProductReadiness::unassessed(),
+            None,
+            vec![],
+            predicate(),
+        )
+        .unwrap();
+        let tx = db.begin().unwrap();
+        tx.execute(
+            "INSERT INTO product
+               (id, intent_id, baseline, readiness, current_milestone,
+                shippable_predicate, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, NULL, ?5, 1, 1)",
+            &[
+                Value::text(product.id().as_str()),
+                Value::text(product.intent_id().as_str()),
+                Value::text(encode_baseline(product.baseline())),
+                Value::text(encode_readiness(product.readiness())),
+                Value::text(encode_predicate(product.shippable_predicate())),
+            ],
+        )
+        .unwrap();
+        tx.commit().unwrap();
+        (dir, db, product)
+    }
+
+    fn forged(
+        id: &str,
+        objective: &str,
+        entry: Vec<&str>,
+        exit: Vec<&str>,
+    ) -> Milestone {
+        Milestone::for_test(
+            MilestoneId::from_str(id),
+            ProductIdRef::from_str("p"),
+            Opaque::from_str(objective),
+            vec![],
+            entry.into_iter().map(Opaque::from_str).collect(),
+            exit.into_iter().map(Opaque::from_str).collect(),
+            MilestoneState::Proposed,
+        )
+    }
+
+    fn count(tx: &Tx<'_>) -> i64 {
+        match tx
+            .query("SELECT COUNT(*) FROM milestone", &[])
+            .unwrap()[0][0]
+        {
+            Value::Int(n) => n,
+            ref other => panic!("COUNT 不是整数: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn save_milestones_rejects_a_forged_empty_milestone() {
+        let (_dir, db, product) = setup();
+        let tx = db.begin().unwrap();
+        let cases = [
+            (
+                forged("milestone/p/0", "", vec![], vec![]),
+                "objective",
+            ),
+            (
+                forged("milestone/p/0", "m", vec![""], vec![]),
+                "entry",
+            ),
+            (
+                forged("milestone/p/0", "m", vec![], vec![""]),
+                "exit",
+            ),
+        ];
+        for (milestone, label) in cases {
+            let err = save_milestones(&tx, &product, &[milestone], 1).unwrap_err();
+            match label {
+                "objective" => assert!(matches!(
+                    err,
+                    ProductError::EmptyMilestoneObjective
+                )),
+                "entry" => assert!(matches!(
+                    err,
+                    ProductError::EmptyMilestoneCondition {
+                        field: "entry_conditions",
+                        ..
+                    }
+                )),
+                _ => assert!(matches!(
+                    err,
+                    ProductError::EmptyMilestoneCondition {
+                        field: "exit_conditions",
+                        ..
+                    }
+                )),
+            }
+            assert_eq!(count(&tx), 0, "坏 {label} 写入了行");
+        }
+    }
+
+    #[test]
+    fn save_milestones_rejects_a_forged_ordinal() {
+        let (_dir, db, product) = setup();
+        let tx = db.begin().unwrap();
+        let milestone = forged("milestone/p/99", "m", vec![], vec![]);
+        let err = save_milestones(&tx, &product, &[milestone], 1).unwrap_err();
+        assert!(matches!(
+            err,
+            ProductError::MilestoneOrdinalMismatch {
+                expected: 0,
+                actual: 99,
+                ..
+            }
+        ));
+        assert_eq!(count(&tx), 0);
+    }
+
+    #[test]
+    fn save_milestones_rejects_duplicate_ids_within_a_batch() {
+        let (_dir, db, product) = setup();
+        let tx = db.begin().unwrap();
+        let batch = [
+            forged("milestone/p/0", "m0", vec![], vec![]),
+            forged("milestone/p/0", "m1", vec![], vec![]),
+        ];
+        let err = save_milestones(&tx, &product, &batch, 1).unwrap_err();
+        assert!(matches!(
+            err,
+            ProductError::MilestoneIdCollision { id } if id == "milestone/p/0"
+        ));
+        assert_eq!(count(&tx), 0);
+    }
 }
