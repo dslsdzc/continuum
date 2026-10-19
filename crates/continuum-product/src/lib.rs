@@ -22,7 +22,9 @@ pub use drive::{
     ContinuousProductDrive, ProductDriveState, ProductPhase, advance_product_phase,
 };
 pub use error::{PortError, ProductError};
-pub use handoff::save_lowered_intent;
+pub use handoff::{
+    product_intent_for_handoff, retire_completed_product_intent, save_lowered_intent,
+};
 pub use lower::lower_milestone;
 pub use milestone::{
     BatchBoundary, Milestone, MilestoneBatchDraft, MilestoneDependency, MilestoneDraft,
