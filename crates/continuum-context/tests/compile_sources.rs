@@ -178,6 +178,9 @@ fn project_text_lands_in_references_with_project_data_label() {
     let package = compile(request, budget(1, 0, 0), &NoMemory).expect("项目文本是合法引用");
 
     assert_eq!(package.references(), [Reference::Text("project".into())]);
+    assert!(package.instructions().is_empty(), "项目文本不得进指令位");
+    assert!(package.artifacts().is_empty(), "项目文本不得进 artifact 位");
+    assert!(package.memories().is_empty(), "项目文本不得进记忆位");
     assert_eq!(
         label_at(&package, Field::Reference, 0),
         ContextTrust::ProjectData
@@ -202,6 +205,9 @@ fn tool_output_lands_in_references_with_tool_output_label() {
     let package = compile(request, budget(1, 0, 0), &NoMemory).expect("工具结果是合法引用");
 
     assert_eq!(package.references(), [Reference::ToolOutput(result)]);
+    assert!(package.instructions().is_empty(), "工具结果不得进指令位");
+    assert!(package.artifacts().is_empty(), "工具结果不得进 artifact 位");
+    assert!(package.memories().is_empty(), "工具结果不得进记忆位");
     assert_eq!(
         label_at(&package, Field::Reference, 0),
         ContextTrust::ToolOutput
@@ -224,6 +230,9 @@ fn external_provider_text_lands_in_references_with_web_untrusted_label() {
     let label = label_at(&package, Field::Reference, 0);
     assert_eq!(label, ContextTrust::WebUntrusted);
     assert_ne!(label, ContextTrust::TrustedRuntime);
+    assert!(package.instructions().is_empty(), "provider 文本不得进指令位");
+    assert!(package.artifacts().is_empty(), "provider 文本不得进 artifact 位");
+    assert!(package.memories().is_empty(), "provider 文本不得进记忆位");
 }
 
 #[test]
@@ -240,6 +249,9 @@ fn artifact_ids_land_in_artifacts_with_the_artifact_label() {
     let package = compile(request, budget(0, 1, 0), &NoMemory).expect("artifact 是合法来源");
 
     assert_eq!(package.artifacts(), [ArtifactId::new("artifact-1")]);
+    assert!(package.instructions().is_empty(), "artifact 不得进指令位");
+    assert!(package.references().is_empty(), "artifact 不得进引用位");
+    assert!(package.memories().is_empty(), "artifact 不得进记忆位");
     assert_eq!(
         label_at(&package, Field::Artifact, 0),
         ContextTrust::ProjectData

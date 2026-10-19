@@ -1,7 +1,7 @@
 //! Task 4：记忆检索、查询构造与 `MemoryError` 透传。
 //!
-//! 本文件先落七条非 claim 用例；五条 claim 用例在 P6C 的 `test-support` 预检
-//! 通过后、与 `test_claim` 夹具同批补入。
+//! 十二条用例：七条非 claim ＋ 五条 claim（claim 经 P6C 的 `test-support`
+//! 构造面 `MemoryClaim::for_test` 造出）。
 
 mod support;
 

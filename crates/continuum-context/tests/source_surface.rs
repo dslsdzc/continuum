@@ -1,5 +1,6 @@
 //! Task 9 的源码面断言：J1-d（唯一构造点）、J9（不定义 P6B／P6C 类型）、
-//! Review Focus 4 的第二半（无隐藏来源）与 Review Focus 5 的第二半（无投影面）。
+//! Review Focus 4 的第二半（无隐藏来源）、Review Focus 5 的第二半（无投影面），
+//! 以及生产路径不调用 `validate` 的守卫。
 //!
 //! 零命中类断言只针对本文件写死的词根／模式，不做「整份文件没有任何…」的泛化；
 //! 语料限定 `src/` 的六个源文件，不含 `tests/`（测试要用 `ContextTrust::` 比较、
@@ -155,6 +156,16 @@ fn there_is_no_projection_serialization_or_persistence_surface() {
             "本 crate 不得出现投影／序列化／持久化面：{forbidden:?}"
         );
     }
+}
+
+/// J3 的另一半：`validate` 只由测试独立调用，生产路径（`compile`）不调它。
+/// 对齐由 `compile` 每片段同步 push 保证（设计 §4.2 第 5 条、§5.3 第 6 条）。
+#[test]
+fn compile_does_not_call_validate() {
+    assert!(
+        !include_str!("../src/compile.rs").contains("validate("),
+        "`src/compile.rs` 不得调用 `validate`；它只负责装配，独立复核在测试侧"
+    );
 }
 
 #[test]

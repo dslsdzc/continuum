@@ -1,5 +1,5 @@
 //! 记忆用例共用的假检索面。**不写进 `src/`**；用到它的 integration test 顶部写
-//! `mod support;`。`test_claim` 夹具在 P6C 的 `test-support` 预检通过后加入。
+//! `mod support;`。
 
 #![allow(dead_code)] // 各集成测试各自 `mod support;`，不是每个 helper 都被每个目标用到。
 
