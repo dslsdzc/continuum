@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `default` found for struct `continuum_product::Product` in the current scope
+ --> tests/compile_fail/product_default_is_absent.rs:2:41
+  |
+2 |     let _ = continuum_product::Product::default();
+  |                                         ^^^^^^^ function or associated item not found in `continuum_product::Product`

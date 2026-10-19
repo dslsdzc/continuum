@@ -1,0 +1,18 @@
+error: cannot construct `continuum_product::Product` with struct literal syntax due to private fields
+ --> tests/compile_fail/product_literal_is_private.rs:2:13
+  |
+2 |     let _ = continuum_product::Product { id: todo!() };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^   ----------- private field
+  |
+  = note: ...and other private fields `intent_id`, `baseline`, `readiness`, `current_milestone`, `milestone_history` and `shippable_predicate` that were not provided
+
+warning: unreachable expression
+ --> tests/compile_fail/product_literal_is_private.rs:2:13
+  |
+2 |     let _ = continuum_product::Product { id: todo!() };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^-------^^
+  |             |                                |
+  |             |                                any code following this expression is unreachable
+  |             unreachable expression
+  |
+  = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default

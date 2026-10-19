@@ -301,6 +301,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-product"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "continuum-canonical",
+ "continuum-persist",
+ "continuum-semantics",
+ "continuum-verify",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "trybuild",
+]
+
+[[package]]
 name = "continuum-protected"
 version = "0.1.0"
 dependencies = [
