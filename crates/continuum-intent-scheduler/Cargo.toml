@@ -1,0 +1,16 @@
+[package]
+name = "continuum-intent-scheduler"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `AdfirGraph` / `NodeId` / `SchedulerConfig` / `select_runnable`（设计 §2.1）。
+continuum-graph = { path = "../continuum-graph" }
+# `Intent` / `IntentId` / `Priority` / `IntentStatus`（设计 §2.1）。
+continuum-semantics = { path = "../continuum-semantics" }
+
+[dev-dependencies]
+# 仅 `tests/` 构造 `Intent` 夹具：`EntityId`（goal）与 `Opaque`（completion_predicate）。
+# `cargo tree --edges all` 会把这条 dev 边算进直接边，故 ALLOWED 行是三项。
+continuum-canonical = { path = "../continuum-canonical" }

@@ -211,6 +211,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-intent-scheduler"
+version = "0.1.0"
+dependencies = [
+ "continuum-canonical",
+ "continuum-graph",
+ "continuum-semantics",
+]
+
+[[package]]
 name = "continuum-learning"
 version = "0.1.0"
 dependencies = [
