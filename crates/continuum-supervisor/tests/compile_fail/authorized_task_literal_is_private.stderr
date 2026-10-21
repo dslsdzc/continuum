@@ -1,0 +1,28 @@
+warning: unreachable expression
+ --> tests/compile_fail/authorized_task_literal_is_private.rs:4:13
+  |
+4 |       let _ = AuthorizedTask {
+  |  _____________^
+5 | |         source: TaskSource::Policy,
+6 | |         evidence: todo!(),
+  | |                   ------- any code following this expression is unreachable
+7 | |     };
+  | |_____^ unreachable expression
+  |
+  = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
+
+error[E0451]: fields `source` and `evidence` of struct `AuthorizedTask` are private
+ --> tests/compile_fail/authorized_task_literal_is_private.rs:5:9
+  |
+4 |     let _ = AuthorizedTask {
+  |             -------------- in this type
+5 |         source: TaskSource::Policy,
+  |         ^^^^^^ private field
+6 |         evidence: todo!(),
+  |         ^^^^^^^^ private field
+
+error: type `continuum_supervisor::task::TaskEvidence` is private
+ --> tests/compile_fail/authorized_task_literal_is_private.rs:6:19
+  |
+6 |         evidence: todo!(),
+  |                   ^^^^^^^ private type

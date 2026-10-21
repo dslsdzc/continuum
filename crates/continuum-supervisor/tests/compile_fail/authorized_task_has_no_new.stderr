@@ -1,0 +1,32 @@
+error[E0599]: no function or associated item named `new` found for struct `AuthorizedTask` in the current scope
+ --> tests/compile_fail/authorized_task_has_no_new.rs:4:29
+  |
+4 |     let _ = AuthorizedTask::new(TaskSource::Policy, todo!());
+  |                             ^^^ function or associated item not found in `AuthorizedTask`
+  |
+note: if you're trying to build a new `AuthorizedTask` consider using one of the following associated functions:
+      AuthorizedTask::authorized_intent
+      AuthorizedTask::product_drive
+      AuthorizedTask::policy
+      AuthorizedTask::maintenance
+ --> src/task.rs
+  |
+  |     pub fn authorized_intent(intent: Intent) -> Result<Self, TaskError> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  |     pub fn product_drive(intent: Intent) -> Result<Self, TaskError> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  |     pub fn policy(grant: PolicyGrantRef) -> Result<Self, TaskError> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+...
+  |     pub fn maintenance(schedule: MaintenanceOccurrenceRef) -> Result<Self, TaskError> {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: unreachable call
+ --> tests/compile_fail/authorized_task_has_no_new.rs:4:13
+  |
+4 |     let _ = AuthorizedTask::new(TaskSource::Policy, todo!());
+  |             ^^^^^^^^^^^^^^^^^^^ unreachable call    ------- any code following this expression is unreachable
+  |
+  = note: `#[warn(unreachable_code)]` (part of `#[warn(unused)]`) on by default
