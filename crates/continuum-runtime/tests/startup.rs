@@ -22,8 +22,8 @@ fn startup_applies_migrations_and_runs_five_phases() {
     let out = run(&path);
     // P0 两条 + P1 两条 + P2 三条（workspace、policy、effect）+ P3 两条（tool；模型三张表）
     // + P4 三条（alias；语义七表；预算树与账本）+ P5a 一条（验证与证据五表）
-    // + P6C 一条（记忆八表）。
-    assert!(out.contains("迁移应用 14 项"), "实际输出:\n{out}");
+    // + P6C 一条（记忆八表）+ P7A 一条（产品循环四表）。
+    assert!(out.contains("迁移应用 15 项"), "实际输出:\n{out}");
     assert!(out.contains("跳过记录 0 条"), "实际输出:\n{out}");
     for phase in [
         "load durable state",
@@ -77,8 +77,8 @@ fn startup_reports_skipped_records() {
     let out = run(&path);
     assert!(out.contains("跳过记录 1 条"), "实际输出:\n{out}");
     // 上面的 Db::open 只带 P0 内置迁移，故本次启动补应用 P1 两条、P2 三条、P3 两条、
-    // P4 三条、P5a 一条与 P6C 一条（共 12 项）。本用例要证明的是跳过计数确实从库里读出，迁移数只是顺带断言。
-    assert!(out.contains("迁移应用 12 项"), "实际输出:\n{out}");
+    // P4 三条、P5a 一条、P6C 一条与 P7A 一条（共 13 项）。本用例要证明的是跳过计数确实从库里读出，迁移数只是顺带断言。
+    assert!(out.contains("迁移应用 13 项"), "实际输出:\n{out}");
 }
 
 #[test]
@@ -88,10 +88,10 @@ fn startup_applies_p1_migrations() {
     let out = run(&path);
     // P0 两条 + P1 两条 + P2 三条（workspace、policy、effect）+ P3 两条（tool；模型三张表）
     // + P4 三条（alias；语义七表；预算树与账本）+ P5a 一条（验证与证据五表）
-    // + P6C 一条（记忆八表）。
+    // + P6C 一条（记忆八表）+ P7A 一条（产品循环四表）。
     // 本计数也是「迁移编号不重复」的守卫：编号撞上已应用的那条时，
     // `migrate` 会把它当作已应用而跳过，条数随之少一。
-    assert!(out.contains("迁移应用 14 项"), "实际输出:\n{out}");
+    assert!(out.contains("迁移应用 15 项"), "实际输出:\n{out}");
 }
 
 #[test]

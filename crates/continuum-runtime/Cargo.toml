@@ -33,6 +33,9 @@ continuum-persist = { path = "../continuum-persist" }
 # Task 10 起：第 7 步的集成路径要查策略（`load_policies`）并按裁决决定是否铸造批准值
 # （`decide` / `PolicyContext` / `ExplicitApproval`）。
 continuum-policy = { path = "../continuum-policy" }
+# P7A 的 Task 9 起：`main.rs` 的装配处注册 `p7a_product_migrations()`
+# （迁移 200 的产品循环四表）。
+continuum-product = { path = "../continuum-product" }
 continuum-provider = { path = "../continuum-provider" }
 continuum-sandbox = { path = "../continuum-sandbox" }
 # Task 7：`main.rs` 的装配处构造并持有密钥运行时（`src/secrets.rs` 的 `assemble`）。

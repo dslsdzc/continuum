@@ -101,6 +101,33 @@ impl Milestone {
     }
 }
 
+#[cfg(test)]
+impl Milestone {
+    /// 测试专用构造：不做校验、只在本 crate 的测试构建可见。
+    ///
+    /// 用于 J4／J8／J10 的「伪造 Milestone」防御面；生产路径仍只有
+    /// [`propose_next_batch`] 与 `persist::load_milestone(s)`。
+    pub(crate) fn for_test(
+        id: MilestoneId,
+        product_id: ProductIdRef,
+        objective: Opaque,
+        dependencies: Vec<MilestoneId>,
+        entry_conditions: Vec<Opaque>,
+        exit_conditions: Vec<Opaque>,
+        state: MilestoneState,
+    ) -> Self {
+        Self {
+            id,
+            product_id,
+            objective,
+            dependencies,
+            entry_conditions,
+            exit_conditions,
+            state,
+        }
+    }
+}
+
 /// §234 的七个状态；编码用小写、多词下划线（与 P4 的枚举列纪律同形）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MilestoneState {

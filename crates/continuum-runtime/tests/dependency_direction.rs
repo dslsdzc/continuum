@@ -417,6 +417,7 @@ const ALLOWED: &[(&str, &[&str])] = &[
             "continuum-model-registry",
             "continuum-persist",
             "continuum-policy",
+            "continuum-product",
             "continuum-protected",
             "continuum-provider",
             "continuum-sandbox",

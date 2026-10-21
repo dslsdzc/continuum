@@ -116,6 +116,25 @@ impl ReadinessDimension {
     }
 }
 
+#[cfg(test)]
+impl ReadinessDimension {
+    /// 测试专用构造：不做校验、只在本 crate 的测试构建可见。
+    ///
+    /// 只给 J4 的「Assessed 但 evidence 空」重验照片；生产构造仍只有
+    /// [`Self::assessed`]／[`Self::unassessed`]。
+    pub(crate) fn for_test(
+        value: ReadinessValue,
+        evidence: Vec<EvidenceId>,
+        last_verified: Option<i64>,
+    ) -> Self {
+        Self {
+            value,
+            evidence,
+            last_verified,
+        }
+    }
+}
+
 /// 九维的名字；用于 required_dimensions、迭代与错误消息。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReadinessDimensionName {
