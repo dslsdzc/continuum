@@ -588,45 +588,59 @@ fn core_and_persist_do_not_depend_on_provider() {
     }
 }
 
-/// P6 的五条期望行（设计 §7.3.2）。
+/// P7 的四条期望行（设计 §7.3.2）。
 ///
-/// 前三条来自 P6A／P6B／P6C 的设计；若它们定稿时改了自己的边表，先改其设计，再由
-/// P6D 改这张表——一次改动两处，不是两套表。后两条是 P6D 本块设计 §3.2。
+/// 前三条来自 P7A／P7B／P7C 的设计；若它们定稿时改了自己的边表，先改其设计，再由
+/// P7D 改这张表——一次改动两处，不是两套表。后一条是 P7D 本块设计 §2.1。
 ///
 /// **所有权**：改它要同时改被改块的设计与 §7.4 的对表，合并评审核这一处 diff。
-const P6_EXPECTED_ROWS: &[(&str, &[&str])] = &[
-    // P6A（其设计 §2.1，四项）
+const P7_EXPECTED_ROWS: &[(&str, &[&str])] = &[
+    // P7A（其设计 §2.1，四项）
     (
-        "continuum-context",
+        "continuum-product",
         &[
-            "continuum-artifact",
-            "continuum-core",
-            "continuum-memory",
-            "continuum-trust",
+            "continuum-canonical",
+            "continuum-persist",
+            "continuum-semantics",
+            "continuum-verify",
         ],
     ),
-    // P6B（其设计 §2.1，零项）
-    ("continuum-trust", &[]),
-    // P6C（其设计 §3.2，一项）
-    ("continuum-memory", &["continuum-persist"]),
-    // P6D：Protected Core（本设计 §3.2，零项）
-    ("continuum-protected", &[]),
-    // P6D：Runtime Learning（本设计 §3.2，一项）
-    ("continuum-learning", &["continuum-protected"]),
+    // P7B（其设计 §2.1，三项：两普通＋一 dev）
+    (
+        "continuum-intent-scheduler",
+        &[
+            "continuum-canonical",
+            "continuum-graph",
+            "continuum-semantics",
+        ],
+    ),
+    // P7C（其设计 §2.1，零项）
+    ("continuum-arbiter", &[]),
+    // P7D（本设计 §2.1，五项：四普通＋一 dev）
+    (
+        "continuum-supervisor",
+        &[
+            "continuum-arbiter",
+            "continuum-canonical",
+            "continuum-intent-scheduler",
+            "continuum-memory",
+            "continuum-semantics",
+        ],
+    ),
 ];
 
-/// `P6_NAMES` 由 `P6_EXPECTED_ROWS` 派生，不写第三张名单：两处名单会分叉，而分叉的
+/// `P7_NAMES` 由 `P7_EXPECTED_ROWS` 派生，不写第三张名单：两处名单会分叉，而分叉的
 /// 那一天没有任何断言会红。
-fn p6_names() -> Vec<&'static str> {
-    P6_EXPECTED_ROWS.iter().map(|(pkg, _)| *pkg).collect()
+fn p7_names() -> Vec<&'static str> {
+    P7_EXPECTED_ROWS.iter().map(|(pkg, _)| *pkg).collect()
 }
 
-/// 读 P6 前基线（`03e79c7` 的 `ALLOWED`，27 行）。
+/// 读 P7 前基线（`c89d839` 的 `ALLOWED`，31 行）。
 ///
 /// 格式：一行一枚 crate；`#` 开头为注释；`crate:` 是空允许集，`crate:dep1,dep2`
 /// 是非空。空 subject／空 dep／重复 subject 一律 `panic!`，不许静默跳过。
-fn pre_p6_allowed() -> BTreeMap<&'static str, Vec<&'static str>> {
-    let source = include_str!("fixtures/p6_pre_allowed.txt");
+fn pre_p7_allowed() -> BTreeMap<&'static str, Vec<&'static str>> {
+    let source = include_str!("fixtures/p7_pre_allowed.txt");
     let mut rows = BTreeMap::new();
     for (index, raw) in source.lines().enumerate() {
         let line = raw.trim();
@@ -634,12 +648,12 @@ fn pre_p6_allowed() -> BTreeMap<&'static str, Vec<&'static str>> {
             continue;
         }
         let Some((subject, dependencies)) = line.split_once(':') else {
-            panic!("P6 前基线第 {} 行缺少冒号: {line}", index + 1);
+            panic!("P7 前基线第 {} 行缺少冒号: {line}", index + 1);
         };
         let subject = subject.trim();
         assert!(
             !subject.is_empty(),
-            "P6 前基线第 {} 行的 subject 为空",
+            "P7 前基线第 {} 行的 subject 为空",
             index + 1
         );
         let dependencies: Vec<&str> = if dependencies.trim().is_empty() {
@@ -650,15 +664,15 @@ fn pre_p6_allowed() -> BTreeMap<&'static str, Vec<&'static str>> {
         for dependency in &dependencies {
             assert!(
                 !dependency.is_empty(),
-                "P6 前基线的 {subject} 行有空的依赖项"
+                "P7 前基线的 {subject} 行有空的依赖项"
             );
         }
         assert!(
             rows.insert(subject, dependencies).is_none(),
-            "P6 前基线的 subject 重复: {subject}"
+            "P7 前基线的 subject 重复: {subject}"
         );
     }
-    assert_eq!(rows.len(), 27, "P6 前基线必须是 27 行");
+    assert_eq!(rows.len(), 31, "P7 前基线必须是 31 行");
     rows
 }
 
@@ -818,34 +832,47 @@ fn allowed_set<'a>(rows: &'a BTreeMap<String, Vec<String>>, subject: &str) -> BT
         .collect()
 }
 
-/// P6 合并门：并集复核（设计 §7.3.3 的八条断言）。
+/// 基线快照之后的非 P7 增量：`c89d839` 早于 P6A 合入。
 ///
-/// **改 `p6_pre_allowed.txt` 是 P6D 的改动，不是 P6 任一执行块的改动；合并评审必须
+/// - `continuum-context`：P6A 在快照之后新增的 subject；
+/// - `continuum-memory`／`continuum-protected`：P6A／P6D 在快照之后给 runtime 行加的边
+///   （这两枚在 31 行里已有自己的行，不是新增 subject）。
+///
+/// 这不是第二套 P7 口径：P7 期望行仍只有四条；本名单只解释「P7 之前的合法增量」。
+const POST_BASELINE_SUBJECTS: &[&str] = &[
+    "continuum-context",
+    "continuum-memory",
+    "continuum-protected",
+];
+
+/// P7 合并门：并集复核（设计 §7.3.3 的八条断言）。
+///
+/// **改 `p7_pre_allowed.txt` 是 P7D 的改动，不是 P7A／P7B／P7C 执行块的改动；合并评审必须
 /// 单独核这一处 diff。**
-/// **这是 P6 合并门，不是永久门；P7 起按 §7.6 重新基线化或退役，不得在此追加行。**
+/// **这是 P7 合并门，不是永久门；P8 起重新基线化或退役，不得在此追加行。**
 ///
 /// 验收时点：四块全部落地后的合并树（设计 §7.6）。中间态只算部分树绿：断言 2、6、8
-/// 只覆盖已落地的 P6 crate；P7 新增 crate 时实际到期的是断言 8，断言 1 的 27 行不会红。
+/// 只覆盖已落地的 P7 crate；P8 新增 crate 时实际到期的是断言 8，断言 1 的 31 行不会红。
 #[test]
-fn p6_union_adds_only_its_own_rows() {
+fn p7_union_adds_only_its_own_rows() {
     let workspace = workspace_crates();
     let workspace_set: BTreeSet<&str> = workspace.iter().map(String::as_str).collect();
 
-    // 断言 1：fixture 可解析且是 27 行；subjects 无重复。
-    let baseline = pre_p6_allowed();
-    assert_eq!(baseline.len(), 27, "P6 前基线必须是 27 行");
+    // 断言 1：fixture 可解析且是 31 行；subjects 无重复。
+    let baseline = pre_p7_allowed();
+    assert_eq!(baseline.len(), 31, "P7 前基线必须是 31 行");
     let baseline_subjects: BTreeSet<&str> = baseline.keys().copied().collect();
     assert_eq!(
         baseline_subjects.len(),
         baseline.len(),
-        "P6 前基线的 subject 重复"
+        "P7 前基线的 subject 重复"
     );
 
-    // 断言 2：P6 期望行恰五行；subjects 无重复。
-    assert_eq!(P6_EXPECTED_ROWS.len(), 5, "P6_EXPECTED_ROWS 必须是五行");
-    let names = p6_names();
+    // 断言 2：P7 期望行恰四行；subjects 无重复。
+    assert_eq!(P7_EXPECTED_ROWS.len(), 4, "P7_EXPECTED_ROWS 必须是四行");
+    let names = p7_names();
     let name_set: BTreeSet<&str> = names.iter().copied().collect();
-    assert_eq!(name_set.len(), names.len(), "P6_EXPECTED_ROWS 的 subject 重复");
+    assert_eq!(name_set.len(), names.len(), "P7_EXPECTED_ROWS 的 subject 重复");
 
     // 断言 3：解析器自检 + 行内元素检查。
     let current = p6d_parse_allowed_source(include_str!("dependency_direction.rs"));
@@ -876,14 +903,14 @@ fn p6_union_adds_only_its_own_rows() {
         let expected: BTreeSet<&str> = allowed.iter().copied().collect();
         assert_eq!(
             actual, expected,
-            "基线行 {subject} 被改动：P6 只允许 continuum-runtime 行增枚"
+            "基线行 {subject} 被改动：P7 只允许 continuum-runtime 行增枚"
         );
     }
 
-    // 断言 5：runtime 行只增不减，且增量 ⊆ P6_NAMES。
+    // 断言 5：runtime 行只增不减，且增量 ⊆ P7_NAMES ∪ 快照之后的非 P7 增量。
     let runtime_baseline = baseline
         .get("continuum-runtime")
-        .expect("P6 前基线必须有 continuum-runtime 行");
+        .expect("P7 前基线必须有 continuum-runtime 行");
     let runtime_baseline_set: BTreeSet<&str> = runtime_baseline.iter().copied().collect();
     let runtime_actual = allowed_set(&current, "continuum-runtime");
     assert!(
@@ -894,13 +921,22 @@ fn p6_union_adds_only_its_own_rows() {
         .difference(&runtime_baseline_set)
         .copied()
         .collect();
+    let post_baseline: BTreeSet<&str> = POST_BASELINE_SUBJECTS
+        .iter()
+        .copied()
+        .filter(|name| workspace_set.contains(name))
+        .collect();
+    let allowed_runtime_additions: BTreeSet<&str> = name_set
+        .union(&post_baseline)
+        .copied()
+        .collect();
     assert!(
-        runtime_added.is_subset(&name_set),
-        "continuum-runtime 行新增了 P6 之外的依赖: {runtime_added:?}"
+        runtime_added.is_subset(&allowed_runtime_additions),
+        "continuum-runtime 行新增了 P7 与基线后非 P7 之外的依赖: {runtime_added:?}"
     );
 
-    // 断言 6：P6 行逐行相等（只查已落地的 crate；行缺失即红）。
-    for (subject, allowed) in P6_EXPECTED_ROWS {
+    // 断言 6：P7 行逐行相等（只查已落地的 crate；行缺失即红）。
+    for (subject, allowed) in P7_EXPECTED_ROWS {
         if !workspace_set.contains(subject) {
             continue;
         }
@@ -908,11 +944,11 @@ fn p6_union_adds_only_its_own_rows() {
         let expected: BTreeSet<&str> = allowed.iter().copied().collect();
         assert_eq!(
             actual, expected,
-            "P6 行 {subject} 与设计的边表不一致（行缺失或被加宽）"
+            "P7 行 {subject} 与设计的边表不一致（行缺失或被加宽）"
         );
     }
 
-    // 断言 7：既有 crate 不指向 P6 crate。
+    // 断言 7：既有 crate 不指向 P7 crate。
     for subject in baseline.keys() {
         if *subject == "continuum-runtime" {
             continue;
@@ -921,14 +957,13 @@ fn p6_union_adds_only_its_own_rows() {
         let leaked: BTreeSet<&str> = actual.intersection(&name_set).copied().collect();
         assert!(
             leaked.is_empty(),
-            "既有 crate {subject} 指向了 P6 crate: {leaked:?}"
+            "既有 crate {subject} 指向了 P7 crate: {leaked:?}"
         );
     }
 
-    // 断言 8：新增 subject 恰是已落地的 P6 crate。
-    // P7 起各实现块会继续在 ALLOWED 追加自己的行，P6 守卫不能把它们误判成
-    // 「P6 夹带」。这里维护一份显式的后续块名单；合并时按块各自追加。
-    const POST_P6_SUBJECTS: &[&str] = &["continuum-intent-scheduler"];
+    // 断言 8：新增 subject 恰是已落地的 P7 crate（外加快照之后的非 P7 subject）。
+    // 这里维护一份显式的基线后名单；合并时按块各自追加。P7B 遗留的
+    // POST_P6_SUBJECTS = ["continuum-intent-scheduler"] 已并入 P7_NAMES，不再保留第二套口径。
     let current_subjects: BTreeSet<&str> = current.keys().map(String::as_str).collect();
     let added_subjects: BTreeSet<&str> = current_subjects
         .difference(&baseline_subjects)
@@ -937,11 +972,11 @@ fn p6_union_adds_only_its_own_rows() {
     let expected_added: BTreeSet<&str> = names
         .iter()
         .copied()
-        .chain(POST_P6_SUBJECTS.iter().copied())
-        .filter(|name| workspace_set.contains(name))
+        .chain(POST_BASELINE_SUBJECTS.iter().copied())
+        .filter(|name| workspace_set.contains(name) && !baseline_subjects.contains(name))
         .collect();
     assert_eq!(
         added_subjects, expected_added,
-        "新增 subject 必须恰是已落地的 P6 crate"
+        "新增 subject 必须恰是已落地的 P7 crate 与快照之后的非 P7 subject"
     );
 }
