@@ -1,9 +1,88 @@
 //! Background Supervisor：任务过滤、选择与资源控制面（设计 §4.4／§4.7）。
 
+use std::collections::HashMap;
+
+use continuum_arbiter::{SuspensionPhase, SuspensionState};
 use continuum_intent_scheduler::{DecisionBasis, IntentDecision};
-use continuum_semantics::IntentId;
+use continuum_semantics::{Intent, IntentId, IntentStatus};
 
 use crate::task::AuthorizedTask;
+
+/// 后台治理入口。持有每任务的 `SuspensionState` 内存表。
+/// 不建任务内容表：`AuthorizedTask` 不存；表只存相位／尝试数／截止。
+#[derive(Debug, Default)]
+pub struct BackgroundSupervisor {
+    states: HashMap<TaskKey, SuspensionState>,
+}
+
+/// 状态表的私有键。不是公开身份类型，不出现在公开 API。
+/// `IntentId` 没有 `Hash`／`Eq`，故 Intent 任务用 `as_str()` 的 `String`；
+/// policy／maintenance 用其不透明引用。
+///
+/// **一 ref 一任务契约**：同一 `PolicyGrantRef`／`MaintenanceOccurrenceRef` 在一个
+/// supervisor 实例里只应标识一个任务。两枚任务共用同一引用会共享同一
+/// `SuspensionState`；这是调用方契约违反，P7D 不检测、不去重。
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum TaskKey {
+    Intent(String),
+    Policy { issuer: String, grant_id: String },
+    Maintenance {
+        schedule_id: String,
+        occurrence_id: String,
+    },
+}
+
+impl TaskKey {
+    fn for_task(task: &AuthorizedTask) -> Self {
+        if let Some(intent) = task.intent() {
+            return Self::Intent(intent.id.as_str().to_owned());
+        }
+        if let Some(grant) = task.policy_grant() {
+            return Self::Policy {
+                issuer: grant.issuer().to_owned(),
+                grant_id: grant.grant_id().to_owned(),
+            };
+        }
+        let schedule = task
+            .maintenance_schedule()
+            .expect("AuthorizedTask 的不变量：无 Intent 时必有 policy 或 maintenance 引用");
+        Self::Maintenance {
+            schedule_id: schedule.schedule_id().to_owned(),
+            occurrence_id: schedule.occurrence_id().to_owned(),
+        }
+    }
+}
+
+impl BackgroundSupervisor {
+    /// 本轮可运行的任务集合。只过滤，不排序：保持 `tasks` 的输入序。
+    /// 有 Intent 的任务只保留「候选集中存在同 id 候选且该候选当前 READY」的；
+    /// policy／maintenance 任务无条件保留。
+    pub fn next_tasks<'a>(
+        &self,
+        candidates: &[Intent],
+        tasks: &'a [AuthorizedTask],
+    ) -> Vec<&'a AuthorizedTask> {
+        tasks
+            .iter()
+            .filter(|task| {
+                let Some(intent) = task.intent() else {
+                    return true;
+                };
+                candidates
+                    .iter()
+                    .find(|candidate| candidate.id.as_str() == intent.id.as_str())
+                    .is_some_and(|candidate| candidate.status == IntentStatus::Ready)
+            })
+            .collect()
+    }
+
+    /// 只读当前相位；无状态返回 `None`。
+    pub fn suspension_phase(&self, task: &AuthorizedTask) -> Option<SuspensionPhase> {
+        self.states
+            .get(&TaskKey::for_task(task))
+            .map(SuspensionState::phase)
+    }
+}
 
 /// `ContinueSession` 的控制值。不是 P7C 的 `ResourceAction`，也不是相位。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

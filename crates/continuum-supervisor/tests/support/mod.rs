@@ -17,10 +17,51 @@ pub fn code_only(source: &str) -> String {
         .join("\n")
 }
 
+/// 从 `fn <name>` 起，截取配对的 `{}` 之间的函数体；先丢弃整行注释，避免注释里的花括号干扰。
+pub fn fn_body(source: &str, name: &str) -> String {
+    let code = code_only(source);
+    let marker = format!("fn {name}");
+    let start = code
+        .find(&marker)
+        .unwrap_or_else(|| panic!("源码里找不到 {marker}"));
+    let rest = &code[start..];
+    let mut depth = 0usize;
+    let mut started = false;
+    let mut body = String::new();
+    for ch in rest.chars() {
+        if ch == '{' {
+            depth += 1;
+            if depth == 1 {
+                started = true;
+                continue;
+            }
+        }
+        if ch == '}' {
+            if depth == 0 {
+                continue;
+            }
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        if started {
+            body.push(ch);
+        }
+    }
+    assert!(depth == 0, "{marker} 的函数体没有配对的右花括号");
+    body
+}
+
 /// 构造一枚最小的 Intent；所有字段由夹具写死，测试按需覆盖。
 pub fn intent(kind: IntentKind, status: IntentStatus) -> Intent {
+    named_intent("intent-1", kind, status)
+}
+
+/// 构造一枚指定 id 的最小 Intent。
+pub fn named_intent(id: &str, kind: IntentKind, status: IntentStatus) -> Intent {
     Intent {
-        id: IntentId::from_str("intent-1"),
+        id: IntentId::from_str(id),
         version: 1,
         kind,
         goal: EntityId::from_str("goal"),
