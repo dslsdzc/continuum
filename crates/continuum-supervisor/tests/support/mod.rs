@@ -9,10 +9,15 @@ use continuum_intent_scheduler::{
     BackgroundSuitability, DecisionBasis, IntentDecision, IntentSelectionPolicy, SchedulerInputs,
     UserFocus,
 };
+use continuum_memory::{
+    MemoryError, SynthesisJobId, SynthesisProposal, SynthesisReport, SynthesisRequest,
+};
 use continuum_semantics::{
     ContractId, ContractRef, Intent, IntentId, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
-use continuum_supervisor::{AuthorizedTask, CheckpointError, CheckpointPort};
+use continuum_supervisor::{
+    AuthorizedTask, CheckpointError, CheckpointPort, SynthesisIo,
+};
 
 /// 逐行丢弃整行注释后拼接；用于源码面的零命中断言。
 pub fn code_only(source: &str) -> String {
@@ -27,9 +32,20 @@ pub fn code_only(source: &str) -> String {
 pub fn fn_body(source: &str, name: &str) -> String {
     let code = code_only(source);
     let marker = format!("fn {name}");
-    let start = code
-        .find(&marker)
-        .unwrap_or_else(|| panic!("源码里找不到 {marker}"));
+    let mut search_from = 0;
+    let start = loop {
+        let Some(offset) = code[search_from..].find(&marker) else {
+            panic!("源码里找不到带函数体的 {marker}");
+        };
+        let candidate = search_from + offset;
+        let rest = &code[candidate..];
+        let brace = rest.find('{');
+        let semi = rest.find(';');
+        if brace.is_some() && (semi.is_none() || brace.unwrap() < semi.unwrap()) {
+            break candidate;
+        }
+        search_from = candidate + marker.len();
+    };
     let rest = &code[start..];
     let mut depth = 0usize;
     let mut started = false;
@@ -152,5 +168,78 @@ impl CheckpointPort for CountingPort {
     fn checkpoint(&self, _task: &AuthorizedTask) -> Result<(), CheckpointError> {
         self.calls.set(self.calls.get() + 1);
         self.result.clone()
+    }
+}
+
+/// 假合成 IO：三个方法各记一次调用，并把固定结果原样返回。
+pub struct CountingIo {
+    pub begin_calls: Cell<usize>,
+    pub apply_calls: Cell<usize>,
+    pub fail_calls: Cell<usize>,
+    pub report: SynthesisReport,
+}
+
+impl CountingIo {
+    pub fn new(report: SynthesisReport) -> Self {
+        Self {
+            begin_calls: Cell::new(0),
+            apply_calls: Cell::new(0),
+            fail_calls: Cell::new(0),
+            report,
+        }
+    }
+}
+
+impl SynthesisIo for CountingIo {
+    fn begin_synthesis(&self, _request: &SynthesisRequest) -> Result<(), MemoryError> {
+        self.begin_calls.set(self.begin_calls.get() + 1);
+        Ok(())
+    }
+
+    fn apply_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _proposal: &SynthesisProposal,
+        _occurred_at: i64,
+    ) -> Result<SynthesisReport, MemoryError> {
+        self.apply_calls.set(self.apply_calls.get() + 1);
+        Ok(self.report.clone())
+    }
+
+    fn fail_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _reason: &str,
+        _occurred_at: i64,
+    ) -> Result<(), MemoryError> {
+        self.fail_calls.set(self.fail_calls.get() + 1);
+        Ok(())
+    }
+}
+
+/// 假合成 IO：三个方法都返回同一个记忆错误。
+pub struct FailingIo;
+
+impl SynthesisIo for FailingIo {
+    fn begin_synthesis(&self, _request: &SynthesisRequest) -> Result<(), MemoryError> {
+        Err(MemoryError::UnknownJob)
+    }
+
+    fn apply_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _proposal: &SynthesisProposal,
+        _occurred_at: i64,
+    ) -> Result<SynthesisReport, MemoryError> {
+        Err(MemoryError::UnknownJob)
+    }
+
+    fn fail_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _reason: &str,
+        _occurred_at: i64,
+    ) -> Result<(), MemoryError> {
+        Err(MemoryError::UnknownJob)
     }
 }

@@ -15,6 +15,7 @@ pub use session::{
     SessionPlan,
 };
 pub use supervisor::{BackgroundSupervisor, ContinueDisposition, SupervisorDecision};
+pub use trigger::{SynthesisIo, SynthesisTriggerPoint};
 pub use task::{
     AuthorizedTask, MaintenanceOccurrenceRef, PolicyGrantRef, TaskError, TaskSource,
 };
