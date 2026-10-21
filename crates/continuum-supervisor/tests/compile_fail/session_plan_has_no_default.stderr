@@ -1,0 +1,5 @@
+error[E0599]: no function or associated item named `default` found for struct `SessionPlan` in the current scope
+ --> tests/compile_fail/session_plan_has_no_default.rs:4:26
+  |
+4 |     let _ = SessionPlan::default();
+  |                          ^^^^^^^ function or associated item not found in `SessionPlan`

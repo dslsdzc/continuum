@@ -1,9 +1,10 @@
-# P6D 自己的基线：03e79c7 的 ALLOWED（27 行）。
-# 改这个文件是 P6D 的改动，不是 P6 任一执行块的改动；合并评审必须单独核这一处 diff。
-# 这是 P6 合并门，不是永久门；P7 起按 §7.6 重新基线化或退役，不得在此追加行。
+# P7 合并门：c89d839 的 ALLOWED（31 行，P7 四个 crate 加入之前）。
+# 改这个文件是 P7D 的合并门改动，不是 P7A／P7B／P7C 执行块的改动；合并评审必须单独核这一处 diff。
+# 这是 P7 合并门，不是永久门；P8 起重新基线化或退役，不得在此追加行。
 continuum-core:
 continuum-events:continuum-core
 continuum-persist:continuum-events
+continuum-memory:continuum-persist
 continuum-provider:continuum-capability,continuum-core,continuum-persist
 continuum-artifact:continuum-core,continuum-events,continuum-persist
 continuum-port:continuum-artifact
@@ -27,4 +28,7 @@ continuum-verify:continuum-artifact,continuum-events,continuum-graph,continuum-o
 continuum-research:continuum-artifact,continuum-graph,continuum-method,continuum-operator,continuum-verify
 continuum-code:continuum-artifact,continuum-graph,continuum-method,continuum-operator,continuum-verify,continuum-workspace
 continuum-image:continuum-artifact,continuum-graph,continuum-operator,continuum-persist,continuum-verify
-continuum-runtime:continuum-artifact,continuum-budget,continuum-canonical,continuum-capability,continuum-core,continuum-effect,continuum-events,continuum-graph,continuum-model-registry,continuum-persist,continuum-policy,continuum-provider,continuum-sandbox,continuum-secrets,continuum-semantics,continuum-verify,continuum-workspace
+continuum-protected:
+continuum-learning:continuum-protected
+continuum-runtime:continuum-artifact,continuum-budget,continuum-canonical,continuum-capability,continuum-core,continuum-effect,continuum-events,continuum-graph,continuum-memory,continuum-model-registry,continuum-persist,continuum-policy,continuum-protected,continuum-provider,continuum-sandbox,continuum-secrets,continuum-semantics,continuum-verify,continuum-workspace
+continuum-trust:

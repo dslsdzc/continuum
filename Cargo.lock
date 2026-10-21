@@ -444,6 +444,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "continuum-supervisor"
+version = "0.1.0"
+dependencies = [
+ "continuum-arbiter",
+ "continuum-canonical",
+ "continuum-intent-scheduler",
+ "continuum-memory",
+ "continuum-semantics",
+ "serde_json",
+ "trybuild",
+]
+
+[[package]]
 name = "continuum-trust"
 version = "0.1.0"
 dependencies = [

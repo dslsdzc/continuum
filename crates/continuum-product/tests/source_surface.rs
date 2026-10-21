@@ -301,10 +301,19 @@ fn git_diff_is_empty(path: &str) {
 }
 
 #[test]
-fn the_p6_fixture_is_untouched() {
-    git_diff_is_empty("crates/continuum-runtime/tests/fixtures/p6_pre_allowed.txt");
+fn the_p7_union_baseline_covers_the_four_p7_crates() {
+    // P7D 的合并门 rebaseline 删除了 P6 fixture 并把期望行改为 P7 四行；
+    // 本用例随最终树口径复核这份基线，不再要求 P6 fixture 原样保留。
+    let fixture = include_str!("../../continuum-runtime/tests/fixtures/p7_pre_allowed.txt");
+    let rows = fixture
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .count();
+    assert_eq!(rows, 31, "P7 前基线必须是 31 行");
+
     let source = include_str!("../../continuum-runtime/tests/dependency_direction.rs");
-    let start = source.find("const P6_EXPECTED_ROWS").unwrap();
+    let start = source.find("const P7_EXPECTED_ROWS").unwrap();
     let rest = &source[start..];
     let end = rest.find("\n];").unwrap();
     let block = &rest[..end];
@@ -315,17 +324,16 @@ fn the_p6_fixture_is_untouched() {
             trimmed == "(" || trimmed.starts_with("(\"continuum-")
         })
         .count();
-    assert_eq!(entries, 5, "P6_EXPECTED_ROWS 必须是五行");
+    assert_eq!(entries, 4, "P7_EXPECTED_ROWS 必须是四行");
     for subject in [
-        "continuum-context",
-        "continuum-trust",
-        "continuum-memory",
-        "continuum-protected",
-        "continuum-learning",
+        "continuum-product",
+        "continuum-intent-scheduler",
+        "continuum-arbiter",
+        "continuum-supervisor",
     ] {
         assert!(
             block.contains(&format!("\"{subject}\"")),
-            "P6_EXPECTED_ROWS 缺少 {subject}"
+            "P7_EXPECTED_ROWS 缺少 {subject}"
         );
     }
 }

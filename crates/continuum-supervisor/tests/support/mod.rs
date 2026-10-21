@@ -1,0 +1,245 @@
+#![allow(dead_code)]
+
+//! 共享夹具与源码语料工具。只放测试用的构造与文本处理，不放生产逻辑。
+
+use std::cell::Cell;
+
+use continuum_canonical::{EntityId, Opaque};
+use continuum_intent_scheduler::{
+    BackgroundSuitability, DecisionBasis, IntentDecision, IntentSelectionPolicy, SchedulerInputs,
+    UserFocus,
+};
+use continuum_memory::{
+    MemoryError, SynthesisJobId, SynthesisProposal, SynthesisReport, SynthesisRequest,
+};
+use continuum_semantics::{
+    ContractId, ContractRef, Intent, IntentId, IntentKind, IntentStatus, Priority, ProductIdRef,
+};
+use continuum_supervisor::{
+    AuthorizedTask, CheckpointError, CheckpointPort, SynthesisIo,
+};
+
+/// 逐行丢弃整行注释后拼接；用于源码面的零命中断言。
+pub fn code_only(source: &str) -> String {
+    source
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// 从 `fn <name>` 起，截取配对的 `{}` 之间的函数体；先丢弃整行注释，避免注释里的花括号干扰。
+pub fn fn_body(source: &str, name: &str) -> String {
+    let code = code_only(source);
+    let marker = format!("fn {name}");
+    let mut search_from = 0;
+    let start = loop {
+        let Some(offset) = code[search_from..].find(&marker) else {
+            panic!("源码里找不到带函数体的 {marker}");
+        };
+        let candidate = search_from + offset;
+        let rest = &code[candidate..];
+        let brace = rest.find('{');
+        let semi = rest.find(';');
+        if brace.is_some() && (semi.is_none() || brace.unwrap() < semi.unwrap()) {
+            break candidate;
+        }
+        search_from = candidate + marker.len();
+    };
+    let rest = &code[start..];
+    let mut depth = 0usize;
+    let mut started = false;
+    let mut body = String::new();
+    for ch in rest.chars() {
+        if ch == '{' {
+            depth += 1;
+            if depth == 1 {
+                started = true;
+                continue;
+            }
+        }
+        if ch == '}' {
+            if depth == 0 {
+                continue;
+            }
+            depth -= 1;
+            if depth == 0 {
+                break;
+            }
+        }
+        if started {
+            body.push(ch);
+        }
+    }
+    assert!(depth == 0, "{marker} 的函数体没有配对的右花括号");
+    body
+}
+
+/// 构造一枚最小的 Intent；所有字段由夹具写死，测试按需覆盖。
+pub fn intent(kind: IntentKind, status: IntentStatus) -> Intent {
+    named_intent("intent-1", kind, status)
+}
+
+/// 构造一枚指定 id 的最小 Intent。
+pub fn named_intent(id: &str, kind: IntentKind, status: IntentStatus) -> Intent {
+    Intent {
+        id: IntentId::from_str(id),
+        version: 1,
+        kind,
+        goal: EntityId::from_str("goal"),
+        status,
+        priority: Priority::from_str("normal"),
+        created_at: 0,
+        updated_at: 0,
+        parent_intent: None,
+        contract_id: ContractRef {
+            id: ContractId::from_str("contract-1"),
+            version: 1,
+        },
+        active_plan_id: None,
+        graph_id: None,
+        product_id: None,
+        completion_predicate: Opaque::from_str("done"),
+    }
+}
+
+/// 构造一枚 Product Intent（`product_id` 有效）。
+pub fn product_intent(status: IntentStatus) -> Intent {
+    let mut value = intent(IntentKind::Product, status);
+    value.product_id = Some(ProductIdRef::from_str("product-1"));
+    value
+}
+
+/// 构造一枚已授权的非 Product 任务。
+pub fn task(intent: Intent) -> AuthorizedTask {
+    AuthorizedTask::authorized_intent(intent).expect("夹具 Intent 必须是合法的授权任务")
+}
+
+/// 构造一枚已授权的 Product 任务。
+pub fn product_task(status: IntentStatus) -> AuthorizedTask {
+    AuthorizedTask::product_drive(product_intent(status)).expect("夹具 Product Intent 必须已 READY")
+}
+
+/// 假策略：总是返回同一枚预先构造的决策。
+pub struct FixedPolicy {
+    pub decision: IntentDecision,
+}
+
+impl IntentSelectionPolicy for FixedPolicy {
+    fn choose(
+        &self,
+        _inputs: &SchedulerInputs<'_>,
+    ) -> Result<IntentDecision, DecisionBasis> {
+        Ok(self.decision.clone())
+    }
+}
+
+/// 假策略：模拟模型不可用。
+pub struct FailingPolicy;
+
+impl IntentSelectionPolicy for FailingPolicy {
+    fn choose(
+        &self,
+        _inputs: &SchedulerInputs<'_>,
+    ) -> Result<IntentDecision, DecisionBasis> {
+        Err(DecisionBasis::new("model unavailable"))
+    }
+}
+
+/// 构造 P7B 的五输入；除候选集外全部为空信号。
+pub fn inputs(candidates: &[Intent]) -> SchedulerInputs<'_> {
+    SchedulerInputs {
+        candidates,
+        priority: &[],
+        deadline: &[],
+        blocking: &[],
+        user_focus: UserFocus::None,
+        background_suitability: BackgroundSuitability::from_projection(""),
+    }
+}
+
+/// 假 checkpoint 端口：记录调用次数并把预设结果原样返回。
+pub struct CountingPort {
+    pub result: Result<(), CheckpointError>,
+    pub calls: Cell<usize>,
+}
+
+impl CheckpointPort for CountingPort {
+    fn checkpoint(&self, _task: &AuthorizedTask) -> Result<(), CheckpointError> {
+        self.calls.set(self.calls.get() + 1);
+        self.result.clone()
+    }
+}
+
+/// 假合成 IO：三个方法各记一次调用，并把固定结果原样返回。
+pub struct CountingIo {
+    pub begin_calls: Cell<usize>,
+    pub apply_calls: Cell<usize>,
+    pub fail_calls: Cell<usize>,
+    pub report: SynthesisReport,
+}
+
+impl CountingIo {
+    pub fn new(report: SynthesisReport) -> Self {
+        Self {
+            begin_calls: Cell::new(0),
+            apply_calls: Cell::new(0),
+            fail_calls: Cell::new(0),
+            report,
+        }
+    }
+}
+
+impl SynthesisIo for CountingIo {
+    fn begin_synthesis(&self, _request: &SynthesisRequest) -> Result<(), MemoryError> {
+        self.begin_calls.set(self.begin_calls.get() + 1);
+        Ok(())
+    }
+
+    fn apply_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _proposal: &SynthesisProposal,
+        _occurred_at: i64,
+    ) -> Result<SynthesisReport, MemoryError> {
+        self.apply_calls.set(self.apply_calls.get() + 1);
+        Ok(self.report.clone())
+    }
+
+    fn fail_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _reason: &str,
+        _occurred_at: i64,
+    ) -> Result<(), MemoryError> {
+        self.fail_calls.set(self.fail_calls.get() + 1);
+        Ok(())
+    }
+}
+
+/// 假合成 IO：三个方法都返回同一个记忆错误。
+pub struct FailingIo;
+
+impl SynthesisIo for FailingIo {
+    fn begin_synthesis(&self, _request: &SynthesisRequest) -> Result<(), MemoryError> {
+        Err(MemoryError::UnknownJob)
+    }
+
+    fn apply_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _proposal: &SynthesisProposal,
+        _occurred_at: i64,
+    ) -> Result<SynthesisReport, MemoryError> {
+        Err(MemoryError::UnknownJob)
+    }
+
+    fn fail_synthesis(
+        &self,
+        _job: &SynthesisJobId,
+        _reason: &str,
+        _occurred_at: i64,
+    ) -> Result<(), MemoryError> {
+        Err(MemoryError::UnknownJob)
+    }
+}

@@ -36,6 +36,7 @@ members = [
     "crates/continuum-arbiter",
     "crates/continuum-context",
     "crates/continuum-intent-scheduler",
+    "crates/continuum-supervisor",
 ]
 
 [workspace.package]

@@ -1,0 +1,16 @@
+[package]
+name = "continuum-supervisor"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+continuum-arbiter = { path = "../continuum-arbiter" }
+continuum-intent-scheduler = { path = "../continuum-intent-scheduler" }
+continuum-memory = { path = "../continuum-memory" }
+continuum-semantics = { path = "../continuum-semantics" }
+
+[dev-dependencies]
+continuum-canonical = { path = "../continuum-canonical" }
+serde_json = { workspace = true }
+trybuild = { workspace = true }
