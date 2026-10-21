@@ -2,13 +2,16 @@
 
 use std::collections::HashMap;
 
-use continuum_arbiter::{SuspensionPhase, SuspensionState};
+use continuum_arbiter::{
+    ResourceArbiter, ResourceDecision, SuspensionPhase, SuspensionState,
+};
 use continuum_intent_scheduler::{
     DecisionBasis, IntentDecision, IntentScheduler, IntentSelectionPolicy, SchedulerInputs,
 };
 use continuum_semantics::{Intent, IntentId, IntentStatus};
 
 use crate::error::SupervisorError;
+use crate::resource::declaration_for;
 use crate::task::AuthorizedTask;
 
 /// 后台治理入口。持有每任务的 `SuspensionState` 内存表。
@@ -84,6 +87,29 @@ impl BackgroundSupervisor {
         self.states
             .get(&TaskKey::for_task(task))
             .map(SuspensionState::phase)
+    }
+
+    /// 把任务交给 P7C 的 `ResourceArbiter::direct`；返回结论原样。
+    /// 首次调用插入新状态，之后复用同一枚。
+    pub fn admit(
+        &mut self,
+        task: &AuthorizedTask,
+        arbiter: &ResourceArbiter,
+        now_millis: u64,
+    ) -> Result<ResourceDecision, SupervisorError> {
+        let key = TaskKey::for_task(task);
+        let state = self
+            .states
+            .entry(key)
+            .or_insert_with(SuspensionState::new);
+        arbiter
+            .direct(declaration_for(task), state, now_millis)
+            .map_err(SupervisorError::Resource)
+    }
+
+    /// 任务终止时丢弃它的状态；返回此前是否存在。P7D 不推断终止。
+    pub fn release(&mut self, task: &AuthorizedTask) -> bool {
+        self.states.remove(&TaskKey::for_task(task)).is_some()
     }
 
     /// 唯一的选择入口：调 P7B 的 `IntentScheduler::decide`，按候选当前状态分派。

@@ -2,7 +2,9 @@
 
 use std::fmt;
 
-use crate::task::AuthorizedTask;
+use continuum_arbiter::WorkloadDeclaration;
+
+use crate::task::{AuthorizedTask, TaskSource};
 
 /// checkpoint 的执行端口。P7D 不实现它；装配方／执行器按任务的真实状态实现。
 pub trait CheckpointPort {
@@ -30,3 +32,13 @@ impl fmt::Display for CheckpointError {
 }
 
 impl std::error::Error for CheckpointError {}
+
+/// `TaskSource` → `WorkloadDeclaration` 的唯一映射（设计 §4.7）。
+/// 前两个布尔恒 false：P7D 只治理后台任务；`maintenance` 只对维护计划为 true。
+pub(crate) fn declaration_for(task: &AuthorizedTask) -> WorkloadDeclaration {
+    WorkloadDeclaration {
+        user_process: false,
+        foreground: false,
+        maintenance: matches!(task.source(), TaskSource::MaintenanceSchedule),
+    }
+}
