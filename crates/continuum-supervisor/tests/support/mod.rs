@@ -6,6 +6,7 @@ use continuum_canonical::{EntityId, Opaque};
 use continuum_semantics::{
     ContractId, ContractRef, Intent, IntentId, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
+use continuum_supervisor::AuthorizedTask;
 
 /// 逐行丢弃整行注释后拼接；用于源码面的零命中断言。
 pub fn code_only(source: &str) -> String {
@@ -44,4 +45,14 @@ pub fn product_intent(status: IntentStatus) -> Intent {
     let mut value = intent(IntentKind::Product, status);
     value.product_id = Some(ProductIdRef::from_str("product-1"));
     value
+}
+
+/// 构造一枚已授权的非 Product 任务。
+pub fn task(intent: Intent) -> AuthorizedTask {
+    AuthorizedTask::authorized_intent(intent).expect("夹具 Intent 必须是合法的授权任务")
+}
+
+/// 构造一枚已授权的 Product 任务。
+pub fn product_task(status: IntentStatus) -> AuthorizedTask {
+    AuthorizedTask::product_drive(product_intent(status)).expect("夹具 Product Intent 必须已 READY")
 }

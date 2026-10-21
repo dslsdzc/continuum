@@ -2,7 +2,7 @@
 
 use std::fmt;
 
-use continuum_semantics::{IntentKind, IntentStatus};
+use continuum_semantics::{ContractRef, Intent, IntentKind, IntentStatus};
 
 /// §299 的四类后台任务来源。恰好四变体；没有第五类，没有 `ModelSuggested`。
 /// 不实现 `FromStr`／`parse`：模型输出或裸字符串不能构造来源。
@@ -126,4 +126,122 @@ impl MaintenanceOccurrenceRef {
     pub fn occurrence_id(&self) -> &str {
         &self.occurrence_id
     }
+}
+
+/// P7D 的唯一任务输入面。字段私有；四个构造器；没有 `new(source, evidence)`。
+/// 裸 `TaskSource` 不能构造本类型。
+#[derive(Debug, Clone)]
+pub struct AuthorizedTask {
+    source: TaskSource,
+    evidence: TaskEvidence,
+}
+
+#[derive(Debug, Clone)]
+enum TaskEvidence {
+    Intent(Intent),
+    Policy(PolicyGrantRef),
+    Maintenance(MaintenanceOccurrenceRef),
+}
+
+impl AuthorizedTask {
+    /// `authorized Intent`：非 Product 的 READY Intent 加有效 contract。
+    pub fn authorized_intent(intent: Intent) -> Result<Self, TaskError> {
+        if intent.kind == IntentKind::Product {
+            return Err(TaskError::WrongKind {
+                kind: intent.kind,
+            });
+        }
+        if intent.status != IntentStatus::Ready {
+            return Err(TaskError::NotReady {
+                status: intent.status,
+            });
+        }
+        validate_contract(&intent)?;
+        Ok(Self {
+            source: TaskSource::AuthorizedIntent,
+            evidence: TaskEvidence::Intent(intent),
+        })
+    }
+
+    /// `product drive`：READY Product Intent 加有效 contract；`product_id` 必须非空。
+    pub fn product_drive(intent: Intent) -> Result<Self, TaskError> {
+        if intent.kind != IntentKind::Product {
+            return Err(TaskError::WrongKind {
+                kind: intent.kind,
+            });
+        }
+        let has_product_id = intent
+            .product_id
+            .as_ref()
+            .is_some_and(|product| !product.as_str().is_empty());
+        if !has_product_id {
+            return Err(TaskError::MissingProductId);
+        }
+        if intent.status != IntentStatus::Ready {
+            return Err(TaskError::NotReady {
+                status: intent.status,
+            });
+        }
+        validate_contract(&intent)?;
+        Ok(Self {
+            source: TaskSource::ProductDrive,
+            evidence: TaskEvidence::Intent(intent),
+        })
+    }
+
+    /// `policy`：第 5 层的非空授权引用；不携带 Intent。
+    pub fn policy(grant: PolicyGrantRef) -> Result<Self, TaskError> {
+        Ok(Self {
+            source: TaskSource::Policy,
+            evidence: TaskEvidence::Policy(grant),
+        })
+    }
+
+    /// `maintenance schedule`：非空 occurrence 引用；不携带 Intent。
+    pub fn maintenance(schedule: MaintenanceOccurrenceRef) -> Result<Self, TaskError> {
+        Ok(Self {
+            source: TaskSource::MaintenanceSchedule,
+            evidence: TaskEvidence::Maintenance(schedule),
+        })
+    }
+
+    pub fn source(&self) -> TaskSource {
+        self.source
+    }
+
+    pub fn intent(&self) -> Option<&Intent> {
+        match &self.evidence {
+            TaskEvidence::Intent(intent) => Some(intent),
+            TaskEvidence::Policy(_) | TaskEvidence::Maintenance(_) => None,
+        }
+    }
+
+    pub fn contract(&self) -> Option<&ContractRef> {
+        self.intent().map(|intent| &intent.contract_id)
+    }
+
+    pub fn policy_grant(&self) -> Option<&PolicyGrantRef> {
+        match &self.evidence {
+            TaskEvidence::Policy(grant) => Some(grant),
+            TaskEvidence::Intent(_) | TaskEvidence::Maintenance(_) => None,
+        }
+    }
+
+    pub fn maintenance_schedule(&self) -> Option<&MaintenanceOccurrenceRef> {
+        match &self.evidence {
+            TaskEvidence::Maintenance(schedule) => Some(schedule),
+            TaskEvidence::Intent(_) | TaskEvidence::Policy(_) => None,
+        }
+    }
+}
+
+fn validate_contract(intent: &Intent) -> Result<(), TaskError> {
+    let id = intent.contract_id.id.as_str();
+    if id.is_empty() || intent.contract_id.version < 1 {
+        return Err(TaskError::InvalidContract {
+            id: id.to_owned(),
+            version: intent.contract_id.version,
+        });
+    }
+    Ok(())
 }

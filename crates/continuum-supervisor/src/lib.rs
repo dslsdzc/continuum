@@ -8,4 +8,6 @@ pub mod supervisor;
 pub mod task;
 pub mod trigger;
 
-pub use task::{MaintenanceOccurrenceRef, PolicyGrantRef, TaskError, TaskSource};
+pub use task::{
+    AuthorizedTask, MaintenanceOccurrenceRef, PolicyGrantRef, TaskError, TaskSource,
+};
