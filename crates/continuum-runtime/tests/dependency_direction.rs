@@ -441,6 +441,20 @@ const ALLOWED: &[(&str, &[&str])] = &[
     // P6B 的 §281 上下文信任词汇，不是节点/工具/权威信任域（设计 §8.5）
     // 空数组是硬断言：本 crate 对 workspace 内零依赖。
     ("continuum-trust", &[]),
+    // P7D Background Supervisor + Session Orchestrator（设计 §2.1）。
+    // 四普通边：arbiter（资源结论）、intent-scheduler（唯一排名）、
+    // memory（§171 触发类型）、semantics（Intent 与证据）。
+    // 一条 dev 边：canonical（仅 tests/ 构造 Intent 夹具）。
+    (
+        "continuum-supervisor",
+        &[
+            "continuum-arbiter",
+            "continuum-canonical",
+            "continuum-intent-scheduler",
+            "continuum-memory",
+            "continuum-semantics",
+        ],
+    ),
     // P7A 产品循环（设计 §2.1）：四条边，内层按字母序。
     // 迁移 200 与落库 API 条件于 C2 裁定；裁定前只用到 canonical／verify 的类型与
     // semantics 的错误类型，边仍按冻结清单登记。
