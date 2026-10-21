@@ -1,6 +1,8 @@
 //! 会话启动面：Manual／Auto 共用的 SessionPlan（设计 §4.5／§4.6）。
 
-use continuum_intent_scheduler::DecisionBasis;
+use continuum_intent_scheduler::{
+    DecisionBasis, IntentSelectionPolicy, SchedulerInputs,
+};
 use continuum_semantics::{Intent, IntentId};
 
 use crate::error::SupervisorError;
@@ -170,5 +172,40 @@ impl SessionOrchestrator {
             decision: None,
             background,
         }
+    }
+
+    /// Auto：先调 `decide`，再用与 Manual 相同的四段构造候选；
+    /// `SupervisorDecision` 三臂原样存放，`NoIntent` 保留既有会话与后台摘要。
+    pub fn plan_auto(
+        &self,
+        inputs: &SchedulerInputs<'_>,
+        policy: &dyn IntentSelectionPolicy,
+        tasks: &[AuthorizedTask],
+        existing_sessions: &[IntentId],
+        background: BackgroundDigest,
+    ) -> Result<SessionPlan, SupervisorError> {
+        let decision = self
+            .supervisor
+            .decide(inputs, policy, tasks, existing_sessions)?;
+        let visible = self.supervisor.next_tasks(inputs.candidates, tasks);
+        let mut planned = Vec::new();
+        for intent in existing_sessions {
+            planned.push(SessionCandidate::ContinueSession {
+                intent: intent.clone(),
+            });
+        }
+        for task in visible {
+            planned.push(SessionCandidate::Task(task.clone()));
+        }
+        for note in background.findings() {
+            planned.push(SessionCandidate::BackgroundFinding(note.clone()));
+        }
+        planned.push(SessionCandidate::NewConversation);
+        Ok(SessionPlan {
+            mode: SessionMode::Auto,
+            candidates: planned,
+            decision: Some(decision),
+            background,
+        })
     }
 }
