@@ -130,7 +130,9 @@ Graph Scheduler 仍在 `continuum-graph`，Resource Scheduler 不在 P7 内。
    `Blocked`／`Undetermined` 时给出（§四第 4 条）；`Blocked` 或 predicate／readiness 明确不成立落
    `NotShippable`，输入不可判落 `Undetermined`。baseline 缺失或不可判时 ProductReadiness 只能
    `Undetermined`，不得默认通过。§336 的 `ContinuousProductDrive` 开关与 post-shippable
-   分类的落点（`Product` 或 `ProductReadiness`／verdict 之一）由 P7A 设计定，本轮只登记归属。
+   分类的落点，**协调者裁定（2026-10-19）：取 (b) 独立 `ProductDriveState` + `product_drive` 表**；
+   迁移 200 含四张表（`product`／`milestone`／`product_progress`／`product_drive`），P7A 的
+   Task 9–17 按此执行（不是切分原给的三选项之一，属经确认的偏离）。
 2. **P7D 的 `TaskSource` 与 `AuthorizedTask`**：`TaskSource` 恰 §299 的四值，**不新增第五类**；
    `AuthorizedTask` 是 P7D 的唯一任务输入面，至少含 `source: TaskSource` 与授权证据。**证据形状按来源定**；
    本文只冻结 `product drive` 这一路（P7A→P7D 没有 policy／capability 边）：证据取 §222 `Intent` 的
