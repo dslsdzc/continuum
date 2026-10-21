@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use continuum_arbiter::{
-    ResourceArbiter, ResourceDecision, SuspensionPhase, SuspensionState,
+    ResourceArbiter, ResourceDecision, SuspensionError, SuspensionPhase, SuspensionState,
 };
 use continuum_intent_scheduler::{
     DecisionBasis, IntentDecision, IntentScheduler, IntentSelectionPolicy, SchedulerInputs,
@@ -11,7 +11,7 @@ use continuum_intent_scheduler::{
 use continuum_semantics::{Intent, IntentId, IntentStatus};
 
 use crate::error::SupervisorError;
-use crate::resource::declaration_for;
+use crate::resource::{declaration_for, CheckpointPort};
 use crate::task::AuthorizedTask;
 
 /// 后台治理入口。持有每任务的 `SuspensionState` 内存表。
@@ -110,6 +110,65 @@ impl BackgroundSupervisor {
     /// 任务终止时丢弃它的状态；返回此前是否存在。P7D 不推断终止。
     pub fn release(&mut self, task: &AuthorizedTask) -> bool {
         self.states.remove(&TaskKey::for_task(task)).is_some()
+    }
+
+    /// 执行一次 checkpoint 并推进 P7C 的相位。三个出口：
+    /// 截止前成功进入 `Suspended`；晚到成功与端口失败都回 `Throttled`。
+    pub fn checkpoint(
+        &mut self,
+        task: &AuthorizedTask,
+        port: &dyn CheckpointPort,
+        now_millis: u64,
+    ) -> Result<SuspensionPhase, SupervisorError> {
+        let key = TaskKey::for_task(task);
+        let Some(state) = self.states.get_mut(&key) else {
+            return Err(SupervisorError::NoSuspensionState {
+                source: task.source(),
+            });
+        };
+        if state.phase() != SuspensionPhase::Checkpointing {
+            return Err(SupervisorError::Resource(
+                SuspensionError::NotCheckpointing {
+                    phase: state.phase(),
+                },
+            ));
+        }
+        match port.checkpoint(task) {
+            Ok(()) => match state.checkpoint_succeeded(now_millis) {
+                Ok(phase) => Ok(phase),
+                Err(error) => Err(SupervisorError::Resource(error)),
+            },
+            Err(port_error) => match state.checkpoint_failed(now_millis) {
+                SuspensionError::CheckpointFailed => Err(SupervisorError::Checkpoint {
+                    error: port_error,
+                    phase: SuspensionPhase::Throttled,
+                }),
+                other => Err(SupervisorError::Resource(other)),
+            },
+        }
+    }
+
+    /// 定时器出口：调 P7C 的 `checkpoint_timed_out`；没有 `Ok` 路径。
+    pub fn checkpoint_timed_out(
+        &mut self,
+        task: &AuthorizedTask,
+        now_millis: u64,
+    ) -> Result<(), SupervisorError> {
+        let key = TaskKey::for_task(task);
+        let Some(state) = self.states.get_mut(&key) else {
+            return Err(SupervisorError::NoSuspensionState {
+                source: task.source(),
+            });
+        };
+        let error = state.checkpoint_timed_out(now_millis);
+        Err(SupervisorError::Resource(error))
+    }
+
+    /// P7C 的 checkpoint 截止时刻；无状态或不在 `Checkpointing` 返回 `None`。
+    pub fn checkpoint_deadline(&self, task: &AuthorizedTask) -> Option<u64> {
+        self.states
+            .get(&TaskKey::for_task(task))
+            .and_then(SuspensionState::checkpoint_deadline_millis)
     }
 
     /// 唯一的选择入口：调 P7B 的 `IntentScheduler::decide`，按候选当前状态分派。

@@ -2,6 +2,8 @@
 
 //! 共享夹具与源码语料工具。只放测试用的构造与文本处理，不放生产逻辑。
 
+use std::cell::Cell;
+
 use continuum_canonical::{EntityId, Opaque};
 use continuum_intent_scheduler::{
     BackgroundSuitability, DecisionBasis, IntentDecision, IntentSelectionPolicy, SchedulerInputs,
@@ -10,7 +12,7 @@ use continuum_intent_scheduler::{
 use continuum_semantics::{
     ContractId, ContractRef, Intent, IntentId, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
-use continuum_supervisor::AuthorizedTask;
+use continuum_supervisor::{AuthorizedTask, CheckpointError, CheckpointPort};
 
 /// 逐行丢弃整行注释后拼接；用于源码面的零命中断言。
 pub fn code_only(source: &str) -> String {
@@ -137,5 +139,18 @@ pub fn inputs(candidates: &[Intent]) -> SchedulerInputs<'_> {
         blocking: &[],
         user_focus: UserFocus::None,
         background_suitability: BackgroundSuitability::from_projection(""),
+    }
+}
+
+/// 假 checkpoint 端口：记录调用次数并把预设结果原样返回。
+pub struct CountingPort {
+    pub result: Result<(), CheckpointError>,
+    pub calls: Cell<usize>,
+}
+
+impl CheckpointPort for CountingPort {
+    fn checkpoint(&self, _task: &AuthorizedTask) -> Result<(), CheckpointError> {
+        self.calls.set(self.calls.get() + 1);
+        self.result.clone()
     }
 }
