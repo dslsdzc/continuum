@@ -8,6 +8,9 @@ pub mod supervisor;
 pub mod task;
 pub mod trigger;
 
+pub use error::SupervisorError;
+pub use resource::{CheckpointError, CheckpointPort};
+pub use supervisor::{ContinueDisposition, SupervisorDecision};
 pub use task::{
     AuthorizedTask, MaintenanceOccurrenceRef, PolicyGrantRef, TaskError, TaskSource,
 };
