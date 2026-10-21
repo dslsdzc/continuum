@@ -191,6 +191,9 @@ impl AuthorizedTask {
 
     /// `policy`：第 5 层的非空授权引用；不携带 Intent。
     pub fn policy(grant: PolicyGrantRef) -> Result<Self, TaskError> {
+        if grant.issuer.is_empty() || grant.grant_id.is_empty() {
+            return Err(TaskError::EmptyPolicyGrant);
+        }
         Ok(Self {
             source: TaskSource::Policy,
             evidence: TaskEvidence::Policy(grant),
@@ -199,6 +202,9 @@ impl AuthorizedTask {
 
     /// `maintenance schedule`：非空 occurrence 引用；不携带 Intent。
     pub fn maintenance(schedule: MaintenanceOccurrenceRef) -> Result<Self, TaskError> {
+        if schedule.schedule_id.is_empty() || schedule.occurrence_id.is_empty() {
+            return Err(TaskError::EmptyMaintenanceRef);
+        }
         Ok(Self {
             source: TaskSource::MaintenanceSchedule,
             evidence: TaskEvidence::Maintenance(schedule),
