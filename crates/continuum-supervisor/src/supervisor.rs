@@ -3,9 +3,12 @@
 use std::collections::HashMap;
 
 use continuum_arbiter::{SuspensionPhase, SuspensionState};
-use continuum_intent_scheduler::{DecisionBasis, IntentDecision};
+use continuum_intent_scheduler::{
+    DecisionBasis, IntentDecision, IntentScheduler, IntentSelectionPolicy, SchedulerInputs,
+};
 use continuum_semantics::{Intent, IntentId, IntentStatus};
 
+use crate::error::SupervisorError;
 use crate::task::AuthorizedTask;
 
 /// 后台治理入口。持有每任务的 `SuspensionState` 内存表。
@@ -81,6 +84,72 @@ impl BackgroundSupervisor {
         self.states
             .get(&TaskKey::for_task(task))
             .map(SuspensionState::phase)
+    }
+
+    /// 唯一的选择入口：调 P7B 的 `IntentScheduler::decide`，按候选当前状态分派。
+    /// P7D 不实现 `IntentSelectionPolicy`，不做第二套候选排序。
+    pub fn decide(
+        &self,
+        inputs: &SchedulerInputs<'_>,
+        policy: &dyn IntentSelectionPolicy,
+        tasks: &[AuthorizedTask],
+        existing_sessions: &[IntentId],
+    ) -> Result<SupervisorDecision, SupervisorError> {
+        let decision =
+            IntentScheduler::decide(inputs, policy).map_err(SupervisorError::Decision)?;
+        match &decision {
+            IntentDecision::NoIntent { .. } => Ok(SupervisorDecision::NoIntent { decision }),
+            IntentDecision::Advance { intent, .. } => {
+                let intent = intent.clone();
+                let candidate = inputs
+                    .candidates
+                    .iter()
+                    .find(|candidate| candidate.id.as_str() == intent.as_str())
+                    .ok_or_else(|| SupervisorError::UnsupportedAdvance {
+                        intent: intent.clone(),
+                    })?;
+                match candidate.status {
+                    IntentStatus::Ready => {
+                        let task = tasks
+                            .iter()
+                            .find(|task| {
+                                task.intent()
+                                    .is_some_and(|value| value.id.as_str() == intent.as_str())
+                            })
+                            .ok_or_else(|| SupervisorError::UnauthorizedAdvance {
+                                intent: intent.clone(),
+                            })?;
+                        Ok(SupervisorDecision::Task {
+                            task: task.clone(),
+                            decision,
+                        })
+                    }
+                    IntentStatus::Waiting | IntentStatus::Suspended => {
+                        Ok(SupervisorDecision::ContinueSession {
+                            intent,
+                            disposition: ContinueDisposition::Resume,
+                            decision,
+                        })
+                    }
+                    IntentStatus::Running
+                    | IntentStatus::Verifying
+                    | IntentStatus::Evolving => {
+                        let has_session = existing_sessions
+                            .iter()
+                            .any(|session| session.as_str() == intent.as_str());
+                        if !has_session {
+                            return Err(SupervisorError::NoActiveSession { intent });
+                        }
+                        Ok(SupervisorDecision::ContinueSession {
+                            intent,
+                            disposition: ContinueDisposition::Continue,
+                            decision,
+                        })
+                    }
+                    _ => Err(SupervisorError::UnsupportedAdvance { intent }),
+                }
+            }
+        }
     }
 }
 

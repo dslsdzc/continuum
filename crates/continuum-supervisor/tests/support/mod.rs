@@ -3,6 +3,10 @@
 //! 共享夹具与源码语料工具。只放测试用的构造与文本处理，不放生产逻辑。
 
 use continuum_canonical::{EntityId, Opaque};
+use continuum_intent_scheduler::{
+    BackgroundSuitability, DecisionBasis, IntentDecision, IntentSelectionPolicy, SchedulerInputs,
+    UserFocus,
+};
 use continuum_semantics::{
     ContractId, ContractRef, Intent, IntentId, IntentKind, IntentStatus, Priority, ProductIdRef,
 };
@@ -96,4 +100,42 @@ pub fn task(intent: Intent) -> AuthorizedTask {
 /// 构造一枚已授权的 Product 任务。
 pub fn product_task(status: IntentStatus) -> AuthorizedTask {
     AuthorizedTask::product_drive(product_intent(status)).expect("夹具 Product Intent 必须已 READY")
+}
+
+/// 假策略：总是返回同一枚预先构造的决策。
+pub struct FixedPolicy {
+    pub decision: IntentDecision,
+}
+
+impl IntentSelectionPolicy for FixedPolicy {
+    fn choose(
+        &self,
+        _inputs: &SchedulerInputs<'_>,
+    ) -> Result<IntentDecision, DecisionBasis> {
+        Ok(self.decision.clone())
+    }
+}
+
+/// 假策略：模拟模型不可用。
+pub struct FailingPolicy;
+
+impl IntentSelectionPolicy for FailingPolicy {
+    fn choose(
+        &self,
+        _inputs: &SchedulerInputs<'_>,
+    ) -> Result<IntentDecision, DecisionBasis> {
+        Err(DecisionBasis::new("model unavailable"))
+    }
+}
+
+/// 构造 P7B 的五输入；除候选集外全部为空信号。
+pub fn inputs(candidates: &[Intent]) -> SchedulerInputs<'_> {
+    SchedulerInputs {
+        candidates,
+        priority: &[],
+        deadline: &[],
+        blocking: &[],
+        user_focus: UserFocus::None,
+        background_suitability: BackgroundSuitability::from_projection(""),
+    }
 }
